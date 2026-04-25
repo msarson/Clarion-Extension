@@ -1270,6 +1270,11 @@ export class DocumentStructure {
         return mapTokens ? [...mapTokens] : [];
     }
 
+    public getModuleBlocks(): Token[] {
+        const moduleTokens = this.structuresByType.get('MODULE');
+        return moduleTokens ? [...moduleTokens] : [];
+    }
+
     /**
      * Gets the MEMBER parent file (if this file is a MEMBER of another)
      * Searches first 10 lines for MEMBER statement

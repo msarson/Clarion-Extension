@@ -28,9 +28,37 @@ export class MapModuleCodeActionProvider {
 
             const line = range.start.line;
             if (!docStructure.isInMapBlock(line)) return actions;
-            if (docStructure.isInModuleBlock(line)) return actions;
 
-            // Find the MAP block that contains the cursor and get its END line
+            if (docStructure.isInModuleBlock(line)) {
+                // Cursor is inside an existing MODULE block — offer "Add PROCEDURE to MODULE"
+                for (const modToken of docStructure.getModuleBlocks()) {
+                    if (
+                        modToken.line < line &&
+                        modToken.finishesAt !== undefined &&
+                        line < modToken.finishesAt &&
+                        modToken.referencedFile
+                    ) {
+                        actions.push({
+                            title: 'Add PROCEDURE to MODULE',
+                            kind: CodeActionKind.QuickFix,
+                            command: Command.create(
+                                'Add PROCEDURE to MODULE',
+                                'clarion.addProcedureToModule',
+                                {
+                                    documentUri: document.uri,
+                                    moduleEndLine: modToken.finishesAt,
+                                    referencedFile: modToken.referencedFile,
+                                    projectGuid: ''  // resolved in command handler
+                                }
+                            )
+                        });
+                        break;
+                    }
+                }
+                return actions;
+            }
+
+            // Cursor is in MAP but outside any MODULE — offer "Add MODULE with PROCEDURE"
             let mapEndLine: number | undefined;
             for (const mapToken of docStructure.getMapBlocks()) {
                 if (

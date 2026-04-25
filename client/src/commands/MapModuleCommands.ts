@@ -13,6 +13,13 @@ interface AddMapModuleArgs {
     projectGuid: string;
 }
 
+interface AddProcedureToModuleArgs {
+    documentUri: string;
+    moduleEndLine: number;
+    referencedFile: string;
+    projectGuid: string;
+}
+
 /**
  * Returns the editor indent string based on VS Code configuration.
  * Respects editor.insertSpaces and editor.tabSize.
@@ -157,10 +164,93 @@ async function addMapModule(...args: any[]): Promise<void> {
 }
 
 /**
+ * Handles the 'clarion.addProcedureToModule' command triggered when cursor is inside a MODULE block.
+ */
+async function addProcedureToModule(...args: any[]): Promise<void> {
+    const params: AddProcedureToModuleArgs = args[0] ?? args;
+
+    if (!params || typeof params.moduleEndLine !== 'number' || !params.referencedFile) {
+        vscode.window.showErrorMessage('Add PROCEDURE: missing command arguments.');
+        return;
+    }
+
+    try {
+        // 1. Prompt for procedure name
+        const procedureName = await vscode.window.showInputBox({
+            prompt: 'Procedure name',
+            placeHolder: 'MyProcedure',
+            validateInput: (v) => {
+                if (!v) return 'Procedure name is required';
+                if (!/^[a-zA-Z_][a-zA-Z0-9_:]*$/.test(v)) return 'Invalid identifier';
+                return null;
+            }
+        });
+        if (!procedureName) return;
+
+        const client = getLanguageClient();
+        if (!client) {
+            vscode.window.showErrorMessage('Language server not available.');
+            return;
+        }
+
+        // 2. Resolve the CLW file path via the server
+        const resolved = await client.sendRequest<{ clwFilePath: string } | null>(
+            'clarion/resolveModuleClwPath',
+            { referencedFile: params.referencedFile, projectGuid: params.projectGuid }
+        );
+
+        if (!resolved?.clwFilePath) {
+            vscode.window.showErrorMessage(`Cannot resolve CLW file for module '${params.referencedFile}'.`);
+            return;
+        }
+
+        const activeUri = vscode.window.activeTextEditor?.document.uri;
+        const indentString = getIndentString(activeUri);
+
+        // 3. Open the CLW document to get its live line count
+        const clwUri = vscode.Uri.file(resolved.clwFilePath);
+        const clwDoc = await vscode.workspace.openTextDocument(clwUri);
+        const clwInsertLine = clwDoc.lineCount;
+
+        // 4. Build both edits
+        const edit = new vscode.WorkspaceEdit();
+
+        // Insert procedure declaration into the MODULE block (before END)
+        const mapUri = vscode.Uri.parse(params.documentUri);
+        edit.insert(mapUri, new vscode.Position(params.moduleEndLine, 0), `${procedureName} PROCEDURE()\n`);
+
+        // Append procedure implementation to the CLW file
+        const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
+        const clwStub =
+            `\r\n${procedureName}${padding}PROCEDURE()\r\n` +
+            `${indentString}CODE\r\n`;
+        edit.insert(clwUri, new vscode.Position(clwInsertLine, 0), clwStub);
+
+        await vscode.workspace.applyEdit(edit);
+
+        // 5. Show the CLW file at the new procedure
+        await vscode.window.showTextDocument(clwDoc, { preview: false });
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const procLine = clwInsertLine + 1; // after the blank separator line
+            const pos = new vscode.Position(procLine, 0);
+            editor.selection = new vscode.Selection(pos, pos);
+            editor.revealRange(new vscode.Range(pos, pos));
+        }
+
+        vscode.window.showInformationMessage(`Added procedure '${procedureName}' to ${params.referencedFile}.`);
+    } catch (error) {
+        logger.error(`❌ addProcedureToModule failed: ${error instanceof Error ? error.message : String(error)}`);
+        vscode.window.showErrorMessage(`Add PROCEDURE failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+/**
  * Registers the MAP module command
  */
 export function registerMapModuleCommands(context: vscode.ExtensionContext): vscode.Disposable[] {
     return [
-        vscode.commands.registerCommand('clarion.addMapModule', addMapModule)
+        vscode.commands.registerCommand('clarion.addMapModule', addMapModule),
+        vscode.commands.registerCommand('clarion.addProcedureToModule', addProcedureToModule)
     ];
 }

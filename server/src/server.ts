@@ -1376,6 +1376,39 @@ connection.onRequest('clarion/addModuleWithProcedure', async (params: {
     }
 });
 
+// Resolve the absolute path of a CLW file referenced by a MODULE token
+connection.onRequest('clarion/resolveModuleClwPath', (params: {
+    referencedFile: string;
+    projectGuid: string;
+}): { clwFilePath: string } | null => {
+    try {
+        const sm = SolutionManager.getInstance();
+        const projects = sm?.solution?.projects ?? [];
+
+        const project = params.projectGuid
+            ? projects.find(p => p.guid === params.projectGuid)
+            : projects[0];
+
+        if (!project) {
+            logger.warn(`⚠️ resolveModuleClwPath: no project found`);
+            return null;
+        }
+
+        const sf = project.findSourceFileByName(params.referencedFile);
+        if (!sf) {
+            logger.warn(`⚠️ resolveModuleClwPath: ${params.referencedFile} not in project source files`);
+            return null;
+        }
+
+        const clwFilePath = path.join(project.path, sf.relativePath || sf.name);
+        logger.info(`✅ resolveModuleClwPath: ${clwFilePath}`);
+        return { clwFilePath };
+    } catch (error) {
+        logger.error(`❌ resolveModuleClwPath error: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
 // Add a handler for getting included redirection files for a project
 connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPath: string }): string[] => {
     logger.info(`🔍 Received request for included redirection files for project at ${params.projectPath}`);
