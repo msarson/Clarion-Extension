@@ -28,6 +28,7 @@ export class MapModuleCodeActionProvider {
 
             const line = range.start.line;
             if (!docStructure.isInMapBlock(line)) return actions;
+            if (docStructure.isInModuleBlock(line)) return actions;
 
             // Find the MAP block that contains the cursor and get its END line
             let mapEndLine: number | undefined;

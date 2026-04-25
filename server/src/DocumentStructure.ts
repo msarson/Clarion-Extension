@@ -1333,6 +1333,21 @@ export class DocumentStructure {
     }
 
     /**
+     * Checks if a line is inside a MODULE block (between MODULE and its END)
+     * Used to suppress "Add MODULE" code action when already inside a MODULE.
+     */
+    public isInModuleBlock(line: number): boolean {
+        const moduleTokens = this.structuresByType.get('MODULE');
+        if (!moduleTokens) return false;
+        for (const t of moduleTokens) {
+            if (t.finishesAt !== undefined && line > t.line && line < t.finishesAt) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Check if a line is inside a WINDOW, REPORT, or APPLICATION structure
      */
     public isInWindowStructure(line: number): boolean {
