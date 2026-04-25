@@ -324,10 +324,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags];
-        if (asyncDiags.length > 0) {
-            diagnostics.push(...asyncDiags);
-            connection.sendDiagnostics({ uri: document.uri, diagnostics });
-        }
+        // Always send the final combined list so previously-raised async diagnostics
+        // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
+        diagnostics.push(...asyncDiags);
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
