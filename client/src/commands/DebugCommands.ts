@@ -57,6 +57,10 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                         proc = edge.containingProcedure
                             ? `  **[local MAP inside: ${edge.containingProcedure}]**`
                             : '  *(file-scope MAP)*';
+                    } else if (edgeType === 'CLASS_MODULE') {
+                        proc = '  *(class implementation)*';
+                    } else if (edgeType === 'IMPLICIT_INCLUDE') {
+                        proc = '  *(compiler-injected)*';
                     }
                     lines.push(`  ${from}  →  ${to}${proc}`);
                     lines.push(`    from: ${edge.fromFile}`);

@@ -2,7 +2,7 @@
  * FileRelationshipGraph — lightweight file-to-file relationship index.
  *
  * Nodes: source file paths (normalised, lowercase)
- * Edges: typed relationships — MODULE, INCLUDE, MEMBER
+ * Edges: typed relationships — MODULE, CLASS_MODULE, INCLUDE, MEMBER, IMPLICIT_INCLUDE
  *
  * Built once in the background after solution load; updated incrementally on file change.
  * Enables O(1) reverse lookups needed by providers (e.g. "which file declared a MODULE
@@ -24,12 +24,13 @@ logger.setLevel("error");
 
 /**
  * Edge types:
- *  MODULE           — MODULE('file.clw') inside a MAP (file declares procedures in another file)
+ *  MODULE           — MODULE('file.clw') inside a MAP block (procedures declared here, implemented there)
+ *  CLASS_MODULE     — MODULE('file.clw') attribute on a CLASS declaration (class methods implemented there)
  *  INCLUDE          — INCLUDE('file.inc') explicit source inclusion
  *  MEMBER           — MEMBER('program.clw') — file belongs to this program
  *  IMPLICIT_INCLUDE — compiler-injected include (BUILTINS.CLW / EQUATES.CLW in every PROGRAM MAP)
  */
-export type EdgeType = 'MODULE' | 'INCLUDE' | 'MEMBER' | 'IMPLICIT_INCLUDE';
+export type EdgeType = 'MODULE' | 'CLASS_MODULE' | 'INCLUDE' | 'MEMBER' | 'IMPLICIT_INCLUDE';
 
 export interface FileEdge {
     type: EdgeType;
@@ -192,16 +193,25 @@ export class FileRelationshipGraph {
             } else if (token.type === TokenType.Directive && token.value.toUpperCase() === 'INCLUDE') {
                 edgeType = 'INCLUDE';
             } else if (token.type === TokenType.Structure && token.value.toUpperCase() === 'MODULE') {
-                edgeType = 'MODULE';
-                // Detect local MAP: parent = MAP token, grandparent = procedure
-                // Structure: GlobalProcedure > MAP > MODULE
-                const mapToken = token.parent;
-                if (mapToken) {
-                    const grandParent = mapToken.parent;
-                    if (grandParent &&
-                        (grandParent.subType === TokenType.GlobalProcedure ||
-                         grandParent.subType === TokenType.MethodImplementation)) {
-                        containingProcedure = grandParent.label;
+                // Distinguish MAP MODULE (procedure declarations) from CLASS MODULE attribute
+                const parentToken = token.parent;
+                const parentIsClass = parentToken &&
+                    parentToken.type === TokenType.Structure &&
+                    parentToken.value.toUpperCase() === 'CLASS';
+
+                if (parentIsClass) {
+                    edgeType = 'CLASS_MODULE';
+                } else {
+                    edgeType = 'MODULE';
+                    // Detect local MAP: parent = MAP token, grandparent = procedure
+                    // Structure: GlobalProcedure > MAP > MODULE
+                    if (parentToken) {
+                        const grandParent = parentToken.parent;
+                        if (grandParent &&
+                            (grandParent.subType === TokenType.GlobalProcedure ||
+                             grandParent.subType === TokenType.MethodImplementation)) {
+                            containingProcedure = grandParent.label;
+                        }
                     }
                 }
             }
