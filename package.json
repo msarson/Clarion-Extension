@@ -383,6 +383,11 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.debug.showFileRelationshipGraph",
+        "title": "Clarion: Show File Relationship Graph (Debug)",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.structureView.expandAll",
         "title": "Expand All",
         "icon": "$(expand-all)"

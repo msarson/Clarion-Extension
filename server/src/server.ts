@@ -26,6 +26,7 @@ import {
     TextEdit,
     Range,
     Position,
+    Location,
     DocumentColorParams,
     ColorInformation,
     ColorPresentationParams,
@@ -85,6 +86,10 @@ logger.setLevel("error");
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
+
+// CodeLens reference count cache — keyed by "uri:line:char", invalidated on any document change
+const codeLensRefCache = new Map<string, { refs: Location[]; generation: number }>();
+let codeLensGeneration = 0;
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -489,11 +494,20 @@ connection.onCodeLensResolve(async (lens) => {
         const document = documents.get(data.uri);
         if (!document) return lens;
 
-        const refs = await referencesProvider.provideReferences(
-            document,
-            { line: data.line, character: data.character },
-            { includeDeclaration: true }
-        );
+        const cacheKey = `${data.uri}:${data.line}:${data.character}`;
+        const cached = codeLensRefCache.get(cacheKey);
+
+        let refs: Location[] | null;
+        if (cached && cached.generation === codeLensGeneration) {
+            refs = cached.refs;
+        } else {
+            refs = await referencesProvider.provideReferences(
+                document,
+                { line: data.line, character: data.character },
+                { includeDeclaration: true }
+            );
+            codeLensRefCache.set(cacheKey, { refs: refs ?? [], generation: codeLensGeneration });
+        }
 
         const count = refs?.length ?? 0;
         lens.command = {
@@ -641,6 +655,9 @@ documents.onDidChangeContent(event => {
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
         
+        // Any document change invalidates all CodeLens reference counts
+        codeLensGeneration++;
+        
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
@@ -678,7 +695,7 @@ documents.onDidChangeContent(event => {
 
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
-        const timeout = setTimeout(() => {
+        const timeout = setTimeout(async () => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
@@ -713,7 +730,13 @@ documents.onDidChangeContent(event => {
 
                 // Re-validate any related PROGRAM/MEMBER files so cross-file diagnostics clear
                 revalidateRelatedDocuments(document, tokens);
-                
+
+                // Update file relationship graph edges for this file
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                FileRelationshipGraph.getInstance().updateFile(uri).catch(err =>
+                    logger.error(`❌ [FRG] updateFile failed for ${uri}: ${err}`)
+                );
+
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
                 connection.sendNotification('clarion/symbolsRefreshed', { uri });
@@ -1128,6 +1151,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
             });
             
+            // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
+            // Enables O(1) reverse lookups for local MAP scope (#91) and include chains (#52).
+            setImmediate(async () => {
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                const graph = FileRelationshipGraph.getInstance();
+                const solutionManager = SolutionManager.getInstance();
+                const allFiles: string[] = [];
+                if (solutionManager?.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const absPath = sourceFile.getAbsolutePath();
+                            if (absPath) allFiles.push(absPath);
+                        }
+                    }
+                }
+                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                await graph.buildInBackground(allFiles).catch(err =>
+                    logger.error(`❌ [FRG] Background build failed: ${err}`)
+                );
+            });
+
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
                 const project = globalSolution.projects[i];
@@ -1196,6 +1240,10 @@ connection.onNotification('clarion/projectConstantsChanged', () => {
             logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
         );
     }
+    // Reset file relationship graph — project file list may have changed
+    import('./FileRelationshipGraph').then(({ FileRelationshipGraph }) => {
+        FileRelationshipGraph.getInstance().reset();
+    });
 });
 
 
@@ -1937,6 +1985,26 @@ connection.onRequest('clarion/unreachableRanges', (params: { textDocument: { uri
         logger.error(`Error providing unreachable ranges: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
+});
+
+connection.onRequest('clarion/getFileRelationshipGraph', async (): Promise<{
+    edges: Array<{ type: string; fromFile: string; toFile: string; fromLine?: number; containingProcedure?: string; containingClass?: string }>;
+    isBuilt: boolean;
+    isBuilding: boolean;
+    buildDurationMs: number | undefined;
+    buildStartTime: string | undefined;
+    buildEndTime: string | undefined;
+}> => {
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const graph = FileRelationshipGraph.getInstance();
+    return {
+        edges: graph.getAllEdges(),
+        isBuilt: graph.isBuilt,
+        isBuilding: graph.isBuilding,
+        buildDurationMs: graph.buildDurationMs,
+        buildStartTime: graph.buildStartTime?.toISOString(),
+        buildEndTime: graph.buildEndTime?.toISOString(),
+    };
 });
 
 logger.info("🟢  Clarion Language Server is now listening for requests.");

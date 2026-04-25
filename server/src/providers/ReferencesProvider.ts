@@ -15,6 +15,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { serverSettings } from '../serverSettings';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -846,7 +847,38 @@ export class ReferencesProvider {
             }
         }
 
-        // Search all project source files — class members can be used in any CLW
+        // Use the FileRelationshipGraph to narrow the search: find all files that
+        // transitively include the class's declaration file (INC), rather than scanning
+        // every project source file. This is a BFS over reverse INCLUDE edges.
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt && declarationFile) {
+            const fsPath = decodeURIComponent(declarationFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const visited = new Set<string>();
+            const queue: string[] = [fsPath];
+
+            while (queue.length > 0) {
+                const current = queue.shift()!;
+                const normCurrent = current.toLowerCase().replace(/\\/g, '/');
+                if (visited.has(normCurrent)) continue;
+                visited.add(normCurrent);
+
+                const reverseEdges = graph.getReverseIncludes(current);
+                for (const edge of reverseEdges) {
+                    // edge.fromFile is already normalized (lowercase forward-slash, no file://)
+                    const fromUri = 'file:///' + edge.fromFile;
+                    files.add(fromUri);
+                    queue.push(edge.fromFile);
+                }
+            }
+
+            if (files.size > 2) {
+                logger.info(`[FRG] getMemberSearchFiles: narrowed to ${files.size} file(s) via reverse includes`);
+                return Array.from(files);
+            }
+            // If graph gave us nothing useful (only document + declarationFile), fall through to full scan
+        }
+
+        // Graph not ready or returned no additional files — fall back to scanning all project files
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution?.projects?.length) {
             for (const project of solutionManager.solution.projects) {
