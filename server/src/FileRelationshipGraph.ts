@@ -193,25 +193,23 @@ export class FileRelationshipGraph {
             } else if (token.type === TokenType.Directive && token.value.toUpperCase() === 'INCLUDE') {
                 edgeType = 'INCLUDE';
             } else if (token.type === TokenType.Structure && token.value.toUpperCase() === 'MODULE') {
-                // Distinguish MAP MODULE (procedure declarations) from CLASS MODULE attribute
+                // CLASS-attribute MODULE (e.g. Class(), Module('file.clw')) has no MAP parent — parentValue is null.
+                // MAP-block MODULE (inside a MAP structure) has a MAP token as its parent.
                 const parentToken = token.parent;
-                const parentIsClass = parentToken &&
+                const parentIsMap = parentToken &&
                     parentToken.type === TokenType.Structure &&
-                    parentToken.value.toUpperCase() === 'CLASS';
+                    parentToken.value.toUpperCase() === 'MAP';
 
-                if (parentIsClass) {
+                if (!parentIsMap) {
                     edgeType = 'CLASS_MODULE';
                 } else {
                     edgeType = 'MODULE';
-                    // Detect local MAP: parent = MAP token, grandparent = procedure
-                    // Structure: GlobalProcedure > MAP > MODULE
-                    if (parentToken) {
-                        const grandParent = parentToken.parent;
-                        if (grandParent &&
-                            (grandParent.subType === TokenType.GlobalProcedure ||
-                             grandParent.subType === TokenType.MethodImplementation)) {
-                            containingProcedure = grandParent.label;
-                        }
+                    // Detect local MAP: grandparent = procedure
+                    const grandParent = parentToken.parent;
+                    if (grandParent &&
+                        (grandParent.subType === TokenType.GlobalProcedure ||
+                         grandParent.subType === TokenType.MethodImplementation)) {
+                        containingProcedure = grandParent.label;
                     }
                 }
             }
