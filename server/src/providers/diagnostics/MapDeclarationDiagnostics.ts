@@ -59,6 +59,8 @@ export async function validateMissingMapDeclarations(
         return [];
     }
 
+    const tokenCache = TokenCache.getInstance();
+
     // Collect GlobalProcedure tokens only — MethodImplementation (dotted names)
     // are declared in CLASS blocks, not MAP, so they are excluded by subtype.
     const implementations = tokens.filter(t =>
@@ -104,6 +106,7 @@ export async function validateMissingMapDeclarations(
             };
 
             if (!result) {
+                const resolvedParent = resolveClwPath(memberToken.referencedFile!);
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range,
@@ -112,7 +115,9 @@ export async function validateMissingMapDeclarations(
                     code: 'missing-map-declaration',
                     data: {
                         procName,
-                        parentFileUri: 'file:///' + memberToken.referencedFile!.replace(/\\/g, '/'),
+                        parentFileUri: resolvedParent
+                            ? 'file:///' + resolvedParent.replace(/\\/g, '/')
+                            : 'file:///' + memberToken.referencedFile!.replace(/\\/g, '/'),
                         implLine: proc.line,
                         currentFileUri: document.uri
                     }
@@ -125,7 +130,14 @@ export async function validateMissingMapDeclarations(
                     const implLine = docLines[proc.line] ?? '';
                     const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
 
-                    const parentLines = fs.readFileSync(result.file, 'utf8').split('\n');
+                    const normalizedResultPath = result.file.toLowerCase().replace(/\\/g, '/');
+                    const resultLiveUri = tokenCache.getAllCachedUris().find(uri => {
+                        const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                        return uriPath === normalizedResultPath;
+                    });
+                    const parentText = (resultLiveUri && tokenCache.getDocumentText(resultLiveUri))
+                        ?? fs.readFileSync(result.file, 'utf8');
+                    const parentLines = parentText.split('\n');
                     const declLine = parentLines[result.line] ?? '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
 
