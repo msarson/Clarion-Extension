@@ -1014,7 +1014,7 @@ export class ClassMemberResolver {
                     const candidatePath = edge.toFile.replace(/\//g, path.sep);
                     const loc = this.findImplementationInFile(candidatePath, className, methodName, declarationSig);
                     if (loc) {
-                        logger.error(`✅ [FRG] Found ${className}.${methodName} via graph → ${candidatePath}`);
+                        logger.info(`✅ [FRG] Found ${className}.${methodName} via graph → ${candidatePath}`);
                         return loc;
                     }
                 }
