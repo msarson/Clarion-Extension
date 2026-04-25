@@ -596,11 +596,16 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
         }
 
         if (memberToken?.referencedFile) {
-            // Re-validate the PROGRAM file this MEMBER file references (if it's open)
-            const programUri = 'file:///' + memberToken.referencedFile.replace(/\\/g, '/');
-            const programDoc = documents.get(programUri);
-            if (programDoc) {
-                validateTextDocument(programDoc, 'crossFileUpdate');
+            // Re-validate the PROGRAM file this MEMBER file references (if it's open).
+            // Avoid URI format mismatch (e.g. file:///f%3A vs file:///F:/) by comparing
+            // normalised paths instead of constructing a URI and calling documents.get().
+            const programBasename = path.basename(memberToken.referencedFile).toLowerCase();
+            for (const openDoc of documents.all()) {
+                if (openDoc.uri === changedDocument.uri) continue;
+                const openPath = decodeURIComponent(openDoc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                if (path.basename(openPath).toLowerCase() === programBasename) {
+                    validateTextDocument(openDoc, 'crossFileUpdate');
+                }
             }
         }
     } catch (err) {
