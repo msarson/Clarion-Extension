@@ -15,8 +15,9 @@ const logger = LoggerManager.getLogger("LocalMapScopeHelper");
 logger.setLevel("error");
 
 export interface LocalMapScope {
-    /** The procedure whose data-section MAP declares the MODULE pointing at this file */
-    containingProcedure: string;
+    /** The procedure whose data-section MAP declares the MODULE pointing at this file.
+     *  Undefined when the MAP is at file-level (not inside a procedure body). */
+    containingProcedure?: string;
     /** The file (lowercase forward-slash) that contains the declaring MAP/MODULE */
     declaringFile: string;
 }
@@ -24,6 +25,10 @@ export interface LocalMapScope {
 /**
  * Returns local-MAP scope info for an implementation file, or null if the file
  * is reached via a global MAP (or the graph has no data yet).
+ *
+ * Covers both:
+ * - Procedure-body MAPs (containingProcedure set in FRG edge)
+ * - File-level MAPs in sibling MEMBER files (containingProcedure not set, but declaringFile differs from the PROGRAM file)
  *
  * @param fileUri  URI string (file:///...) or absolute path of the implementation file
  */
@@ -37,13 +42,13 @@ export function getLocalMapScope(fileUri: string): LocalMapScope | null {
         .toLowerCase();
 
     const edges = graph.getModuleDeclarants(filePath);
-    // A local-MAP edge has containingProcedure set; a global-MAP edge does not.
-    const localEdge = edges.find(e => !!e.containingProcedure);
+    // Prefer procedure-local edges (most specific scope); fall back to any MODULE declarant
+    const localEdge = edges.find(e => !!e.containingProcedure) ?? edges[0];
     if (!localEdge) return null;
 
-    logger.info(`✅ [LocalMapScope] ${filePath} is local-MAP inside '${localEdge.containingProcedure}' declared in ${localEdge.fromFile}`);
+    logger.info(`✅ [LocalMapScope] ${filePath} declared via MODULE in '${localEdge.fromFile}' (procedure: ${localEdge.containingProcedure ?? 'file-level'})`);
     return {
-        containingProcedure: localEdge.containingProcedure!,
+        containingProcedure: localEdge.containingProcedure,
         declaringFile: localEdge.fromFile
     };
 }

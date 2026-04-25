@@ -291,6 +291,27 @@ export class CrossFileResolver {
             }
             
             logger.info(`❌ Procedure ${procName} not found in parent MAP either`);
+
+            // FRG fallback: another file (e.g. a sibling MEMBER file) may declare the MODULE
+            // pointing to us. This handles local MAPs at file-level inside a MEMBER file —
+            // the MODULE is NOT in the PROGRAM's global MAP, it's in the sibling MEMBER file.
+            const graph2 = FileRelationshipGraph.getInstance();
+            if (graph2.isBuilt) {
+                const currentFileLower = decodeURIComponent(currentDocument.uri.replace(/^file:\/\/\//i, ''))
+                    .replace(/\\/g, '/').toLowerCase();
+                const declarants = graph2.getModuleDeclarants(currentFileLower);
+                for (const edge of declarants) {
+                    if (edge.fromFile === normalizedResolved) continue; // already searched above
+                    logger.info(`🔄 FRG fallback: searching ${edge.fromFile} for ${procName}`);
+                    const result = await this.searchDeclarantFileForMapDeclaration(
+                        edge.fromFile, currentFileName, procName, signature, edge.containingProcedure
+                    );
+                    if (result) {
+                        logger.info(`✅ Found via FRG fallback in ${edge.fromFile}`);
+                        return result;
+                    }
+                }
+            }
             return null;
 
         } catch (error) {
@@ -365,6 +386,115 @@ export class CrossFileResolver {
 
         } catch (error) {
             logger.error(`Error searching for global variable in MEMBER file: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Searches a file (identified by its FRG-normalised path) for a MAP/MODULE declaration.
+     * Used as a fallback when the primary MEMBER file doesn't contain the expected MODULE.
+     *
+     * @param frgFilePath   Lowercase forward-slash absolute path (FRG storage format)
+     * @param currentFileName  Basename of the current file to match against MODULE('…')
+     * @param procName      Procedure name to find
+     * @param signature     Optional signature for overload resolution
+     * @param containingProcedure  When set, only search MAPs whose parent token label matches
+     */
+    private async searchDeclarantFileForMapDeclaration(
+        frgFilePath: string,
+        currentFileName: string,
+        procName: string,
+        signature?: string,
+        containingProcedure?: string
+    ): Promise<MapDeclarationResult | null> {
+        try {
+            const osDiskPath = frgFilePath.replace(/\//g, path.sep);
+            const resolvedUri = 'file:///' + frgFilePath;
+
+            // Prefer live TokenCache content
+            const liveUri = this.tokenCache.getAllCachedUris().find(uri => {
+                const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                return uriPath === frgFilePath;
+            });
+
+            if (!liveUri && !fs.existsSync(osDiskPath)) return null;
+
+            const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
+                ?? fs.readFileSync(osDiskPath, 'utf8');
+            const docUri = liveUri ?? resolvedUri;
+            const doc = TextDocument.create(docUri, 'clarion', 1, content);
+            const tokens = await this.tokenCache.getTokens(doc);
+            const structure = this.tokenCache.getStructure(doc);
+            const mapBlocks = structure.getMapBlocks();
+
+            for (const mapBlock of mapBlocks) {
+                const mapStart = mapBlock.line;
+                const mapEnd = mapBlock.finishesAt;
+                if (mapEnd === undefined) continue;
+
+                // When containingProcedure is set, filter to MAPs inside that procedure
+                if (containingProcedure) {
+                    const parentLabel = mapBlock.parent?.label;
+                    if (!parentLabel || parentLabel.toUpperCase() !== containingProcedure.toUpperCase()) {
+                        continue;
+                    }
+                }
+
+                // Find MODULE blocks in this MAP
+                const moduleBlocks = tokens.filter(t =>
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' &&
+                    t.line > mapStart &&
+                    t.line < mapEnd
+                );
+
+                for (const moduleBlock of moduleBlocks) {
+                    const moduleToken = tokens.find(t =>
+                        t.line === moduleBlock.line &&
+                        t.value.toUpperCase() === 'MODULE' &&
+                        t.referencedFile
+                    );
+                    if (!moduleToken?.referencedFile) continue;
+                    if (path.basename(moduleToken.referencedFile).toLowerCase() !== currentFileName.toLowerCase()) continue;
+
+                    const moduleStart = moduleBlock.line;
+                    const moduleEnd = moduleBlock.finishesAt;
+                    if (moduleEnd === undefined) continue;
+
+                    const procedureDecls = tokens.filter(t =>
+                        t.line > moduleStart &&
+                        t.line < moduleEnd &&
+                        (t.subType === TokenType.MapProcedure || t.subType === TokenType.Function) &&
+                        (t.label?.toLowerCase() === procName.toLowerCase() ||
+                            t.value.toLowerCase() === procName.toLowerCase())
+                    );
+
+                    if (procedureDecls.length === 0) continue;
+
+                    let decl = procedureDecls[0];
+                    if (signature && procedureDecls.length > 1) {
+                        const lines = content.split('\n');
+                        const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                        for (const d of procedureDecls) {
+                            const declParams = ProcedureSignatureUtils.extractParameterTypes(lines[d.line].trim());
+                            if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                                decl = d;
+                                break;
+                            }
+                        }
+                    }
+
+                    const location = Location.create('file:///' + frgFilePath, {
+                        start: { line: decl.line, character: 0 },
+                        end: { line: decl.line, character: decl.value.length }
+                    });
+                    return { token: decl, file: osDiskPath, line: decl.line, location };
+                }
+            }
+
+            return null;
+        } catch (error) {
+            logger.error(`Error in searchDeclarantFileForMapDeclaration: ${error}`);
             return null;
         }
     }
