@@ -26,6 +26,7 @@ import {
     TextEdit,
     Range,
     Position,
+    Location,
     DocumentColorParams,
     ColorInformation,
     ColorPresentationParams,
@@ -85,6 +86,10 @@ logger.setLevel("error");
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
+
+// CodeLens reference count cache — keyed by "uri:line:char", invalidated on any document change
+const codeLensRefCache = new Map<string, { refs: Location[]; generation: number }>();
+let codeLensGeneration = 0;
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -489,11 +494,20 @@ connection.onCodeLensResolve(async (lens) => {
         const document = documents.get(data.uri);
         if (!document) return lens;
 
-        const refs = await referencesProvider.provideReferences(
-            document,
-            { line: data.line, character: data.character },
-            { includeDeclaration: true }
-        );
+        const cacheKey = `${data.uri}:${data.line}:${data.character}`;
+        const cached = codeLensRefCache.get(cacheKey);
+
+        let refs: Location[] | null;
+        if (cached && cached.generation === codeLensGeneration) {
+            refs = cached.refs;
+        } else {
+            refs = await referencesProvider.provideReferences(
+                document,
+                { line: data.line, character: data.character },
+                { includeDeclaration: true }
+            );
+            codeLensRefCache.set(cacheKey, { refs: refs ?? [], generation: codeLensGeneration });
+        }
 
         const count = refs?.length ?? 0;
         lens.command = {
@@ -640,6 +654,9 @@ documents.onDidChangeContent(event => {
         }
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
+        
+        // Any document change invalidates all CodeLens reference counts
+        codeLensGeneration++;
         
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
