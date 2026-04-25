@@ -48,6 +48,7 @@ export class FileRelationshipGraph {
 
     private _built = false;
     private _building = false;
+    private _buildDurationMs: number | undefined;
 
     private constructor() {}
 
@@ -60,52 +61,60 @@ export class FileRelationshipGraph {
 
     public get isBuilt(): boolean { return this._built; }
     public get isBuilding(): boolean { return this._building; }
+    public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
 
     // ── Build ──────────────────────────────────────────────────────────────────
 
     /**
      * Build the graph from all project source files.
      * Seeds from the cwproj file list, then follows INCLUDE edges recursively.
-     * Runs in the background, yielding every ~10 ms to keep the event loop responsive.
+     * Processes files in parallel batches to maximise I/O throughput.
+     * Yields between batches to keep the event loop responsive.
      */
     public async buildInBackground(projectFiles: string[]): Promise<void> {
         if (this._building) return;
         this._building = true;
         this._built = false;
+        this._buildDurationMs = undefined;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
 
+        const buildStart = Date.now();
         const visited = new Set<string>();
-        // Iterative traversal — avoids stack overflow on deep include chains
         const queue: string[] = projectFiles.map(f => this.normalizePath(f));
 
-        const BATCH_BUDGET_MS = 10;
+        const PARALLEL_BATCH = 20;
 
         while (queue.length > 0) {
-            const batchStart = Date.now();
-
-            while (queue.length > 0 && (Date.now() - batchStart) < BATCH_BUDGET_MS) {
+            // Dequeue up to PARALLEL_BATCH unvisited files
+            const batch: string[] = [];
+            while (queue.length > 0 && batch.length < PARALLEL_BATCH) {
                 const filePath = queue.shift()!;
                 if (visited.has(filePath)) continue;
-                // Defensive: skip if already indexed by a concurrent updateFile call
                 if (this.forwardEdges.has(filePath)) { visited.add(filePath); continue; }
                 visited.add(filePath);
+                batch.push(filePath);
+            }
 
-                const newFiles = await this.processFile(filePath);
+            if (batch.length === 0) continue;
+
+            // Process the batch concurrently
+            const results = await Promise.all(batch.map(f => this.processFile(f)));
+            for (const newFiles of results) {
                 for (const f of newFiles) {
                     if (!visited.has(f)) queue.push(f);
                 }
             }
 
-            if (queue.length > 0) {
-                // Yield back to the event loop between batches
-                await new Promise<void>(resolve => setImmediate(resolve));
-            }
+            // Yield back to the event loop between batches
+            await new Promise<void>(resolve => setImmediate(resolve));
         }
 
+        this._buildDurationMs = Date.now() - buildStart;
         this._built = true;
         this._building = false;
-        logger.error(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files indexed`);
+        const edgeCount = this.getAllEdges().length;
+        logger.error(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
     }
 
     /**

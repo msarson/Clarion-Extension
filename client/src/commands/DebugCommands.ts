@@ -22,6 +22,7 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                 edges: Array<{ type: string; fromFile: string; toFile: string; fromLine?: number; containingProcedure?: string; containingClass?: string }>;
                 isBuilt: boolean;
                 isBuilding: boolean;
+                buildDurationMs: number | undefined;
             }>('clarion/getFileRelationshipGraph');
 
             const lines: string[] = [];
@@ -35,7 +36,10 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                 lines.push('⚠️  Graph has not been built yet. Open a solution first.');
                 lines.push('');
             } else {
-                lines.push(`✅ Graph built — ${result.edges.length} edge(s) total`);
+                const duration = result.buildDurationMs !== undefined
+                    ? ` in ${(result.buildDurationMs / 1000).toFixed(1)}s`
+                    : '';
+                lines.push(`✅ Graph built — ${result.edges.length} edge(s) total${duration}`);
                 lines.push('');
             }
 
