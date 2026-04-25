@@ -1970,4 +1970,14 @@ connection.onRequest('clarion/unreachableRanges', (params: { textDocument: { uri
     }
 });
 
+connection.onRequest('clarion/getFileRelationshipGraph', async (): Promise<{
+    edges: Array<{ type: string; fromFile: string; toFile: string; containingProcedure?: string }>;
+    isBuilt: boolean;
+    isBuilding: boolean;
+}> => {
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const graph = FileRelationshipGraph.getInstance();
+    return { edges: graph.getAllEdges(), isBuilt: graph.isBuilt, isBuilding: graph.isBuilding };
+});
+
 logger.info("🟢  Clarion Language Server is now listening for requests.");

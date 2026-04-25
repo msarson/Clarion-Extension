@@ -250,6 +250,15 @@ export class FileRelationshipGraph {
         return this.forwardEdges.get(this.normalizePath(filePath)) ?? [];
     }
 
+    /** Returns all edges in the graph (for debugging/diagnostics). */
+    public getAllEdges(): FileEdge[] {
+        const result: FileEdge[] = [];
+        for (const edges of this.forwardEdges.values()) {
+            result.push(...edges);
+        }
+        return result;
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     /** Normalise a path for use as a map key: lowercase, backslashes → forward slashes. */
