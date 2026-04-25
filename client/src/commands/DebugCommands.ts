@@ -52,7 +52,12 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
                 for (const edge of edges.sort((a, b) => a.fromFile.localeCompare(b.fromFile))) {
                     const from = edge.fromFile.split(/[/\\]/).pop() ?? edge.fromFile;
                     const to = edge.toFile.split(/[/\\]/).pop() ?? edge.toFile;
-                    const proc = edge.containingProcedure ? `  [inside: ${edge.containingProcedure}]` : '';
+                    let proc = '';
+                    if (edgeType === 'MODULE') {
+                        proc = edge.containingProcedure
+                            ? `  **[local MAP inside: ${edge.containingProcedure}]**`
+                            : '  *(file-scope MAP)*';
+                    }
                     lines.push(`  ${from}  →  ${to}${proc}`);
                     lines.push(`    from: ${edge.fromFile}`);
                     lines.push(`    to:   ${edge.toFile}`);

@@ -22,7 +22,14 @@ import LoggerManager from './logger';
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
 logger.setLevel("error");
 
-export type EdgeType = 'MODULE' | 'INCLUDE' | 'MEMBER';
+/**
+ * Edge types:
+ *  MODULE           — MODULE('file.clw') inside a MAP (file declares procedures in another file)
+ *  INCLUDE          — INCLUDE('file.inc') explicit source inclusion
+ *  MEMBER           — MEMBER('program.clw') — file belongs to this program
+ *  IMPLICIT_INCLUDE — compiler-injected include (BUILTINS.CLW / EQUATES.CLW in every PROGRAM MAP)
+ */
+export type EdgeType = 'MODULE' | 'INCLUDE' | 'MEMBER' | 'IMPLICIT_INCLUDE';
 
 export interface FileEdge {
     type: EdgeType;
@@ -78,6 +85,8 @@ export class FileRelationshipGraph {
             while (queue.length > 0 && (Date.now() - batchStart) < BATCH_BUDGET_MS) {
                 const filePath = queue.shift()!;
                 if (visited.has(filePath)) continue;
+                // Defensive: skip if already indexed by a concurrent updateFile call
+                if (this.forwardEdges.has(filePath)) { visited.add(filePath); continue; }
                 visited.add(filePath);
 
                 const newFiles = await this.processFile(filePath);
@@ -100,8 +109,10 @@ export class FileRelationshipGraph {
     /**
      * Rebuild edges for a single file after it changes.
      * Removes old edges sourced from this file and re-processes it.
+     * No-op while the background build is running — the build will capture the latest state.
      */
     public async updateFile(uri: string): Promise<void> {
+        if (this._building) return;
         const filePath = this.normalizePath(this.uriToPath(uri));
 
         // Remove old forward edges from this file and their reverse counterparts
@@ -163,8 +174,14 @@ export class FileRelationshipGraph {
         }
 
         const newIncludes: string[] = [];
+        let isProgramFile = false;
 
         for (const token of tokens) {
+            // Track if this is a PROGRAM file (for implicit includes below)
+            if (token.type === TokenType.ClarionDocument && token.value.toUpperCase() === 'PROGRAM') {
+                isProgramFile = true;
+            }
+
             if (!token.referencedFile) continue;
 
             let edgeType: EdgeType | null = null;
@@ -209,6 +226,21 @@ export class FileRelationshipGraph {
             // INCLUDE targets are enqueued for recursive processing
             if (edgeType === 'INCLUDE') {
                 newIncludes.push(toFile);
+            }
+        }
+
+        // Compiler automatically injects BUILTINS.CLW and EQUATES.CLW into every PROGRAM's MAP.
+        // Add implicit edges so providers know these are always in scope.
+        if (isProgramFile) {
+            for (const implicitFile of ['BUILTINS.CLW', 'EQUATES.CLW']) {
+                const resolved = this.resolveFile(implicitFile, filePath);
+                if (!resolved) continue;
+                const toFile = this.normalizePath(resolved);
+                const edge: FileEdge = { type: 'IMPLICIT_INCLUDE', fromFile: filePath, toFile };
+                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
+                this.forwardEdges.get(filePath)!.push(edge);
+                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
+                this.reverseEdges.get(toFile)!.push(edge);
             }
         }
 
