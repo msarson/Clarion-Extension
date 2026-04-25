@@ -2,8 +2,10 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
 import LoggerManager from '../../logger';
+import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
@@ -67,11 +69,12 @@ export async function validateMissingMapDeclarations(
                 document
             );
 
+            const range: Range = {
+                start: { line: proc.line, character: 0 },
+                end:   { line: proc.line, character: procName.length }
+            };
+
             if (!result) {
-                const range: Range = {
-                    start: { line: proc.line, character: 0 },
-                    end:   { line: proc.line, character: procName.length }
-                };
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range,
@@ -79,6 +82,29 @@ export async function validateMissingMapDeclarations(
                     source: 'clarion'
                 });
                 logger.info(`⚠️ No MAP declaration for '${procName}' in ${memberToken.referencedFile}`);
+            } else {
+                // Declaration found — compare signatures to catch parameter mismatches
+                try {
+                    const docLines = document.getText().split('\n');
+                    const implLine = docLines[proc.line] ?? '';
+                    const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+
+                    const parentLines = fs.readFileSync(result.file, 'utf8').split('\n');
+                    const declLine = parentLines[result.line] ?? '';
+                    const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+
+                    if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                        diagnostics.push({
+                            severity: DiagnosticSeverity.Warning,
+                            range,
+                            message: `Procedure '${procName}' signature does not match its MAP declaration.`,
+                            source: 'clarion'
+                        });
+                        logger.info(`⚠️ Signature mismatch for '${procName}': impl=(${implParams.join(',')}) decl=(${declParams.join(',')})`);
+                    }
+                } catch (sigErr) {
+                    logger.error(`Error comparing signatures for '${procName}': ${sigErr instanceof Error ? sigErr.message : String(sigErr)}`);
+                }
             }
         } catch (err) {
             logger.error(`Error checking MAP declaration for '${procName}': ${err instanceof Error ? err.message : String(err)}`);
