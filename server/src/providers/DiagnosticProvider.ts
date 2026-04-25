@@ -10,7 +10,7 @@ import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, v
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
-import { validateMissingMapDeclarations } from './diagnostics/MapDeclarationDiagnostics';
+import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -67,6 +67,14 @@ export class DiagnosticProvider {
         document: TextDocument
     ): Promise<Diagnostic[]> {
         return validateMissingMapDeclarations(tokens, document);
+    }
+
+    /** Async pass: warn when a MAP/MODULE declaration has no implementation in the referenced CLW. Closes #89 */
+    public static async validateMissingImplementations(
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Diagnostic[]> {
+        return validateMissingImplementations(tokens, document);
     }
 
     /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */
