@@ -855,6 +855,11 @@
       "type": "object",
       "title": "Clarion Extension Configuration",
       "properties": {
+        "clarion.saveBeforeBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save all unsaved files before triggering any Clarion build. Ensures the compiler always builds against the latest content."
+        },
         "clarion.procedurePrototypeStyle": {
           "type": "string",
           "enum": ["keyword", "shorthand"],
