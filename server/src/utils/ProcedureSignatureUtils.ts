@@ -131,6 +131,63 @@ export class ProcedureSignatureUtils {
     }
     
     /**
+     * Finds the span of the parameter list "(…)" in a procedure line.
+     * Returns {start, end} where end is exclusive (index after the closing paren).
+     * Handles nested parens and single-quoted strings so that
+     * e.g. PROCEDURE(*STRING s='(ok)') is parsed correctly.
+     */
+    public static findParameterListSpan(line: string): { start: number; end: number } | null {
+        let parenStart = -1;
+        let inQuote = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === "'") { inQuote = !inQuote; }
+            else if (!inQuote && ch === '(') { parenStart = i; break; }
+        }
+
+        if (parenStart === -1) return null;
+
+        let depth = 1;
+        inQuote = false;
+        let i = parenStart + 1;
+
+        while (i < line.length && depth > 0) {
+            const ch = line[i];
+            if (ch === "'") { inQuote = !inQuote; }
+            else if (!inQuote) {
+                if (ch === '(') depth++;
+                else if (ch === ')') depth--;
+            }
+            i++;
+        }
+
+        if (depth !== 0) return null; // unbalanced
+        return { start: parenStart, end: i };
+    }
+
+    /**
+     * Replaces the "(…)" parameter list in a line with newParamList.
+     * Everything before "(" and after ")" (e.g. return type, attributes) is preserved.
+     */
+    public static replaceParameterList(line: string, newParamList: string): string {
+        const span = this.findParameterListSpan(line);
+        if (!span) return line;
+        return line.slice(0, span.start) + newParamList + line.slice(span.end);
+    }
+
+    /**
+     * Extracts the raw "(…)" parameter list string from a procedure line.
+     * Returns "()" if no parameter list is found.
+     * Does NOT strip return types or attributes — only the paren-delimited part.
+     */
+    public static extractRawParameterList(line: string): string {
+        const span = this.findParameterListSpan(line);
+        if (!span) return '()';
+        return line.slice(span.start, span.end);
+    }
+
+    /**
      * Counts parameters in a procedure/method signature
      * Handles omittable parameters like <LONG SomeVar> and default values LONG SomeVar=1
      * Handles both traditional format (with PROCEDURE/FUNCTION keyword) and shorthand MAP format

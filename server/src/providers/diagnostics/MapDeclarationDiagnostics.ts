@@ -79,7 +79,14 @@ export async function validateMissingMapDeclarations(
                     severity: DiagnosticSeverity.Warning,
                     range,
                     message: `Procedure '${procName}' has no matching declaration in the MAP.`,
-                    source: 'clarion'
+                    source: 'clarion',
+                    code: 'missing-map-declaration',
+                    data: {
+                        procName,
+                        parentFileUri: 'file:///' + memberToken.referencedFile!.replace(/\\/g, '/'),
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
                 });
                 logger.info(`⚠️ No MAP declaration for '${procName}' in ${memberToken.referencedFile}`);
             } else {
@@ -98,7 +105,15 @@ export async function validateMissingMapDeclarations(
                             severity: DiagnosticSeverity.Warning,
                             range,
                             message: `Procedure '${procName}' signature does not match its MAP declaration.`,
-                            source: 'clarion'
+                            source: 'clarion',
+                            code: 'map-signature-mismatch',
+                            data: {
+                                procName,
+                                parentFileUri: 'file:///' + result.file.replace(/\\/g, '/'),
+                                declLine: result.line,
+                                implLine: proc.line,
+                                currentFileUri: document.uri
+                            }
                         });
                         logger.info(`⚠️ Signature mismatch for '${procName}': impl=(${implParams.join(',')}) decl=(${declParams.join(',')})`);
                     }
@@ -196,7 +211,14 @@ export async function validateMissingImplementations(
                     severity: DiagnosticSeverity.Warning,
                     range,
                     message: `Procedure '${procName}' is declared in the MAP but has no implementation in '${require('path').basename(clwPath)}'.`,
-                    source: 'clarion'
+                    source: 'clarion',
+                    code: 'missing-map-implementation',
+                    data: {
+                        procName,
+                        clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                        declLine: decl.line,
+                        currentFileUri: document.uri
+                    }
                 });
                 logger.info(`⚠️ No implementation for MAP declaration '${procName}' in ${clwPath}`);
             } else {
@@ -220,7 +242,15 @@ export async function validateMissingImplementations(
                                 severity: DiagnosticSeverity.Warning,
                                 range,
                                 message: `Procedure '${procName}' signature does not match its implementation in '${require('path').basename(clwPath)}'.`,
-                                source: 'clarion'
+                                source: 'clarion',
+                                code: 'map-impl-signature-mismatch',
+                                data: {
+                                    procName,
+                                    clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                                    implLine: implLine.line,
+                                    declLine: decl.line,
+                                    currentFileUri: document.uri
+                                }
                             });
                             logger.info(`⚠️ Signature mismatch for '${procName}': decl=(${declParams.join(',')}) impl=(${implParams.join(',')})`);
                         }
