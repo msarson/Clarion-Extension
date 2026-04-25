@@ -20,6 +20,11 @@ interface AddProcedureToModuleArgs {
     projectGuid: string;
 }
 
+interface AddProcedureFromMapArgs {
+    documentUri: string;
+    mapEndLine: number;
+}
+
 /**
  * Returns the editor indent string based on VS Code configuration.
  * Respects editor.insertSpaces and editor.tabSize.
@@ -246,11 +251,66 @@ async function addProcedureToModule(...args: any[]): Promise<void> {
 }
 
 /**
+ * Handles 'clarion.addProcedureFromMap' — adds a procedure to the current file
+ * when the cursor is in a MAP block (outside any MODULE block).
+ */
+async function addProcedureFromMap(...args: any[]): Promise<void> {
+    const params: AddProcedureFromMapArgs = args[0] ?? args;
+
+    if (!params || typeof params.mapEndLine !== 'number') {
+        vscode.window.showErrorMessage('Add PROCEDURE: missing command arguments.');
+        return;
+    }
+
+    try {
+        const procedureName = await vscode.window.showInputBox({
+            prompt: 'Procedure name',
+            placeHolder: 'MyProcedure',
+            validateInput: (v) => {
+                if (!v) return 'Procedure name is required';
+                if (!/^[a-zA-Z_][a-zA-Z0-9_:]*$/.test(v)) return 'Invalid identifier';
+                return null;
+            }
+        });
+        if (!procedureName) return;
+
+        const fileUri = vscode.Uri.parse(params.documentUri);
+        const indentString = getIndentString(fileUri);
+        const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
+
+        // Open the current file to get its live line count
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        const insertLine = doc.lineCount;
+
+        const edit = new vscode.WorkspaceEdit();
+        // Declaration directly in the MAP (before its END)
+        edit.insert(fileUri, new vscode.Position(params.mapEndLine, 0), `${procedureName} PROCEDURE()\n`);
+        // Implementation appended at end of file
+        const stub = `\r\n${procedureName}${padding}PROCEDURE()\r\n${indentString}CODE\r\n`;
+        edit.insert(fileUri, new vscode.Position(insertLine, 0), stub);
+        await vscode.workspace.applyEdit(edit);
+
+        // Navigate to the new procedure
+        const editor = await vscode.window.showTextDocument(doc, { preview: false });
+        const procLine = insertLine + 1;
+        const pos = new vscode.Position(procLine, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(new vscode.Range(pos, pos));
+
+        vscode.window.showInformationMessage(`Added procedure '${procedureName}'.`);
+    } catch (error) {
+        logger.error(`❌ addProcedureFromMap failed: ${error instanceof Error ? error.message : String(error)}`);
+        vscode.window.showErrorMessage(`Add PROCEDURE failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+/**
  * Registers the MAP module command
  */
 export function registerMapModuleCommands(context: vscode.ExtensionContext): vscode.Disposable[] {
     return [
         vscode.commands.registerCommand('clarion.addMapModule', addMapModule),
-        vscode.commands.registerCommand('clarion.addProcedureToModule', addProcedureToModule)
+        vscode.commands.registerCommand('clarion.addProcedureToModule', addProcedureToModule),
+        vscode.commands.registerCommand('clarion.addProcedureFromMap', addProcedureFromMap)
     ];
 }

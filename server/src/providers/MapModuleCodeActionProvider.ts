@@ -59,6 +59,7 @@ export class MapModuleCodeActionProvider {
             }
 
             // Cursor is in MAP but outside any MODULE — offer "Add MODULE with PROCEDURE"
+            // and "Add PROCEDURE" (to existing module or current MEMBER file)
             let mapEndLine: number | undefined;
             for (const mapToken of docStructure.getMapBlocks()) {
                 if (
@@ -89,7 +90,7 @@ export class MapModuleCodeActionProvider {
                 f.name.toLowerCase().endsWith('.clw')
             )?.name ?? '';
 
-            const action: CodeAction = {
+            actions.push({
                 title: 'Add MODULE with PROCEDURE',
                 kind: CodeActionKind.QuickFix,
                 command: Command.create(
@@ -102,9 +103,21 @@ export class MapModuleCodeActionProvider {
                         projectGuid: project?.guid ?? ''
                     }
                 )
-            };
+            });
 
-            actions.push(action);
+            // Always offer "Add PROCEDURE" — targets the current file
+            actions.push({
+                title: 'Add PROCEDURE',
+                kind: CodeActionKind.QuickFix,
+                command: Command.create(
+                    'Add PROCEDURE',
+                    'clarion.addProcedureFromMap',
+                    {
+                        documentUri: document.uri,
+                        mapEndLine
+                    }
+                )
+            });
         } catch (error) {
             logger.error(`❌ Error providing MAP module code actions: ${error instanceof Error ? error.message : String(error)}`);
         }
