@@ -40,13 +40,14 @@ function getIndentString(uri?: vscode.Uri): string {
 /**
  * Returns the MAP prototype declaration for a procedure name,
  * respecting the clarion.procedurePrototypeStyle setting.
- * e.g. "MyProc PROCEDURE()" or "MyProc()"
+ * indentPrefix is only applied for the 'shorthand' style (keyword form is always column 0).
+ * e.g. "MyProc PROCEDURE()" or "  MyProc()"
  */
-function getProtoDeclaration(procedureName: string, uri?: vscode.Uri): string {
+function getProtoDeclaration(procedureName: string, indentPrefix: string, uri?: vscode.Uri): string {
     const style = vscode.workspace.getConfiguration('clarion', uri)
         .get<string>('procedurePrototypeStyle', 'keyword');
     return style === 'shorthand'
-        ? `${procedureName}()`
+        ? `${indentPrefix}${procedureName}()`
         : `${procedureName} PROCEDURE()`;
 }
 
@@ -137,7 +138,7 @@ async function addMapModule(...args: any[]): Promise<void> {
 
         const activeUri = vscode.window.activeTextEditor?.document.uri;
         const indentString = getIndentString(activeUri);
-        const protoDecl = getProtoDeclaration(procedureName, activeUri);
+        const protoDecl = getProtoDeclaration(procedureName, indentString + indentString, activeUri);
         const prototypeStyle = vscode.workspace.getConfiguration('clarion', activeUri)
             .get<string>('procedurePrototypeStyle', 'keyword');
 
@@ -229,7 +230,7 @@ async function addProcedureToModule(...args: any[]): Promise<void> {
 
         const activeUri = vscode.window.activeTextEditor?.document.uri;
         const indentString = getIndentString(activeUri);
-        const protoDecl = getProtoDeclaration(procedureName, activeUri);
+        const protoDecl = getProtoDeclaration(procedureName, indentString + indentString, activeUri);
 
         // 3. Open the CLW document to get its live line count
         const clwUri = vscode.Uri.file(resolved.clwFilePath);
@@ -295,7 +296,7 @@ async function addProcedureFromMap(...args: any[]): Promise<void> {
 
         const fileUri = vscode.Uri.parse(params.documentUri);
         const indentString = getIndentString(fileUri);
-        const protoDecl = getProtoDeclaration(procedureName, fileUri);
+        const protoDecl = getProtoDeclaration(procedureName, indentString, fileUri);
         const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
 
         // Open the current file to get its live line count

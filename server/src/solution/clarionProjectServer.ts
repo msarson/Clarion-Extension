@@ -883,7 +883,7 @@ export class ClarionProjectServer {
             const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
             const protoDecl = prototypeStyle === 'shorthand'
                 ? `${i}${i}${procedureName}()`
-                : `${i}${i}${procedureName}${padding}PROCEDURE()`;
+                : `${procedureName}${padding}PROCEDURE()`;
 
             // For a local MAP module, the CLW must also declare the procedure inside its MAP/END
             const mapSection = isLocalMap
