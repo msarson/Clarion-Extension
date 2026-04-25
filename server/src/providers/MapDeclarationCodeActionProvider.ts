@@ -169,18 +169,18 @@ export class MapDeclarationCodeActionProvider {
 
         const docLines = document.getText().split('\n');
         const implLineText = docLines[data.implLine] ?? '';
-        const implParams = ProcedureSignatureUtils.extractRawParameterList(implLineText);
+        const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
 
         const parentContent = fs.readFileSync(parentPath, 'utf8');
         const parentLines = parentContent.split('\n');
         const declLineText = parentLines[data.declLine] ?? '';
-        const declParams = ProcedureSignatureUtils.extractRawParameterList(declLineText);
+        const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
 
         const actions: CodeAction[] = [];
 
-        // Action 1: update declaration to match implementation
-        const newDeclLine = ProcedureSignatureUtils.replaceParameterList(declLineText, implParams);
-        if (newDeclLine !== declLineText) {
+        // Action 1: update declaration params to match implementation (keep return type/attributes)
+        if (implSpan && declSpan) {
+            const implParams = implLineText.slice(implSpan.start, implSpan.end);
             actions.push({
                 title: `Update declaration of '${data.procName}' to match implementation`,
                 kind: CodeActionKind.QuickFix,
@@ -189,8 +189,8 @@ export class MapDeclarationCodeActionProvider {
                     changes: {
                         [pathToUri(parentPath)]: [
                             TextEdit.replace(
-                                Range.create(data.declLine, 0, data.declLine, declLineText.length),
-                                newDeclLine
+                                Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
+                                implParams
                             )
                         ]
                     }
@@ -198,10 +198,9 @@ export class MapDeclarationCodeActionProvider {
             });
         }
 
-        // Action 2: update implementation to match declaration
-        // Implementations never have return types/attributes, so we only need the (…) part from the decl
-        const newImplLine = ProcedureSignatureUtils.replaceParameterList(implLineText, declParams);
-        if (newImplLine !== implLineText) {
+        // Action 2: update implementation params to match declaration
+        if (implSpan && declSpan) {
+            const declParams = declLineText.slice(declSpan.start, declSpan.end);
             actions.push({
                 title: `Update implementation of '${data.procName}' to match MAP declaration`,
                 kind: CodeActionKind.QuickFix,
@@ -209,8 +208,8 @@ export class MapDeclarationCodeActionProvider {
                     changes: {
                         [document.uri]: [
                             TextEdit.replace(
-                                Range.create(data.implLine, 0, data.implLine, implLineText.length),
-                                newImplLine
+                                Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
+                                declParams
                             )
                         ]
                     }
@@ -282,18 +281,18 @@ export class MapDeclarationCodeActionProvider {
 
         const docLines = document.getText().split('\n');
         const declLineText = docLines[data.declLine] ?? '';
-        const declParams = ProcedureSignatureUtils.extractRawParameterList(declLineText);
+        const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
 
         const clwContent = fs.readFileSync(clwPath, 'utf8');
         const clwLines = clwContent.split('\n');
         const implLineText = clwLines[data.implLine] ?? '';
-        const implParams = ProcedureSignatureUtils.extractRawParameterList(implLineText);
+        const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
 
         const actions: CodeAction[] = [];
 
-        // Action 1: update implementation to match declaration
-        const newImplLine = ProcedureSignatureUtils.replaceParameterList(implLineText, declParams);
-        if (newImplLine !== implLineText) {
+        // Action 1: update implementation params to match declaration
+        if (implSpan && declSpan) {
+            const declParams = declLineText.slice(declSpan.start, declSpan.end);
             actions.push({
                 title: `Update implementation of '${data.procName}' to match declaration`,
                 kind: CodeActionKind.QuickFix,
@@ -302,8 +301,8 @@ export class MapDeclarationCodeActionProvider {
                     changes: {
                         [pathToUri(clwPath)]: [
                             TextEdit.replace(
-                                Range.create(data.implLine, 0, data.implLine, implLineText.length),
-                                newImplLine
+                                Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
+                                declParams
                             )
                         ]
                     }
@@ -311,10 +310,9 @@ export class MapDeclarationCodeActionProvider {
             });
         }
 
-        // Action 2: update declaration to match implementation
-        // Keep return type/attributes in the declaration — only replace (…)
-        const newDeclLine = ProcedureSignatureUtils.replaceParameterList(declLineText, implParams);
-        if (newDeclLine !== declLineText) {
+        // Action 2: update declaration params to match implementation (keep return type/attributes)
+        if (implSpan && declSpan) {
+            const implParams = implLineText.slice(implSpan.start, implSpan.end);
             actions.push({
                 title: `Update declaration of '${data.procName}' to match implementation`,
                 kind: CodeActionKind.QuickFix,
@@ -322,8 +320,8 @@ export class MapDeclarationCodeActionProvider {
                     changes: {
                         [document.uri]: [
                             TextEdit.replace(
-                                Range.create(data.declLine, 0, data.declLine, declLineText.length),
-                                newDeclLine
+                                Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
+                                implParams
                             )
                         ]
                     }
