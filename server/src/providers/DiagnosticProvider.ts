@@ -10,6 +10,7 @@ import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, v
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
+import { validateMissingMapDeclarations } from './diagnostics/MapDeclarationDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -58,6 +59,14 @@ export class DiagnosticProvider {
         memberLocator: MemberLocatorService
     ): Promise<Diagnostic[]> {
         return _validateDiscardedReturnValues(tokens, document, memberLocator);
+    }
+
+    /** Async pass: warn when a procedure implementation has no MAP declaration in the parent file. Closes #89 */
+    public static async validateMissingMapDeclarations(
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Diagnostic[]> {
+        return validateMissingMapDeclarations(tokens, document);
     }
 
     /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */
