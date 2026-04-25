@@ -13,7 +13,6 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 import { SolutionManager } from './solution/solutionManager';
@@ -147,7 +146,8 @@ export class FileRelationshipGraph {
     // ── Core processor ─────────────────────────────────────────────────────────
 
     /**
-     * Extract edges from a file using TokenCache if available, otherwise tokenize from disk.
+     * Extract edges from a file using TokenCache if available, otherwise use a fast
+     * regex scan (avoids full tokenization for cold files — critical for large solutions).
      * Returns newly-discovered file paths to enqueue (INCLUDE targets).
      */
     private async processFile(filePath: string): Promise<string[]> {
@@ -164,23 +164,30 @@ export class FileRelationshipGraph {
             tokens = tokenCache.getTokensByUri(uriAlt) ?? null;
         }
 
-        if (!tokens || tokens.length === 0) {
-            // File not in cache — read from disk and tokenize
-            try {
-                if (!fs.existsSync(filePath)) return [];
-                const content = await fs.promises.readFile(filePath, 'utf-8');
-                const doc = TextDocument.create(uri, 'clarion', 0, content);
-                tokens = tokenCache.getTokens(doc);
-            } catch {
-                return [];
-            }
+        if (tokens && tokens.length > 0) {
+            // File is in the token cache (open in editor) — use rich token data
+            return this.processFileFromTokens(filePath, tokens);
         }
 
+        // File not in cache — use fast regex scan instead of full tokenization
+        try {
+            if (!fs.existsSync(filePath)) return [];
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            return this.processFileFromText(filePath, content);
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Extract edges from already-tokenized content (warm cache path).
+     * Has full type/parent information for precise CLASS_MODULE detection.
+     */
+    private processFileFromTokens(filePath: string, tokens: import('./ClarionTokenizer').Token[]): string[] {
         const newIncludes: string[] = [];
         let isProgramFile = false;
 
         for (const token of tokens) {
-            // Track if this is a PROGRAM file (for implicit includes below)
             if (token.type === TokenType.ClarionDocument && token.value.toUpperCase() === 'PROGRAM') {
                 isProgramFile = true;
             }
@@ -196,8 +203,6 @@ export class FileRelationshipGraph {
             } else if (token.type === TokenType.Directive && token.value.toUpperCase() === 'INCLUDE') {
                 edgeType = 'INCLUDE';
             } else if (token.type === TokenType.Structure && token.value.toUpperCase() === 'MODULE') {
-                // CLASS-attribute MODULE (e.g. Class(), Module('file.clw')) has no MAP parent — parentValue is null.
-                // MAP-block MODULE (inside a MAP structure) has a MAP token as its parent.
                 const parentToken = token.parent;
                 const parentIsMap = parentToken &&
                     parentToken.type === TokenType.Structure &&
@@ -205,7 +210,6 @@ export class FileRelationshipGraph {
 
                 if (!parentIsMap) {
                     edgeType = 'CLASS_MODULE';
-                    // Find the CLASS token on the same line to get the class label
                     const classToken = tokens.find(t =>
                         t.line === token.line &&
                         t.type === TokenType.Structure &&
@@ -214,7 +218,6 @@ export class FileRelationshipGraph {
                     containingClass = classToken?.label;
                 } else {
                     edgeType = 'MODULE';
-                    // Detect local MAP: grandparent = procedure
                     const grandParent = parentToken.parent;
                     if (grandParent &&
                         (grandParent.subType === TokenType.GlobalProcedure ||
@@ -226,29 +229,121 @@ export class FileRelationshipGraph {
 
             if (!edgeType) continue;
 
-            // Resolve bare filename to absolute path via redirection parser
             const resolved = this.resolveFile(token.referencedFile, filePath);
             if (!resolved) continue;
 
             const toFile = this.normalizePath(resolved);
             const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: token.line, containingProcedure, containingClass };
 
-            // Forward edge
             if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
             this.forwardEdges.get(filePath)!.push(edge);
-
-            // Reverse edge
             if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
             this.reverseEdges.get(toFile)!.push(edge);
 
-            // INCLUDE targets are enqueued for recursive processing
-            if (edgeType === 'INCLUDE') {
-                newIncludes.push(toFile);
+            if (edgeType === 'INCLUDE') newIncludes.push(toFile);
+        }
+
+        if (isProgramFile) {
+            for (const implicitFile of ['BUILTINS.CLW', 'EQUATES.CLW']) {
+                const resolved = this.resolveFile(implicitFile, filePath);
+                if (!resolved) continue;
+                const toFile = this.normalizePath(resolved);
+                const edge: FileEdge = { type: 'IMPLICIT_INCLUDE', fromFile: filePath, toFile };
+                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
+                this.forwardEdges.get(filePath)!.push(edge);
+                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
+                this.reverseEdges.get(toFile)!.push(edge);
             }
         }
 
-        // Compiler automatically injects BUILTINS.CLW and EQUATES.CLW into every PROGRAM's MAP.
-        // Add implicit edges so providers know these are always in scope.
+        return newIncludes;
+    }
+
+    /**
+     * Extract edges from raw source text using fast regex (cold file path).
+     * Avoids full tokenization — order of magnitude faster for large solutions.
+     * CLASS_MODULE detection uses line-context heuristic (CLASS keyword on same line).
+     */
+    private processFileFromText(filePath: string, content: string): string[] {
+        const newIncludes: string[] = [];
+        const lines = content.split(/\r?\n/);
+
+        // Patterns for file-reference keywords
+        const memberRe   = /^\s*MEMBER\s*\(\s*'([^']+)'\s*\)/i;
+        const programRe  = /^\s*PROGRAM\b/i;
+        const includeRe  = /\bINCLUDE\s*\(\s*'([^']+)'\s*(?:,\s*'[^']*'\s*)?\)/ig;
+        const moduleRe   = /\bMODULE\s*\(\s*'([^']+)'\s*\)/ig;
+        const classRe    = /\bCLASS\s*\(/i;
+        // MAP context: track whether we are inside a MAP block
+        const mapOpenRe  = /\bMAP\b/i;
+        const mapCloseRe = /\bEND\b/i;
+
+        let isProgramFile = false;
+        let mapDepth = 0;
+
+        for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+            const line = lines[lineNum];
+            const stripped = line.replace(/!.*$/, ''); // strip comments
+
+            if (programRe.test(stripped)) isProgramFile = true;
+
+            // Track MAP depth (crude but sufficient — CLW files rarely nest MAP in non-MAP contexts)
+            if (mapOpenRe.test(stripped)) mapDepth++;
+            if (mapCloseRe.test(stripped) && mapDepth > 0) mapDepth--;
+
+            // MEMBER('file') — only valid on line 0 or 1
+            if (lineNum <= 1) {
+                const m = memberRe.exec(stripped);
+                if (m) {
+                    const resolved = this.resolveFile(m[1], filePath);
+                    if (resolved) {
+                        const toFile = this.normalizePath(resolved);
+                        const edge: FileEdge = { type: 'MEMBER', fromFile: filePath, toFile, fromLine: lineNum };
+                        if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
+                        this.forwardEdges.get(filePath)!.push(edge);
+                        if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
+                        this.reverseEdges.get(toFile)!.push(edge);
+                    }
+                }
+            }
+
+            // INCLUDE('file')
+            let m: RegExpExecArray | null;
+            includeRe.lastIndex = 0;
+            while ((m = includeRe.exec(stripped)) !== null) {
+                const resolved = this.resolveFile(m[1], filePath);
+                if (!resolved) continue;
+                const toFile = this.normalizePath(resolved);
+                const edge: FileEdge = { type: 'INCLUDE', fromFile: filePath, toFile, fromLine: lineNum };
+                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
+                this.forwardEdges.get(filePath)!.push(edge);
+                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
+                this.reverseEdges.get(toFile)!.push(edge);
+                newIncludes.push(toFile);
+            }
+
+            // MODULE('file') — class attribute if CLASS keyword on same line, else MAP block
+            moduleRe.lastIndex = 0;
+            while ((m = moduleRe.exec(stripped)) !== null) {
+                const resolved = this.resolveFile(m[1], filePath);
+                if (!resolved) continue;
+                const toFile = this.normalizePath(resolved);
+                const isClassAttr = classRe.test(stripped);
+                const edgeType: EdgeType = isClassAttr ? 'CLASS_MODULE' : 'MODULE';
+                let containingClass: string | undefined;
+                if (isClassAttr) {
+                    // Extract class label — word before CLASS keyword
+                    const labelMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+CLASS\b/i.exec(stripped.trim());
+                    containingClass = labelMatch?.[1];
+                }
+                const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: lineNum, containingClass };
+                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
+                this.forwardEdges.get(filePath)!.push(edge);
+                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
+                this.reverseEdges.get(toFile)!.push(edge);
+            }
+        }
+
         if (isProgramFile) {
             for (const implicitFile of ['BUILTINS.CLW', 'EQUATES.CLW']) {
                 const resolved = this.resolveFile(implicitFile, filePath);
