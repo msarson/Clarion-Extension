@@ -363,6 +363,21 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.addMapModule",
+        "title": "Add MODULE with PROCEDURE",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.addProcedureToModule",
+        "title": "Add PROCEDURE to MODULE",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.addProcedureFromMap",
+        "title": "Add PROCEDURE",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.removeSourceFile",
         "title": "Remove Source File",
         "when": "clarion.solutionOpen"
@@ -651,6 +666,18 @@
           "when": "false"
         },
         {
+          "command": "clarion.addMapModule",
+          "when": "false"
+        },
+        {
+          "command": "clarion.addProcedureToModule",
+          "when": "false"
+        },
+        {
+          "command": "clarion.addProcedureFromMap",
+          "when": "false"
+        },
+        {
           "command": "clarion.removeSourceFile",
           "when": "false"
         },
@@ -828,6 +855,16 @@
       "type": "object",
       "title": "Clarion Extension Configuration",
       "properties": {
+        "clarion.procedurePrototypeStyle": {
+          "type": "string",
+          "enum": ["keyword", "shorthand"],
+          "enumDescriptions": [
+            "Use 'ProcName PROCEDURE()' — the preferred form (Clarion docs recommended)",
+            "Use 'ProcName()' — shorthand form (backward compatibility only)"
+          ],
+          "default": "keyword",
+          "description": "Controls the prototype style used when inserting procedure declarations inside MAP/MODULE structures."
+        },
         "clarion.build.revealOutput": {
           "type": "string",
           "enum": [

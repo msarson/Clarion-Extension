@@ -59,6 +59,7 @@ import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
+import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -1320,6 +1321,98 @@ connection.onRequest('clarion/addSourceFile', async (params: { projectGuid: stri
     }
 });
 
+// Get all CLW-candidate directories from the redirection file for a project
+connection.onRequest('clarion/getClwDirectories', (params: { projectGuid: string }): { label: string; dir: string; section: string }[] => {
+    logger.info(`🔍 getClwDirectories for project ${params.projectGuid}`);
+    try {
+        const sm = SolutionManager.getInstance();
+        const project = sm?.solution?.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project ${params.projectGuid} not found`);
+            return [];
+        }
+        return project.getClwDirectories();
+    } catch (error) {
+        logger.error(`❌ getClwDirectories error: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+// Create a new member CLW module and register it in the project
+connection.onRequest('clarion/addModuleWithProcedure', async (params: {
+    projectGuid: string;
+    moduleName: string;
+    procedureName: string;
+    targetDir: string;
+    firstClwFile: string;
+    indentString: string;
+    isLocalMap?: boolean;
+    prototypeStyle?: string;
+}): Promise<{ success: boolean; filePath: string }> => {
+    logger.info(`🔄 addModuleWithProcedure: ${params.moduleName}`);
+    try {
+        const sm = SolutionManager.getInstance();
+        const project = sm?.solution?.projects.find(p => p.guid === params.projectGuid);
+        if (!project) {
+            logger.warn(`⚠️ Project ${params.projectGuid} not found`);
+            return { success: false, filePath: '' };
+        }
+        const result = await project.addModuleWithProcedure(
+            params.moduleName,
+            params.procedureName,
+            params.targetDir,
+            params.firstClwFile,
+            params.indentString,
+            params.isLocalMap ?? false,
+            params.prototypeStyle ?? 'keyword'
+        );
+        if (result.success) {
+            try {
+                globalSolution = await buildClarionSolution();
+            } catch (buildError: any) {
+                logger.error(`❌ Error rebuilding solution after addModuleWithProcedure: ${buildError.message || buildError}`);
+            }
+        }
+        return result;
+    } catch (error) {
+        logger.error(`❌ addModuleWithProcedure error: ${error instanceof Error ? error.message : String(error)}`);
+        return { success: false, filePath: '' };
+    }
+});
+
+// Resolve the absolute path of a CLW file referenced by a MODULE token
+connection.onRequest('clarion/resolveModuleClwPath', (params: {
+    referencedFile: string;
+    projectGuid: string;
+}): { clwFilePath: string } | null => {
+    try {
+        const sm = SolutionManager.getInstance();
+        const projects = sm?.solution?.projects ?? [];
+
+        const project = params.projectGuid
+            ? projects.find(p => p.guid === params.projectGuid)
+            : projects[0];
+
+        if (!project) {
+            logger.warn(`⚠️ resolveModuleClwPath: no project found`);
+            return null;
+        }
+
+        const sf = project.findSourceFileByName(params.referencedFile);
+        if (!sf) {
+            logger.warn(`⚠️ resolveModuleClwPath: ${params.referencedFile} not in project source files`);
+            return null;
+        }
+
+        const clwFilePath = path.join(project.path, sf.relativePath || sf.name);
+        logger.info(`✅ resolveModuleClwPath: ${clwFilePath}`);
+        return { clwFilePath };
+    } catch (error) {
+        logger.error(`❌ resolveModuleClwPath error: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
 // Add a handler for getting included redirection files for a project
 connection.onRequest('clarion/getIncludedRedirectionFiles', (params: { projectPath: string }): string[] => {
     logger.info(`🔍 Received request for included redirection files for project at ${params.projectPath}`);
@@ -1577,7 +1670,10 @@ connection.onCodeAction(async (params) => {
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
 
-        const allActions = [...actions, ...flattenActions];
+        const mapModuleProvider = new MapModuleCodeActionProvider();
+        const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions];
         logger.info(`Provided ${allActions.length} code actions`);
         return allActions;
     } catch (error) {

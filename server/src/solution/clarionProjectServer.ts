@@ -800,6 +800,164 @@ export class ClarionProjectServer {
     }
 
     /**
+     * Returns all directories from the redirection file where CLW files may be placed.
+     * Ordering: project directory first, then non-Common sections, then Common last.
+     * Any path that resolves to the project directory is relabelled [Project] and shown first.
+     * @returns Array of { label, dir, section } objects for use in a QuickPick
+     */
+    public getClwDirectories(): { label: string; dir: string; section: string }[] {
+        const seen = new Set<string>();
+        const projectEntries: { label: string; dir: string; section: string }[] = [];
+        const configEntries: { label: string; dir: string; section: string }[] = [];
+        const commonEntries: { label: string; dir: string; section: string }[] = [];
+
+        const projectKey = this.path.toLowerCase();
+        const redParser = this.getRedirectionParser();
+        const entries = redParser.parseRedFile(this.path);
+
+        for (const entry of entries) {
+            const ext = entry.extension.toLowerCase();
+            if (ext !== '*.clw') continue;
+
+            for (const p of entry.paths) {
+                const resolved = path.isAbsolute(p)
+                    ? p
+                    : path.resolve(this.path, p);
+                const key = resolved.toLowerCase();
+                if (seen.has(key)) continue;
+                seen.add(key);
+
+                // Any path that resolves to the project folder becomes [Project]
+                if (key === projectKey) {
+                    projectEntries.push({ label: `[Project] ${resolved}`, dir: resolved, section: 'Project' });
+                    continue;
+                }
+
+                const isCommon = !entry.section || entry.section.toLowerCase() === 'common';
+                const sectionLabel = isCommon ? '[Common]' : `[${entry.section}]`;
+                const item = { label: `${sectionLabel} ${resolved}`, dir: resolved, section: entry.section };
+
+                if (isCommon) {
+                    commonEntries.push(item);
+                } else {
+                    configEntries.push(item);
+                }
+            }
+        }
+
+        // If project dir wasn't in the RED file at all, add it explicitly
+        if (!seen.has(projectKey)) {
+            projectEntries.unshift({ label: `[Project] ${this.path}`, dir: this.path, section: 'Project' });
+        }
+
+        // Order: project dir → config-specific sections → Common
+        return [...projectEntries, ...configEntries, ...commonEntries];
+    }
+
+    /**
+     * Creates a new member CLW file and registers it in the project.
+     * @param moduleName  Filename of the new CLW (e.g. "MyModule.clw")
+     * @param procedureName  Name of the initial PROCEDURE
+     * @param targetDir  Absolute path of the directory to create the file in
+     * @param firstClwFile  Name of the program CLW for the MEMBER statement
+     * @param indentString  Indent string from the editor (spaces or tab)
+     * @returns { success, filePath }
+     */
+    public async addModuleWithProcedure(
+        moduleName: string,
+        procedureName: string,
+        targetDir: string,
+        firstClwFile: string,
+        indentString: string,
+        isLocalMap: boolean = false,
+        prototypeStyle: string = 'keyword'
+    ): Promise<{ success: boolean; filePath: string }> {
+        logger.info(`🔄 addModuleWithProcedure: ${moduleName} in ${targetDir}`);
+
+        const filePath = path.join(targetDir, moduleName);
+
+        try {
+            // Build the CLW stub
+            const i = indentString;
+            const memberRef = firstClwFile ? `'${firstClwFile}'` : "''";
+            const padding = ' '.repeat(Math.max(1, 16 - procedureName.length));
+            const protoDecl = prototypeStyle === 'shorthand'
+                ? `${i}${i}${procedureName}()`
+                : `${procedureName}${padding}PROCEDURE()`;
+
+            // For a local MAP module, the CLW must also declare the procedure inside its MAP/END
+            const mapSection = isLocalMap
+                ? `${i}MAP\r\n${protoDecl}\r\n${i}END\r\n\r\n`
+                : `${i}MAP\r\n${i}END\r\n\r\n`;
+
+            const content =
+                `${i}MEMBER(${memberRef})\r\n\r\n` +
+                mapSection +
+                `${procedureName}${padding}PROCEDURE()\r\n` +
+                `${i}CODE\r\n`;
+
+            // Create the directory if needed
+            if (!fs.existsSync(targetDir)) {
+                fs.mkdirSync(targetDir, { recursive: true });
+            }
+
+            if (!fs.existsSync(filePath)) {
+                fs.writeFileSync(filePath, content, 'utf-8');
+                logger.info(`✅ Created CLW file: ${filePath}`);
+            } else {
+                logger.info(`⚠️ CLW file already exists: ${filePath}`);
+            }
+
+            // Register in .cwproj
+            const projectFile = path.join(this.path, `${this.name}.cwproj`);
+            if (fs.existsSync(projectFile)) {
+                const xmlContent = fs.readFileSync(projectFile, 'utf-8');
+                const parsed = await xml2js.parseStringPromise(xmlContent);
+
+                // Check if already registered
+                let alreadyExists = false;
+                if (parsed?.Project?.ItemGroup) {
+                    for (const group of parsed.Project.ItemGroup) {
+                        if (group.Compile) {
+                            for (const file of group.Compile) {
+                                if (file.$.Include.toLowerCase() === moduleName.toLowerCase()) {
+                                    alreadyExists = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (alreadyExists) break;
+                    }
+                }
+
+                if (!alreadyExists) {
+                    // Find or create Compile ItemGroup
+                    let compileGroup = parsed?.Project?.ItemGroup?.find((g: any) => g.Compile);
+                    if (!compileGroup) {
+                        if (!parsed.Project.ItemGroup) parsed.Project.ItemGroup = [];
+                        compileGroup = { Compile: [] };
+                        parsed.Project.ItemGroup.push(compileGroup);
+                    }
+                    compileGroup.Compile.push({ $: { Include: moduleName } });
+
+                    const builder = new xml2js.Builder();
+                    fs.writeFileSync(projectFile, builder.buildObject(parsed));
+                    logger.info(`✅ Added ${moduleName} to ${projectFile}`);
+                }
+
+                // Keep in-memory source files in sync
+                const relativePath = path.relative(this.path, filePath);
+                this.sourceFiles.push(new ClarionSourcerFileServer(moduleName, relativePath, this));
+            }
+
+            return { success: true, filePath };
+        } catch (error) {
+            logger.error(`❌ addModuleWithProcedure failed: ${error instanceof Error ? error.message : String(error)}`);
+            return { success: false, filePath };
+        }
+    }
+
+    /**
      * Removes a source file from the project
      * @param fileName The name of the source file to remove (e.g., "someclwfile.clw")
      * @returns True if the file was removed successfully, false otherwise
