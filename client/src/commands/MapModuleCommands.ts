@@ -137,7 +137,7 @@ async function addMapModule(...args: any[]): Promise<void> {
         const insertPos = new vscode.Position(params.mapEndLine, 0);
         const moduleText =
             `${indentString}MODULE('${moduleName}')\n` +
-            `${indentString}${procedureName} PROCEDURE()\n` +
+            `${procedureName} PROCEDURE()\n` +
             `${indentString}END\n`;
         edit.insert(docUri, insertPos, moduleText);
         await vscode.workspace.applyEdit(edit);
