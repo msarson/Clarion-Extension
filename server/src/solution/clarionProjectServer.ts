@@ -801,12 +801,14 @@ export class ClarionProjectServer {
 
     /**
      * Returns all directories from the redirection file where CLW files may be placed.
-     * Covers every section found in the RED file (never hardcodes section names).
+     * Ordering: project directory first, then non-Common sections, then Common last.
      * @returns Array of { label, dir, section } objects for use in a QuickPick
      */
     public getClwDirectories(): { label: string; dir: string; section: string }[] {
-        const results: { label: string; dir: string; section: string }[] = [];
         const seen = new Set<string>();
+        const projectEntries: { label: string; dir: string; section: string }[] = [];
+        const configEntries: { label: string; dir: string; section: string }[] = [];
+        const commonEntries: { label: string; dir: string; section: string }[] = [];
 
         const redParser = this.getRedirectionParser();
         const entries = redParser.parseRedFile(this.path);
@@ -820,21 +822,29 @@ export class ClarionProjectServer {
                     ? p
                     : path.resolve(this.path, p);
                 const key = resolved.toLowerCase();
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    const sectionLabel = entry.section ? `[${entry.section}]` : '[Common]';
-                    results.push({ label: `${sectionLabel} ${resolved}`, dir: resolved, section: entry.section });
+                if (seen.has(key)) continue;
+                seen.add(key);
+
+                const isCommon = !entry.section || entry.section.toLowerCase() === 'common';
+                const sectionLabel = isCommon ? '[Common]' : `[${entry.section}]`;
+                const item = { label: `${sectionLabel} ${resolved}`, dir: resolved, section: entry.section };
+
+                if (isCommon) {
+                    commonEntries.push(item);
+                } else {
+                    configEntries.push(item);
                 }
             }
         }
 
-        // Always include the project directory as a fallback
+        // Project directory comes first; add only if not already listed from RED file
         const projectKey = this.path.toLowerCase();
         if (!seen.has(projectKey)) {
-            results.push({ label: `[Project] ${this.path}`, dir: this.path, section: 'Project' });
+            projectEntries.push({ label: `[Project] ${this.path}`, dir: this.path, section: 'Project' });
         }
 
-        return results;
+        // Order: project dir → config-specific sections → Common
+        return [...projectEntries, ...configEntries, ...commonEntries];
     }
 
     /**
