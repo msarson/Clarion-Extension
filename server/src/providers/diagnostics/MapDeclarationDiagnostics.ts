@@ -4,11 +4,30 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
+import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
+
+/** Resolve a bare CLW filename (as stored in MODULE token.referencedFile) to an
+ *  absolute path using the solution's redirection parser.  Returns null if it
+ *  cannot be resolved or does not exist on disk. */
+function resolveClwPath(bareFilename: string): string | null {
+    const solutionManager = SolutionManager.getInstance();
+    if (solutionManager?.solution) {
+        for (const proj of solutionManager.solution.projects) {
+            const resolved = proj.getRedirectionParser().findFile(bareFilename);
+            if (resolved?.path && fs.existsSync(resolved.path)) {
+                return resolved.path;
+            }
+        }
+    }
+    // Fall back: already absolute or relative to CWD
+    if (fs.existsSync(bareFilename)) return bareFilename;
+    return null;
+}
 
 /**
  * Warns when a GlobalProcedure implementation in a MEMBER file has no matching
@@ -161,9 +180,10 @@ export async function validateMissingImplementations(
     );
 
     for (const moduleToken of moduleTokens) {
-        const clwPath = moduleToken.referencedFile!;
+        const clwPath = resolveClwPath(moduleToken.referencedFile!);
 
-        if (!fs.existsSync(clwPath)) {
+        if (!clwPath) {
+            logger.debug(`⚠️ Could not resolve MODULE file: ${moduleToken.referencedFile}`);
             continue;
         }
 

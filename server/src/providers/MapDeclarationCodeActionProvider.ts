@@ -16,7 +16,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('MapDeclarationCodeActionProvider');
-logger.setLevel('error');
+logger.setLevel('debug');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -165,57 +165,66 @@ export class MapDeclarationCodeActionProvider {
         if (!data?.procName || !data.parentFileUri) return [];
 
         const parentPath = uriToPath(data.parentFileUri);
-        if (!fs.existsSync(parentPath)) return [];
+        logger.debug(`🔧 [MemberSide] proc=${data.procName} parentPath=${parentPath} declLine=${data.declLine} implLine=${data.implLine}`);
+        if (!fs.existsSync(parentPath)) {
+            logger.debug(`❌ [MemberSide] parent file not found: ${parentPath}`);
+            return [];
+        }
 
         const docLines = document.getText().split('\n');
         const implLineText = docLines[data.implLine] ?? '';
         const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
+        logger.debug(`🔧 [MemberSide] implLine[${data.implLine}]="${implLineText.replace(/\r/g, '\\r')}" implSpan=${JSON.stringify(implSpan)}`);
 
         const parentContent = fs.readFileSync(parentPath, 'utf8');
         const parentLines = parentContent.split('\n');
         const declLineText = parentLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
+        logger.debug(`🔧 [MemberSide] declLine[${data.declLine}]="${declLineText.replace(/\r/g, '\\r')}" declSpan=${JSON.stringify(declSpan)}`);
 
         const actions: CodeAction[] = [];
 
-        // Action 1: update declaration params to match implementation (keep return type/attributes)
-        if (implSpan && declSpan) {
-            const implParams = implLineText.slice(implSpan.start, implSpan.end);
-            actions.push({
-                title: `Update declaration of '${data.procName}' to match implementation`,
-                kind: CodeActionKind.QuickFix,
-                isPreferred: true,
-                edit: {
-                    changes: {
-                        [pathToUri(parentPath)]: [
-                            TextEdit.replace(
-                                Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
-                                implParams
-                            )
-                        ]
-                    }
-                }
-            });
+        if (!implSpan || !declSpan) {
+            logger.debug(`❌ [MemberSide] no span found — implSpan=${JSON.stringify(implSpan)} declSpan=${JSON.stringify(declSpan)}`);
+            return [];
         }
 
-        // Action 2: update implementation params to match declaration
-        if (implSpan && declSpan) {
-            const declParams = declLineText.slice(declSpan.start, declSpan.end);
-            actions.push({
-                title: `Update implementation of '${data.procName}' to match MAP declaration`,
-                kind: CodeActionKind.QuickFix,
-                edit: {
-                    changes: {
-                        [document.uri]: [
-                            TextEdit.replace(
-                                Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
-                                declParams
-                            )
-                        ]
-                    }
+        // Action 1: update declaration params to match implementation (keep return type/attributes)
+        const implParams = implLineText.slice(implSpan.start, implSpan.end);
+        logger.debug(`🔧 [MemberSide] action1: replace declLine col ${declSpan.start}-${declSpan.end} in ${parentPath} with "${implParams}"`);
+        actions.push({
+            title: `Update declaration of '${data.procName}' to match implementation`,
+            kind: CodeActionKind.QuickFix,
+            isPreferred: true,
+            edit: {
+                changes: {
+                    [pathToUri(parentPath)]: [
+                        TextEdit.replace(
+                            Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
+                            implParams
+                        )
+                    ]
                 }
-            });
-        }
+            }
+        });
+
+        // Action 2: update implementation params to match declaration
+        const declParams = declLineText.slice(declSpan.start, declSpan.end);
+        logger.debug(`🔧 [MemberSide] action2: replace implLine col ${implSpan.start}-${implSpan.end} in ${document.uri} with "${declParams}"`);
+        actions.push({
+            title: `Update implementation of '${data.procName}' to match MAP declaration`,
+            kind: CodeActionKind.QuickFix,
+            edit: {
+                changes: {
+                    [document.uri]: [
+                        TextEdit.replace(
+                            Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
+                            declParams
+                        )
+                    ]
+                }
+            }
+        });
 
         return actions;
     }
@@ -277,57 +286,66 @@ export class MapDeclarationCodeActionProvider {
         if (!data?.procName || !data.clwFileUri) return [];
 
         const clwPath = uriToPath(data.clwFileUri);
-        if (!fs.existsSync(clwPath)) return [];
+        logger.debug(`🔧 [ProgramSide] proc=${data.procName} clwPath=${clwPath} declLine=${data.declLine} implLine=${data.implLine}`);
+        if (!fs.existsSync(clwPath)) {
+            logger.debug(`❌ [ProgramSide] clw file not found: ${clwPath}`);
+            return [];
+        }
 
         const docLines = document.getText().split('\n');
         const declLineText = docLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
+        logger.debug(`🔧 [ProgramSide] declLine[${data.declLine}]="${declLineText.replace(/\r/g, '\\r')}" declSpan=${JSON.stringify(declSpan)}`);
 
         const clwContent = fs.readFileSync(clwPath, 'utf8');
         const clwLines = clwContent.split('\n');
         const implLineText = clwLines[data.implLine] ?? '';
         const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
+        logger.debug(`🔧 [ProgramSide] implLine[${data.implLine}]="${implLineText.replace(/\r/g, '\\r')}" implSpan=${JSON.stringify(implSpan)}`);
 
         const actions: CodeAction[] = [];
 
-        // Action 1: update implementation params to match declaration
-        if (implSpan && declSpan) {
-            const declParams = declLineText.slice(declSpan.start, declSpan.end);
-            actions.push({
-                title: `Update implementation of '${data.procName}' to match declaration`,
-                kind: CodeActionKind.QuickFix,
-                isPreferred: true,
-                edit: {
-                    changes: {
-                        [pathToUri(clwPath)]: [
-                            TextEdit.replace(
-                                Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
-                                declParams
-                            )
-                        ]
-                    }
-                }
-            });
+        if (!implSpan || !declSpan) {
+            logger.debug(`❌ [ProgramSide] no span found — implSpan=${JSON.stringify(implSpan)} declSpan=${JSON.stringify(declSpan)}`);
+            return [];
         }
 
-        // Action 2: update declaration params to match implementation (keep return type/attributes)
-        if (implSpan && declSpan) {
-            const implParams = implLineText.slice(implSpan.start, implSpan.end);
-            actions.push({
-                title: `Update declaration of '${data.procName}' to match implementation`,
-                kind: CodeActionKind.QuickFix,
-                edit: {
-                    changes: {
-                        [document.uri]: [
-                            TextEdit.replace(
-                                Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
-                                implParams
-                            )
-                        ]
-                    }
+        // Action 1: update implementation params to match declaration
+        const declParams = declLineText.slice(declSpan.start, declSpan.end);
+        logger.debug(`🔧 [ProgramSide] action1: replace implLine col ${implSpan.start}-${implSpan.end} in ${clwPath} with "${declParams}"`);
+        actions.push({
+            title: `Update implementation of '${data.procName}' to match declaration`,
+            kind: CodeActionKind.QuickFix,
+            isPreferred: true,
+            edit: {
+                changes: {
+                    [pathToUri(clwPath)]: [
+                        TextEdit.replace(
+                            Range.create(data.implLine, implSpan.start, data.implLine, implSpan.end),
+                            declParams
+                        )
+                    ]
                 }
-            });
-        }
+            }
+        });
+
+        // Action 2: update declaration params to match implementation (keep return type/attributes)
+        const implParams = implLineText.slice(implSpan.start, implSpan.end);
+        logger.debug(`🔧 [ProgramSide] action2: replace declLine col ${declSpan.start}-${declSpan.end} in ${document.uri} with "${implParams}"`);
+        actions.push({
+            title: `Update declaration of '${data.procName}' to match implementation`,
+            kind: CodeActionKind.QuickFix,
+            edit: {
+                changes: {
+                    [document.uri]: [
+                        TextEdit.replace(
+                            Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
+                            implParams
+                        )
+                    ]
+                }
+            }
+        });
 
         return actions;
     }
