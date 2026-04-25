@@ -678,7 +678,7 @@ documents.onDidChangeContent(event => {
 
         // 🚀 PERF: Don't clear cache until debounce completes
         // This allows other features to use stale tokens while user is typing
-        const timeout = setTimeout(() => {
+        const timeout = setTimeout(async () => {
             try {
                 logger.info(`🔍 Debounce timeout triggered, refreshing tokens for: ${uri}`);
                 
@@ -713,7 +713,13 @@ documents.onDidChangeContent(event => {
 
                 // Re-validate any related PROGRAM/MEMBER files so cross-file diagnostics clear
                 revalidateRelatedDocuments(document, tokens);
-                
+
+                // Update file relationship graph edges for this file
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                FileRelationshipGraph.getInstance().updateFile(uri).catch(err =>
+                    logger.error(`❌ [FRG] updateFile failed for ${uri}: ${err}`)
+                );
+
                 // 🔄 Notify client that document symbols have changed
                 // This triggers structure view to refresh with fresh symbols
                 connection.sendNotification('clarion/symbolsRefreshed', { uri });
@@ -1128,6 +1134,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
             });
             
+            // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
+            // Enables O(1) reverse lookups for local MAP scope (#91) and include chains (#52).
+            setImmediate(async () => {
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                const graph = FileRelationshipGraph.getInstance();
+                const solutionManager = SolutionManager.getInstance();
+                const allFiles: string[] = [];
+                if (solutionManager?.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const absPath = sourceFile.getAbsolutePath();
+                            if (absPath) allFiles.push(absPath);
+                        }
+                    }
+                }
+                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                await graph.buildInBackground(allFiles).catch(err =>
+                    logger.error(`❌ [FRG] Background build failed: ${err}`)
+                );
+            });
+
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
                 const project = globalSolution.projects[i];
@@ -1196,6 +1223,10 @@ connection.onNotification('clarion/projectConstantsChanged', () => {
             logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
         );
     }
+    // Reset file relationship graph — project file list may have changed
+    import('./FileRelationshipGraph').then(({ FileRelationshipGraph }) => {
+        FileRelationshipGraph.getInstance().reset();
+    });
 });
 
 
