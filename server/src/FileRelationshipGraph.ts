@@ -43,8 +43,9 @@ export interface FileEdge {
 export class FileRelationshipGraph {
     private static instance: FileRelationshipGraph;
 
-    private forwardEdges = new Map<string, FileEdge[]>();  // fromFile → edges
-    private reverseEdges = new Map<string, FileEdge[]>();  // toFile   → edges
+    private forwardEdges = new Map<string, FileEdge[]>();      // fromFile → edges
+    private reverseEdges = new Map<string, FileEdge[]>();      // toFile   → edges
+    private classModuleIndex = new Map<string, FileEdge[]>(); // className (upper) → CLASS_MODULE edges
 
     private _built = false;
     private _building = false;
@@ -84,6 +85,7 @@ export class FileRelationshipGraph {
         this._buildEndTime = undefined;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
+        this.classModuleIndex.clear();
 
         const buildStart = Date.now();
         const visited = new Set<string>();
@@ -133,7 +135,7 @@ export class FileRelationshipGraph {
         if (this._building) return;
         const filePath = this.normalizePath(this.uriToPath(uri));
 
-        // Remove old forward edges from this file and their reverse counterparts
+        // Remove old forward edges from this file and their reverse/index counterparts
         const oldEdges = this.forwardEdges.get(filePath) ?? [];
         this.forwardEdges.delete(filePath);
         for (const edge of oldEdges) {
@@ -142,6 +144,15 @@ export class FileRelationshipGraph {
                 const filtered = rev.filter(e => e.fromFile !== filePath);
                 if (filtered.length === 0) this.reverseEdges.delete(edge.toFile);
                 else this.reverseEdges.set(edge.toFile, filtered);
+            }
+            if (edge.type === 'CLASS_MODULE' && edge.containingClass) {
+                const key = edge.containingClass.toUpperCase();
+                const idx = this.classModuleIndex.get(key);
+                if (idx) {
+                    const filtered = idx.filter(e => e.fromFile !== filePath);
+                    if (filtered.length === 0) this.classModuleIndex.delete(key);
+                    else this.classModuleIndex.set(key, filtered);
+                }
             }
         }
 
@@ -154,6 +165,7 @@ export class FileRelationshipGraph {
     public reset(): void {
         this.forwardEdges.clear();
         this.reverseEdges.clear();
+        this.classModuleIndex.clear();
         this._built = false;
         this._building = false;
         logger.error(`🔄 [FRG] FileRelationshipGraph reset`);
@@ -251,10 +263,7 @@ export class FileRelationshipGraph {
             const toFile = this.normalizePath(resolved);
             const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: token.line, containingProcedure, containingClass };
 
-            if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-            this.forwardEdges.get(filePath)!.push(edge);
-            if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-            this.reverseEdges.get(toFile)!.push(edge);
+            this.addEdge(edge);
 
             if (edgeType === 'INCLUDE') newIncludes.push(toFile);
         }
@@ -265,10 +274,7 @@ export class FileRelationshipGraph {
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);
                 const edge: FileEdge = { type: 'IMPLICIT_INCLUDE', fromFile: filePath, toFile };
-                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-                this.forwardEdges.get(filePath)!.push(edge);
-                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-                this.reverseEdges.get(toFile)!.push(edge);
+                this.addEdge(edge);
             }
         }
 
@@ -314,11 +320,7 @@ export class FileRelationshipGraph {
                     const resolved = this.resolveFile(m[1], filePath);
                     if (resolved) {
                         const toFile = this.normalizePath(resolved);
-                        const edge: FileEdge = { type: 'MEMBER', fromFile: filePath, toFile, fromLine: lineNum };
-                        if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-                        this.forwardEdges.get(filePath)!.push(edge);
-                        if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-                        this.reverseEdges.get(toFile)!.push(edge);
+                        this.addEdge({ type: 'MEMBER', fromFile: filePath, toFile, fromLine: lineNum });
                     }
                 }
             }
@@ -330,11 +332,7 @@ export class FileRelationshipGraph {
                 const resolved = this.resolveFile(m[1], filePath);
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);
-                const edge: FileEdge = { type: 'INCLUDE', fromFile: filePath, toFile, fromLine: lineNum };
-                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-                this.forwardEdges.get(filePath)!.push(edge);
-                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-                this.reverseEdges.get(toFile)!.push(edge);
+                this.addEdge({ type: 'INCLUDE', fromFile: filePath, toFile, fromLine: lineNum });
                 newIncludes.push(toFile);
             }
 
@@ -348,15 +346,10 @@ export class FileRelationshipGraph {
                 const edgeType: EdgeType = isClassAttr ? 'CLASS_MODULE' : 'MODULE';
                 let containingClass: string | undefined;
                 if (isClassAttr) {
-                    // Extract class label — word before CLASS keyword
                     const labelMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+CLASS\b/i.exec(stripped.trim());
                     containingClass = labelMatch?.[1];
                 }
-                const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: lineNum, containingClass };
-                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-                this.forwardEdges.get(filePath)!.push(edge);
-                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-                this.reverseEdges.get(toFile)!.push(edge);
+                this.addEdge({ type: edgeType, fromFile: filePath, toFile, fromLine: lineNum, containingClass });
             }
         }
 
@@ -365,18 +358,23 @@ export class FileRelationshipGraph {
                 const resolved = this.resolveFile(implicitFile, filePath);
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);
-                const edge: FileEdge = { type: 'IMPLICIT_INCLUDE', fromFile: filePath, toFile };
-                if (!this.forwardEdges.has(filePath)) this.forwardEdges.set(filePath, []);
-                this.forwardEdges.get(filePath)!.push(edge);
-                if (!this.reverseEdges.has(toFile)) this.reverseEdges.set(toFile, []);
-                this.reverseEdges.get(toFile)!.push(edge);
+                this.addEdge({ type: 'IMPLICIT_INCLUDE', fromFile: filePath, toFile });
             }
         }
 
         return newIncludes;
     }
 
-    // ── Query API ──────────────────────────────────────────────────────────────
+    // ── Query API──────────────────────────────────────────────────────────────
+
+    /**
+     * Returns all CLASS_MODULE edges for a given class name (case-insensitive).
+     * O(1) lookup via the classModuleIndex — used by ImplementationProvider to
+     * find the CLW file that implements a class without scanning all solution files.
+     */
+    public getEdgesForClass(className: string): FileEdge[] {
+        return this.classModuleIndex.get(className.toUpperCase()) ?? [];
+    }
 
     /**
      * Given an implementation file path, find the MODULE edge(s) declaring it.
@@ -421,6 +419,19 @@ export class FileRelationshipGraph {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    /** Register a single edge in all three indexes. */
+    private addEdge(edge: FileEdge): void {
+        if (!this.forwardEdges.has(edge.fromFile)) this.forwardEdges.set(edge.fromFile, []);
+        this.forwardEdges.get(edge.fromFile)!.push(edge);
+        if (!this.reverseEdges.has(edge.toFile)) this.reverseEdges.set(edge.toFile, []);
+        this.reverseEdges.get(edge.toFile)!.push(edge);
+        if (edge.type === 'CLASS_MODULE' && edge.containingClass) {
+            const key = edge.containingClass.toUpperCase();
+            if (!this.classModuleIndex.has(key)) this.classModuleIndex.set(key, []);
+            this.classModuleIndex.get(key)!.push(edge);
+        }
+    }
 
     /** Normalise a path for use as a map key: lowercase, backslashes → forward slashes. */
     private normalizePath(filePath: string): string {
