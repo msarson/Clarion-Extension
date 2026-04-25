@@ -7,6 +7,7 @@ import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
+import * as nodePath from 'path';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
@@ -18,14 +19,23 @@ function resolveClwPath(bareFilename: string): string | null {
     const solutionManager = SolutionManager.getInstance();
     if (solutionManager?.solution) {
         for (const proj of solutionManager.solution.projects) {
+            // Try redirection parser first
             const resolved = proj.getRedirectionParser().findFile(bareFilename);
             if (resolved?.path && fs.existsSync(resolved.path)) {
                 return resolved.path;
             }
+            // Fall back to project directory
+            const projDirPath = nodePath.join(proj.path, bareFilename);
+            if (fs.existsSync(projDirPath)) {
+                return projDirPath;
+            }
         }
     }
-    // Fall back: already absolute or relative to CWD
-    if (fs.existsSync(bareFilename)) return bareFilename;
+    // Already absolute
+    if (nodePath.isAbsolute(bareFilename) && fs.existsSync(bareFilename)) return bareFilename;
+    // Relative to CWD — resolve to absolute so path comparisons work
+    const cwdResolved = nodePath.resolve(bareFilename);
+    if (fs.existsSync(cwdResolved)) return cwdResolved;
     return null;
 }
 
@@ -154,7 +164,8 @@ export async function validateMissingMapDeclarations(
  */
 export async function validateMissingImplementations(
     tokens: Token[],
-    document: TextDocument
+    document: TextDocument,
+    getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Only relevant for PROGRAM files
     const programToken = tokens.find(t =>
@@ -188,34 +199,45 @@ export async function validateMissingImplementations(
         }
 
         // Get tokens for the implementation file.
-        // Prefer live in-memory content from TokenCache so that WorkspaceEdit
-        // changes are visible even before the file is saved to disk.
+        // Priority order:
+        //   1. VS Code's live document buffer (always up-to-date, even for unsaved WorkspaceEdits)
+        //   2. TokenCache (may be stale if cache wasn't cleared after a non-structural edit)
+        //   3. Disk (fallback for files not open in editor)
         let implTokens: Token[];
         let implFileContent: string;
         try {
-            const normalizedClwPath = clwPath.toLowerCase().replace(/\\/g, '/');
-            const liveUri = tokenCache.getAllCachedUris().find(uri => {
-                const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
-                return uriPath === normalizedClwPath;
-            });
-
-            if (liveUri) {
-                const liveText = tokenCache.getDocumentText(liveUri);
-                const liveCachedTokens = tokenCache.getTokensByUri(liveUri);
-                if (liveText && liveCachedTokens) {
-                    implTokens = liveCachedTokens;
-                    implFileContent = liveText;
-                } else if (liveText) {
-                    const implDoc = TextDocument.create(liveUri, 'clarion', 1, liveText);
-                    implTokens = tokenCache.getTokens(implDoc);
-                    implFileContent = liveText;
-                } else {
-                    throw new Error('no live text in cache');
-                }
-            } else {
-                implFileContent = fs.readFileSync(clwPath, 'utf8');
-                const implDoc = TextDocument.create('file:///' + clwPath.replace(/\\/g, '/'), 'clarion', 1, implFileContent);
+            const openText = getOpenDocumentContent?.(clwPath) ?? null;
+            if (openText !== null) {
+                // File is open in VS Code — use the live buffer content directly.
+                implFileContent = openText;
+                const implUri = 'file:///' + clwPath.replace(/\\/g, '/');
+                const implDoc = TextDocument.create(implUri, 'clarion', 1, openText);
                 implTokens = tokenCache.getTokens(implDoc);
+            } else {
+                // File not open in editor — try TokenCache, then fall back to disk.
+                const normalizedClwPath = clwPath.toLowerCase().replace(/\\/g, '/');
+                const liveUri = tokenCache.getAllCachedUris().find(uri => {
+                    const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                    return uriPath === normalizedClwPath;
+                });
+                if (liveUri) {
+                    const liveText = tokenCache.getDocumentText(liveUri);
+                    const liveCachedTokens = tokenCache.getTokensByUri(liveUri);
+                    if (liveText && liveCachedTokens) {
+                        implTokens = liveCachedTokens;
+                        implFileContent = liveText;
+                    } else if (liveText) {
+                        const implDoc = TextDocument.create(liveUri, 'clarion', 1, liveText);
+                        implTokens = tokenCache.getTokens(implDoc);
+                        implFileContent = liveText;
+                    } else {
+                        throw new Error('no live text in cache');
+                    }
+                } else {
+                    implFileContent = fs.readFileSync(clwPath, 'utf8');
+                    const implDoc = TextDocument.create('file:///' + clwPath.replace(/\\/g, '/'), 'clarion', 1, implFileContent);
+                    implTokens = tokenCache.getTokens(implDoc);
+                }
             }
         } catch (err) {
             logger.error(`Error loading implementation file '${clwPath}': ${err instanceof Error ? err.message : String(err)}`);
@@ -277,8 +299,8 @@ export async function validateMissingImplementations(
                         const implParams = ProcedureSignatureUtils.extractParameterTypes(implSig);
                         const declSig = docLines[decl.line] ?? '';
                         const declParams = ProcedureSignatureUtils.extractParameterTypes(declSig);
-
-                        if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                        const matched = ProcedureSignatureUtils.parametersMatch(implParams, declParams);
+                        if (!matched) {
                             diagnostics.push({
                                 severity: DiagnosticSeverity.Warning,
                                 range,
@@ -293,7 +315,6 @@ export async function validateMissingImplementations(
                                     currentFileUri: document.uri
                                 }
                             });
-                            logger.info(`⚠️ Signature mismatch for '${procName}': decl=(${declParams.join(',')}) impl=(${implParams.join(',')})`);
                         }
                     }
                 } catch (sigErr) {

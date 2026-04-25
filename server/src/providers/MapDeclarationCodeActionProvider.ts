@@ -17,7 +17,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('MapDeclarationCodeActionProvider');
-logger.setLevel('debug');
+logger.setLevel('error');
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

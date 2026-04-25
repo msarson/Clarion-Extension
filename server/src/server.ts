@@ -309,12 +309,22 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
+        // Provide a live-document getter so validateMissingImplementations can read
+        // open files even when the TokenCache has been cleared (e.g. structure-affecting edit).
+        const getOpenDocumentContent = (absPath: string): string | null => {
+            const normalizedPath = absPath.toLowerCase().replace(/\\/g, '/');
+            for (const doc of documents.all()) {
+                const docPath = decodeURIComponent(doc.uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                if (docPath === normalizedPath) return doc.getText();
+            }
+            return null;
+        };
         const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags] = await Promise.all([
             DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
             DiagnosticProvider.validateMissingIncludes(tokens, document),
             DiagnosticProvider.validateMissingConstants(tokens, document),
             DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
-            DiagnosticProvider.validateMissingImplementations(tokens, document),
+            DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
         ]);
 
         // Stale-version guard: document may have changed while we were resolving types
