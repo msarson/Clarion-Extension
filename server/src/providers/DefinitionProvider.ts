@@ -21,6 +21,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -304,11 +305,13 @@ export class DefinitionProvider {
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
                     
+                    const localScope = getLocalMapScope(document.uri);
                     const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                         word,
                         memberToken.referencedFile,
                         document,
-                        line
+                        line,
+                        localScope?.containingProcedure
                     );
                     if (memberResult) {
                         logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
@@ -418,12 +421,14 @@ export class DefinitionProvider {
                     if (memberToken?.referencedFile) {
                         logger.info(`File has MEMBER('${memberToken.referencedFile}'), searching parent file for MAP declaration`);
                         
+                        const localScope = getLocalMapScope(document.uri);
                         // Use CrossFileResolver to find MAP declaration
                         const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                             tokenAtPosition.label,
                             memberToken.referencedFile,
                             document,
-                            line
+                            line,
+                            localScope?.containingProcedure
                         );
                         if (memberResult) {
                             return memberResult.location;

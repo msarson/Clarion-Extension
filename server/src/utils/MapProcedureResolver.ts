@@ -194,12 +194,14 @@ export class MapProcedureResolver {
      * @param tokens Document tokens
      * @param document Text document
      * @param implementationSignature Optional implementation signature for overload matching
+     * @param containingProcedure Optional — when set, only search MAP blocks inside this procedure (local MAP scope)
      */
     public findMapDeclaration(
         procName: string, 
         tokens: Token[], 
         document: TextDocument,
-        implementationSignature?: string
+        implementationSignature?: string,
+        containingProcedure?: string
     ): Location | null {
         logger.info(`Looking for MAP declaration for procedure: ${procName}`);
         logger.info(`📊 Total tokens in document: ${tokens.length}`);
@@ -242,6 +244,17 @@ export class MapProcedureResolver {
             const mapEndLine = mapToken.finishesAt;
             
             if (mapEndLine === undefined) continue;
+
+            // When containingProcedure is specified, only search MAPs whose immediate
+            // parent in the token tree is the named procedure (local MAP scope).
+            if (containingProcedure) {
+                const mapParent = mapToken.parent;
+                const parentLabel = mapParent?.label ?? mapParent?.value;
+                if (!parentLabel || parentLabel.toUpperCase() !== containingProcedure.toUpperCase()) {
+                    logger.info(`⏭️ Skipping MAP at line ${mapStartLine} — parent is '${parentLabel}', not '${containingProcedure}'`);
+                    continue;
+                }
+            }
 
             // ✨ NEW: Get tokens from MAP including INCLUDEs using ScopeAnalyzer
             logger.info(`🗺️ Searching MAP at line ${mapStartLine} (including INCLUDEs)...`);

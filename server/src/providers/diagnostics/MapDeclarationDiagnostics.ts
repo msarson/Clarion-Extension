@@ -6,6 +6,7 @@ import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
+import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -73,31 +74,113 @@ export async function validateMissingMapDeclarations(
         return [];
     }
 
-    // Build a set of procedure names already declared in this file's own MAP blocks.
-    // A MEMBER file can have its own MAP/END (e.g. for local procedures) — those are
-    // valid declarations and must not trigger the warning.
-    const locallyDeclared = new Set<string>(
+    // Build a set of procedure names declared in a MODULE('thisfile.clw') block
+    // within this file's own MAP. Only these count as true self-declarations — bare
+    // MAP entries with no MODULE wrapper are forward-declarations for calling external
+    // procedures and must not suppress the missing-declaration check.
+    const currentBasename = nodePath.basename(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    ).toLowerCase();
+
+    // Case 1: inside MODULE('thisfile.clw') — self-declaration in the same file's
+    // MODULE block; no cross-file resolver needed, but signatures still need to match.
+    const selfModuleDeclaredTokens = new Map<string, Token>(
         tokens
-            .filter(t => t.subType === TokenType.MapProcedure && t.label)
-            .map(t => t.label!.toUpperCase())
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                const parent = t.parent;
+                if (!parent || parent.type !== TokenType.Structure) return false;
+                if (parent.value.toUpperCase() !== 'MODULE' || !parent.referencedFile) return false;
+                return nodePath.basename(parent.referencedFile).toLowerCase() === currentBasename;
+            })
+            .map(t => [t.label!.toUpperCase(), t] as [string, Token])
+    );
+
+    // Case 2: inside a local MAP whose parent is a procedure body — declared and
+    // implemented in the same file; no cross-file resolver needed, but signatures
+    // still need to match.
+    const procLevelDeclaredTokens = new Map<string, Token>(
+        tokens
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                const parent = t.parent;
+                if (!parent || parent.type !== TokenType.Structure) return false;
+                if (parent.value.toUpperCase() !== 'MAP') return false;
+                const grandParent = parent.parent;
+                return grandParent !== undefined &&
+                    (grandParent.subType === TokenType.GlobalProcedure ||
+                     grandParent.subType === TokenType.MethodImplementation);
+            })
+            .map(t => [t.label!.toUpperCase(), t] as [string, Token])
     );
 
     const resolver = new CrossFileResolver(TokenCache.getInstance());
     const diagnostics: Diagnostic[] = [];
+    const docLines = document.getText().split('\n');
 
     for (const proc of implementations) {
         const procName = proc.label!;
 
-        // Skip procedures declared in this file's own MAP block
-        if (locallyDeclared.has(procName.toUpperCase())) {
+        // Case 1: self-declared via MODULE('thisfile.clw') — compare signatures locally
+        const selfModuleDecl = selfModuleDeclaredTokens.get(procName.toUpperCase());
+        if (selfModuleDecl) {
+            const declLine = docLines[selfModuleDecl.line] ?? '';
+            const implLine = docLines[proc.line] ?? '';
+            const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: { start: { line: proc.line, character: 0 }, end: { line: proc.line, character: procName.length } },
+                    message: `Procedure '${procName}' signature does not match its local MAP declaration.`,
+                    source: 'clarion',
+                    code: 'map-signature-mismatch',
+                    data: {
+                        procName,
+                        parentFileUri: document.uri,
+                        declLine: selfModuleDecl.line,
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
+                });
+            }
+            continue;
+        }
+
+        // Case 2: procedure-level MAP declaration — compare signatures locally
+        const procLevelDecl = procLevelDeclaredTokens.get(procName.toUpperCase());
+        if (procLevelDecl) {
+            const declLine = docLines[procLevelDecl.line] ?? '';
+            const implLine = docLines[proc.line] ?? '';
+            const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: { start: { line: proc.line, character: 0 }, end: { line: proc.line, character: procName.length } },
+                    message: `Procedure '${procName}' signature does not match its local MAP declaration.`,
+                    source: 'clarion',
+                    code: 'map-signature-mismatch',
+                    data: {
+                        procName,
+                        parentFileUri: document.uri,
+                        declLine: procLevelDecl.line,
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
+                });
+            }
             continue;
         }
 
         try {
+            const localScope = getLocalMapScope(document.uri);
             const result = await resolver.findMapDeclarationInMemberFile(
                 procName,
                 memberToken.referencedFile,
-                document
+                document,
+                undefined,
+                localScope?.containingProcedure
             );
 
             const range: Range = {
@@ -126,7 +209,6 @@ export async function validateMissingMapDeclarations(
             } else {
                 // Declaration found — compare signatures to catch parameter mismatches
                 try {
-                    const docLines = document.getText().split('\n');
                     const implLine = docLines[proc.line] ?? '';
                     const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
 
@@ -171,22 +253,23 @@ export async function validateMissingMapDeclarations(
 }
 
 /**
- * Warns when a procedure declared inside a MAP/MODULE block in a PROGRAM file
+ * Warns when a procedure declared inside a MAP/MODULE block
  * has no matching implementation (GlobalProcedure) in the referenced CLW file.
+ * Applies to both PROGRAM and MEMBER files that contain MODULE declarations.
  */
 export async function validateMissingImplementations(
     tokens: Token[],
     document: TextDocument,
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
-    // Only relevant for PROGRAM files
-    const programToken = tokens.find(t =>
+    // Must be a Clarion source file (PROGRAM or MEMBER)
+    const clarionDoc = tokens.find(t =>
         t.type === TokenType.ClarionDocument &&
-        t.value.toUpperCase() === 'PROGRAM' &&
+        (t.value.toUpperCase() === 'PROGRAM' || t.value.toUpperCase() === 'MEMBER') &&
         t.line < 5
     );
 
-    if (!programToken) {
+    if (!clarionDoc) {
         return [];
     }
 
