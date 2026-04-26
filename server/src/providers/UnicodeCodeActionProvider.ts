@@ -58,18 +58,22 @@ export class UnicodeCodeActionProvider {
             });
         }
 
-        // "Fix all" action when multiple invalid chars in the document
-        if (invalidEncodingDiags.length > 1) {
-            const allEdits: TextEdit[] = [];
-            for (const diag of invalidEncodingDiags) {
-                const char = document.getText(diag.range);
+        // "Fix all" — scan the whole document for every invalid char, not just the current position
+        const allEdits: TextEdit[] = [];
+        const text = document.getText();
+        for (let i = 0; i < text.length; i++) {
+            const code = text.charCodeAt(i);
+            if (code > 0xFF) {
+                const pos = document.positionAt(i);
+                const range: Range = { start: pos, end: { line: pos.line, character: pos.character + 1 } };
+                const char = text[i];
                 const replacement = REPLACEMENTS.get(char);
-                allEdits.push(replacement
-                    ? TextEdit.replace(diag.range, replacement)
-                    : TextEdit.del(diag.range));
+                allEdits.push(replacement ? TextEdit.replace(range, replacement) : TextEdit.del(range));
             }
+        }
+        if (allEdits.length > 1) {
             actions.push({
-                title: `Fix all ${invalidEncodingDiags.length} invalid characters`,
+                title: `Fix all ${allEdits.length} invalid characters in file`,
                 kind: CodeActionKind.QuickFix,
                 edit: { changes: { [document.uri]: allEdits } }
             });
