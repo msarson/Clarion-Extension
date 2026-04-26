@@ -117,7 +117,29 @@ export class WordCompletionProvider {
         containingRoutine: Token | undefined,
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
-        // Find all MAP tokens in the file
+        this.collectProceduresFromTokens(tokens, document, containingProc, add);
+
+        // If this is a MEMBER file, also collect procedures from the PROGRAM file's MAP
+        const memberToken = tokens.find(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+        );
+        if (memberToken?.referencedFile) {
+            const programUri = 'file:///' + memberToken.referencedFile.replace(/\\/g, '/');
+            const programTokens = this.tokenCache.getTokensByUri(programUri) ??
+                this.tokenCache.getTokensByUri(programUri.toLowerCase());
+            if (programTokens && programTokens.length > 0) {
+                this.collectProceduresFromTokens(programTokens, document, undefined, add);
+            }
+        }
+    }
+
+    private collectProceduresFromTokens(
+        tokens: Token[],
+        document: TextDocument,
+        containingProc: Token | undefined,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        // Find all MAP tokens
         const mapTokens = tokens.filter(t =>
             t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP'
         );
@@ -141,7 +163,7 @@ export class WordCompletionProvider {
             }
         }
 
-        // GlobalProcedure labels in the same file (not dotted MethodImplementations)
+        // GlobalProcedure labels in the same file
         for (const t of tokens) {
             if (t.subType === TokenType.GlobalProcedure && t.label) {
                 add(t.label, CompletionItemKind.Function, 'PROCEDURE');
