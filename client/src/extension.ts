@@ -66,7 +66,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         diagnosticCollection
     };
     
-    logger.error(`⏱️ [STARTUP] Client activation started at ${new Date().toISOString()}`);
+    logger.info(`⏱️ [STARTUP] Client activation started at ${new Date().toISOString()}`);
     logger.info("🚀 ========== ACTIVATION START ==========");
     
     // Phase 1-5: Core initialization
@@ -191,7 +191,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     }
     
     const activationDuration = Date.now() - activationStartTime;
-    logger.error(`⏱️ [STARTUP] Client activation complete in ${activationDuration}ms`);
+    logger.info(`⏱️ [STARTUP] Client activation complete in ${activationDuration}ms`);
     logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
 }
 

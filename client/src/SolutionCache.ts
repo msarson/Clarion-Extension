@@ -816,14 +816,14 @@ export class SolutionCache {
                     });
 
                     const requestStartTime = performance.now();
-                    logger.error(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
+                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
                         this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
                         timeoutPromise
                     ]);
                     const requestEndTime = performance.now();
-                    logger.error(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
+                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
 
                     if (this.solutionInfo && this.solutionInfo.projects && this.solutionInfo.projects.length > 0) {
@@ -831,9 +831,9 @@ export class SolutionCache {
                         
                         // Save to in-memory cache
                         const saveStart = performance.now();
-                        logger.error(`⏱️ [STARTUP] saveToInMemoryCache starting`);
+                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache starting`);
                         this.saveToInMemoryCache();
-                        logger.error(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
+                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
                         
                         // Log basic project information
                         logger.info(`📊 Solution tree structure:`);
@@ -1765,7 +1765,7 @@ export class SolutionCache {
         // request entirely. This prevents thousands of clarion/findFile requests flooding
         // the LSP stdio pipe during startup, causing 50s+ hangs.
         if (!this.solutionInfo?.projects?.length) {
-            logger.error(`⏩ [REFRESH] Skipping server lookup for ${filename} — solution not ready (0 projects)`);
+            logger.info(`⏩ [REFRESH] Skipping server lookup for ${filename} — solution not ready (0 projects)`);
             return "";
         }
 

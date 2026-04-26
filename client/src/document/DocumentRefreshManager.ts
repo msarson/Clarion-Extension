@@ -22,7 +22,7 @@ export async function refreshOpenDocuments(documentManager: DocumentManager | un
         const docsStartTime = performance.now();
         const openDocuments = await getAllOpenDocuments();
         const docsEndTime = performance.now();
-        logger.error(`⏱️ [REFRESH] Found ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(0)}ms`);
+        logger.info(`⏱️ [REFRESH] Found ${openDocuments.length} open documents in ${(docsEndTime - docsStartTime).toFixed(0)}ms`);
 
         if (openDocuments.length === 0) {
             logger.warn("⚠️ No open documents found.");
@@ -38,7 +38,7 @@ export async function refreshOpenDocuments(documentManager: DocumentManager | un
                     await documentManager.updateDocumentInfo(document);
                 }
                 const elapsed = (performance.now() - docStartTime).toFixed(0);
-                logger.error(`⏱️ [REFRESH] ${document.uri.fsPath.split(/[\\/]/).pop()} done in ${elapsed}ms`);
+                logger.info(`⏱️ [REFRESH] ${document.uri.fsPath.split(/[\\/]/).pop()} done in ${elapsed}ms`);
             } catch (docError) {
                 logger.error(`❌ Error updating document ${document.uri.fsPath}: ${docError instanceof Error ? docError.message : String(docError)}`);
             }
@@ -48,7 +48,7 @@ export async function refreshOpenDocuments(documentManager: DocumentManager | un
         await Promise.all(updatePromises);
 
         const endTime = performance.now();
-        logger.error(`⏱️ [REFRESH] All ${openDocuments.length} documents done in ${(endTime - startTime).toFixed(0)}ms`);
+        logger.info(`⏱️ [REFRESH] All ${openDocuments.length} documents done in ${(endTime - startTime).toFixed(0)}ms`);
     } catch (error) {
         logger.error(`❌ Error in refreshOpenDocuments: ${error instanceof Error ? error.message : String(error)}`);
     }

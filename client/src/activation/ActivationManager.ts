@@ -241,9 +241,9 @@ export async function setupFolderDependentFeatures(
                     logger.info("⏳ Waiting for language client to be ready before initializing solution...");
                     const doInit = async () => {
                         try {
-                            logger.error(`⏱️ [STARTUP] workspaceHasBeenTrusted starting`);
+                            logger.info(`⏱️ [STARTUP] workspaceHasBeenTrusted starting`);
                             await workspaceHasBeenTrusted(context, disposables);
-                            logger.error(`⏱️ [STARTUP] workspaceHasBeenTrusted complete`);
+                            logger.info(`⏱️ [STARTUP] workspaceHasBeenTrusted complete`);
                         } catch (error) {
                             logger.error(`❌ Error in workspaceHasBeenTrusted: ${error instanceof Error ? error.message : String(error)}`);
                             vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");

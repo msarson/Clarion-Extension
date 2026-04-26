@@ -1113,7 +1113,7 @@ export class DocumentManager implements Disposable {
             ]);
             const patternEnd = performance.now();
 
-            logger.error(`⏱️ [REFRESH] ${path.basename(document.uri.fsPath)} patterns: INCLUDE=${includeLocations.length} MODULE=${moduleLocations.length} MEMBER=${memberLocations.length} LINK=${linkLocations.length} total=${Math.round(patternEnd - patternStart)}ms`);
+            logger.info(`⏱️ [REFRESH] ${path.basename(document.uri.fsPath)} patterns: INCLUDE=${includeLocations.length} MODULE=${moduleLocations.length} MEMBER=${memberLocations.length} LINK=${linkLocations.length} total=${Math.round(patternEnd - patternStart)}ms`);
 
             // Process method declarations in class files
             const methodLocations = await this.processMethodDeclarations(document);
@@ -1559,3 +1559,4 @@ export class DocumentManager implements Disposable {
         this.disposables.forEach(disposable => disposable.dispose());
     }
 }
+
