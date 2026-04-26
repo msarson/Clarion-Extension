@@ -315,13 +315,13 @@ export async function initializeSolution(
             libsrcPaths: globalSettings.libsrcPaths,
             defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
         });
-        logger.info("✅ Clarion paths/config/version sent to the language server.");
+        logger.error(`⏱️ [STARTUP] clarion/updatePaths sent`);
         
         // Wait a moment for the server to process the notification and initialize
         // This prevents a race condition where we request the solution tree before it's built
         logger.info("⏳ Waiting for server to initialize solution...");
         await new Promise(resolve => setTimeout(resolve, 1000));
-        logger.info("✅ Server initialization delay complete");
+        logger.error(`⏱️ [STARTUP] 1s delay complete, calling reinitializeEnvironment`);
     } else {
         logger.error("❌ Language client is not available.");
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
@@ -332,9 +332,11 @@ export async function initializeSolution(
     
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
+    logger.error(`⏱️ [STARTUP] reinitializeEnvironment complete`);
     logger.info("✅ Environment initialized");
     
     await refreshSolutionTreeView();
+    logger.error(`⏱️ [STARTUP] refreshSolutionTreeView complete`);
     logger.info("✅ Solution tree view refreshed");
     
     registerLanguageFeatures(context, documentManager);
@@ -345,11 +347,15 @@ export async function initializeSolution(
     updateBuildProjectStatusBar(); // Update the build project status bar
     
     // Create file watchers for the solution, project, and redirection files
+    const fwStart = Date.now();
     await createSolutionFileWatchers(context, reinitializeEnvironment, documentManager);
+    logger.error(`⏱️ [STARTUP] createSolutionFileWatchers complete in ${Date.now() - fwStart}ms`);
     logger.info("✅ File watchers created");
     
     // Force refresh all open documents to ensure links are generated
+    const rdStart = Date.now();
     await refreshOpenDocuments(documentManager);
+    logger.error(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
     logger.info("✅ Open documents refreshed");
     
     const endTime = performance.now();
@@ -386,16 +392,20 @@ export async function reinitializeEnvironment(
     // Initialize the solution cache with the solution file path
     if (globalSolutionFile) {
         const cacheStartTime = performance.now();
+        logger.error(`⏱️ [STARTUP] solutionCache.initialize starting`);
         const result = await solutionCache.initialize(globalSolutionFile);
         const cacheEndTime = performance.now();
+        logger.error(`⏱️ [STARTUP] solutionCache.initialize done in ${(cacheEndTime - cacheStartTime).toFixed(0)}ms (${result ? 'success' : 'failed'})`);
         logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
         
         // If initialization failed or returned empty solution, force a refresh from server
         if (!result) {
             logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
             const refreshStartTime = performance.now();
+            logger.error(`⏱️ [STARTUP] solutionCache.refresh (forced) starting`);
             const refreshResult = await solutionCache.refresh(true);
             const refreshEndTime = performance.now();
+            logger.error(`⏱️ [STARTUP] solutionCache.refresh (forced) done in ${(refreshEndTime - refreshStartTime).toFixed(0)}ms`);
             logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
             
             if (!refreshResult) {
@@ -418,8 +428,10 @@ export async function reinitializeEnvironment(
 
     // Create a new DocumentManager (no longer needs SolutionParser)
     const dmStartTime = performance.now();
+    logger.error(`⏱️ [STARTUP] DocumentManager.create starting`);
     documentManager = await DocumentManager.create();
     const dmEndTime = performance.now();
+    logger.error(`⏱️ [STARTUP] DocumentManager.create done in ${(dmEndTime - dmStartTime).toFixed(0)}ms`);
     logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
 
     if (refreshDocs) {

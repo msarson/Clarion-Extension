@@ -239,15 +239,22 @@ export async function setupFolderDependentFeatures(
                 
                 if (state.client) {
                     logger.info("⏳ Waiting for language client to be ready before initializing solution...");
-                    
-                    if (isClientReady()) {
-                        logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
-                        await workspaceHasBeenTrusted(context, disposables);
-                    } else {
-                        getClientReadyPromise().then(async () => {
-                            logger.info("✅ Language client is ready. Proceeding with solution initialization...");
+                    const doInit = async () => {
+                        try {
+                            logger.error(`⏱️ [STARTUP] workspaceHasBeenTrusted starting`);
                             await workspaceHasBeenTrusted(context, disposables);
-                        }).catch(error => {
+                            logger.error(`⏱️ [STARTUP] workspaceHasBeenTrusted complete`);
+                        } catch (error) {
+                            logger.error(`❌ Error in workspaceHasBeenTrusted: ${error instanceof Error ? error.message : String(error)}`);
+                            vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
+                        }
+                    };
+                    // Always fire asynchronously so activate() completes and the tree is created immediately
+                    if (isClientReady()) {
+                        logger.info("✅ Language client is already ready. Firing solution initialization in background...");
+                        doInit(); // intentionally NOT awaited
+                    } else {
+                        getClientReadyPromise().then(doInit).catch(error => {
                             logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
                             vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
                         });

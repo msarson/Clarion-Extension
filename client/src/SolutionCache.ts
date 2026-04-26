@@ -638,7 +638,7 @@ export class SolutionCache {
                             logger.warn(`[CACHE] Error computing hash for ${path.basename(cwprojPath)}: ${error instanceof Error ? error.message : String(error)}`);
                         }
                         
-                        // Process source files
+                        // Process source files — skip fs.existsSync (synchronous I/O on 3000+ files is slow)
                         if (project.sourceFiles && Array.isArray(project.sourceFiles)) {
                             for (const sourceFile of project.sourceFiles) {
                                 if (!sourceFile.name) continue;
@@ -654,14 +654,11 @@ export class SolutionCache {
                                     continue;
                                 }
                                 
-                                // Check if file exists
-                                const exists = fs.existsSync(absolutePath);
-                                
                                 projectDto.files.push({
                                     name: sourceFile.name,
                                     absolutePath: path.normalize(absolutePath),
-                                    relativePath: sourceFile.relativePath,
-                                    exists: exists
+                                    relativePath: sourceFile.relativePath
+                                    // exists: omitted — checking existence synchronously for 3000+ files causes startup hangs
                                 });
                             }
                         }
@@ -802,19 +799,24 @@ export class SolutionCache {
                     });
 
                     const requestStartTime = performance.now();
+                    logger.error(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
                         this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
                         timeoutPromise
                     ]);
                     const requestEndTime = performance.now();
+                    logger.error(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
 
                     if (this.solutionInfo && this.solutionInfo.projects && this.solutionInfo.projects.length > 0) {
                         logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
                         
                         // Save to in-memory cache
+                        const saveStart = performance.now();
+                        logger.error(`⏱️ [STARTUP] saveToInMemoryCache starting`);
                         this.saveToInMemoryCache();
+                        logger.error(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
                         
                         // Log basic project information
                         logger.info(`📊 Solution tree structure:`);
