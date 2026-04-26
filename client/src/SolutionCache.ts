@@ -782,6 +782,13 @@ export class SolutionCache {
             this.fetchInProgress = true;
             
             try {
+                // Guard: client must be set before we can make requests
+                if (!this.client) {
+                    logger.info("⏳ Language client not yet set in SolutionCache; deferring until setLanguageClient() is called.");
+                    this.fetchInProgress = false;
+                    return false;
+                }
+
                 // Show progress notification
                 await window.withProgress({
                     location: ProgressLocation.Notification,
