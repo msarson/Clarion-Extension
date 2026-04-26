@@ -62,6 +62,7 @@ import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCode
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
 import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
 import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
+import { UnicodeCodeActionProvider } from './providers/UnicodeCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -1808,7 +1809,10 @@ connection.onCodeAction(async (params) => {
         const mapDeclProvider = new MapDeclarationCodeActionProvider();
         const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
 
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions];
+        const unicodeProvider = new UnicodeCodeActionProvider();
+        const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
         logger.info(`Provided ${allActions.length} code actions`);
         return allActions;
     } catch (error) {
