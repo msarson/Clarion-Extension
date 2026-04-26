@@ -139,6 +139,8 @@ export class DocumentManager implements Disposable {
     private locationProvider!: LocationProvider;
     private disposables: Disposable[] = [];
     private solutionCache: SolutionCache;
+    /** URIs currently being refreshed — prevents redundant concurrent refreshes */
+    private refreshInProgress: Set<string> = new Set();
 
     private constructor() {
         this.solutionCache = SolutionCache.getInstance();
@@ -1045,6 +1047,15 @@ export class DocumentManager implements Disposable {
      * It extracts locations for "INCLUDE", "MODULE", and "MEMBER" patterns and stores these locations in the openDocuments map.
      */
     public async updateDocumentInfo(document: TextDocument) {
+        const uri = document.uri.toString();
+        
+        // Skip if a refresh is already in flight for this document
+        if (this.refreshInProgress.has(uri)) {
+            logger.info(`⏩ Skipping duplicate refresh for ${document.uri.fsPath}`);
+            return;
+        }
+
+        this.refreshInProgress.add(uri);
         const parseStartTime = performance.now();
         logger.info(`📄 Processing document: ${document.uri.fsPath}`);
 
@@ -1053,6 +1064,7 @@ export class DocumentManager implements Disposable {
 
         if (document.uri.scheme !== 'file' || document.uri.fsPath.endsWith('.code-workspace')) {
             logger.info(`⚠ Skipping document: ${document.uri.fsPath}`);
+            this.refreshInProgress.delete(uri);
             return;
         }
 
@@ -1060,6 +1072,7 @@ export class DocumentManager implements Disposable {
         const ext = path.extname(document.uri.fsPath).toLowerCase();
         if (ext === '.xml' || ext === '.cwproj') {
             logger.info(`⚠ Skipping XML-related file to avoid extension conflict: ${document.uri.fsPath}`);
+            this.refreshInProgress.delete(uri);
             return;
         }
 
@@ -1071,6 +1084,7 @@ export class DocumentManager implements Disposable {
 
         if (!isClarionFile) {
             logger.info(`⚠ Skipping non-Clarion file: ${document.uri.fsPath} (extension not in lookupExtensions)`);
+            this.refreshInProgress.delete(uri);
             return;
         }
 
@@ -1089,12 +1103,17 @@ export class DocumentManager implements Disposable {
         }
 
         try {
-            // Always process all patterns regardless of whether we found a source file
-            // This ensures we catch all possible links
-            const includeLocations = await this.processPattern(document, this.includePattern, "INCLUDE");
-            const moduleLocations = await this.processPattern(document, this.modulePattern, "MODULE");
-            const memberLocations = await this.processPattern(document, this.memberPattern, "MEMBER");
-            const linkLocations = await this.processPattern(document, this.linkPattern, "LINK");
+            // Process all 4 patterns in parallel — each does independent file resolution
+            const patternStart = performance.now();
+            const [includeLocations, moduleLocations, memberLocations, linkLocations] = await Promise.all([
+                this.processPattern(document, this.includePattern, "INCLUDE"),
+                this.processPattern(document, this.modulePattern, "MODULE"),
+                this.processPattern(document, this.memberPattern, "MEMBER"),
+                this.processPattern(document, this.linkPattern, "LINK"),
+            ]);
+            const patternEnd = performance.now();
+
+            logger.info(`⏱️ [REFRESH] ${path.basename(document.uri.fsPath)} patterns: INCLUDE=${includeLocations.length} MODULE=${moduleLocations.length} MEMBER=${memberLocations.length} LINK=${linkLocations.length} total=${Math.round(patternEnd - patternStart)}ms`);
 
             // Process method declarations in class files
             const methodLocations = await this.processMethodDeclarations(document);
@@ -1147,6 +1166,8 @@ export class DocumentManager implements Disposable {
             logger.error(`❌ Error updating document info: ${error instanceof Error ? error.message : String(error)}`);
             // Store an empty document info to prevent repeated processing
             this.openDocuments.set(document.uri.toString().toLowerCase(), { statementLocations: [] });
+        } finally {
+            this.refreshInProgress.delete(uri);
         }
     }
 
@@ -1538,3 +1559,4 @@ export class DocumentManager implements Disposable {
         this.disposables.forEach(disposable => disposable.dispose());
     }
 }
+

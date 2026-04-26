@@ -290,25 +290,6 @@ export class RedirectionService {
                 }
             }
             
-            // If we couldn't resolve the path locally, try the server
-            if (isClientReady()) {
-                const client = getLanguageClient();
-                if (client) {
-                    // This is async, but we're in a sync context, so we can't wait for it
-                    // We'll just return an empty string for now and let the caller handle it
-                    client.sendRequest<{ path: string, source: string }>('clarion/findFile', { filename })
-                        .then(result => {
-                            if (result.path && fs.existsSync(result.path)) {
-                                // Cache the result for future use
-                                this.resolvedPathCache.set(cacheKey, result.path);
-                            }
-                        })
-                        .catch(error => {
-                            logger.error(`Error requesting file from server: ${error instanceof Error ? error.message : String(error)}`);
-                        });
-                }
-            }
-            
             return "";
         };
     }

@@ -235,6 +235,11 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return path.normalize(p);
     }
 
+    /** Returns true if the index for this project path is already built and cached */
+    isIndexed(projectPath: string): boolean {
+        return this.indexes.has(this.normalizeKey(projectPath));
+    }
+
     async getOrBuildIndex(projectPath: string): Promise<StructureIndex> {
         // Without a redirection file we cannot meaningfully scan anything.
         // Return an empty uncached index so the first real call after solution
@@ -291,17 +296,23 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
 
-            logger.warn(`⏱️ [SDI] Scanning ${allFiles.length} files in parallel`);
+            logger.warn(`⏱️ [SDI] Scanning ${allFiles.length} files in batches`);
 
-            const allResults = await Promise.all(allFiles.map(f => this.scanFile(f)));
+            const BATCH_SIZE = 20;
             let total = 0;
-            for (const decls of allResults) {
-                total += decls.length;
-                for (const d of decls) {
-                    const key = d.name.toLowerCase();
-                    if (!byName.has(key)) byName.set(key, []);
-                    byName.get(key)!.push(d);
+            for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+                const batch = allFiles.slice(i, i + BATCH_SIZE);
+                const batchResults = await Promise.all(batch.map(f => this.scanFile(f)));
+                for (const decls of batchResults) {
+                    total += decls.length;
+                    for (const d of decls) {
+                        const key = d.name.toLowerCase();
+                        if (!byName.has(key)) byName.set(key, []);
+                        byName.get(key)!.push(d);
+                    }
                 }
+                // Yield between batches to keep the event loop responsive
+                await new Promise<void>(resolve => setImmediate(resolve));
             }
 
             const duration = Date.now() - startTime;

@@ -57,6 +57,10 @@ export async function createSolutionFileWatchers(
     const solutionInfo = solutionCache.getSolutionInfo();
 
     if (solutionInfo && solutionInfo.projects) {
+        // Collect unique project directories to avoid redundant server calls
+        const watchedDirs = new Set<string>();
+        const watchedRedFiles = new Set<string>();
+
         // Create watchers for each project file
         for (const project of solutionInfo.projects) {
             const projectFilePath = path.join(project.path, `${project.name}.cwproj`);
@@ -76,10 +80,11 @@ export async function createSolutionFileWatchers(
                 logger.info(`✅ Added watcher for project file: ${projectFilePath}`);
             }
 
-            // Create watchers for redirection files in this project
+            // Create watchers for redirection files in this project (deduplicated by dir)
             const projectRedFile = path.join(project.path, globalSettings.redirectionFile);
 
-            if (fs.existsSync(projectRedFile)) {
+            if (!watchedRedFiles.has(projectRedFile) && fs.existsSync(projectRedFile)) {
+                watchedRedFiles.add(projectRedFile);
                 const redFileWatcher = workspace.createFileSystemWatcher(projectRedFile);
 
                 // Mark as a file watcher for cleanup
@@ -93,33 +98,35 @@ export async function createSolutionFileWatchers(
                 context.subscriptions.push(redFileWatcher);
                 logger.info(`✅ Added watcher for redirection file: ${projectRedFile}`);
 
-                // Get included redirection files from the server
-                try {
-                    // Get the solution cache to access the server
-                    const solutionCache = SolutionCache.getInstance();
+                // Watch included redirection files asynchronously — don't block startup
+                if (!watchedDirs.has(project.path)) {
+                    watchedDirs.add(project.path);
+                    const projPath = project.path;
+                    setImmediate(async () => {
+                        try {
+                            const solutionCache = SolutionCache.getInstance();
+                            const includedRedFiles = await solutionCache.getIncludedRedirectionFilesFromServer(projPath);
 
-                    // Get included redirection files from the server
-                    const includedRedFiles = await solutionCache.getIncludedRedirectionFilesFromServer(project.path);
+                            for (const redFile of includedRedFiles) {
+                                if (!watchedRedFiles.has(redFile) && fs.existsSync(redFile)) {
+                                    watchedRedFiles.add(redFile);
+                                    const includedRedWatcher = workspace.createFileSystemWatcher(redFile);
 
-                    // Create watchers for each included redirection file
-                    for (const redFile of includedRedFiles) {
-                        if (redFile !== projectRedFile && fs.existsSync(redFile)) {
-                            const includedRedWatcher = workspace.createFileSystemWatcher(redFile);
+                                    (includedRedWatcher as any)._isFileWatcher = true;
 
-                            // Mark as a file watcher for cleanup
-                            (includedRedWatcher as any)._isFileWatcher = true;
+                                    includedRedWatcher.onDidChange(async (uri) => {
+                                        logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
+                                        await handleRedirectionFileChange(context, reinitializeEnvironment, documentManager);
+                                    });
 
-                            includedRedWatcher.onDidChange(async (uri) => {
-                                logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
-                                await handleRedirectionFileChange(context, reinitializeEnvironment, documentManager);
-                            });
-
-                            context.subscriptions.push(includedRedWatcher);
-                            logger.info(`✅ Added watcher for included redirection file: ${redFile}`);
+                                    context.subscriptions.push(includedRedWatcher);
+                                    logger.info(`✅ Added watcher for included redirection file: ${redFile}`);
+                                }
+                            }
+                        } catch (error) {
+                            logger.error(`❌ Error getting included redirection files for ${projPath}: ${error instanceof Error ? error.message : String(error)}`);
                         }
-                    }
-                } catch (error) {
-                    logger.error(`❌ Error getting included redirection files for ${projectRedFile}: ${error instanceof Error ? error.message : String(error)}`);
+                    });
                 }
             }
         }

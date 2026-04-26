@@ -114,6 +114,57 @@ export async function validateMissingMapDeclarations(
             .map(t => [t.label!.toUpperCase(), t] as [string, Token])
     );
 
+    // Case 1b: MAP contains INCLUDE directives — collect procedure declarations
+    // from included INC files (app-generated code puts declarations in _GL1.INC etc.).
+    // Clarion's preprocessor inlines INC content at the INCLUDE position, so a
+    // MODULE('thisfile.clw') block inside the INC effectively declares procedures for
+    // this CLW. We only accept declarations inside a MODULE whose referenced file
+    // matches the current CLW basename to avoid false-positives from unrelated INC files.
+    const incDeclaredTokens = new Map<string, Token>();
+    const currentClwBasename = nodePath.basename(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    ).toLowerCase();
+    const currentClwDir = nodePath.dirname(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    );
+    const mapStructureTokens = tokens.filter(t =>
+        t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP'
+    );
+    for (const mapToken of mapStructureTokens) {
+        const mapEnd = mapToken.finishesAt;
+        const includesInMap = tokens.filter(t =>
+            t.type === TokenType.Directive &&
+            t.value.toUpperCase() === 'INCLUDE' &&
+            t.referencedFile &&
+            t.line > mapToken.line &&
+            (mapEnd === undefined || t.line <= mapEnd)
+        );
+        for (const inclToken of includesInMap) {
+            // Try same directory as current CLW first (most common), then redirection
+            const sameDirPath = nodePath.join(currentClwDir, inclToken.referencedFile!);
+            const incPath = fs.existsSync(sameDirPath)
+                ? sameDirPath
+                : resolveClwPath(inclToken.referencedFile!);
+            if (!incPath) continue;
+            try {
+                const incUri = 'file:///' + incPath.replace(/\\/g, '/');
+                const incContent = tokenCache.getDocumentText(incUri) ?? fs.readFileSync(incPath, 'utf8');
+                const incDoc = TextDocument.create(incUri, 'clarion', 1, incContent);
+                const incTokens = await tokenCache.getTokens(incDoc);
+
+                // Only accept procedures inside MODULE('thisfile.clw') blocks
+                for (const t of incTokens) {
+                    if (t.subType === TokenType.MapProcedure && t.label && t.parent) {
+                        const moduleRef = t.parent.referencedFile;
+                        if (moduleRef && nodePath.basename(moduleRef).toLowerCase() === currentClwBasename) {
+                            incDeclaredTokens.set(t.label.toUpperCase(), t);
+                        }
+                    }
+                }
+            } catch { /* skip unreadable INC files */ }
+        }
+    }
+
     const resolver = new CrossFileResolver(TokenCache.getInstance());
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
@@ -170,6 +221,11 @@ export async function validateMissingMapDeclarations(
                     }
                 });
             }
+            continue;
+        }
+
+        // Case 1b: declared in an INC file included by a MAP block in this file
+        if (incDeclaredTokens.has(procName.toUpperCase())) {
             continue;
         }
 
@@ -286,10 +342,9 @@ export async function validateMissingImplementations(
     );
 
     for (const moduleToken of moduleTokens) {
-        const clwPath = resolveClwPath(moduleToken.referencedFile!);
+        const clwPath = moduleToken.referencedFile!;
 
-        if (!clwPath) {
-            logger.debug(`⚠️ Could not resolve MODULE file: ${moduleToken.referencedFile}`);
+        if (!fs.existsSync(clwPath)) {
             continue;
         }
 

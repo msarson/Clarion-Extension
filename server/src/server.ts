@@ -84,6 +84,9 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+const globalStartTime = Date.now();
+logger.info(`⏱️ [STARTUP] Server process started at ${new Date().toISOString()}`);
+
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -123,6 +126,8 @@ process.on('unhandledRejection', (reason: any) => {
 });
 // Log all incoming requests and notifications
 connection.onInitialize((params) => {
+    const t0 = Date.now();
+    logger.info(`⏱️ [STARTUP] onInitialize called at ${new Date().toISOString()}`);
     try {
         logger.info(`📥 [CRITICAL] Initialize request received`);
         logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -158,7 +163,7 @@ connection.onInitialize((params) => {
         logger.info(`📥 [CRITICAL] Responding with server capabilities`);
         
         // Return server capabilities
-        return {
+        const result: InitializeResult = {
             capabilities: {
                 textDocumentSync: TextDocumentSyncKind.Incremental,
                 documentFormattingProvider: true,
@@ -190,6 +195,8 @@ connection.onInitialize((params) => {
                 }
             }
         };
+        logger.info(`⏱️ [STARTUP] onInitialize complete in ${Date.now() - t0}ms`);
+        return result;
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -710,7 +717,7 @@ documents.onDidChangeContent(event => {
                 const tokensStart = performance.now();
                 const tokens = getTokens(document);
                 const tokensMs = (performance.now() - tokensStart).toFixed(1);
-                logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
+                logger.info(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Remove stale duplicate cache entries for this URI (e.g., file:///f:/ vs file:///f%3A/)
@@ -1111,9 +1118,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
         // Build the solution after registering handlers
         const buildStartTime = performance.now();
         try {
+            logger.info(`⏱️ [STARTUP] Solution build started at +${Date.now() - (globalStartTime ?? Date.now())}ms`);
             logger.info(`🔄 Building solution...`);
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
+            logger.info(`⏱️ [STARTUP] Solution build done: ${globalSolution.projects.length} projects, ${globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0)} source files in ${(buildEndTime - buildStartTime).toFixed(0)}ms`);
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Always-visible project summary
@@ -1124,6 +1133,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 `  Projects (${globalSolution.projects.length}):\n` +
                 (projectSummary || '  (none)'));
             
+            // Notify the client that the solution is ready so it can defer refreshOpenDocuments
+            // until after we have real project data (avoids flooding the LSP pipe with
+            // thousands of clarion/findFile requests when getSolutionTree returns 0 projects).
+            connection.sendNotification('clarion/solutionReady', {
+                solutionFilePath: solutionPath,
+                projectCount: globalSolution.projects.length
+            });
+            logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
+
             // Re-validate all open documents now that cross-file type info is available.
             // The async diagnostic pass (discarded return value detection) needs the solution
             // to be ready; it may have already run (and silently skipped resolutions) before
@@ -1143,13 +1161,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
-                logger.error(`⏱️ [INDEX] Pre-building structure index for ${projectPaths.length} project(s) in background`);
+                const sdiStart = Date.now();
+                logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
                 await Promise.all(projectPaths.map(p =>
                     indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
                     )
                 ));
-                logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
+                logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -1167,10 +1186,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         }
                     }
                 }
-                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                const frgStart = Date.now();
+                logger.info(`⏱️ [STARTUP] FRG build starting for ${allFiles.length} source file(s) at +${frgStart - globalStartTime}ms`);
                 await graph.buildInBackground(allFiles).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
+                logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
             });
 
             // Log each project in the global solution
@@ -1636,7 +1657,7 @@ connection.onDefinition(async (params) => {
 
 // Handle implementation requests
 connection.onImplementation(async (params) => {
-    logger.error(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
+    logger.info(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying implementation request`);
@@ -1778,42 +1799,55 @@ connection.onHover(async (params) => {
 
 // Handle code actions (lightbulb) requests
 connection.onCodeAction(async (params) => {
-    logger.info(`💡 Received code action request for: ${params.textDocument.uri}`);
+    logger.info(`⏱️ [CODE-ACTION] ▶ triggered line=${params.range.start.line} file="${params.textDocument.uri.split('/').pop()}"`);
     
     if (!serverInitialized) {
-        logger.info(`⚠️ Server not initialized yet, delaying code action request`);
+        logger.info(`⏱️ [CODE-ACTION] ⚠ server not initialized, returning []`);
         return [];
     }
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        logger.info(`⏱️ [CODE-ACTION] ⚠ document not found`);
         return [];
     }
     
     try {
+        const caStart = Date.now();
+
+        const t0 = Date.now();
+        logger.info(`⏱️ [CODE-ACTION] ClassConstants starting`);
         const codeActionProvider = new ClassConstantsCodeActionProvider();
         const actions = await codeActionProvider.provideCodeActions(
             document,
             params.range,
             params.context,
-            params as any // CancellationToken
+            params as any
         );
+        logger.info(`⏱️ [CODE-ACTION] ClassConstants done: ${Date.now() - t0}ms → ${actions.length} actions`);
 
+        const t2 = Date.now();
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
+        logger.info(`⏱️ [CODE-ACTION] Flatten done: ${Date.now() - t2}ms → ${flattenActions.length} actions`);
 
+        const t4 = Date.now();
         const mapModuleProvider = new MapModuleCodeActionProvider();
         const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
+        logger.info(`⏱️ [CODE-ACTION] MapModule done: ${Date.now() - t4}ms → ${mapModuleActions.length} actions`);
 
+        const t6 = Date.now();
         const mapDeclProvider = new MapDeclarationCodeActionProvider();
         const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
+        logger.info(`⏱️ [CODE-ACTION] MapDecl done: ${Date.now() - t6}ms → ${mapDeclActions.length} actions`);
 
+        const t8 = Date.now();
         const unicodeProvider = new UnicodeCodeActionProvider();
         const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
+        logger.info(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
 
         const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
-        logger.info(`Provided ${allActions.length} code actions`);
+        logger.info(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);

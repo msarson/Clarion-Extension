@@ -27,7 +27,7 @@ export class ClassConstantsCodeActionProvider {
 
     constructor() {
         this.sdi = StructureDeclarationIndexer.getInstance();
-        this.includeVerifier = new IncludeVerifier();
+        this.includeVerifier = IncludeVerifier.getInstance();
     }
 
     async provideCodeActions(
@@ -42,7 +42,7 @@ export class ClassConstantsCodeActionProvider {
             const text = document.getText();
             const line = document.getText(Range.create(range.start.line, 0, range.start.line, 1000));
             
-            logger.warn(`[CodeAction] triggered line=${range.start.line} file="${path.basename(document.uri)}"`);
+            logger.info(`[CodeAction] triggered line=${range.start.line} file="${path.basename(document.uri)}"`);
 
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const sm = SolutionManager.getInstance();
@@ -55,7 +55,7 @@ export class ClassConstantsCodeActionProvider {
                 for (const diag of missingIncludeDiags) {
                     const data = diag.data as { typeName: string; incFileName: string } | undefined;
                     if (data?.typeName && data?.incFileName) {
-                        logger.warn(`[CodeAction] missing-include diag: typeName="${data.typeName}" incFile="${data.incFileName}"`);
+                        logger.info(`[CodeAction] missing-include diag: typeName="${data.typeName}" incFile="${data.incFileName}"`);
                         const diagActions = await this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath);
                         actions.push(...diagActions);
                     }
@@ -71,7 +71,7 @@ export class ClassConstantsCodeActionProvider {
                 for (const diag of missingConstantsDiags) {
                     const data = diag.data as { typeName: string; missingConstants: string[]; cwprojPath: string } | undefined;
                     if (data?.typeName && data?.missingConstants?.length) {
-                        logger.warn(`[CodeAction] missing-define-constants diag: typeName="${data.typeName}" constants=${data.missingConstants.join(',')}`);
+                        logger.info(`[CodeAction] missing-define-constants diag: typeName="${data.typeName}" constants=${data.missingConstants.join(',')}`);
                         const addConstantsAction = CodeAction.create(
                             `Add missing ${data.typeName} link equates to project`,
                             Command.create(
@@ -99,7 +99,7 @@ export class ClassConstantsCodeActionProvider {
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)/i);
             if (includeMatch) {
                 const includeFile = includeMatch[1];
-                logger.warn(`[CodeAction] INCLUDE line detected: ${includeFile}`);
+                logger.info(`[CodeAction] INCLUDE line detected: ${includeFile}`);
                 
                 // Check if this is a class include file
                 const includeActions = await this.getActionsForInclude(includeFile, document);
@@ -111,6 +111,12 @@ export class ClassConstantsCodeActionProvider {
             }
             
             // Otherwise, check the word at cursor position (existing logic)
+            // Only proceed if the index is already cached — triggering a cold build here
+            // would scan the entire project on every Ctrl+. press and cause a hang.
+            if (!this.sdi.isIndexed(projectPath)) {
+                return actions;
+            }
+
             const offset = document.offsetAt(range.start);
             const word = this.getWordAtPosition(text, offset);
 
@@ -118,18 +124,18 @@ export class ClassConstantsCodeActionProvider {
                 return actions;
             }
 
-            logger.warn(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
+            logger.info(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
 
             // Check if this is a class type with missing constants
-            logger.warn(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
+            logger.info(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
             
             // Build or get index for this project
             const index = await this.sdi.getOrBuildIndex(projectPath);
-            logger.warn(`[CodeAction] SDI index has ${index.byName.size} entries`);
+            logger.info(`[CodeAction] SDI index has ${index.byName.size} entries`);
             
             // Look up the class
             const definitions = this.sdi.find(word, projectPath);
-            logger.warn(`[CodeAction] found ${definitions.length} definitions for "${word}"`);
+            logger.info(`[CodeAction] found ${definitions.length} definitions for "${word}"`);
             
             if (definitions.length === 0) {
                 return actions;
@@ -137,11 +143,11 @@ export class ClassConstantsCodeActionProvider {
 
             const def = definitions[0];
             const fileName = path.basename(def.filePath);
-            logger.warn(`[CodeAction] class file="${fileName}" filePath="${def.filePath}"`);
+            logger.info(`[CodeAction] class file="${fileName}" filePath="${def.filePath}"`);
 
             // Verify the class file is included
             const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
-            logger.warn(`[CodeAction] isIncluded=${isIncluded}`);
+            logger.info(`[CodeAction] isIncluded=${isIncluded}`);
             if (!isIncluded) {
                 // Offer Code Action to add the missing INCLUDE
                 const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath);
@@ -149,7 +155,7 @@ export class ClassConstantsCodeActionProvider {
                 return actions;
             }
 
-            logger.warn(`[CodeAction] checking constants for ${word}`);
+            logger.info(`[CodeAction] checking constants for ${word}`);
 
             // Parse class constants
             const constantParser = new ClassConstantParser();
@@ -157,7 +163,7 @@ export class ClassConstantsCodeActionProvider {
             const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.name.toLowerCase());
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
-                logger.warn(`[CodeAction] no Link/DLL constants found in ${fileName} for class "${def.name}"`);
+                logger.info(`[CodeAction] no Link/DLL constants found in ${fileName} for class "${def.name}"`);
                 return actions;
             }
 
@@ -167,18 +173,18 @@ export class ClassConstantsCodeActionProvider {
 
             for (const constant of thisClassConstants.constants) {
                 const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
-                logger.warn(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
+                logger.info(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);
                 }
             }
 
             if (missingConstants.length === 0) {
-                logger.warn(`[CodeAction] all constants already defined — no action needed`);
+                logger.info(`[CodeAction] all constants already defined — no action needed`);
                 return actions;
             }
 
-            logger.warn(`[CodeAction] offering action for ${missingConstants.length} missing constants`);
+            logger.info(`[CodeAction] offering action for ${missingConstants.length} missing constants`);
 
             // Single action — user chooses Link or DLL mode via QuickPick at execution time
             const addConstantsAction = CodeAction.create(
@@ -461,3 +467,4 @@ export class ClassConstantsCodeActionProvider {
         return text.substring(start, end);
     }
 }
+

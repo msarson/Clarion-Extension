@@ -94,7 +94,7 @@ export class HoverProvider {
             this.contextHandler,
             this.formatter
         );
-        this.includeVerifier = new IncludeVerifier();
+        this.includeVerifier = IncludeVerifier.getInstance();
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
     }
 

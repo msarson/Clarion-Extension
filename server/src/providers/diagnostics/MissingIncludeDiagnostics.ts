@@ -12,7 +12,7 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger('MissingIncludeDiagnostics');
 logger.setLevel('error');
 
-const includeVerifier = new IncludeVerifier();
+const includeVerifier = IncludeVerifier.getInstance();
 
 /**
  * Shared: resolve project/cwproj paths from document URI.
@@ -173,7 +173,7 @@ export async function validateMissingConstants(
 
     // Without a project file we can't check constants — skip silently
     if (!cwprojPath) {
-        logger.error(`[MissingConstants] No cwproj path for ${document.uri.split('/').pop()} — skipping`);
+        logger.info(`[MissingConstants] No cwproj path for ${document.uri.split('/').pop()} — skipping`);
         return diagnostics;
     }
 
@@ -212,7 +212,7 @@ export async function validateMissingConstants(
 
         if (missing.length === 0) continue;
 
-        logger.error(`⚠️ Missing constants for "${typeName}": ${missing.join(', ')}`);
+        logger.info(`⚠️ Missing constants for "${typeName}": ${missing.join(', ')}`);
 
         diagnostics.push({
             severity: DiagnosticSeverity.Information,
@@ -229,4 +229,5 @@ export async function validateMissingConstants(
 
     return diagnostics;
 }
+
 
