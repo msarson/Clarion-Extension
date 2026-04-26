@@ -1790,16 +1790,16 @@ connection.onHover(async (params) => {
 
 // Handle code actions (lightbulb) requests
 connection.onCodeAction(async (params) => {
-    logger.info(`💡 Received code action request for: ${params.textDocument.uri}`);
+    logger.error(`⏱️ [CODE-ACTION] ▶ triggered line=${params.range.start.line} file="${params.textDocument.uri.split('/').pop()}"`);
     
     if (!serverInitialized) {
-        logger.info(`⚠️ Server not initialized yet, delaying code action request`);
+        logger.error(`⏱️ [CODE-ACTION] ⚠ server not initialized, returning []`);
         return [];
     }
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        logger.error(`⏱️ [CODE-ACTION] ⚠ document not found`);
         return [];
     }
     
@@ -1807,39 +1807,38 @@ connection.onCodeAction(async (params) => {
         const caStart = Date.now();
 
         const t0 = Date.now();
+        logger.error(`⏱️ [CODE-ACTION] ClassConstants starting`);
         const codeActionProvider = new ClassConstantsCodeActionProvider();
         const actions = await codeActionProvider.provideCodeActions(
             document,
             params.range,
             params.context,
-            params as any // CancellationToken
+            params as any
         );
-        const t1 = Date.now(); if (t1 - t0 > 50) logger.error(`⏱️ [CODE-ACTION] ClassConstants: ${t1 - t0}ms`);
+        logger.error(`⏱️ [CODE-ACTION] ClassConstants done: ${Date.now() - t0}ms → ${actions.length} actions`);
 
         const t2 = Date.now();
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
-        const t3 = Date.now(); if (t3 - t2 > 50) logger.error(`⏱️ [CODE-ACTION] Flatten: ${t3 - t2}ms`);
+        logger.error(`⏱️ [CODE-ACTION] Flatten done: ${Date.now() - t2}ms → ${flattenActions.length} actions`);
 
         const t4 = Date.now();
         const mapModuleProvider = new MapModuleCodeActionProvider();
         const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
-        const t5 = Date.now(); if (t5 - t4 > 50) logger.error(`⏱️ [CODE-ACTION] MapModule: ${t5 - t4}ms`);
+        logger.error(`⏱️ [CODE-ACTION] MapModule done: ${Date.now() - t4}ms → ${mapModuleActions.length} actions`);
 
         const t6 = Date.now();
         const mapDeclProvider = new MapDeclarationCodeActionProvider();
         const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
-        const t7 = Date.now(); if (t7 - t6 > 50) logger.error(`⏱️ [CODE-ACTION] MapDecl: ${t7 - t6}ms`);
+        logger.error(`⏱️ [CODE-ACTION] MapDecl done: ${Date.now() - t6}ms → ${mapDeclActions.length} actions`);
 
         const t8 = Date.now();
         const unicodeProvider = new UnicodeCodeActionProvider();
         const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
-        const t9 = Date.now(); if (t9 - t8 > 50) logger.error(`⏱️ [CODE-ACTION] Unicode: ${t9 - t8}ms`);
+        logger.error(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
 
         const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
-        const caTotal = Date.now() - caStart;
-        if (caTotal > 100) logger.error(`⏱️ [CODE-ACTION] total ${caTotal}ms → ${allActions.length} actions`);
-        logger.info(`Provided ${allActions.length} code actions`);
+        logger.error(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
