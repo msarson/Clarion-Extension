@@ -12,6 +12,7 @@ import { TokenCache } from '../TokenCache';
 import { TokenType } from '../tokenizer/TokenTypes';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -199,52 +200,47 @@ export class MapDeclarationCodeActionProvider {
         if (!data?.procName || !data.parentFileUri) return [];
 
         const parentPath = uriToPath(data.parentFileUri);
-        logger.debug(`🔧 [MemberSide] proc=${data.procName} parentPath=${parentPath} declLine=${data.declLine} implLine=${data.implLine}`);
-        if (!fs.existsSync(parentPath)) {
-            logger.debug(`❌ [MemberSide] parent file not found: ${parentPath}`);
-            return [];
-        }
+        if (!fs.existsSync(parentPath)) return [];
 
         const docLines = document.getText().split('\n');
         const implLineText = docLines[data.implLine] ?? '';
         const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
-        logger.debug(`🔧 [MemberSide] implLine[${data.implLine}]="${implLineText.replace(/\r/g, '\\r')}" implSpan=${JSON.stringify(implSpan)}`);
 
-        const parentContent = fs.readFileSync(parentPath, 'utf8');
+        // For same-file declarations (Cases 1 & 2) use the live document text; otherwise read disk
+        const isSameFile = data.parentFileUri.toLowerCase() === data.currentFileUri.toLowerCase();
+        const parentContent = isSameFile ? document.getText() : fs.readFileSync(parentPath, 'utf8');
         const parentLines = parentContent.split('\n');
         const declLineText = parentLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
-        logger.debug(`🔧 [MemberSide] declLine[${data.declLine}]="${declLineText.replace(/\r/g, '\\r')}" declSpan=${JSON.stringify(declSpan)}`);
 
+        if (!implSpan || !declSpan) return [];
+
+        const implParams = implLineText.slice(implSpan.start, implSpan.end);
+        const declParams = declLineText.slice(declSpan.start, declSpan.end);
+        const implFilePath = uriToPath(document.uri);
         const actions: CodeAction[] = [];
 
-        if (!implSpan || !declSpan) {
-            logger.debug(`❌ [MemberSide] no span found — implSpan=${JSON.stringify(implSpan)} declSpan=${JSON.stringify(declSpan)}`);
-            return [];
+        // Action 1: update ALL declarations to match implementation
+        const allDeclChanges = this.collectAllDeclarationEdits(data.procName, implFilePath, implParams);
+        // Ensure the diagnostic's own decl site is included (covers proc-level MAP, not in FRG)
+        const diagDeclUri = isSameFile ? document.uri : pathToUri(parentPath);
+        if (!(allDeclChanges[diagDeclUri] ?? []).some(e => e.range.start.line === data.declLine)) {
+            if (!allDeclChanges[diagDeclUri]) allDeclChanges[diagDeclUri] = [];
+            allDeclChanges[diagDeclUri].push(
+                TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
+            );
         }
-
-        // Action 1: update declaration params to match implementation (keep return type/attributes)
-        const implParams = implLineText.slice(implSpan.start, implSpan.end);
-        logger.debug(`🔧 [MemberSide] action1: replace declLine col ${declSpan.start}-${declSpan.end} in ${parentPath} with "${implParams}"`);
+        const declFileCount = Object.keys(allDeclChanges).length;
         actions.push({
-            title: `Update declaration of '${data.procName}' to match implementation`,
+            title: declFileCount > 1
+                ? `Update all declarations of '${data.procName}' to match implementation (${declFileCount} files)`
+                : `Update declaration of '${data.procName}' to match implementation`,
             kind: CodeActionKind.QuickFix,
             isPreferred: true,
-            edit: {
-                changes: {
-                    [pathToUri(parentPath)]: [
-                        TextEdit.replace(
-                            Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
-                            implParams
-                        )
-                    ]
-                }
-            }
+            edit: { changes: allDeclChanges }
         });
 
         // Action 2: update implementation params to match declaration
-        const declParams = declLineText.slice(declSpan.start, declSpan.end);
-        logger.debug(`🔧 [MemberSide] action2: replace implLine col ${implSpan.start}-${implSpan.end} in ${document.uri} with "${declParams}"`);
         actions.push({
             title: `Update implementation of '${data.procName}' to match MAP declaration`,
             kind: CodeActionKind.QuickFix,
@@ -302,40 +298,31 @@ export class MapDeclarationCodeActionProvider {
         }];
     }
 
-    // ─── map-impl-signature-mismatch (PROGRAM file side) ────────────────────
+    // ─── map-impl-signature-mismatch (PROGRAM/MEMBER file side) ────────────────────
 
     private fixSignatureMismatchProgramSide(document: TextDocument, data: SigMismatchProgramData): CodeAction[] {
         if (!data?.procName || !data.clwFileUri) return [];
 
         const docPath = uriToPath(document.uri);
         const clwPath = resolveClwPath(uriToPath(data.clwFileUri), docPath);
-        logger.debug(`🔧 [ProgramSide] proc=${data.procName} raw=${uriToPath(data.clwFileUri)} resolved=${clwPath} declLine=${data.declLine} implLine=${data.implLine}`);
-        if (!clwPath) {
-            logger.debug(`❌ [ProgramSide] could not resolve clw file`);
-            return [];
-        }
+        if (!clwPath) return [];
 
         const docLines = document.getText().split('\n');
         const declLineText = docLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
-        logger.debug(`🔧 [ProgramSide] declLine[${data.declLine}]="${declLineText.replace(/\r/g, '\\r')}" declSpan=${JSON.stringify(declSpan)}`);
 
         const clwContent = fs.readFileSync(clwPath, 'utf8');
         const clwLines = clwContent.split('\n');
         const implLineText = clwLines[data.implLine] ?? '';
         const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
-        logger.debug(`🔧 [ProgramSide] implLine[${data.implLine}]="${implLineText.replace(/\r/g, '\\r')}" implSpan=${JSON.stringify(implSpan)}`);
 
+        if (!implSpan || !declSpan) return [];
+
+        const declParams = declLineText.slice(declSpan.start, declSpan.end);
+        const implParams = implLineText.slice(implSpan.start, implSpan.end);
         const actions: CodeAction[] = [];
 
-        if (!implSpan || !declSpan) {
-            logger.debug(`❌ [ProgramSide] no span found — implSpan=${JSON.stringify(implSpan)} declSpan=${JSON.stringify(declSpan)}`);
-            return [];
-        }
-
-        // Action 1: update implementation params to match declaration
-        const declParams = declLineText.slice(declSpan.start, declSpan.end);
-        logger.debug(`🔧 [ProgramSide] action1: replace implLine col ${implSpan.start}-${implSpan.end} in ${clwPath} with "${declParams}"`);
+        // Action 1: update implementation to match declaration
         actions.push({
             title: `Update implementation of '${data.procName}' to match declaration`,
             kind: CodeActionKind.QuickFix,
@@ -352,25 +339,101 @@ export class MapDeclarationCodeActionProvider {
             }
         });
 
-        // Action 2: update declaration params to match implementation (keep return type/attributes)
-        const implParams = implLineText.slice(implSpan.start, implSpan.end);
-        logger.debug(`🔧 [ProgramSide] action2: replace declLine col ${declSpan.start}-${declSpan.end} in ${document.uri} with "${implParams}"`);
+        // Action 2: update ALL declarations to match implementation
+        const allDeclChanges = this.collectAllDeclarationEdits(data.procName, clwPath, implParams);
+        // Ensure the current document's decl site is included (handles self-loop and proc-level MAP)
+        if (!(allDeclChanges[document.uri] ?? []).some(e => e.range.start.line === data.declLine)) {
+            if (!allDeclChanges[document.uri]) allDeclChanges[document.uri] = [];
+            allDeclChanges[document.uri].push(
+                TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
+            );
+        }
+        const declFileCount = Object.keys(allDeclChanges).length;
         actions.push({
-            title: `Update declaration of '${data.procName}' to match implementation`,
+            title: declFileCount > 1
+                ? `Update all declarations of '${data.procName}' to match implementation (${declFileCount} files)`
+                : `Update declaration of '${data.procName}' to match implementation`,
             kind: CodeActionKind.QuickFix,
-            edit: {
-                changes: {
-                    [document.uri]: [
-                        TextEdit.replace(
-                            Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end),
-                            implParams
-                        )
-                    ]
-                }
-            }
+            edit: { changes: allDeclChanges }
         });
 
         return actions;
+    }
+
+    // ─── helper: find all declaration sites across the project ──────────────
+
+    /**
+     * Uses the FRG to find every file that has a MODULE block referencing
+     * `implFilePath`, then for each file finds the MapProcedure declaration for
+     * `procName` and builds a TextEdit replacing its parameter list with `newParams`.
+     * Also checks the impl file itself for self-declaration MODULE blocks (those are
+     * filtered from the FRG to prevent self-loops).
+     */
+    private collectAllDeclarationEdits(
+        procName: string,
+        implFilePath: string,
+        newParams: string
+    ): { [uri: string]: TextEdit[] } {
+        const changes: { [uri: string]: TextEdit[] } = {};
+        const frg = FileRelationshipGraph.getInstance();
+        const implBasename = path.basename(implFilePath).toLowerCase();
+        const tokenCache = TokenCache.getInstance();
+
+        const filesToCheck = new Set<string>([
+            ...frg.getModuleDeclarants(implFilePath).map(e => e.fromFile),
+            implFilePath  // impl file may have its own self-declaration MODULE block
+        ]);
+
+        for (const filePath of filesToCheck) {
+            try {
+                const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+                const liveUri = tokenCache.getAllCachedUris().find(uri =>
+                    decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/') === normalizedPath
+                );
+                const fileUri = liveUri ?? pathToUri(filePath);
+                const fileContent = (liveUri && tokenCache.getDocumentText(liveUri))
+                    ?? fs.readFileSync(filePath, 'utf8');
+                const fileDoc = TextDocument.create(fileUri, 'clarion', 1, fileContent);
+                const fileTokens = liveUri
+                    ? (tokenCache.getTokensByUri(liveUri) ?? tokenCache.getTokens(fileDoc))
+                    : tokenCache.getTokens(fileDoc);
+                const fileLines = fileContent.split('\n');
+
+                const moduleTokens = fileTokens.filter(t =>
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' &&
+                    t.referencedFile &&
+                    path.basename(t.referencedFile).toLowerCase() === implBasename &&
+                    t.finishesAt !== undefined
+                );
+
+                for (const moduleToken of moduleTokens) {
+                    const declToken = fileTokens.find(t =>
+                        t.subType === TokenType.MapProcedure &&
+                        t.label?.toUpperCase() === procName.toUpperCase() &&
+                        t.line > moduleToken.line &&
+                        t.line < moduleToken.finishesAt!
+                    );
+                    if (!declToken) continue;
+
+                    const declLineText = fileLines[declToken.line] ?? '';
+                    const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
+                    if (!declSpan) continue;
+
+                    if (!changes[fileUri]) changes[fileUri] = [];
+                    changes[fileUri].push(
+                        TextEdit.replace(
+                            Range.create(declToken.line, declSpan.start, declToken.line, declSpan.end),
+                            newParams
+                        )
+                    );
+                }
+            } catch (err) {
+                logger.error(`collectAllDeclarationEdits error for '${procName}' in '${filePath}': ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+
+        return changes;
     }
 }
 

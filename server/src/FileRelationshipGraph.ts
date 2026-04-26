@@ -156,7 +156,7 @@ export class FileRelationshipGraph {
             }
         }
 
-        await this.processFile(filePath);
+        await this.processFile(filePath, uri);
     }
 
     /**
@@ -178,13 +178,17 @@ export class FileRelationshipGraph {
      * regex scan (avoids full tokenization for cold files — critical for large solutions).
      * Returns newly-discovered file paths to enqueue (INCLUDE targets).
      */
-    private async processFile(filePath: string): Promise<string[]> {
+    private async processFile(filePath: string, originalUri?: string): Promise<string[]> {
         const tokenCache = TokenCache.getInstance();
 
-        // Reconstruct URI in the same format VS Code uses so TokenCache hits
-        const uri = this.pathToUri(filePath);
+        // Try the original URI first (exact key from VS Code, preserves casing)
+        let tokens = originalUri ? tokenCache.getTokensByUri(originalUri) : null;
 
-        let tokens = tokenCache.getTokensByUri(uri);
+        if (!tokens || tokens.length === 0) {
+            // Reconstruct URI in the same format VS Code uses so TokenCache hits
+            const uri = this.pathToUri(filePath);
+            tokens = tokenCache.getTokensByUri(uri);
+        }
 
         if (!tokens || tokens.length === 0) {
             // Try alternate URI encoding (unencoded path variant)
@@ -237,13 +241,19 @@ export class FileRelationshipGraph {
                     parentToken.value.toUpperCase() === 'MAP';
 
                 if (!parentIsMap) {
-                    edgeType = 'CLASS_MODULE';
                     const classToken = tokens.find(t =>
                         t.line === token.line &&
                         t.type === TokenType.Structure &&
                         t.value.toUpperCase() === 'CLASS'
                     );
-                    containingClass = classToken?.label;
+                    if (classToken) {
+                        edgeType = 'CLASS_MODULE';
+                        containingClass = classToken.label;
+                    } else {
+                        // Root-level MODULE with no MAP parent — e.g., SV-generated INC file
+                        // where the MODULE block is not wrapped in a MAP structure.
+                        edgeType = 'MODULE';
+                    }
                 } else {
                     edgeType = 'MODULE';
                     const grandParent = parentToken.parent;
@@ -261,6 +271,9 @@ export class FileRelationshipGraph {
             if (!resolved) continue;
 
             const toFile = this.normalizePath(resolved);
+            // Skip self-referencing MODULE edges — they add no topological information
+            if (edgeType === 'MODULE' && toFile === filePath) continue;
+
             const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: token.line, containingProcedure, containingClass };
 
             this.addEdge(edge);
@@ -344,6 +357,8 @@ export class FileRelationshipGraph {
                 const toFile = this.normalizePath(resolved);
                 const isClassAttr = classRe.test(stripped);
                 const edgeType: EdgeType = isClassAttr ? 'CLASS_MODULE' : 'MODULE';
+                // Skip self-referencing MODULE edges — they add no topological information
+                if (edgeType === 'MODULE' && toFile === filePath) continue;
                 let containingClass: string | undefined;
                 if (isClassAttr) {
                     const labelMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+CLASS\b/i.exec(stripped.trim());
