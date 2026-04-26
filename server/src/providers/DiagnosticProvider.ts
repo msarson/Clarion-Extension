@@ -11,6 +11,7 @@ import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnost
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
+import { validateUnicodeCharacters } from './diagnostics/UnicodeDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -41,6 +42,7 @@ export class DiagnosticProvider {
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
             ...validateReservedKeywordLabels(tokens, document),
+            ...validateUnicodeCharacters(document),
         ];
 
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
