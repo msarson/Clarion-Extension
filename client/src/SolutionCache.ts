@@ -1726,6 +1726,14 @@ export class SolutionCache {
             return fsResult;
         }
 
+        // Safety net: if we have no projects yet (server still building), skip the server
+        // request entirely. This prevents thousands of clarion/findFile requests flooding
+        // the LSP stdio pipe during startup, causing 50s+ hangs.
+        if (!this.solutionInfo?.projects?.length) {
+            logger.info(`⏩ Skipping server lookup for ${filename} — solution not ready (0 projects)`);
+            return "";
+        }
+
         // Only call the server if the client is ready
         if (this.client && !this.client.needsStart()) {
             try {

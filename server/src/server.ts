@@ -1133,6 +1133,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 `  Projects (${globalSolution.projects.length}):\n` +
                 (projectSummary || '  (none)'));
             
+            // Notify the client that the solution is ready so it can defer refreshOpenDocuments
+            // until after we have real project data (avoids flooding the LSP pipe with
+            // thousands of clarion/findFile requests when getSolutionTree returns 0 projects).
+            connection.sendNotification('clarion/solutionReady', {
+                solutionFilePath: solutionPath,
+                projectCount: globalSolution.projects.length
+            });
+            logger.error(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
+
             // Re-validate all open documents now that cross-file type info is available.
             // The async diagnostic pass (discarded return value detection) needs the solution
             // to be ready; it may have already run (and silently skipped resolutions) before

@@ -303,6 +303,33 @@ export async function initializeSolution(
         // Get the solution directory
         const solutionDir = path.dirname(globalSolutionFile);
 
+        // Register a one-shot handler for clarion/solutionReady BEFORE sending updatePaths
+        // so we never miss the notification due to a race. The handler defers refreshOpenDocuments
+        // until the server has real project data, avoiding thousands of clarion/findFile requests
+        // flooding the LSP pipe when getSolutionTree returns 0 projects on startup.
+        let solutionReadyDisposable: Disposable | null = null;
+        solutionReadyDisposable = client.onNotification('clarion/solutionReady', async (params: { solutionFilePath: string, projectCount: number }) => {
+            // Ignore stale notifications from a previous solution load
+            if (params.solutionFilePath !== globalSolutionFile) {
+                logger.warn(`⚠️ clarion/solutionReady ignored — path mismatch (got ${params.solutionFilePath}, expected ${globalSolutionFile})`);
+                return;
+            }
+            if (params.projectCount === 0) {
+                logger.warn(`⚠️ clarion/solutionReady received with 0 projects — skipping refresh`);
+                return;
+            }
+            // Dispose immediately so subsequent re-initializations register a fresh handler
+            solutionReadyDisposable?.dispose();
+            solutionReadyDisposable = null;
+
+            logger.error(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
+            const solutionCache = SolutionCache.getInstance();
+            await solutionCache.refresh(true);
+            await refreshSolutionTreeView();
+            await refreshOpenDocuments(documentManager);
+            logger.error(`⏱️ [STARTUP] deferred refreshOpenDocuments complete`);
+        });
+
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
@@ -352,11 +379,18 @@ export async function initializeSolution(
     logger.error(`⏱️ [STARTUP] createSolutionFileWatchers complete in ${Date.now() - fwStart}ms`);
     logger.info("✅ File watchers created");
     
-    // Force refresh all open documents to ensure links are generated
-    const rdStart = Date.now();
-    await refreshOpenDocuments(documentManager);
-    logger.error(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
-    logger.info("✅ Open documents refreshed");
+    // Only call refreshOpenDocuments immediately if we already have project data.
+    // If the solution wasn't ready yet (0 projects), the clarion/solutionReady handler
+    // registered above will call it once the server finishes building the solution.
+    const solutionCache = SolutionCache.getInstance();
+    if ((solutionCache.getSolutionInfo()?.projects?.length ?? 0) > 0) {
+        const rdStart = Date.now();
+        await refreshOpenDocuments(documentManager);
+        logger.error(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
+        logger.info("✅ Open documents refreshed");
+    } else {
+        logger.error(`⏱️ [STARTUP] refreshOpenDocuments deferred — solution not ready yet (waiting for clarion/solutionReady)`);
+    }
     
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
