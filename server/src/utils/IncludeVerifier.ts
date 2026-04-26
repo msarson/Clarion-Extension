@@ -39,10 +39,21 @@ interface PathCache {
  * in the current file or its MEMBER parent
  */
 export class IncludeVerifier {
-    private tokenCache = TokenCache.getInstance();
+    private static instance: IncludeVerifier | undefined;
     private includeCache = new Map<string, IncludeCache>(); // URI -> IncludeCache
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     private static readonly CACHE_DURATION = 60000; // 60 seconds
+
+    private constructor() {}
+
+    public static getInstance(): IncludeVerifier {
+        if (!IncludeVerifier.instance) {
+            IncludeVerifier.instance = new IncludeVerifier();
+        }
+        return IncludeVerifier.instance;
+    }
+
+    private tokenCache = TokenCache.getInstance();
 
     /**
      * Verifies if a class file is included and accessible in the given document

@@ -84,6 +84,9 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+const globalStartTime = Date.now();
+logger.error(`⏱️ [STARTUP] Server process started at ${new Date().toISOString()}`);
+
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -123,6 +126,8 @@ process.on('unhandledRejection', (reason: any) => {
 });
 // Log all incoming requests and notifications
 connection.onInitialize((params) => {
+    const t0 = Date.now();
+    logger.error(`⏱️ [STARTUP] onInitialize called at ${new Date().toISOString()}`);
     try {
         logger.info(`📥 [CRITICAL] Initialize request received`);
         logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -158,7 +163,7 @@ connection.onInitialize((params) => {
         logger.info(`📥 [CRITICAL] Responding with server capabilities`);
         
         // Return server capabilities
-        return {
+        const result: InitializeResult = {
             capabilities: {
                 textDocumentSync: TextDocumentSyncKind.Incremental,
                 documentFormattingProvider: true,
@@ -190,6 +195,8 @@ connection.onInitialize((params) => {
                 }
             }
         };
+        logger.error(`⏱️ [STARTUP] onInitialize complete in ${Date.now() - t0}ms`);
+        return result;
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -1111,9 +1118,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
         // Build the solution after registering handlers
         const buildStartTime = performance.now();
         try {
+            logger.error(`⏱️ [STARTUP] Solution build started at +${Date.now() - (globalStartTime ?? Date.now())}ms`);
             logger.info(`🔄 Building solution...`);
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
+            logger.error(`⏱️ [STARTUP] Solution build done: ${globalSolution.projects.length} projects, ${globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0)} source files in ${(buildEndTime - buildStartTime).toFixed(0)}ms`);
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Always-visible project summary
@@ -1143,13 +1152,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
-                logger.error(`⏱️ [INDEX] Pre-building structure index for ${projectPaths.length} project(s) in background`);
+                const sdiStart = Date.now();
+                logger.error(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
                 await Promise.all(projectPaths.map(p =>
                     indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
                     )
                 ));
-                logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
+                logger.error(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -1167,10 +1177,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         }
                     }
                 }
-                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                const frgStart = Date.now();
+                logger.error(`⏱️ [STARTUP] FRG build starting for ${allFiles.length} source file(s) at +${frgStart - globalStartTime}ms`);
                 await graph.buildInBackground(allFiles).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
+                logger.error(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
             });
 
             // Log each project in the global solution
@@ -1792,6 +1804,9 @@ connection.onCodeAction(async (params) => {
     }
     
     try {
+        const caStart = Date.now();
+
+        const t0 = Date.now();
         const codeActionProvider = new ClassConstantsCodeActionProvider();
         const actions = await codeActionProvider.provideCodeActions(
             document,
@@ -1799,20 +1814,31 @@ connection.onCodeAction(async (params) => {
             params.context,
             params as any // CancellationToken
         );
+        const t1 = Date.now(); if (t1 - t0 > 50) logger.error(`⏱️ [CODE-ACTION] ClassConstants: ${t1 - t0}ms`);
 
+        const t2 = Date.now();
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
+        const t3 = Date.now(); if (t3 - t2 > 50) logger.error(`⏱️ [CODE-ACTION] Flatten: ${t3 - t2}ms`);
 
+        const t4 = Date.now();
         const mapModuleProvider = new MapModuleCodeActionProvider();
         const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
+        const t5 = Date.now(); if (t5 - t4 > 50) logger.error(`⏱️ [CODE-ACTION] MapModule: ${t5 - t4}ms`);
 
+        const t6 = Date.now();
         const mapDeclProvider = new MapDeclarationCodeActionProvider();
         const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
+        const t7 = Date.now(); if (t7 - t6 > 50) logger.error(`⏱️ [CODE-ACTION] MapDecl: ${t7 - t6}ms`);
 
+        const t8 = Date.now();
         const unicodeProvider = new UnicodeCodeActionProvider();
         const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
+        const t9 = Date.now(); if (t9 - t8 > 50) logger.error(`⏱️ [CODE-ACTION] Unicode: ${t9 - t8}ms`);
 
         const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
+        const caTotal = Date.now() - caStart;
+        if (caTotal > 100) logger.error(`⏱️ [CODE-ACTION] total ${caTotal}ms → ${allActions.length} actions`);
         logger.info(`Provided ${allActions.length} code actions`);
         return allActions;
     } catch (error) {

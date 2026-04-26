@@ -106,13 +106,13 @@ export class FileRelationshipGraph {
 
             if (batch.length === 0) continue;
 
-            // Process the batch concurrently
-            const results = await Promise.all(batch.map(f => this.processFile(f)));
-            for (const newFiles of results) {
-                for (const f of newFiles) {
-                    if (!visited.has(f)) queue.push(f);
-                }
-            }
+            // Process the batch concurrently.
+            // We intentionally do NOT enqueue the returned INCLUDE targets — recursively
+            // following include chains into library directories (libsrc etc.) can add
+            // thousands of files and make startup unresponsive on large solutions.
+            // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
+            // reverse-include lookups work for files directly referenced by project files.
+            await Promise.all(batch.map(f => this.processFile(f)));
 
             // Yield back to the event loop between batches
             await new Promise<void>(resolve => setImmediate(resolve));

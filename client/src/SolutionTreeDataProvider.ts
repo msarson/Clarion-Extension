@@ -198,6 +198,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         }
         this.refreshInProgress = true;
         const startTime = performance.now();
+        const wallStart = Date.now();
+        logger.error(`⏱️ [STARTUP] Solution tree refresh started`);
         logger.info("🔄 Refreshing solution tree...");
     
         try {
@@ -264,6 +266,7 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 logger.warn("⚠️ Tree root is empty after refresh.");
             } else {
                 const endTime = performance.now();
+                logger.error(`⏱️ [STARTUP] Solution tree visible with ${this._root.length} root item(s) in ${Date.now() - wallStart}ms`);
                 logger.info(`✅ Tree refreshed successfully with ${this._root.length} root item(s) in ${(endTime - startTime).toFixed(2)}ms`);
             }
         } catch (error) {

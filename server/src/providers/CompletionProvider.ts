@@ -66,7 +66,6 @@ export class CompletionProvider {
 
             // Ensure the trigger is actually '.'
             if (!lineText.trimEnd().endsWith('.')) {
-                // Word/identifier completion: extract the partial word before the cursor
                 const partialMatch = lineText.match(/[\w:]+$/);
                 const partial = partialMatch ? partialMatch[0] : '';
                 logger.info(`CompletionProvider: word trigger, partial="${partial}"`);

@@ -12,7 +12,7 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger('MissingIncludeDiagnostics');
 logger.setLevel('error');
 
-const includeVerifier = new IncludeVerifier();
+const includeVerifier = IncludeVerifier.getInstance();
 
 /**
  * Shared: resolve project/cwproj paths from document URI.

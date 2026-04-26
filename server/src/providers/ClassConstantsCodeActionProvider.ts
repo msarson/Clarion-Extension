@@ -27,7 +27,7 @@ export class ClassConstantsCodeActionProvider {
 
     constructor() {
         this.sdi = StructureDeclarationIndexer.getInstance();
-        this.includeVerifier = new IncludeVerifier();
+        this.includeVerifier = IncludeVerifier.getInstance();
     }
 
     async provideCodeActions(
@@ -111,6 +111,12 @@ export class ClassConstantsCodeActionProvider {
             }
             
             // Otherwise, check the word at cursor position (existing logic)
+            // Only proceed if the index is already cached — triggering a cold build here
+            // would scan the entire project on every Ctrl+. press and cause a hang.
+            if (!this.sdi.isIndexed(projectPath)) {
+                return actions;
+            }
+
             const offset = document.offsetAt(range.start);
             const word = this.getWordAtPosition(text, offset);
 
