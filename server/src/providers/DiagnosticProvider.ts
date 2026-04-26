@@ -42,7 +42,7 @@ export class DiagnosticProvider {
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
             ...validateReservedKeywordLabels(tokens, document),
-            // ...validateUnicodeCharacters(document), // temporarily disabled for debugging
+            ...validateUnicodeCharacters(document),
         ];
 
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
