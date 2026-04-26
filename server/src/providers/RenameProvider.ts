@@ -2,6 +2,7 @@ import { Range, WorkspaceEdit, TextEdit, ResponseError, ErrorCodes } from 'vscod
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import { TokenCache } from '../TokenCache';
+import { TokenType } from '../tokenizer/TokenTypes';
 import { SolutionManager } from '../solution/solutionManager';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SymbolFinderService } from '../services/SymbolFinderService';
@@ -62,6 +63,13 @@ export class RenameProvider {
             throw new ResponseError(ErrorCodes.InvalidRequest, 'No symbol at cursor position.');
         }
 
+        // Reject if the symbol is a MAP procedure declared in an external DLL or
+        // a MODULE whose source file cannot be resolved within the solution.
+        const dllReason = this.getDllOrUnresolvableRejectionReason(document, position.line, word);
+        if (dllReason) {
+            throw new ResponseError(ErrorCodes.InvalidRequest, dllReason);
+        }
+
         // Confirm symbol is known — rejects keywords, punctuation, etc.
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
@@ -115,6 +123,51 @@ export class RenameProvider {
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Returns a rejection reason if the symbol at the given line is a MAP procedure
+     * that is declared with the ,DLL attribute (external library) or whose MODULE
+     * target cannot be resolved within the solution. Returns null if rename is safe.
+     */
+    private getDllOrUnresolvableRejectionReason(
+        document: TextDocument,
+        line: number,
+        name: string
+    ): string | null {
+        const tokens = this.tokenCache.getTokensByUri(document.uri);
+        if (!tokens) return null;
+
+        // Find a MapProcedure token on or near the cursor line matching the symbol name
+        const mapProc = tokens.find(t =>
+            t.subType === TokenType.MapProcedure &&
+            t.label?.toUpperCase() === name.toUpperCase() &&
+            Math.abs(t.line - line) <= 1
+        );
+
+        if (!mapProc) return null;
+
+        // Check for ,DLL attribute on the declaration line
+        const docLine = document.getText({
+            start: { line: mapProc.line, character: 0 },
+            end: { line: mapProc.line, character: 1000 }
+        });
+        if (/,\s*DLL\b/i.test(docLine)) {
+            return `Cannot rename '${name}': procedure is declared with ,DLL and may be defined in an external project. Rename the source manually.`;
+        }
+
+        // Check whether the parent MODULE's target file is resolvable
+        const parentModule = mapProc.parent;
+        if (
+            parentModule?.type === TokenType.Structure &&
+            parentModule.value.toUpperCase() === 'MODULE' &&
+            !parentModule.referencedFile
+        ) {
+            const moduleRef = parentModule.label ?? '(unknown)';
+            return `Cannot rename '${name}': the source file '${moduleRef}' could not be resolved within the current solution. Rename the source manually.`;
+        }
+
+        return null;
+    }
 
     /** Converts a file:// URI to a normalised file-system path. */
     private uriToPath(uri: string): string {
