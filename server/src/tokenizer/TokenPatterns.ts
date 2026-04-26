@@ -76,7 +76,7 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. Structure keywords (CLASS, FILE, WINDOW, etc.) are valid Clarion labels per language spec.
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END|CODE|DATA)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. CODE/DATA are execution markers, never labels.
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,

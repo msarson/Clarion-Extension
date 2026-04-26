@@ -12,8 +12,8 @@ import { Token, TokenType } from '../../ClarionTokenizer';
  */
 const FULLY_RESERVED = new Set([
     'ACCEPT', 'AND', 'ASSERT', 'BEGIN', 'BREAK', 'BY',
-    'CASE', 'CHOOSE', 'CODE', 'COMPILE', 'CONST',
-    'CYCLE', 'DATA', 'DO', 'ELSE', 'ELSIF', 'END',
+    'CASE', 'CHOOSE', 'COMPILE', 'CONST',
+    'CYCLE', 'DO', 'ELSE', 'ELSIF', 'END',
     'EXECUTE', 'EXIT', 'FUNCTION', 'GOTO', 'IF',
     'INCLUDE', 'LOOP', 'MEMBER', 'NEW', 'NOT', 'NULL',
     'OF', 'OMIT', 'OR', 'OROF', 'PRAGMA', 'PROCEDURE',

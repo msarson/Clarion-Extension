@@ -324,10 +324,16 @@ export async function initializeSolution(
 
             logger.error(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
             const solutionCache = SolutionCache.getInstance();
+            const refreshStart = Date.now();
             await solutionCache.refresh(true);
+            logger.error(`⏱️ [STARTUP] solutionCache.refresh(true) in solutionReady handler done in ${Date.now() - refreshStart}ms (${solutionCache.getSolutionInfo()?.projects?.length ?? 0} projects)`);
             await refreshSolutionTreeView();
+            const deferredRdStart = Date.now();
+            solutionCache.beginActivationRefresh();
             await refreshOpenDocuments(documentManager);
-            logger.error(`⏱️ [STARTUP] deferred refreshOpenDocuments complete`);
+            logger.error(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
+            SolutionCache.getInstance().markActivationComplete();
+            logger.error(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
         });
 
         // Send notification to initialize the server-side solution manager
@@ -387,7 +393,8 @@ export async function initializeSolution(
         const rdStart = Date.now();
         await refreshOpenDocuments(documentManager);
         logger.error(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
-        logger.info("✅ Open documents refreshed");
+        solutionCache.markActivationComplete();
+        logger.error(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
     } else {
         logger.error(`⏱️ [STARTUP] refreshOpenDocuments deferred — solution not ready yet (waiting for clarion/solutionReady)`);
     }
@@ -450,9 +457,10 @@ export async function reinitializeEnvironment(
         logger.warn("⚠️ No solution file path available. SolutionCache will not be initialized.");
     }
     
-    // Mark activation as complete in SolutionCache
-    solutionCache.markActivationComplete();
-    logger.info("✅ Marked activation as complete in SolutionCache");
+    // Mark activation as complete AFTER document refresh so that clarion/findFile
+    // server calls are suppressed during refreshOpenDocuments (prevents 100+ queued
+    // requests from blocking the LSP pipe for 5+ seconds after startup).
+    // markActivationComplete() is called by the caller after refreshOpenDocuments returns.
 
     if (documentManager) {
         logger.info("🔄 Disposing of existing DocumentManager instance...");
