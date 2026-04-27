@@ -1,4 +1,4 @@
-import { CompletionItem, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver/node';
+import { CompletionItem, CompletionItemKind } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
 import * as fs from 'fs';
@@ -402,8 +402,6 @@ export class WordCompletionProvider {
                 seen.set(kw, {
                     label: kw,
                     kind: CompletionItemKind.Keyword,
-                    insertText: `${kw}$0\nEND`,
-                    insertTextFormat: InsertTextFormat.Snippet,
                 });
             }
         }
