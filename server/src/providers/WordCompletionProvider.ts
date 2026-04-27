@@ -106,24 +106,25 @@ export class WordCompletionProvider {
             this.collectConstants(tokens, add);
 
             // ----------------------------------------------------------------
-            // E. Language keywords
+            // E. Container structures (WINDOW, APPLICATION, REPORT) + controls
+            // — collected before keywords so richer JSON entries take priority
+            // ----------------------------------------------------------------
+            this.collectControls(seen);
+
+            // ----------------------------------------------------------------
+            // F. Language keywords (skipped if already in seen from JSON)
             // ----------------------------------------------------------------
             this.collectKeywords(seen);
 
             // ----------------------------------------------------------------
-            // F. Built-in functions (from clarion-builtins.json)
+            // G. Built-in functions (from clarion-builtins.json)
             // ----------------------------------------------------------------
             this.collectBuiltins(seen);
 
             // ----------------------------------------------------------------
-            // G. Data types (from clarion-datatypes.json)
+            // H. Data types (from clarion-datatypes.json)
             // ----------------------------------------------------------------
             this.collectDataTypes(seen);
-
-            // ----------------------------------------------------------------
-            // H. Window / report controls (from clarion-controls.json)
-            // ----------------------------------------------------------------
-            this.collectControls(seen);
 
             // ----------------------------------------------------------------
             // Filter by prefix
@@ -428,6 +429,7 @@ export class WordCompletionProvider {
 
     private collectControls(seen: Map<string, CompletionItem>): void {
         for (const ctrl of [
+            ...this.controlService.getAllContainerStructures(),
             ...this.controlService.getAllWindowControls(),
             ...this.controlService.getAllReportControls(),
         ]) {

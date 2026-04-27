@@ -212,5 +212,25 @@
       "syntax": "FORM",
       "commonAttributes": ["AT", "FONT", "USE", "COLOR"]
     }
+  ],
+  "containerStructures": [
+    {
+      "name": "WINDOW",
+      "description": "Declares a dialog window or document window containing controls. Requires a label and title string. Opened by OPEN() and event-processed by ACCEPT.",
+      "syntax": "label WINDOW('title'[, AT(x,y,w,h)][, CENTER][, MDI][, MODAL][, RESIZE][, MAX][, ICON(file)][, FONT(name,size)][, GRAY][, TIMER(n)][, AUTO][, SYSTEM][, STATUS(n)][, DOUBLE|NOFRAME][, TOOLBOX][, MAXIMIZE][, ICONIZE][, COLOR(fg,bg)][, HLP(id)])",
+      "commonAttributes": ["AT", "CENTER", "MDI", "MODAL", "RESIZE", "MAX", "ICON", "FONT", "GRAY", "TIMER", "AUTO", "SYSTEM", "STATUS", "DOUBLE", "NOFRAME", "TOOLBOX", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "DOCK", "DOCKED", "LAYOUT", "MASK", "MSG", "PALETTE", "DROPID", "IMM"]
+    },
+    {
+      "name": "APPLICATION",
+      "description": "Declares an MDI frame window. The APPLICATION is the top-level container for MDI child windows. Requires a label and title string.",
+      "syntax": "label APPLICATION('title'[, AT(x,y,w,h)][, CENTER][, MAX][, ICON(file)][, FONT(name,size)][, GRAY][, TIMER(n)][, STATUS(n)][, MAXIMIZE][, ICONIZE][, COLOR(fg,bg)][, HLP(id)])",
+      "commonAttributes": ["AT", "CENTER", "MAX", "ICON", "FONT", "GRAY", "TIMER", "STATUS", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "MASK", "MSG", "PALETTE"]
+    },
+    {
+      "name": "REPORT",
+      "description": "Declares a report structure for printed output. Contains DETAIL, HEADER, FOOTER, and FORM bands. Processed by a PRINT loop.",
+      "syntax": "label REPORT[, AT(x,y,w,h)][, FONT(name,size)][, PAPER(type)][, ORIENT(n)][, PREVIEW][, THOUS][, PRE(prefix)][, COPIES(n)])",
+      "commonAttributes": ["AT", "FONT", "PAPER", "ORIENT", "PREVIEW", "THOUS", "PRE", "COPIES", "DRIVER", "NAME", "TO", "COLOR"]
+    }
   ]
 }
