@@ -402,7 +402,7 @@ export class WordCompletionProvider {
                 seen.set(kw, {
                     label: kw,
                     kind: CompletionItemKind.Keyword,
-                    insertText: `${kw}\n$0\nEND`,
+                    insertText: `${kw}$0\nEND`,
                     insertTextFormat: InsertTextFormat.Snippet,
                 });
             }
