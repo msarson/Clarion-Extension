@@ -59,13 +59,17 @@ export class WordCompletionProvider {
             // Keeping one item per label; for overloaded procedures the first found wins.
             const seen = new Map<string, CompletionItem>();
 
-            const add = (label: string, kind: CompletionItemKind, detail?: string) => {
+            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => {
                 const key = label.toUpperCase();
                 if (!seen.has(key)) {
-                    seen.set(key, { label, kind, detail });
-                } else if (detail && !seen.get(key)!.detail) {
-                    // Upgrade with detail if not set
-                    seen.get(key)!.detail = detail;
+                    const item: CompletionItem = { label, kind };
+                    if (detail) item.detail = detail;
+                    if (documentation) item.documentation = documentation;
+                    seen.set(key, item);
+                } else {
+                    const existing = seen.get(key)!;
+                    if (detail && !existing.detail) existing.detail = detail;
+                    if (documentation && !existing.documentation) existing.documentation = documentation;
                 }
             };
 
@@ -117,9 +121,9 @@ export class WordCompletionProvider {
         document: TextDocument,
         containingProc: Token | undefined,
         containingRoutine: Token | undefined,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
     ): Promise<void> {
-        this.collectProceduresFromTokens(tokens, document, containingProc, add);
+        this.collectProceduresFromTokens(tokens, document, document, containingProc, add);
 
         // Use FileRelationshipGraph to find the PROGRAM file for this MEMBER file.
         // All procedures declared in ANY MODULE in the program's MAP are globally
@@ -131,9 +135,9 @@ export class WordCompletionProvider {
             : this.getProgramFileFromTokens(tokens);  // fallback while graph is building
 
         if (programPath) {
-            const programTokens = this.getTokensForFile(programPath);
-            if (programTokens && programTokens.length > 0) {
-                this.collectProceduresFromTokens(programTokens, document, undefined, add);
+            const result = this.getTokensForFile(programPath);
+            if (result && result.tokens.length > 0) {
+                this.collectProceduresFromTokens(result.tokens, result.doc, document, undefined, add);
             }
         }
     }
@@ -151,16 +155,21 @@ export class WordCompletionProvider {
     /**
      * Get tokens for a file path — from TokenCache if available, otherwise read from disk.
      */
-    private getTokensForFile(filePath: string): Token[] | null {
+    private getTokensForFile(filePath: string): { tokens: Token[], doc: TextDocument } | null {
         const uri = 'file:///' + filePath.replace(/\\/g, '/');
         const cached = this.tokenCache.getTokensByUri(uri) ?? this.tokenCache.getTokensByUri(uri.toLowerCase());
-        if (cached && cached.length > 0) return cached;
+        if (cached && cached.length > 0) {
+            // Build a minimal doc just for line-text lookups (text comes from cache)
+            const text = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentText(uri.toLowerCase()) ?? '';
+            const doc = TextDocument.create(uri, 'clarion', 1, text);
+            return { tokens: cached, doc };
+        }
 
         try {
             if (!fs.existsSync(filePath)) return null;
             const content = fs.readFileSync(filePath, 'utf-8');
             const doc = TextDocument.create(uri, 'clarion', 1, content);
-            return this.tokenCache.getTokens(doc);
+            return { tokens: this.tokenCache.getTokens(doc), doc };
         } catch {
             return null;
         }
@@ -168,9 +177,10 @@ export class WordCompletionProvider {
 
     private collectProceduresFromTokens(
         tokens: Token[],
-        document: TextDocument,
+        sourceDoc: TextDocument,
+        currentDoc: TextDocument,
         containingProc: Token | undefined,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
     ): void {
         // Find all MAP tokens
         const mapTokens = tokens.filter(t =>
@@ -188,10 +198,11 @@ export class WordCompletionProvider {
             }
 
             // Collect MapProcedure tokens from this MAP (including INCLUDE'd MAPs)
-            const mapContent = this.scopeAnalyzer.getMapTokensWithIncludes(mapToken, document, tokens);
+            const mapContent = this.scopeAnalyzer.getMapTokensWithIncludes(mapToken, currentDoc, tokens);
             for (const t of mapContent) {
                 if (t.subType === TokenType.MapProcedure && t.label) {
-                    add(t.label, CompletionItemKind.Function, this.procedureDetail(t));
+                    const info = this.extractProcedureInfo(t, sourceDoc);
+                    add(t.label, CompletionItemKind.Function, info.detail, info.documentation);
                 }
             }
         }
@@ -199,7 +210,8 @@ export class WordCompletionProvider {
         // GlobalProcedure labels in the same file
         for (const t of tokens) {
             if (t.subType === TokenType.GlobalProcedure && t.label) {
-                add(t.label, CompletionItemKind.Function, 'PROCEDURE');
+                const info = this.extractProcedureInfo(t, sourceDoc);
+                add(t.label, CompletionItemKind.Function, info.detail, info.documentation);
             }
         }
     }
@@ -370,7 +382,28 @@ export class WordCompletionProvider {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private procedureDetail(t: Token): string {
-        return t.label ? `PROCEDURE` : 'MAP PROCEDURE';
+    /**
+     * Extract the prototype signature and optional inline comment from the token's source line.
+     * e.g. `CalculatePercentage    FUNCTION(REAL,REAL),REAL,DLL  ! Calculate Percentage`
+     *   → { detail: 'FUNCTION(REAL,REAL),REAL,DLL', documentation: 'Calculate Percentage' }
+     */
+    private extractProcedureInfo(t: Token, sourceDoc: TextDocument): { detail: string; documentation?: string } {
+        try {
+            const lineText = sourceDoc.getText({
+                start: { line: t.line, character: 0 },
+                end: { line: t.line, character: 4000 }
+            });
+            const keyword = t.value.toUpperCase();  // 'PROCEDURE' or 'FUNCTION'
+            const kwIdx = lineText.toUpperCase().indexOf(keyword);
+            if (kwIdx === -1) return { detail: keyword };
+
+            const fromKw = lineText.slice(kwIdx);
+            const commentIdx = fromKw.indexOf('!');
+            const signature = (commentIdx !== -1 ? fromKw.slice(0, commentIdx) : fromKw).trimEnd();
+            const comment = commentIdx !== -1 ? fromKw.slice(commentIdx + 1).trim() : undefined;
+            return { detail: signature || keyword, documentation: comment || undefined };
+        } catch {
+            return { detail: t.value };
+        }
     }
 }
