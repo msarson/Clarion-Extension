@@ -1,6 +1,7 @@
 import { CompletionItem, CompletionItemKind } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
+import * as fs from 'fs';
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
@@ -37,7 +38,7 @@ export class WordCompletionProvider {
      * @param position Cursor position (post-character)
      * @param partial Word fragment already typed (empty = show all)
      */
-    provide(document: TextDocument, position: Position, partial: string): CompletionItem[] {
+    async provide(document: TextDocument, position: Position, partial: string): Promise<CompletionItem[]> {
         try {
             const tokens = this.tokenCache.getTokens(document);
             if (!tokens || tokens.length === 0) return [];
@@ -70,7 +71,7 @@ export class WordCompletionProvider {
             // ----------------------------------------------------------------
             // A. Callable procedures
             // ----------------------------------------------------------------
-            this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
+            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
 
             // ----------------------------------------------------------------
             // B. Variables / Labels
@@ -110,26 +111,45 @@ export class WordCompletionProvider {
     // A. Procedures
     // -------------------------------------------------------------------------
 
-    private collectProcedures(
+    private async collectProcedures(
         tokens: Token[],
         document: TextDocument,
         containingProc: Token | undefined,
         containingRoutine: Token | undefined,
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
-    ): void {
+    ): Promise<void> {
         this.collectProceduresFromTokens(tokens, document, containingProc, add);
 
-        // If this is a MEMBER file, also collect procedures from the PROGRAM file's MAP
+        // If this is a MEMBER file, also collect procedures from the PROGRAM file's MAP.
+        // All procedures declared in ANY MODULE in the program's MAP are globally accessible —
+        // the module/DLL name is irrelevant for completion purposes.
         const memberToken = tokens.find(t =>
             t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
         );
         if (memberToken?.referencedFile) {
-            const programUri = 'file:///' + memberToken.referencedFile.replace(/\\/g, '/');
-            const programTokens = this.tokenCache.getTokensByUri(programUri) ??
-                this.tokenCache.getTokensByUri(programUri.toLowerCase());
+            const programTokens = this.getTokensForFile(memberToken.referencedFile);
             if (programTokens && programTokens.length > 0) {
                 this.collectProceduresFromTokens(programTokens, document, undefined, add);
             }
+        }
+    }
+
+    /**
+     * Get tokens for a file path — from TokenCache if available, otherwise read from disk.
+     */
+    private getTokensForFile(filePath: string): Token[] | null {
+        const uri = 'file:///' + filePath.replace(/\\/g, '/');
+        const cached = this.tokenCache.getTokensByUri(uri) ?? this.tokenCache.getTokensByUri(uri.toLowerCase());
+        if (cached && cached.length > 0) return cached;
+
+        // Fall back to reading from disk
+        try {
+            if (!fs.existsSync(filePath)) return null;
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const doc = TextDocument.create(uri, 'clarion', 1, content);
+            return this.tokenCache.getTokens(doc);
+        } catch {
+            return null;
         }
     }
 

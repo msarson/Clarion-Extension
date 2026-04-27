@@ -21,7 +21,7 @@ function makeProvider(document: TextDocument): WordCompletionProvider {
 suite('WordCompletionProvider', () => {
 
     suite('Debug — token inspection', () => {
-        test('inspect tokens for simple procedure with local var', () => {
+        test('inspect tokens for simple procedure with local var', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE(LONG pId)',
                 'LocalVar  LONG',
@@ -46,7 +46,7 @@ suite('WordCompletionProvider', () => {
     });
 
     suite('Global MAP procedures', () => {
-        test('surfaces GlobalProcedure labels', () => {
+        test('surfaces GlobalProcedure labels', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 '',
@@ -55,12 +55,12 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 3, character: 4 }, '');
+            const items = await p.provide(doc, { line: 3, character: 4 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('MyGlobalProc'), `Expected MyGlobalProc in: ${labels.join(', ')}`);
         });
 
-        test('surfaces MAP procedures at module level', () => {
+        test('surfaces MAP procedures at module level', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 '',
@@ -76,12 +76,12 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 10, character: 2 }, '');
+            const items = await p.provide(doc, { line: 10, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('HelperProc'), `Expected HelperProc in: ${labels.join(', ')}`);
         });
 
-        test('prefix filter reduces candidates', () => {
+        test('prefix filter reduces candidates', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 '',
@@ -98,7 +98,7 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 11, character: 0 }, 'Help');
+            const items = await p.provide(doc, { line: 11, character: 0 }, 'Help');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('HelperProc'), 'Expected HelperProc');
             assert.ok(!labels.includes('OtherProc'), 'Did not expect OtherProc with prefix Help');
@@ -106,7 +106,7 @@ suite('WordCompletionProvider', () => {
     });
 
     suite('Local MAP procedures (procedure-scoped)', () => {
-        test('surfaces local MAP procedures inside owning procedure', () => {
+        test('surfaces local MAP procedures inside owning procedure', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 '',
@@ -122,12 +122,12 @@ suite('WordCompletionProvider', () => {
             ].join('\n'));
             const p = makeProvider(doc);
             // Cursor in OuterProc CODE section
-            const items = p.provide(doc, { line: 9, character: 2 }, '');
+            const items = await p.provide(doc, { line: 9, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('LocalProc'), `Expected LocalProc in: ${labels.join(', ')}`);
         });
 
-        test('does NOT surface local MAP procedures outside owning procedure', () => {
+        test('does NOT surface local MAP procedures outside owning procedure', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 '',
@@ -147,14 +147,14 @@ suite('WordCompletionProvider', () => {
             ].join('\n'));
             const p = makeProvider(doc);
             // Cursor inside AnotherProc
-            const items = p.provide(doc, { line: 13, character: 2 }, '');
+            const items = await p.provide(doc, { line: 13, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(!labels.includes('LocalProc'), `LocalProc should NOT appear outside its owning procedure. Got: ${labels.join(', ')}`);
         });
     });
 
     suite('Local variables', () => {
-        test('surfaces local Label tokens in procedure data section', () => {
+        test('surfaces local Label tokens in procedure data section', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE()',
                 'LocalVar  LONG',
@@ -163,12 +163,12 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 3, character: 2 }, '');
+            const items = await p.provide(doc, { line: 3, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('LocalVar'), `Expected LocalVar in: ${labels.join(', ')}`);
         });
 
-        test('does NOT include structure fields as standalone variables', () => {
+        test('does NOT include structure fields as standalone variables', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE()',
                 'MyQueue QUEUE',
@@ -179,7 +179,7 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 5, character: 2 }, '');
+            const items = await p.provide(doc, { line: 5, character: 2 }, '');
             const labels = items.map(i => i.label);
             // Field1 is a structure field — should not appear as a standalone variable
             assert.ok(!labels.includes('Field1'), `Structure field Field1 should not appear as a variable. Got: ${labels.join(', ')}`);
@@ -187,21 +187,21 @@ suite('WordCompletionProvider', () => {
             assert.ok(labels.includes('MyQueue'), `Expected MyQueue in: ${labels.join(', ')}`);
         });
 
-        test('does NOT include procedure name as a variable', () => {
+        test('does NOT include procedure name as a variable', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE()',
                 'CODE',
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 1, character: 0 }, '');
+            const items = await p.provide(doc, { line: 1, character: 0 }, '');
             const varItems = items.filter(i => i.label === 'MyProc' && i.kind === CompletionItemKind.Variable);
             assert.strictEqual(varItems.length, 0, 'MyProc should not appear as a Variable completion item');
         });
     });
 
     suite('Parameters', () => {
-        test('surfaces simple parameters', () => {
+        test('surfaces simple parameters', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE(LONG pId, STRING pName)',
                 'CODE',
@@ -209,13 +209,13 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 2, character: 2 }, '');
+            const items = await p.provide(doc, { line: 2, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('pId'), `Expected pId in: ${labels.join(', ')}`);
             assert.ok(labels.includes('pName'), `Expected pName in: ${labels.join(', ')}`);
         });
 
-        test('surfaces optional parameters (angle-bracket notation)', () => {
+        test('surfaces optional parameters (angle-bracket notation)', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE(LONG pId, <STRING pOpt>)',
                 'CODE',
@@ -223,26 +223,26 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 2, character: 2 }, '');
+            const items = await p.provide(doc, { line: 2, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('pOpt'), `Expected pOpt in: ${labels.join(', ')}`);
         });
 
-        test('surfaces colon-prefixed parameters', () => {
+        test('surfaces colon-prefixed parameters', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE(LONG LOC:TestId)',
                 'CODE',
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 1, character: 0 }, '');
+            const items = await p.provide(doc, { line: 1, character: 0 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('LOC:TestId'), `Expected LOC:TestId in: ${labels.join(', ')}`);
         });
     });
 
     suite('Routine scope', () => {
-        test('routine sees parent procedure local variables', () => {
+        test('routine sees parent procedure local variables', async () => {
             const doc = makeDoc([
                 'MyProc PROCEDURE()',
                 'ParentVar  LONG',
@@ -253,14 +253,14 @@ suite('WordCompletionProvider', () => {
             ].join('\n'));
             const p = makeProvider(doc);
             // Cursor inside the routine
-            const items = p.provide(doc, { line: 4, character: 2 }, '');
+            const items = await p.provide(doc, { line: 4, character: 2 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('ParentVar'), `Expected ParentVar visible in routine. Got: ${labels.join(', ')}`);
         });
     });
 
     suite('Constants / equates', () => {
-        test('surfaces file-level constants', () => {
+        test('surfaces file-level constants', async () => {
             const doc = makeDoc([
                 'MyProg PROGRAM',
                 'MyConst EQUATE(42)',
@@ -271,19 +271,19 @@ suite('WordCompletionProvider', () => {
                 'END',
             ].join('\n'));
             const p = makeProvider(doc);
-            const items = p.provide(doc, { line: 5, character: 4 }, '');
+            const items = await p.provide(doc, { line: 5, character: 4 }, '');
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('MyConst'), `Expected MyConst in: ${labels.join(', ')}`);
         });
     });
 
     suite('No completions in comments or strings', () => {
-        test('returns results regardless — comment guard is in CompletionProvider', () => {
+        test('returns results regardless — comment guard is in CompletionProvider', async () => {
             // WordCompletionProvider itself has no comment guard (CompletionProvider handles it)
             // Just verify it does not throw on edge cases
             const doc = makeDoc('! nothing here\n');
             const p = makeProvider(doc);
-            assert.doesNotThrow(() => p.provide(doc, { line: 0, character: 5 }, 'n'));
+            await assert.doesNotReject(async () => { await p.provide(doc, { line: 0, character: 5 }, 'n'); });
         });
     });
 });

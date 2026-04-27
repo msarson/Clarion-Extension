@@ -69,7 +69,7 @@ export class CompletionProvider {
                 const partialMatch = lineText.match(/[\w:]+$/);
                 const partial = partialMatch ? partialMatch[0] : '';
                 logger.info(`CompletionProvider: word trigger, partial="${partial}"`);
-                return this.wordCompletion.provide(document, position, partial);
+                return await this.wordCompletion.provide(document, position, partial);
             }
 
             // Extract the chain before the dot (e.g. "SELF", "oKanban", "SELF.Order")
