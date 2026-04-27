@@ -25,9 +25,13 @@ const FULLY_RESERVED = new Set([
  * Keywords that may be labels for data structures or executable statements,
  * but NOT for PROCEDURE or FUNCTION declarations.
  * Source: Clarion Language Reference, "Reserved Words" table.
+ *
+ * CODE and DATA are execution-marker keywords — valid standalone at col 0,
+ * and valid as method/field names inside a structure (e.g. CLASS), but
+ * invalid as the label of a global PROCEDURE/FUNCTION declaration.
  */
 const STRUCTURE_ONLY = new Set([
-    'APPLICATION', 'CLASS', 'DETAIL', 'FILE', 'FOOTER',
+    'APPLICATION', 'CLASS', 'CODE', 'DATA', 'DETAIL', 'FILE', 'FOOTER',
     'FORM', 'GROUP', 'HEADER', 'ITEM', 'ITEMIZE',
     'JOIN', 'MAP', 'MENU', 'MENUBAR', 'MODULE',
     'OLE', 'OPTION', 'QUEUE', 'PARENT', 'RECORD',
