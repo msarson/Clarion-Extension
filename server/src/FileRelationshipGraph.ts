@@ -67,6 +67,8 @@ export class FileRelationshipGraph {
     public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
     public get buildStartTime(): Date | undefined { return this._buildStartTime; }
     public get buildEndTime(): Date | undefined { return this._buildEndTime; }
+    public get fileCount(): number { return this.forwardEdges.size; }
+    public get edgeCount(): number { return this.getAllEdges().length; }
 
     // ── Build ──────────────────────────────────────────────────────────────────
 

@@ -1188,10 +1188,17 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 }
                 const frgStart = Date.now();
                 logger.info(`⏱️ [STARTUP] FRG build starting for ${allFiles.length} source file(s) at +${frgStart - globalStartTime}ms`);
+                connection.sendNotification('clarion/graphStatus', { status: 'building', fileCount: allFiles.length });
                 await graph.buildInBackground(allFiles).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
                 logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                connection.sendNotification('clarion/graphStatus', {
+                    status: 'built',
+                    fileCount: graph.fileCount,
+                    edgeCount: graph.edgeCount,
+                    durationMs: graph.buildDurationMs
+                });
             });
 
             // Log each project in the global solution

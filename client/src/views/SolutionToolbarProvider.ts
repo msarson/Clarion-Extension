@@ -7,14 +7,27 @@ import LoggerManager from '../utils/LoggerManager';
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
 
+export interface GraphStatus {
+    status: 'building' | 'built';
+    fileCount?: number;
+    edgeCount?: number;
+    durationMs?: number;
+}
+
 export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     public static readonly viewId = 'clarionSolutionToolbar';
 
     private _view?: vscode.WebviewView;
     private readonly _extensionUri: vscode.Uri;
+    private _graphStatus: GraphStatus | undefined;
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
+    }
+
+    public setGraphStatus(status: GraphStatus): void {
+        this._graphStatus = status;
+        this.update();
     }
 
     resolveWebviewView(
@@ -101,6 +114,19 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 if (startup) {
                     rows.push({ label: 'Startup', value: startup.name });
                 }
+            }
+        }
+
+        if (this._graphStatus) {
+            if (this._graphStatus.status === 'building') {
+                const count = this._graphStatus.fileCount ?? 0;
+                rows.push({ label: 'Graph', value: `Building… (${count} files)` });
+            } else {
+                const files = this._graphStatus.fileCount ?? 0;
+                const edges = this._graphStatus.edgeCount ?? 0;
+                const ms = this._graphStatus.durationMs;
+                const time = ms !== undefined ? ` ${ms}ms` : '';
+                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}` });
             }
         }
 

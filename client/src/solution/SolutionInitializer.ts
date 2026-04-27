@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
-import { refreshSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView, setToolbarGraphStatus } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
@@ -335,6 +335,18 @@ export async function initializeSolution(
             SolutionCache.getInstance().markActivationComplete();
             logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
         });
+
+        // Track FileRelationshipGraph build progress in the Actions toolbar
+        context.subscriptions.push(
+            client.onNotification('clarion/graphStatus', (params: {
+                status: 'building' | 'built';
+                fileCount?: number;
+                edgeCount?: number;
+                durationMs?: number;
+            }) => {
+                setToolbarGraphStatus(params);
+            })
+        );
 
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
