@@ -320,14 +320,15 @@ export class CompletionProvider {
 
     /** Returns true if the cursor appears to be inside a Clarion comment or string. */
     private isInCommentOrString(lineText: string): boolean {
-        // Walk the text to correctly handle '!' inside string literals
+        // Walk the text to correctly handle '!' / '|' inside string literals.
+        // '!' starts a line comment; '|' is line-continuation — everything after it is a comment.
         let inString = false;
         for (const ch of lineText) {
             if (inString) {
                 if (ch === "'") inString = false;
             } else {
                 if (ch === "'") inString = true;
-                else if (ch === '!') return true;
+                else if (ch === '!' || ch === '|') return true;
             }
         }
         return inString;
