@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
 import * as fs from 'fs';
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import LoggerManager from '../logger';
@@ -120,18 +121,31 @@ export class WordCompletionProvider {
     ): Promise<void> {
         this.collectProceduresFromTokens(tokens, document, containingProc, add);
 
-        // If this is a MEMBER file, also collect procedures from the PROGRAM file's MAP.
-        // All procedures declared in ANY MODULE in the program's MAP are globally accessible —
-        // the module/DLL name is irrelevant for completion purposes.
-        const memberToken = tokens.find(t =>
-            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
-        );
-        if (memberToken?.referencedFile) {
-            const programTokens = this.getTokensForFile(memberToken.referencedFile);
+        // Use FileRelationshipGraph to find the PROGRAM file for this MEMBER file.
+        // All procedures declared in ANY MODULE in the program's MAP are globally
+        // accessible — the module/DLL name is irrelevant for completion purposes.
+        const graph = FileRelationshipGraph.getInstance();
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programPath = graph.isBuilt
+            ? graph.getProgramFile(currentPath)
+            : this.getProgramFileFromTokens(tokens);  // fallback while graph is building
+
+        if (programPath) {
+            const programTokens = this.getTokensForFile(programPath);
             if (programTokens && programTokens.length > 0) {
                 this.collectProceduresFromTokens(programTokens, document, undefined, add);
             }
         }
+    }
+
+    /**
+     * Fallback: find program file path by scanning MEMBER token in current file tokens.
+     * Used only while the FileRelationshipGraph is still building.
+     */
+    private getProgramFileFromTokens(tokens: Token[]): string | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+        )?.referencedFile;
     }
 
     /**
@@ -142,7 +156,6 @@ export class WordCompletionProvider {
         const cached = this.tokenCache.getTokensByUri(uri) ?? this.tokenCache.getTokensByUri(uri.toLowerCase());
         if (cached && cached.length > 0) return cached;
 
-        // Fall back to reading from disk
         try {
             if (!fs.existsSync(filePath)) return null;
             const content = fs.readFileSync(filePath, 'utf-8');
