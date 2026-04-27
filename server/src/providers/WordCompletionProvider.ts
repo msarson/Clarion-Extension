@@ -1,4 +1,4 @@
-import { CompletionItem, CompletionItemKind } from 'vscode-languageserver/node';
+import { CompletionItem, CompletionItemKind, InsertTextFormat } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
 import * as fs from 'fs';
@@ -98,6 +98,11 @@ export class WordCompletionProvider {
             // D. Constants / equates
             // ----------------------------------------------------------------
             this.collectConstants(tokens, add);
+
+            // ----------------------------------------------------------------
+            // E. Language keywords
+            // ----------------------------------------------------------------
+            this.collectKeywords(seen);
 
             // ----------------------------------------------------------------
             // Filter by prefix
@@ -359,6 +364,55 @@ export class WordCompletionProvider {
                 const paramName = m[2];
                 const paramType = m[1].trim();
                 add(paramName, CompletionItemKind.Variable, `parameter: ${paramType}`);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E. Language keywords
+    // -------------------------------------------------------------------------
+
+    /**
+     * Block-structure keywords that always require a matching END.
+     * These get a snippet that places END on the next line so the user
+     * doesn't have to type it — but nothing else is presumed.
+     */
+    private static readonly BLOCK_STRUCTURES = new Set([
+        'ACCEPT', 'APPLICATION', 'BEGIN', 'CASE', 'CLASS', 'DETAIL',
+        'EXECUTE', 'FILE', 'FOOTER', 'FORM', 'GROUP', 'HEADER',
+        'IF', 'INTERFACE', 'ITEMIZE', 'JOIN', 'LOOP', 'MAP',
+        'MENU', 'MENUBAR', 'MODULE', 'OLE', 'OPTION', 'QUEUE',
+        'RECORD', 'REPORT', 'SECTION', 'SHEET', 'TAB', 'TOOLBAR',
+        'VIEW', 'WINDOW',
+    ]);
+
+    /** Single-line keywords — no auto-insertion beyond the word itself. */
+    private static readonly PLAIN_KEYWORDS = [
+        'BREAK', 'CYCLE', 'EXIT', 'RETURN',
+        'CODE', 'DATA',
+        'ELSE', 'ELSIF', 'OF', 'OROF', 'THEN', 'TIMES',
+        'UNTIL', 'WHILE',
+        'AND', 'NOT', 'OR', 'XOR',
+        'NEW', 'PARENT', 'SELF',
+    ];
+
+    private collectKeywords(seen: Map<string, CompletionItem>): void {
+        for (const kw of WordCompletionProvider.BLOCK_STRUCTURES) {
+            if (!seen.has(kw)) {
+                seen.set(kw, {
+                    label: kw,
+                    kind: CompletionItemKind.Keyword,
+                    insertText: `${kw}\n$0\nEND`,
+                    insertTextFormat: InsertTextFormat.Snippet,
+                });
+            }
+        }
+        for (const kw of WordCompletionProvider.PLAIN_KEYWORDS) {
+            if (!seen.has(kw)) {
+                seen.set(kw, {
+                    label: kw,
+                    kind: CompletionItemKind.Keyword,
+                });
             }
         }
     }
