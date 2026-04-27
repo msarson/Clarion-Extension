@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
@@ -368,8 +369,17 @@ export class SignatureHelpProvider {
             }
         }
         
-        // Otherwise, find procedure declarations in MAP
-        const procedures = this.findProcedureInMap(methodName, tokens, document);
+        // Otherwise, find procedure declarations in MAP (current file first)
+        let procedures = this.findProcedureInMap(methodName, tokens, document);
+
+        // If not found locally, search the program file's MAP via the FileRelationshipGraph
+        if (procedures.length === 0) {
+            const programDoc = this.getProgramFileDocument(document);
+            if (programDoc) {
+                const programTokens = this.tokenCache.getTokens(programDoc);
+                procedures = this.findProcedureInMap(methodName, programTokens, programDoc);
+            }
+        }
         
         return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount));
     }
@@ -572,6 +582,43 @@ export class SignatureHelpProvider {
     }
 
     /**
+     * Get the TextDocument for the program file of a MEMBER file, using the
+     * FileRelationshipGraph for O(1) lookup. Falls back to scanning MEMBER tokens.
+     * Returns null if this document is already a PROGRAM or the program file is not found.
+     */
+    private getProgramFileDocument(document: TextDocument): TextDocument | null {
+        const graph = FileRelationshipGraph.getInstance();
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+
+        let programPath: string | undefined;
+        if (graph.isBuilt) {
+            programPath = graph.getProgramFile(currentPath);
+        } else {
+            // Fallback while graph is building — scan MEMBER token
+            const tokens = this.tokenCache.getCachedTokens(document);
+            programPath = tokens.find(t =>
+                t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+            )?.referencedFile;
+        }
+
+        if (!programPath) return null;
+
+        const uri = 'file:///' + programPath.replace(/\\/g, '/');
+        const cached = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentText(uri.toLowerCase());
+        if (cached !== null) {
+            return TextDocument.create(uri, 'clarion', 1, cached);
+        }
+
+        try {
+            if (!fs.existsSync(programPath)) return null;
+            const content = fs.readFileSync(programPath, 'utf-8');
+            return TextDocument.create(uri, 'clarion', 1, content);
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * Finds the type of a variable
      */
     private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
@@ -607,8 +654,8 @@ export class SignatureHelpProvider {
      * Creates a SignatureInformation object from a signature string
      */
     private createSignatureInformation(methodName: string, signature: string, paramCount: number): SignatureInformation {
-        // Extract parameters from signature
-        const match = signature.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        // Extract parameters from signature (handles both PROCEDURE and FUNCTION)
+        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
         const parameters: ParameterInformation[] = [];
 
         if (match && match[1]) {
