@@ -320,13 +320,17 @@ export class CompletionProvider {
 
     /** Returns true if the cursor appears to be inside a Clarion comment or string. */
     private isInCommentOrString(lineText: string): boolean {
-        // Clarion comments start with '!'
-        const commentIdx = lineText.indexOf('!');
-        if (commentIdx !== -1 && commentIdx < lineText.length - 1) return true;
-        // Basic string check: odd number of single quotes before cursor
-        const singleQuotes = (lineText.match(/'/g) || []).length;
-        if (singleQuotes % 2 !== 0) return true;
-        return false;
+        // Walk the text to correctly handle '!' inside string literals
+        let inString = false;
+        for (const ch of lineText) {
+            if (inString) {
+                if (ch === "'") inString = false;
+            } else {
+                if (ch === "'") inString = true;
+                else if (ch === '!') return true;
+            }
+        }
+        return inString;
     }
 
     /**

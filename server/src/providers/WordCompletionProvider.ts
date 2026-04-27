@@ -6,6 +6,9 @@ import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
+import { DataTypeService } from '../utils/DataTypeService';
+import { ControlService } from '../utils/ControlService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
@@ -27,6 +30,9 @@ logger.setLevel("error");
 export class WordCompletionProvider {
     private tokenCache: TokenCache;
     private scopeAnalyzer: ScopeAnalyzer;
+    private builtinService = BuiltinFunctionService.getInstance();
+    private dataTypeService = DataTypeService.getInstance();
+    private controlService = ControlService.getInstance();
 
     constructor(tokenCache: TokenCache, scopeAnalyzer: ScopeAnalyzer) {
         this.tokenCache = tokenCache;
@@ -103,6 +109,21 @@ export class WordCompletionProvider {
             // E. Language keywords
             // ----------------------------------------------------------------
             this.collectKeywords(seen);
+
+            // ----------------------------------------------------------------
+            // F. Built-in functions (from clarion-builtins.json)
+            // ----------------------------------------------------------------
+            this.collectBuiltins(seen);
+
+            // ----------------------------------------------------------------
+            // G. Data types (from clarion-datatypes.json)
+            // ----------------------------------------------------------------
+            this.collectDataTypes(seen);
+
+            // ----------------------------------------------------------------
+            // H. Window / report controls (from clarion-controls.json)
+            // ----------------------------------------------------------------
+            this.collectControls(seen);
 
             // ----------------------------------------------------------------
             // Filter by prefix
@@ -364,6 +385,59 @@ export class WordCompletionProvider {
                 const paramName = m[2];
                 const paramType = m[1].trim();
                 add(paramName, CompletionItemKind.Variable, `parameter: ${paramType}`);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // F. Built-in functions
+    // -------------------------------------------------------------------------
+
+    private collectBuiltins(seen: Map<string, CompletionItem>): void {
+        for (const name of this.builtinService.getAllBuiltinNames()) {
+            const key = name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: name,
+                    kind: CompletionItemKind.Function,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // G. Data types
+    // -------------------------------------------------------------------------
+
+    private collectDataTypes(seen: Map<string, CompletionItem>): void {
+        for (const dt of this.dataTypeService.getAllDataTypes()) {
+            const key = dt.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: dt.name,
+                    kind: CompletionItemKind.TypeParameter,
+                    detail: dt.description,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // H. Window / report controls
+    // -------------------------------------------------------------------------
+
+    private collectControls(seen: Map<string, CompletionItem>): void {
+        for (const ctrl of [
+            ...this.controlService.getAllWindowControls(),
+            ...this.controlService.getAllReportControls(),
+        ]) {
+            const key = ctrl.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: ctrl.name,
+                    kind: CompletionItemKind.Keyword,
+                    detail: ctrl.description,
+                });
             }
         }
     }
