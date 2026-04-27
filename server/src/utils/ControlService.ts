@@ -1,10 +1,17 @@
 import * as controlsData from '../data/clarion-controls.json';
 
+export interface ControlParam {
+    name: string;
+    description: string;
+    optional: boolean;
+}
+
 export interface ControlDefinition {
     name: string;
     description: string;
     syntax: string;
     commonAttributes: string[];
+    params?: ControlParam[];
 }
 
 interface ControlData {
@@ -130,6 +137,13 @@ export class ControlService {
      */
     public getAllContainerStructures(): ControlDefinition[] {
         return Array.from(this.containerStructures.values());
+    }
+
+    /**
+     * Get a single container structure definition by name
+     */
+    public getContainerStructure(name: string): ControlDefinition | undefined {
+        return this.containerStructures.get(name.toUpperCase());
     }
 
     /**

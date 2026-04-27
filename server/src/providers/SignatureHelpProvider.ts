@@ -358,6 +358,13 @@ export class SignatureHelpProvider {
                 // Fall through to check for user-defined procedures
             }
         }
+
+        // Check if it's a container structure (WINDOW, APPLICATION)
+        const containerSig = this.getContainerStructureSignature(methodName);
+        if (containerSig) {
+            logger.info(`Found container structure: ${methodName}`);
+            return [containerSig];
+        }
         
         // If we didn't check data type first, check it now as fallback
         if (!checkDataTypeFirst && this.dataTypeService.hasDataType(methodName)) {
@@ -694,6 +701,26 @@ export class SignatureHelpProvider {
         return {
             label,
             documentation: undefined,
+            parameters
+        };
+    }
+
+    /**
+     * Creates a SignatureInformation object for a container structure (WINDOW, APPLICATION)
+     */
+    private getContainerStructureSignature(name: string): SignatureInformation | null {
+        const ctrl = this.controlService.getContainerStructure(name);
+        if (!ctrl || !ctrl.params || ctrl.params.length === 0) return null;
+
+        const parameters: ParameterInformation[] = ctrl.params.map(p => ({
+            label: p.optional ? `[${p.name}]` : p.name,
+            documentation: p.description
+        }));
+
+        const paramLabels = ctrl.params.map(p => p.optional ? `[${p.name}]` : p.name).join(', ');
+        return {
+            label: `${ctrl.name}(${paramLabels})`,
+            documentation: ctrl.description,
             parameters
         };
     }

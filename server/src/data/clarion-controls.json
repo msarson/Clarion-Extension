@@ -218,12 +218,18 @@
       "name": "WINDOW",
       "description": "Declares a dialog window or document window containing controls. Requires a label and title string. Opened by OPEN() and event-processed by ACCEPT.",
       "syntax": "label WINDOW('title'[, AT(x,y,w,h)][, CENTER][, MDI][, MODAL][, RESIZE][, MAX][, ICON(file)][, FONT(name,size)][, GRAY][, TIMER(n)][, AUTO][, SYSTEM][, STATUS(n)][, DOUBLE|NOFRAME][, TOOLBOX][, MAXIMIZE][, ICONIZE][, COLOR(fg,bg)][, HLP(id)])",
+      "params": [
+        { "name": "title", "description": "String constant for the window title bar text (PROP:Text)", "optional": false }
+      ],
       "commonAttributes": ["AT", "CENTER", "MDI", "MODAL", "RESIZE", "MAX", "ICON", "FONT", "GRAY", "TIMER", "AUTO", "SYSTEM", "STATUS", "DOUBLE", "NOFRAME", "TOOLBOX", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "DOCK", "DOCKED", "LAYOUT", "MASK", "MSG", "PALETTE", "DROPID", "IMM"]
     },
     {
       "name": "APPLICATION",
       "description": "Declares an MDI frame window. The APPLICATION is the top-level container for MDI child windows. Requires a label and title string.",
       "syntax": "label APPLICATION('title'[, AT(x,y,w,h)][, CENTER][, MAX][, ICON(file)][, FONT(name,size)][, GRAY][, TIMER(n)][, STATUS(n)][, MAXIMIZE][, ICONIZE][, COLOR(fg,bg)][, HLP(id)])",
+      "params": [
+        { "name": "title", "description": "String constant for the MDI frame window title bar text (PROP:Text)", "optional": false }
+      ],
       "commonAttributes": ["AT", "CENTER", "MAX", "ICON", "FONT", "GRAY", "TIMER", "STATUS", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "MASK", "MSG", "PALETTE"]
     },
     {
