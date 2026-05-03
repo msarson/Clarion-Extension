@@ -1008,6 +1008,186 @@ END`;
         });
     });
 
+    suite('Branches on CASE/IF (Gap G)', () => {
+        function buildG(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { tokens, structure };
+        }
+
+        function findStructureAt(tokens: any[], keyword: string, line?: number) {
+            return tokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.value.toUpperCase() === keyword.toUpperCase() &&
+                (line === undefined || t.line === line)
+            );
+        }
+
+        test('CASE with three OF branches and an ELSE: branches[] reflects all four', () => {
+            const code = [
+                'TestProc PROCEDURE()',           // 0
+                'CODE',                            // 1
+                '  CASE x',                        // 2
+                '  OF 1',                          // 3
+                '    y = 1',                       // 4
+                '  OF 2',                          // 5
+                '    y = 2',                       // 6
+                '  OF 3',                          // 7
+                '    y = 3',                       // 8
+                '  ELSE',                          // 9
+                '    y = 0',                       // 10
+                '  END',                           // 11
+                '  RETURN',                        // 12
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const caseTok = findStructureAt(tokens, 'CASE');
+            assert.ok(caseTok, 'CASE token must be present');
+            const branches = structure.getBranches(caseTok);
+            assert.strictEqual(branches.length, 4, `expected 4 branches; got ${branches.length}`);
+            assert.deepStrictEqual(branches.map(b => b.kind), ['OF', 'OF', 'OF', 'ELSE']);
+            // start lines correspond to the keyword lines
+            assert.deepStrictEqual(branches.map(b => b.startLine), [3, 5, 7, 9]);
+            // end lines: last body line of each branch
+            assert.strictEqual(branches[0].endLine, 4, 'OF 1 body ends at line 4');
+            assert.strictEqual(branches[1].endLine, 6, 'OF 2 body ends at line 6');
+            assert.strictEqual(branches[2].endLine, 8, 'OF 3 body ends at line 8');
+            assert.strictEqual(branches[3].endLine, 10, 'ELSE body ends at line 10 (END is line 11)');
+            // OF branches carry the value expression; ELSE does not
+            assert.strictEqual(branches[0].valueExpr, '1');
+            assert.strictEqual(branches[1].valueExpr, '2');
+            assert.strictEqual(branches[2].valueExpr, '3');
+            assert.strictEqual(branches[3].valueExpr, undefined);
+            // keywordToken refers to the actual ConditionalContinuation token
+            assert.ok(branches.every(b => b.keywordToken.type === TokenType.ConditionalContinuation));
+        });
+
+        test('IF / ELSIF / ELSE: kinds reflect the keyword, ELSE has no expression', () => {
+            const code = [
+                'TestProc PROCEDURE()',         // 0
+                'CODE',                          // 1
+                '  IF x = 1',                    // 2
+                '    y = 1',                     // 3
+                '  ELSIF x = 2',                 // 4
+                '    y = 2',                     // 5
+                '  ELSE',                        // 6
+                '    y = 0',                     // 7
+                '  END',                         // 8
+                '  RETURN',                      // 9
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const ifTok = findStructureAt(tokens, 'IF');
+            assert.ok(ifTok, 'IF token must be present');
+            const branches = structure.getBranches(ifTok);
+            assert.deepStrictEqual(branches.map(b => b.kind), ['ELSIF', 'ELSE']);
+            assert.strictEqual(branches[0].valueExpr, 'x = 2');
+            assert.strictEqual(branches[1].valueExpr, undefined);
+        });
+
+        test('OROF is recorded as its own branch entry with kind=OROF', () => {
+            const code = [
+                'TestProc PROCEDURE()',         // 0
+                'CODE',                          // 1
+                '  CASE x',                      // 2
+                '  OF 1',                        // 3
+                '    y = 1',                     // 4
+                '  OROF 2',                      // 5
+                '    y = 2',                     // 6
+                '  OF 3',                        // 7
+                '    y = 3',                     // 8
+                '  END',                         // 9
+                '  RETURN',                      // 10
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const caseTok = findStructureAt(tokens, 'CASE');
+            const branches = structure.getBranches(caseTok);
+            assert.deepStrictEqual(branches.map(b => b.kind), ['OF', 'OROF', 'OF']);
+            assert.strictEqual(branches[1].valueExpr, '2', 'OROF expression captured');
+        });
+
+        test('OF expression spanning a `|` continuation joins via getLogicalLine', () => {
+            const code = [
+                'TestProc PROCEDURE()',                     // 0
+                'CODE',                                      // 1
+                '  CASE x',                                  // 2
+                '  OF Customer:State = \'NY\' |',            // 3 (continues)
+                '       OR Customer:State = \'NJ\'',         // 4
+                '    y = 1',                                 // 5
+                '  END',                                     // 6
+                '  RETURN',                                  // 7
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const caseTok = findStructureAt(tokens, 'CASE');
+            const branches = structure.getBranches(caseTok);
+            assert.strictEqual(branches.length, 1);
+            assert.strictEqual(branches[0].kind, 'OF');
+            assert.ok(
+                branches[0].valueExpr?.includes("Customer:State = 'NY'") &&
+                branches[0].valueExpr?.includes("Customer:State = 'NJ'"),
+                `valueExpr should join both segments; got: "${branches[0].valueExpr}"`
+            );
+        });
+
+        test('CASE with no branches (just statements) yields an empty branches array', () => {
+            const code = [
+                'TestProc PROCEDURE()',         // 0
+                'CODE',                          // 1
+                '  CASE x',                      // 2
+                '  END',                         // 3
+                '  RETURN',                      // 4
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const caseTok = findStructureAt(tokens, 'CASE');
+            assert.ok(caseTok);
+            assert.deepStrictEqual(structure.getBranches(caseTok), []);
+        });
+
+        test('Nested IF inside a CASE OF: inner branches do not bleed into outer', () => {
+            const code = [
+                'TestProc PROCEDURE()',         // 0
+                'CODE',                          // 1
+                '  CASE x',                      // 2
+                '  OF 1',                        // 3
+                '    IF y = 1',                  // 4
+                '      z = 1',                   // 5
+                '    ELSIF y = 2',               // 6  ← inner ELSIF, must NOT show on outer CASE
+                '      z = 2',                   // 7
+                '    ELSE',                      // 8  ← inner ELSE, must NOT show on outer CASE
+                '      z = 0',                   // 9
+                '    END',                       // 10
+                '  OF 2',                        // 11
+                '    z = 99',                    // 12
+                '  END',                         // 13
+                '  RETURN',                      // 14
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const caseTok = findStructureAt(tokens, 'CASE');
+            const ifTok = findStructureAt(tokens, 'IF');
+            assert.ok(caseTok && ifTok);
+
+            const outerBranches = structure.getBranches(caseTok);
+            assert.deepStrictEqual(outerBranches.map(b => b.kind), ['OF', 'OF'],
+                'outer CASE should see only its two OF branches, not the inner IF/ELSIF/ELSE');
+
+            const innerBranches = structure.getBranches(ifTok);
+            assert.deepStrictEqual(innerBranches.map(b => b.kind), ['ELSIF', 'ELSE'],
+                'inner IF should see its own ELSIF + ELSE');
+        });
+
+        test('non-CASE/non-IF token returns empty branches', () => {
+            const code = [
+                'MyClass CLASS,TYPE',
+                '  Foo PROCEDURE()',
+                'END',
+            ].join('\n');
+            const { tokens, structure } = buildG(code);
+            const cls = findStructureAt(tokens, 'CLASS');
+            assert.ok(cls);
+            assert.deepStrictEqual(structure.getBranches(cls), []);
+        });
+    });
+
     suite('findRoutines()', () => {
         test('should return all routines when no name supplied', () => {
             const code = `TestProc PROCEDURE()

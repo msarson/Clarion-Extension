@@ -334,38 +334,31 @@ export function validateFileStructures(tokens: Token[], document: TextDocument):
 export function validateCaseStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
+    // Reads `branches[]` populated by Gap G's `populateBranches` pass on each CASE
+    // structure. The pass already filters out branches that belong to nested
+    // CASE/IF blocks, so OROF-without-preceding-OF detection becomes a simple
+    // ordering check on the array.
+    for (const token of tokens) {
+        if (token.type !== TokenType.Structure) continue;
+        if (token.value.toUpperCase() !== 'CASE') continue;
+        const branches = token.branches;
+        if (!branches || branches.length === 0) continue;
 
-        if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CASE') {
-            let hasOf = false;
-            let lastOfIndex = -1;
-
-            for (let j = i + 1; j < tokens.length; j++) {
-                const nextToken = tokens[j];
-                const upperValue = nextToken.value.toUpperCase();
-
-                if (upperValue === 'OF') {
-                    hasOf = true;
-                    lastOfIndex = j;
-                }
-
-                if (upperValue === 'OROF') {
-                    if (!hasOf || lastOfIndex === -1) {
-                        diagnostics.push({
-                            severity: DiagnosticSeverity.Error,
-                            range: {
-                                start: { line: nextToken.line, character: nextToken.start },
-                                end: { line: nextToken.line, character: nextToken.start + nextToken.value.length }
-                            },
-                            message: 'OROF must be preceded by an OF clause in CASE structure',
-                            source: 'clarion'
-                        });
-                    }
-                }
-
-                if (upperValue === 'END' && nextToken.type === TokenType.EndStatement) break;
-                if (nextToken.type === TokenType.Structure && nextToken.line > token.line) break;
+        let sawOf = false;
+        for (const branch of branches) {
+            if (branch.kind === 'OF') {
+                sawOf = true;
+            } else if (branch.kind === 'OROF' && !sawOf) {
+                const kw = branch.keywordToken;
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Error,
+                    range: {
+                        start: { line: kw.line, character: kw.start },
+                        end: { line: kw.line, character: kw.start + kw.value.length },
+                    },
+                    message: 'OROF must be preceded by an OF clause in CASE structure',
+                    source: 'clarion'
+                });
             }
         }
     }

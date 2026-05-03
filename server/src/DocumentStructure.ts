@@ -1,4 +1,5 @@
 import { Token, TokenType } from "./ClarionTokenizer";
+import { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
 import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
@@ -7,6 +8,7 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
+export type { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
@@ -618,6 +620,104 @@ export class DocumentStructure {
         // window descriptor pass above, this runs after the logical-line cache
         // is cleared so multi-line VIEW headers / clauses can be joined cleanly.
         this.populateViewDescriptors();
+
+        // Walk every CASE / IF structure and record its OF / OROF / ELSE / ELSIF
+        // clauses on the parent token's `branches` field.
+        this.populateBranches();
+    }
+
+    /**
+     * Walks every CASE and IF structure and records its OF / OROF / ELSE / ELSIF
+     * clauses on the parent token's `branches` array. Branches are emitted in
+     * source order; each entry covers the body lines that belong to that branch
+     * (up to the next branch's keyword line, or the END line for the last).
+     *
+     * Nested CASE/IF inside a branch are handled by their own `populateBranches`
+     * pass — the outer pass skips their inner ConditionalContinuation tokens to
+     * avoid double-attribution.
+     */
+    private populateBranches(): void {
+        const cases = this.structuresByType.get('CASE') ?? [];
+        const ifs   = this.structuresByType.get('IF') ?? [];
+        const containers: Token[] = [...cases, ...ifs];
+        if (containers.length === 0) return;
+
+        for (const container of containers) {
+            // Always reset — process() may run more than once on the same DS.
+            container.branches = undefined;
+
+            if (container.finishesAt === undefined) continue;
+
+            // Inner CASE/IF blocks fully contained inside this one. Their
+            // ConditionalContinuation tokens are owned by the inner block.
+            const inner = containers.filter(c =>
+                c !== container &&
+                c.finishesAt !== undefined &&
+                c.line > container.line &&
+                c.finishesAt < container.finishesAt!
+            );
+
+            const branchTokens: Token[] = [];
+            for (const t of this.tokens) {
+                if (t.type !== TokenType.ConditionalContinuation) continue;
+                if (t.line <= container.line || t.line >= container.finishesAt) continue;
+                const upper = t.value.toUpperCase();
+                if (upper !== 'OF' && upper !== 'OROF' && upper !== 'ELSE' && upper !== 'ELSIF') continue;
+
+                // Skip if inside a nested CASE/IF — that pass owns it.
+                const inNested = inner.some(n =>
+                    t.line > n.line && t.line < n.finishesAt!
+                );
+                if (inNested) continue;
+
+                branchTokens.push(t);
+            }
+
+            if (branchTokens.length === 0) continue;
+            // Sort by source position (line then column) to be deterministic.
+            branchTokens.sort((a, b) =>
+                a.line !== b.line ? a.line - b.line : a.start - b.start
+            );
+
+            const branches: BranchInfo[] = [];
+            for (let i = 0; i < branchTokens.length; i++) {
+                const tok = branchTokens[i];
+                const next = branchTokens[i + 1];
+                const startLine = tok.line;
+                const endLine = next ? next.line - 1 : container.finishesAt - 1;
+                const kind = tok.value.toUpperCase() as BranchKind;
+                const valueExpr = kind === 'ELSE' ? undefined : this.extractBranchExpression(tok);
+                const entry: BranchInfo = {
+                    kind,
+                    startLine,
+                    endLine,
+                    keywordToken: tok,
+                };
+                if (valueExpr !== undefined) entry.valueExpr = valueExpr;
+                branches.push(entry);
+            }
+            container.branches = branches;
+        }
+    }
+
+    /**
+     * Returns the conditional expression text that follows an OF / OROF / ELSIF
+     * keyword on its logical line, joined across `|` continuations. Trailing
+     * whitespace is trimmed; comments are already stripped by `getLogicalLine`.
+     */
+    private extractBranchExpression(keywordToken: Token): string | undefined {
+        const logical = this.getLogicalLine(keywordToken.line);
+        if (!logical) return undefined;
+        const joined = logical.joinedText;
+        // Find the keyword in the joined text (case-insensitive). The keyword's
+        // physical column is `keywordToken.start` on its physical line, but the
+        // joined text might have rewritten leading whitespace; so search for
+        // the first occurrence of the keyword as a whole word.
+        const re = new RegExp(`\\b${keywordToken.value.toUpperCase()}\\b`, 'i');
+        const match = joined.match(re);
+        if (!match || match.index === undefined) return undefined;
+        const after = joined.slice(match.index + match[0].length).trim();
+        return after === '' ? undefined : after;
     }
 
     /**
@@ -2643,6 +2743,15 @@ export class DocumentStructure {
             if (desc) return desc;
         }
         return undefined;
+    }
+
+    /**
+     * Returns the OF / OROF / ELSE / ELSIF clause boundaries recorded on a
+     * CASE or IF parent token by `populateBranches()`. Empty array when
+     * `caseOrIfToken` isn't a CASE/IF Structure or carries no branches.
+     */
+    public getBranches(caseOrIfToken: Token): BranchInfo[] {
+        return caseOrIfToken.branches ? [...caseOrIfToken.branches] : [];
     }
 
     // =====================================================
