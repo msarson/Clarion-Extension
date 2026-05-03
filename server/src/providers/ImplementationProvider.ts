@@ -215,8 +215,9 @@ export class ImplementationProvider {
 
         // 3. Check if this is a MAP procedure declaration (inside MAP block)
         // OR a MODULE procedure declaration (inside MODULE block in INCLUDE file)
-        const isInMap = documentStructure.isInMapBlock(position.line);
-        const isInModule = !isInMap && this.isInModuleBlock(position.line, tokens);
+        const containerCtx = documentStructure.getStructureContextAt(position.line);
+        const isInMap = containerCtx.inMap;
+        const isInModule = !isInMap && containerCtx.inModule;
         
         if (isInMap || isInModule) {
             // Use ClarionPatterns.MAP_PROCEDURE_DECLARATION which handles both PROCEDURE and FUNCTION
@@ -314,18 +315,6 @@ export class ImplementationProvider {
         }
 
         return null;
-    }
-
-    /**
-     * Check if a line is inside a MODULE block
-     */
-    private isInModuleBlock(line: number, tokens: Token[]): boolean {
-        const moduleBlocks = TokenHelper.findModuleStructures(tokens).filter(t =>
-            t.line <= line &&
-            t.finishesAt !== undefined &&
-            t.finishesAt >= line
-        );
-        return moduleBlocks.length > 0;
     }
 
     /**

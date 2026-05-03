@@ -1127,10 +1127,164 @@ END`;
             assert.ok(someVar, 'Should find variable token');
             
             const result = structure.isInGlobalScope(someVar!);
-            
+
             // When no CODE exists, everything could be considered global
             // But safer to return true (no CODE = all is global scope in Clarion)
             assert.strictEqual(result, true, 'Should be in global scope when no CODE marker');
+        });
+    });
+
+    suite('getStructureContextAt()', () => {
+        function build(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return structure;
+        }
+
+        test('returns empty chain at file scope (before any structure)', () => {
+            const code = [
+                'MyProg PROGRAM',                  // 0
+                '',                                 // 1
+                'TestProc PROCEDURE()',             // 2
+                'CODE',                             // 3
+                'END',                              // 4
+            ].join('\n');
+            const structure = build(code);
+            const ctx = structure.getStructureContextAt(0);
+            assert.strictEqual(ctx.chain.length, 0, 'PROGRAM line has empty chain');
+            assert.strictEqual(ctx.innermost, null);
+            assert.strictEqual(ctx.inMap, false);
+            assert.strictEqual(ctx.inClass, false);
+        });
+
+        test('cursor inside MAP body sets inMap=true', () => {
+            const code = [
+                'MyMap MAP',                        // 0
+                "  MODULE('foo.clw')",              // 1
+                '    Foo PROCEDURE()',              // 2
+                '  END',                            // 3
+                'END',                              // 4
+            ].join('\n');
+            const structure = build(code);
+            const ctx = structure.getStructureContextAt(2);
+            assert.strictEqual(ctx.inMap, true, 'Inside MAP');
+            assert.strictEqual(ctx.inModule, true, 'Inside MODULE');
+            assert.strictEqual(ctx.chain[0].value.toUpperCase(), 'MODULE', 'Innermost is MODULE');
+            assert.strictEqual(ctx.chain[1].value.toUpperCase(), 'MAP', 'Outer is MAP');
+        });
+
+        test('cursor on structure-opening line returns OUTER chain (not the just-opened structure)', () => {
+            // The case Bob asked to pin down: cursor on the `MyClass CLASS` line
+            // is NOT inside MyClass. The outer scope (here a procedure data section)
+            // is what should be reported via `scope`.
+            const code = [
+                'ProcA PROCEDURE',                  // 0
+                'MyClass CLASS,TYPE',               // 1 — opening line of CLASS
+                'M       PROCEDURE',                // 2
+                '        END',                      // 3
+                'CODE',                             // 4
+                '        END',                      // 5
+            ].join('\n');
+            const structure = build(code);
+            const ctx = structure.getStructureContextAt(1);
+            assert.strictEqual(ctx.inClass, false, 'Opening CLASS line is NOT inside the just-opened CLASS');
+            assert.ok(ctx.scope, 'Outer scope should still be resolvable');
+            assert.strictEqual(ctx.scope!.label, 'ProcA', 'Outer scope is the enclosing procedure');
+        });
+
+        test('cursor on END line is NOT inside the just-closed structure', () => {
+            const code = [
+                'MyMap MAP',                        // 0
+                "  MODULE('foo.clw')",              // 1
+                '    Foo PROCEDURE()',              // 2
+                '  END',                            // 3 — END of MODULE
+                'END',                              // 4 — END of MAP
+            ].join('\n');
+            const structure = build(code);
+
+            const atModuleEnd = structure.getStructureContextAt(3);
+            assert.strictEqual(atModuleEnd.inModule, false, 'MODULE END line is not inside MODULE');
+            assert.strictEqual(atModuleEnd.inMap, true, 'But still inside outer MAP');
+
+            const atMapEnd = structure.getStructureContextAt(4);
+            assert.strictEqual(atMapEnd.inMap, false, 'MAP END line is not inside MAP');
+            assert.strictEqual(atMapEnd.chain.length, 0, 'Chain is empty at MAP END');
+        });
+
+        test('chain orders innermost first when nested', () => {
+            const code = [
+                'OuterProc PROCEDURE',              // 0
+                'MyClass CLASS',                    // 1
+                'Method1 PROCEDURE',                // 2
+                '        END',                      // 3
+                '        END',                      // 4 — close CLASS
+                'CODE',                             // 5
+                '        END',                      // 6
+            ].join('\n');
+            const structure = build(code);
+            // Line 2 — inside CLASS, inside the procedure's data section
+            const ctx = structure.getStructureContextAt(2);
+            assert.ok(ctx.chain.length >= 1, `Expected non-empty chain, got ${ctx.chain.length}`);
+            assert.strictEqual(ctx.chain[0].value.toUpperCase(), 'CLASS', 'Innermost should be CLASS');
+        });
+
+        test('inWindow is true for both WINDOW and APPLICATION', () => {
+            const winCode = [
+                'TestProc PROCEDURE',               // 0
+                "MyWin WINDOW('T'),AT(0,0,200,100)",// 1
+                "         BUTTON('OK'),AT(10,10),USE(?Btn)", // 2
+                '         END',                     // 3 — END of WINDOW
+                'CODE',                             // 4
+                'END',                              // 5
+            ].join('\n');
+            const appCode = winCode.replace('WINDOW(', 'APPLICATION(');
+            assert.strictEqual(build(winCode).getStructureContextAt(2).inWindow, true);
+            assert.strictEqual(build(appCode).getStructureContextAt(2).inWindow, true);
+        });
+
+        test('blank line walks back to find context', () => {
+            const code = [
+                'MyMap MAP',                        // 0
+                '',                                 // 1 — blank inside MAP
+                '  Foo PROCEDURE()',                // 2
+                'END',                              // 3
+            ].join('\n');
+            const structure = build(code);
+            const ctx = structure.getStructureContextAt(1);
+            assert.strictEqual(ctx.inMap, true, 'Blank line inside MAP still resolves to inMap');
+        });
+
+        test('isInsideStructure(line, ...keywords) matches any of the keywords', () => {
+            const code = [
+                'MyMap MAP',                        // 0
+                "  MODULE('foo.clw')",              // 1
+                '    Foo PROCEDURE()',              // 2
+                '  END',                            // 3
+                'END',                              // 4
+            ].join('\n');
+            const structure = build(code);
+            assert.strictEqual(structure.isInsideStructure(2, 'MAP'), true);
+            assert.strictEqual(structure.isInsideStructure(2, 'MODULE'), true);
+            assert.strictEqual(structure.isInsideStructure(2, 'CLASS'), false);
+            assert.strictEqual(structure.isInsideStructure(2, 'CLASS', 'MODULE'), true);
+            assert.strictEqual(structure.isInsideStructure(2), false, 'No keywords → false');
+        });
+
+        test('deprecated shims still return correct results (backwards compat)', () => {
+            const code = [
+                'MyMap MAP',                        // 0
+                "  MODULE('foo.clw')",              // 1
+                '    Foo PROCEDURE()',              // 2
+                '  END',                            // 3
+                'END',                              // 4
+            ].join('\n');
+            const structure = build(code);
+            assert.strictEqual(structure.isInMapBlock(2), true, 'isInMapBlock shim');
+            assert.strictEqual(structure.isInModuleBlock(2), true, 'isInModuleBlock shim');
+            assert.strictEqual(structure.isInMapBlock(0), false, 'Opening MAP line not inside MAP');
+            assert.strictEqual(structure.isInClassBlock(2), false, 'isInClassBlock shim');
         });
     });
 });

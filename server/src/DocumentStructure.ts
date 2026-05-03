@@ -6,6 +6,49 @@ import { isAttributeKeyword } from './utils/AttributeKeywords';
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
 
+/**
+ * Snapshot of every container the cursor is nested inside, plus shortcut flags
+ * for the common predicates. Returned by {@link DocumentStructure.getStructureContextAt}.
+ *
+ * Containment is strict: a line that opens or closes a structure (the line carrying
+ * the keyword or the line carrying its END/period) is NOT considered to be inside
+ * that structure. This matches the existing isInMapBlock/isInClassBlock semantics.
+ */
+export interface StructureContext {
+    /** Innermost containing structure, or null at file scope. Same as `chain[0]`. */
+    innermost: Token | null;
+    /** Containing structures from innermost to outermost. Empty when at file scope. */
+    chain: Token[];
+    /** First scope-defining ancestor (PROCEDURE / FUNCTION / MethodImpl / ROUTINE / MODULE), or null. */
+    scope: Token | null;
+    inMap: boolean;
+    inModule: boolean;
+    inClass: boolean;
+    inInterface: boolean;
+    /** True if the cursor is inside a WINDOW or an APPLICATION. */
+    inWindow: boolean;
+    inReport: boolean;
+    inFile: boolean;
+    inView: boolean;
+    /** True if the cursor is inside any data-bearing aggregate: QUEUE, GROUP, or RECORD. */
+    inQueueOrGroupOrRecord: boolean;
+}
+
+const EMPTY_STRUCTURE_CONTEXT: StructureContext = {
+    innermost: null,
+    chain: [],
+    scope: null,
+    inMap: false,
+    inModule: false,
+    inClass: false,
+    inInterface: false,
+    inWindow: false,
+    inReport: false,
+    inFile: false,
+    inView: false,
+    inQueueOrGroupOrRecord: false,
+};
+
 export class DocumentStructure {
     private structureStack: Token[] = [];
     private procedureStack: Token[] = [];
@@ -189,6 +232,105 @@ export class DocumentStructure {
     }
 
     /**
+     * Resolves the chain of containing structures at the given line and returns
+     * convenience flags for the most common predicates. Single source of truth
+     * for "what container am I in" — replaces the older isInMapBlock /
+     * isInModuleBlock / isInWindowStructure / isInClassBlock helpers, which now
+     * call through to this method.
+     *
+     * Containment is strict: the structure-opening line and the END/period line
+     * are NOT considered inside the structure (matches the existing helpers).
+     *
+     * @param line Line number to inspect (0-based)
+     * @param _character Reserved for future use (cursor-character precision)
+     */
+    public getStructureContextAt(line: number, _character?: number): StructureContext {
+        const seed = this.findSeedTokenForLine(line);
+        if (!seed) return EMPTY_STRUCTURE_CONTEXT;
+
+        const chain: Token[] = [];
+        let scope: Token | null = null;
+
+        // Walk from the seed's parent upward. We deliberately start one level
+        // above the seed so a structure-keyword token on its own opening line
+        // resolves to the OUTER chain rather than to itself.
+        let cursor: Token | undefined = this.parentIndex.get(seed);
+        while (cursor) {
+            if (cursor.type === TokenType.Structure) {
+                if (
+                    cursor.finishesAt !== undefined &&
+                    line > cursor.line &&
+                    line < cursor.finishesAt
+                ) {
+                    chain.push(cursor);
+                }
+            } else if (!scope && this.isScopeToken(cursor)) {
+                scope = cursor;
+            }
+            cursor = this.parentIndex.get(cursor);
+        }
+
+        return this.buildStructureContext(chain, scope);
+    }
+
+    /**
+     * True iff the line is inside any structure whose keyword matches one of the
+     * supplied names (case-insensitive). Convenience over getStructureContextAt
+     * for ad-hoc multi-keyword checks. Returns false when no keywords are passed.
+     */
+    public isInsideStructure(line: number, ...keywords: string[]): boolean {
+        if (keywords.length === 0) return false;
+        const upper = new Set(keywords.map(k => k.toUpperCase()));
+        const ctx = this.getStructureContextAt(line);
+        return ctx.chain.some(t => upper.has(t.value.toUpperCase()));
+    }
+
+    /**
+     * Pick a token to start the parent walk from. Prefers tokens on the queried
+     * line; on blank lines walks FORWARD to the next non-empty line, falling back
+     * to walking backward only past EOF.
+     *
+     * Why forward first: walking back from a blank line can land on a structure's
+     * opening line, and the seed there is the structure's label — whose parent
+     * resolves to the OUTER scope, missing the structure that actually contains
+     * the queried line. Walking forward lands on a child token whose parent
+     * resolves correctly through `parentIndex`.
+     */
+    private findSeedTokenForLine(line: number): Token | null {
+        let lineTokens = this.tokensByLine.get(line);
+        if (lineTokens && lineTokens.length > 0) return lineTokens[0];
+
+        const lastLine = this.tokens[this.tokens.length - 1]?.line ?? 0;
+        for (let s = line + 1; s <= lastLine; s++) {
+            lineTokens = this.tokensByLine.get(s);
+            if (lineTokens && lineTokens.length > 0) return lineTokens[0];
+        }
+        for (let s = line - 1; s >= 0; s--) {
+            lineTokens = this.tokensByLine.get(s);
+            if (lineTokens && lineTokens.length > 0) return lineTokens[0];
+        }
+        return null;
+    }
+
+    private buildStructureContext(chain: Token[], scope: Token | null): StructureContext {
+        const has = (kw: string) => chain.some(t => t.value.toUpperCase() === kw);
+        return {
+            innermost: chain[0] ?? null,
+            chain,
+            scope,
+            inMap: has('MAP'),
+            inModule: has('MODULE'),
+            inClass: has('CLASS'),
+            inInterface: has('INTERFACE'),
+            inWindow: has('WINDOW') || has('APPLICATION'),
+            inReport: has('REPORT'),
+            inFile: has('FILE'),
+            inView: has('VIEW'),
+            inQueueOrGroupOrRecord: has('QUEUE') || has('GROUP') || has('RECORD'),
+        };
+    }
+
+    /**
      * Gets the control and structure context at a specific position
      * Used for context-aware IntelliSense features
      */
@@ -258,7 +400,11 @@ export class DocumentStructure {
         if (controlToken && controlToken.parent) {
             structureToken = controlToken.parent;
         } else {
-            // Walk up structure stack to find containing structure
+            // TODO(Gap K follow-up): this fallback walks `structureStack`, which is
+            // the build-time stack and is empty by the time external callers run.
+            // Effectively dead code — to be removed once a follow-up cleanup task
+            // confirms no caller relies on it. New callers should prefer
+            // getStructureContextAt() instead.
             for (let i = this.structureStack.length - 1; i >= 0; i--) {
                 const struct = this.structureStack[i];
                 if (struct.line <= line) {
@@ -1366,80 +1512,37 @@ export class DocumentStructure {
     }
 
     /**
-     * Checks if a line is inside a MAP block (between MAP and its END)
-     * @param line Line number to check
-     * @returns true if line is inside a MAP block, false otherwise
+     * @deprecated Use {@link getStructureContextAt}(line).inMap. Kept as a shim
+     * for existing callers; will be removed once call sites migrate.
      */
     public isInMapBlock(line: number): boolean {
-        // Get all MAP blocks
-        const mapBlocks = this.getMapBlocks();
-        
-        for (const mapToken of mapBlocks) {
-            const mapStart = mapToken.line;
-            const mapEnd = mapToken.finishesAt;
-            
-            // Line must be after MAP declaration and before END
-            if (mapEnd !== undefined && line > mapStart && line < mapEnd) {
-                return true;
-            }
-        }
-        
-        return false;
+        return this.getStructureContextAt(line).inMap;
     }
 
     /**
-     * Checks if a line is inside a MODULE block (between MODULE and its END)
-     * Used to suppress "Add MODULE" code action when already inside a MODULE.
+     * @deprecated Use {@link getStructureContextAt}(line).inModule. Kept as a shim
+     * for existing callers; will be removed once call sites migrate.
      */
     public isInModuleBlock(line: number): boolean {
-        const moduleTokens = this.structuresByType.get('MODULE');
-        if (!moduleTokens) return false;
-        for (const t of moduleTokens) {
-            if (t.finishesAt !== undefined && line > t.line && line < t.finishesAt) {
-                return true;
-            }
-        }
-        return false;
+        return this.getStructureContextAt(line).inModule;
     }
 
     /**
-     * Check if a line is inside a WINDOW, REPORT, or APPLICATION structure
+     * @deprecated Use {@link getStructureContextAt}(line).inWindow or .inReport.
+     * Returns true for WINDOW, APPLICATION, or REPORT containment. Kept as a shim
+     * for existing callers; will be removed once call sites migrate.
      */
     public isInWindowStructure(line: number): boolean {
-        // Check if line is within any WINDOW, REPORT, or APPLICATION structure
-        const windowStructures = ['WINDOW', 'REPORT', 'APPLICATION'];
-        
-        for (const structType of windowStructures) {
-            const structures = this.structuresByType.get(structType) || [];
-            for (const struct of structures) {
-                const start = struct.line;
-                const end = struct.finishesAt;
-                
-                if (end !== undefined && line > start && line < end) {
-                    return true;
-                }
-            }
-        }
-        
-        return false;
+        const ctx = this.getStructureContextAt(line);
+        return ctx.inWindow || ctx.inReport;
     }
 
     /**
-     * Check if a line is inside a CLASS structure
+     * @deprecated Use {@link getStructureContextAt}(line).inClass. Kept as a shim
+     * for existing callers; will be removed once call sites migrate.
      */
     public isInClassBlock(line: number): boolean {
-        const classStructures = this.structuresByType.get('CLASS') || [];
-        
-        for (const struct of classStructures) {
-            const start = struct.line;
-            const end = struct.finishesAt;
-            
-            if (end !== undefined && line > start && line < end) {
-                return true;
-            }
-        }
-        
-        return false;
+        return this.getStructureContextAt(line).inClass;
     }
 
     /**
