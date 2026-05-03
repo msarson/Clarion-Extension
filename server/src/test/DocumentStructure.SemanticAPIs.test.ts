@@ -835,6 +835,106 @@ END`;
         });
     });
 
+    // ─── isFileRecord marker (Gap M) ──────────────────────────────────────────
+
+    suite('isFileRecord marker', () => {
+        function findStructure(tokens: any[], value: string, line?: number) {
+            return tokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.value.toUpperCase() === value.toUpperCase() &&
+                (line === undefined || t.line === line)
+            );
+        }
+
+        test('sets isFileRecord on a RECORD that is the direct child of a FILE', () => {
+            const code = `Names FILE,DRIVER('TopSpeed'),PRE(NAM)
+PrimaryKey  KEY(NAM:Id)
+Record      RECORD,PRE()
+Id            LONG
+Name          STRING(40)
+            END
+          END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const recordTok = findStructure(tokens, 'RECORD');
+            assert.ok(recordTok, 'Test setup: should have parsed a RECORD structure');
+            assert.strictEqual(recordTok.isFileRecord, true, 'RECORD inside FILE should be flagged');
+        });
+
+        test('does NOT set isFileRecord on a standalone RECORD declaration', () => {
+            // Top-level RECORD (rare but legal) — no FILE parent.
+            const code = `MyRec RECORD,PRE(MR)
+Id     LONG
+Name   STRING(20)
+       END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const recordTok = findStructure(tokens, 'RECORD');
+            assert.ok(recordTok, 'Test setup: should have parsed a RECORD structure');
+            assert.notStrictEqual(recordTok.isFileRecord, true,
+                'Standalone RECORD must not be flagged as FILE-owned');
+        });
+
+        test('does NOT set isFileRecord on a RECORD nested in a QUEUE', () => {
+            const code = `MyQueue QUEUE,PRE(MQ)
+Inner    RECORD,PRE()
+Id         LONG
+Name       STRING(20)
+         END
+       END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const recordTok = findStructure(tokens, 'RECORD');
+            assert.ok(recordTok, 'Test setup: should have parsed a RECORD structure');
+            assert.notStrictEqual(recordTok.isFileRecord, true,
+                'RECORD inside QUEUE must not be flagged as FILE-owned');
+        });
+
+        test('getFileRecord(fileToken) returns the FILE\'s RECORD child', () => {
+            const code = `Names FILE,DRIVER('TopSpeed'),PRE(NAM)
+PrimaryKey  KEY(NAM:Id)
+Record      RECORD,PRE()
+Id            LONG
+            END
+          END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const fileTok = findStructure(tokens, 'FILE');
+            assert.ok(fileTok, 'Test setup: should have parsed a FILE structure');
+
+            const recordTok = structure.getFileRecord(fileTok);
+            assert.ok(recordTok, 'getFileRecord should return the RECORD child');
+            assert.strictEqual(recordTok!.value.toUpperCase(), 'RECORD');
+            assert.strictEqual(recordTok!.isFileRecord, true);
+        });
+
+        test('getFileRecord returns undefined for a FILE with no RECORD child', () => {
+            // Malformed: FILE missing its RECORD section entirely.
+            const code = `BadFile FILE,DRIVER('TopSpeed')
+        END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const fileTok = findStructure(tokens, 'FILE');
+            assert.ok(fileTok, 'Test setup: should have parsed a FILE structure');
+            assert.strictEqual(structure.getFileRecord(fileTok), undefined);
+        });
+    });
+
     suite('getGlobalVariables()', () => {
         test('should return empty array when no global variables', () => {
             const code = `TestProc PROCEDURE()

@@ -721,6 +721,15 @@ export class DocumentStructure {
             parentStructure.children = parentStructure.children || [];
             parentStructure.children.push(token);
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
+
+            // Mark RECORD tokens whose direct parent is a FILE — lifts the manual
+            // parent-walk that consumers (e.g. StructureDiagnostics) used to do.
+            if (
+                token.value.toUpperCase() === 'RECORD' &&
+                parentStructure.value.toUpperCase() === 'FILE'
+            ) {
+                token.isFileRecord = true;
+            }
         } else if (this.procedureStack.length > 0) {
             // Fall back to procedure parent only if no structure parent exists
             const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
@@ -1539,6 +1548,16 @@ export class DocumentStructure {
         const all: Token[] = [];
         for (const list of this.procedureIndex.values()) all.push(...list);
         return all;
+    }
+
+    /**
+     * Returns the RECORD child of a FILE structure, or undefined when the FILE
+     * has no RECORD (a malformed declaration). The flag is set during process()
+     * — callers don't need to walk the parent chain themselves.
+     */
+    public getFileRecord(fileToken: Token): Token | undefined {
+        if (!fileToken.children) return undefined;
+        return fileToken.children.find(c => c.isFileRecord === true);
     }
 
     /**

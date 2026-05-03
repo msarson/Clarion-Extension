@@ -282,15 +282,21 @@ export function validateFileStructures(tokens: Token[], document: TextDocument):
         if (isInConditionalBlock(token.line, conditionalRanges)) continue;
 
         if (token.type === TokenType.Structure && token.value.toUpperCase() === 'FILE') {
-            let hasDriver = false;
-            let hasRecord = false;
+            // RECORD presence comes from the parent-child tree (token.children, populated
+            // during DocumentStructure.process()). The flagged RECORD child is the only
+            // place we ever cared about — no need to re-walk for it.
+            const hasRecord = (token.children ?? []).some(c => c.isFileRecord === true);
 
+            // DRIVER is an attribute, not a child structure, so we still need a forward
+            // scan for it. Tightened to stop at the FILE declaration line's end, since
+            // DRIVER must appear on the same logical line as the FILE keyword (with line
+            // continuation tolerated by virtue of the token stream already being flat).
+            let hasDriver = false;
             for (let j = i + 1; j < tokens.length; j++) {
                 const nextToken = tokens[j];
                 const upperValue = nextToken.value.toUpperCase();
 
-                if (upperValue === 'DRIVER') hasDriver = true;
-                if (upperValue === 'RECORD') hasRecord = true;
+                if (upperValue === 'DRIVER') { hasDriver = true; break; }
 
                 if (upperValue === 'END' && nextToken.type === TokenType.EndStatement) break;
                 if (nextToken.type === TokenType.Structure && nextToken.start === 0 && nextToken.line > token.line) break;

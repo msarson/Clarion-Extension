@@ -69,6 +69,7 @@ export interface Token {
     maxLabelLength: number;   // ✅ Store max label length
     structurePrefix?: string; // ✅ Store structure prefix (e.g., "INV" from PRE(INV))
     isStructureField?: boolean; // ✅ Flag to identify structure fields
+    isFileRecord?: boolean;     // ✅ True when this RECORD token is the direct child of a FILE structure (vs. a standalone or QUEUE/GROUP-nested RECORD)
     structureParent?: Token;  // ✅ Reference to the parent structure token
     nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
     referencedFile?: string;  // ✅ Resolved path for any file reference (MODULE/INCLUDE/LINK/MEMBER/etc)
