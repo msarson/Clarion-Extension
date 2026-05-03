@@ -16,6 +16,7 @@ import { serverSettings } from '../serverSettings';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
+import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -1951,6 +1952,13 @@ export class ReferencesProvider {
         currentTokens: Token[],
         includeDeclaration: boolean
     ): Promise<Location[] | null> {
+        // If the current file is a local-MAP implementation target, restrict search
+        // to only files reachable via that same procedure-local MAP scope.
+        const localScope = getLocalMapScope(document.uri);
+        if (localScope?.containingProcedure) {
+            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope);
+        }
+
         const wordLower = word.toLowerCase();
         const procedureSubTypes = new Set([
             TokenType.GlobalProcedure,
@@ -2064,6 +2072,56 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} reference(s) to procedure "${word}"`);
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * References search restricted to files reachable from a procedure-local MAP.
+     * Called when the current implementation file is the target of a MODULE declared
+     * inside a procedure body — only files sharing that same local-MAP scope are searched.
+     */
+    private findLocalMapProcedureReferences(
+        word: string,
+        document: TextDocument,
+        includeDeclaration: boolean,
+        localScope: LocalMapScope
+    ): Location[] | null {
+        const graph = FileRelationshipGraph.getInstance();
+        const declaringUri = `file:///${localScope.declaringFile}`;
+        const filesToSearch = new Set<string>([declaringUri, document.uri]);
+
+        if (graph.isBuilt) {
+            graph.getForwardEdges(localScope.declaringFile)
+                .filter(e => e.type === 'MODULE' &&
+                    e.containingProcedure?.toUpperCase() === localScope.containingProcedure!.toUpperCase())
+                .forEach(e => filesToSearch.add(`file:///${e.toFile}`));
+        }
+
+        const dummyToken: Token = {
+            type: TokenType.Variable,
+            subType: undefined,
+            value: word,
+            line: 0,
+            start: 0,
+            maxLabelLength: 0,
+            parent: undefined,
+            children: []
+        };
+        const syntheticInfo: SymbolInfo = {
+            token: dummyToken,
+            type: 'PROCEDURE',
+            scope: { token: dummyToken, type: 'global' },
+            location: { uri: declaringUri, line: 0, character: 0 },
+            originalWord: word,
+            searchWord: word
+        };
+
+        const locations: Location[] = [];
+        for (const fileUri of filesToSearch) {
+            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
+        }
+
+        logger.info(`✅ [LocalMAP] Found ${locations.length} reference(s) to "${word}" (local to ${localScope.containingProcedure}), searched ${filesToSearch.size} file(s)`);
         return locations.length > 0 ? locations : null;
     }
 
