@@ -300,7 +300,7 @@ export class SymbolFinderService {
                 // findProcedureDeclaration (step 5) with the correct scope and type.
                 const isProcDecl = tokens.some(t =>
                     t.line === labelToken.line &&
-                    t.type === TokenType.Procedure &&
+                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     (t.subType === TokenType.MapProcedure ||
                      t.subType === TokenType.GlobalProcedure ||
                      t.subType === TokenType.MethodDeclaration)
@@ -338,7 +338,7 @@ export class SymbolFinderService {
                     if (found) {
                         const isProcDecl = tokens.some(t =>
                             t.line === found.line &&
-                            t.type === TokenType.Procedure &&
+                            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                             (t.subType === TokenType.MapProcedure ||
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
@@ -364,7 +364,7 @@ export class SymbolFinderService {
             if (scopeToken.subType === TokenType.MethodImplementation) {
                 logger.info(`Scope is MethodImplementation — searching GlobalProcedure scopes for "${searchText}"`);
                 const globalProcs = tokens.filter(t =>
-                    t.type === TokenType.Procedure &&
+                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of globalProcs) {
@@ -387,7 +387,7 @@ export class SymbolFinderService {
                         // Skip MAP/global procedure declarations — they are not local variables
                         const isProcDecl = tokens.some(t =>
                             t.line === found.line &&
-                            t.type === TokenType.Procedure &&
+                            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                             (t.subType === TokenType.MapProcedure ||
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
@@ -1029,8 +1029,11 @@ export class SymbolFinderService {
      */
     findProcedureDeclaration(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
         const wordLower = word.toLowerCase();
+        // Accept both Procedure-typed and Function-typed tokens — modern Clarion treats
+        // PROCEDURE and FUNCTION as the same construct (both can return values); the
+        // token-type split is a tokenizer artifact, not a language distinction.
         const procToken = tokens.find(t =>
-            t.type === TokenType.Procedure &&
+            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
             (t.subType === TokenType.MapProcedure || t.subType === TokenType.GlobalProcedure) &&
             t.label?.toLowerCase() === wordLower
         );
@@ -1047,7 +1050,7 @@ export class SymbolFinderService {
         // Find the innermost containing procedure scope (MethodImplementation or GlobalProcedure)
         const containingScope = tokens
             .filter(t =>
-                t.type === TokenType.Procedure &&
+                (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                 (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation) &&
                 t.line < procToken.line &&
                 (t.finishesAt === undefined || t.finishesAt >= procToken.line)

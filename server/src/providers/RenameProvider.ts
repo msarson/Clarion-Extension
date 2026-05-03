@@ -107,11 +107,11 @@ export class RenameProvider {
         );
 
         if (!locations || locations.length === 0) {
-            logger.error(`[RENAME] No references found for "${oldName}"`);
+            logger.debug(`[RENAME] No references found for "${oldName}"`);
             return null;
         }
 
-        logger.error(`[RENAME] Renaming "${oldName}" → "${newName}" across ${locations.length} location(s)`);
+        logger.debug(`[RENAME] Renaming "${oldName}" → "${newName}" across ${locations.length} location(s)`);
 
         // Build WorkspaceEdit: group TextEdits by file URI
         const changes: { [uri: string]: TextEdit[] } = {};

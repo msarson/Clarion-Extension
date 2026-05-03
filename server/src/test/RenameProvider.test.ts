@@ -276,6 +276,68 @@ suite('RenameProvider', () => {
                 );
             }
         });
+
+        // ─── FUNCTION declarations are renameable (hotfix 4d1435b1) ─────────────
+        // Modern Clarion treats PROCEDURE and FUNCTION as semantically identical
+        // (both can return values); the token-type split is a tokenizer artifact.
+        // SymbolFinderService.findProcedureDeclaration was rejecting Function-typed
+        // tokens silently, breaking F2 / Definition / Hover from any call site.
+
+        test('FUNCTION-typed declaration is renameable from a call site (hotfix 4d1435b1)', async () => {
+            // User reproducer: Foo FUNCTION(LONG),REAL with a call from another scope.
+            const code = [
+                'MyProg PROGRAM',                       // 0
+                'MAP',                                   // 1
+                'Foo FUNCTION(LONG pId),REAL',           // 2
+                'END',                                   // 3
+                '',                                       // 4
+                'CODE',                                   // 5
+                '  x = Foo(42)',                         // 6  ← cursor on Foo
+                '',                                       // 7
+                'Foo FUNCTION(LONG pId),REAL',           // 8 — implementation
+                'CODE',                                   // 9
+                '  RETURN 0.0',                          // 10
+            ].join('\n');
+            const doc = createDocument(code, 'file:///f%3A/MyProject/Func.clw');
+            seedCache(doc);
+
+            // Cursor on "Foo" at the call site — should resolve via findProcedureDeclaration.
+            const result = await provider.prepareRename(doc, { line: 6, character: 7 });
+            assert.ok(result !== null,
+                'prepareRename should return a range for a FUNCTION-typed procedure declaration');
+        });
+
+        test('PROCEDURE and FUNCTION declarations side by side: both rename from their call sites', async () => {
+            const code = [
+                'MyProg PROGRAM',                       // 0
+                'MAP',                                   // 1
+                'ProcA PROCEDURE',                       // 2
+                'FuncB FUNCTION(LONG),REAL',             // 3
+                'END',                                   // 4
+                '',                                       // 5
+                'CODE',                                   // 6
+                '  ProcA',                               // 7  ← call to PROCEDURE
+                '  x = FuncB(1)',                        // 8  ← call to FUNCTION
+                '',                                       // 9
+                'ProcA PROCEDURE',                       // 10
+                'CODE',                                   // 11
+                '  RETURN',                              // 12
+                '',                                       // 13
+                'FuncB FUNCTION(LONG pId),REAL',         // 14
+                'CODE',                                   // 15
+                '  RETURN 0.0',                          // 16
+            ].join('\n');
+            const doc = createDocument(code, 'file:///f%3A/MyProject/Mixed.clw');
+            seedCache(doc);
+
+            // Both should be resolvable from the call sites.
+            const procResult = await provider.prepareRename(doc, { line: 7, character: 4 });
+            assert.ok(procResult !== null, 'PROCEDURE call site should be renameable');
+
+            const funcResult = await provider.prepareRename(doc, { line: 8, character: 8 });
+            assert.ok(funcResult !== null,
+                'FUNCTION call site should also be renameable (hotfix 4d1435b1)');
+        });
     });
 
     // ─── provideRename ────────────────────────────────────────────────────────
