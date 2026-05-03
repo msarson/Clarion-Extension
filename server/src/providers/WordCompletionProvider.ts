@@ -374,12 +374,16 @@ export class WordCompletionProvider {
         proc: Token,
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
-        const procLineText = document.getText({
+        // Logical-line view from DocumentStructure (Gap P) — handles multi-line
+        // procedure signatures joined by `|` continuation, strips inline `!`-
+        // comments, and gives us a single string suitable for regex parsing
+        // without re-implementing the join in this provider.
+        const logical = this.tokenCache.getStructure(document).getLogicalLine(proc.line);
+        const procLineText = logical?.joinedText ?? document.getText({
             start: { line: proc.line, character: 0 },
             end: { line: proc.line, character: 2000 }
         });
 
-        // Handle multi-line signatures: look for PROCEDURE( and collect until )
         const parenOpen = procLineText.indexOf('(');
         const parenClose = procLineText.indexOf(')', parenOpen);
         if (parenOpen === -1 || parenClose === -1) return;

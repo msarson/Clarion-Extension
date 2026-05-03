@@ -1950,4 +1950,164 @@ END`;
             assert.strictEqual(s.getProgramName(), undefined);
         });
     });
+
+    suite('Logical-line joiner (Gap P)', () => {
+        function buildP(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens, code.split('\n'));
+            structure.process();
+            return structure;
+        }
+
+        test('single line with no continuation: startLine === endLine, joined is the line', () => {
+            const code = 'TestProc PROCEDURE(LONG pId)';
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            assert.strictEqual(logical!.startLine, 0);
+            assert.strictEqual(logical!.endLine, 0);
+            assert.ok(logical!.joinedText.includes('PROCEDURE(LONG pId)'));
+        });
+
+        test('two-line `|` continuation joins into one logical line', () => {
+            const code = [
+                'TestProc PROCEDURE(LONG pId,    |',  // 0
+                '                  STRING pName)',     // 1
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            assert.strictEqual(logical!.startLine, 0);
+            assert.strictEqual(logical!.endLine, 1);
+            // The `|` is stripped and replaced with a separator space.
+            assert.ok(!logical!.joinedText.includes('|'), 'pipe should be stripped');
+            assert.ok(logical!.joinedText.includes('LONG pId'), 'first segment included');
+            assert.ok(logical!.joinedText.includes('STRING pName'), 'second segment included');
+        });
+
+        test('querying any physical line in a chain returns the SAME LogicalLine', () => {
+            const code = [
+                'TestProc PROCEDURE(LONG a,  |',     // 0
+                '                  LONG b,  |',      // 1
+                '                  LONG c)',          // 2
+            ].join('\n');
+            const s = buildP(code);
+            const a = s.getLogicalLine(0);
+            const b = s.getLogicalLine(1);
+            const c = s.getLogicalLine(2);
+            assert.strictEqual(a, b, 'mid-chain query returns the start chain');
+            assert.strictEqual(b, c, 'end-chain query returns the same object');
+            assert.strictEqual(a!.startLine, 0);
+            assert.strictEqual(a!.endLine, 2);
+        });
+
+        test('comment-only line in middle of chain BREAKS the continuation (edge case 7)', () => {
+            const code = [
+                'TestProc PROCEDURE(LONG a,    |',   // 0 — ends with |
+                '! a comment-only line',              // 1 — no |, just a comment
+                '                  LONG b)',          // 2 — should NOT be in chain
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            // Chain spans lines 0 and 1, NOT line 2.
+            assert.strictEqual(logical!.endLine, 1, 'chain should end at the comment-only line');
+            // LONG b should NOT appear in joinedText.
+            assert.ok(!logical!.joinedText.includes('LONG b'), 'line 2 must not be joined');
+            // The comment text itself is stripped.
+            assert.ok(!logical!.joinedText.includes('comment-only'), 'comment content stripped from joined view');
+        });
+
+        test('inline `!`-comment AFTER `|` on a continued line is stripped from joinedText', () => {
+            // Clarion treats `|` as the continuation marker only when it comes
+            // BEFORE the comment on a line. `! ... |` would consume the pipe
+            // as comment text — that's a separate case (no continuation).
+            const code = [
+                'TestProc PROCEDURE(LONG a, | ! cont',   // 0 — | first, then !
+                '                  LONG b)',              // 1
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            assert.strictEqual(logical!.endLine, 1);
+            assert.ok(!logical!.joinedText.includes('cont'), 'comment text stripped');
+            assert.ok(logical!.joinedText.includes('LONG b'), 'continuation applies because | precedes !');
+        });
+
+        test('`!`-comment SWALLOWING the `|` does NOT continue the chain', () => {
+            // When `!` comes first, the `|` is consumed as comment text and
+            // the line does not have a LineContinuation token at the end.
+            const code = [
+                'TestProc PROCEDURE(LONG a, ! note |',  // 0 — comment swallows the |
+                '                  LONG b)',             // 1 — should NOT join
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            assert.strictEqual(logical!.endLine, 0, 'no continuation: chain ends at line 0');
+            assert.ok(!logical!.joinedText.includes('LONG b'));
+        });
+
+        test('LogicalLine.tokens excludes LineContinuation and Comment tokens', () => {
+            const code = [
+                'TestProc PROCEDURE(LONG a, ! comment   |',  // 0
+                '                  LONG b)',                   // 1
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            for (const t of logical!.tokens) {
+                assert.notStrictEqual(t.type, TokenType.LineContinuation, 'no LineContinuation tokens');
+                assert.notStrictEqual(t.type, TokenType.Comment, 'no Comment tokens');
+            }
+            // Sanity: must have included real tokens from both lines.
+            const valuesUpper = logical!.tokens.map(t => t.value.toUpperCase());
+            assert.ok(valuesUpper.includes('PROCEDURE'));
+            assert.ok(valuesUpper.includes('LONG'));
+        });
+
+        test('map() back-translates a joined-text column to (line, col) on the right physical line', () => {
+            const code = [
+                'TestProc PROCEDURE(LONG a,  |',     // 0
+                '                  LONG b)',          // 1
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            // Column 0 of joinedText is column 0 of the first line.
+            assert.deepStrictEqual(logical!.map(0), { line: 0, column: 0 });
+            // Find "LONG b" — it's on line 1.
+            const idx = logical!.joinedText.indexOf('LONG b');
+            assert.ok(idx > 0, 'found LONG b in joined text');
+            const pos = logical!.map(idx);
+            assert.strictEqual(pos.line, 1, 'maps back to line 1');
+            assert.ok(pos.column > 0, 'column non-zero (LONG b is indented)');
+        });
+
+        test('string literal containing `|` is NOT a continuation', () => {
+            const code = [
+                "MyVar STRING('hello | world')",   // 0
+                'NextLine STRING(20)',              // 1
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(0);
+            assert.ok(logical);
+            assert.strictEqual(logical!.endLine, 0, 'string-literal pipe does not extend the chain');
+        });
+
+        test('blank line returns a LogicalLine with empty joinedText (no chain)', () => {
+            const code = [
+                'TestProc PROCEDURE',  // 0
+                '',                     // 1 — blank
+                'CODE',                 // 2
+                'END',                  // 3
+            ].join('\n');
+            const s = buildP(code);
+            const logical = s.getLogicalLine(1);
+            assert.ok(logical, 'blank line still resolves');
+            assert.strictEqual(logical!.startLine, 1);
+            assert.strictEqual(logical!.endLine, 1, 'blank line is a single logical line');
+        });
+    });
 });

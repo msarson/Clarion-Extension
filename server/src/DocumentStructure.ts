@@ -49,6 +49,32 @@ const EMPTY_STRUCTURE_CONTEXT: StructureContext = {
     inQueueOrGroupOrRecord: false,
 };
 
+/**
+ * One logical Clarion line — possibly spanning multiple physical lines via the
+ * `|` continuation marker. Returned by {@link DocumentStructure.getLogicalLine}.
+ *
+ * `joinedText` strips the trailing `|` of each continuation segment (replaced
+ * with a single space to preserve token boundaries) and strips inline `!` comments.
+ * Consumers that want the raw form should iterate `tokens` directly.
+ */
+export interface LogicalLine {
+    /** Physical line where the logical line begins (the first line of the chain). */
+    startLine: number;
+    /** Physical line where the logical line ends. Equals `startLine` when there is
+     *  no `|` continuation. */
+    endLine: number;
+    /** Concatenated source text with `|` markers replaced by single spaces and
+     *  inline `!` comments stripped. */
+    joinedText: string;
+    /** Tokens that comprise the logical line, in source order, with
+     *  `LineContinuation` and `Comment` tokens excluded. References live tokens
+     *  from `tokensByLine` — do not re-tokenize the joined text. */
+    tokens: Token[];
+    /** Maps a 0-based column in `joinedText` back to its physical (line, column).
+     *  O(log n) on the segment count via binary search. */
+    map(joinedColumn: number): { line: number; column: number };
+}
+
 export class DocumentStructure {
     private structureStack: Token[] = [];
     private procedureStack: Token[] = [];
@@ -100,6 +126,13 @@ export class DocumentStructure {
      * processed once.
      */
     private implementorsByInterface: Map<string, Token[]> = new Map();
+    /**
+     * Lazy cache for {@link getLogicalLine}. Each physical line in a continued
+     * chain maps to the SAME LogicalLine object (so any line in the chain returns
+     * the same answer). Cleared via {@link clearLogicalLineCache} whenever the
+     * underlying tokens / line text could change.
+     */
+    private logicalLinesByPhysicalLine: Map<number, LogicalLine> = new Map();
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -550,6 +583,11 @@ export class DocumentStructure {
         // Build the reverse IMPLEMENTS index from each CLASS token's
         // `implementedInterfaces` array (set in handleStructureToken).
         this.linkImplementorsPass();
+
+        // Invalidate the lazy logical-line cache. process() can run more than
+        // once on the same DS (e.g. TokenCache fallbacks), and stale chains
+        // would point at out-of-date Token references.
+        this.clearLogicalLineCache();
     }
 
     /**
@@ -2228,6 +2266,189 @@ export class DocumentStructure {
     // =====================================================
     // 🎯 Gap H: Reverse IMPLEMENTS index
     // =====================================================
+
+    // =====================================================
+    // 🎯 Gap P: Continued-line joiner (`|` continuation)
+    // =====================================================
+
+    /**
+     * Returns the {@link LogicalLine} that contains the given physical line —
+     * the result of joining all `|`-continued physical lines into a single
+     * logical line. Any line in a multi-line chain returns the SAME LogicalLine
+     * object, so callers don't have to walk back to find the chain start.
+     *
+     * Containment rules:
+     *   - Single-line case (no `|` continuation): returns a one-line LogicalLine
+     *     with `startLine === endLine === line`.
+     *   - Trailing `|` extends the chain: the next physical line is included.
+     *   - A comment-only line in the middle of a chain (no `|` of its own) ends
+     *     the chain at that line — Clarion semantics, see edge case 7 in the
+     *     Gap P design.
+     *   - String-literal `|` is preserved by the tokenizer (no `LineContinuation`
+     *     token is emitted inside strings) and never extends a chain.
+     *
+     * Lazy: chains are built on first query and cached. Returns undefined when
+     * `line` is out of range or has no tokens at all.
+     */
+    public getLogicalLine(line: number): LogicalLine | undefined {
+        const cached = this.logicalLinesByPhysicalLine.get(line);
+        if (cached) return cached;
+
+        // Find the chain start — walk back while the previous line ends in `|`.
+        let startLine = line;
+        while (startLine > 0 && this.lineEndsWithContinuation(startLine - 1)) {
+            startLine--;
+        }
+
+        const built = this.buildLogicalLine(startLine);
+        if (!built) return undefined;
+
+        // Cache under every physical line in the chain so any query hits.
+        for (let l = built.startLine; l <= built.endLine; l++) {
+            this.logicalLinesByPhysicalLine.set(l, built);
+        }
+        return built;
+    }
+
+    /**
+     * Invalidates the {@link getLogicalLine} cache. Called automatically when
+     * `process()` runs; external callers don't need to invoke this directly,
+     * but it's exposed (private) for future incremental-update integration.
+     */
+    private clearLogicalLineCache(): void {
+        this.logicalLinesByPhysicalLine.clear();
+    }
+
+    /**
+     * True iff the given physical line ends with a `|` continuation marker.
+     * Walks `tokensByLine` from the end skipping Comment tokens and reports
+     * whether the last significant token is a `LineContinuation`.
+     */
+    private lineEndsWithContinuation(line: number): boolean {
+        const lineTokens = this.tokensByLine.get(line);
+        if (!lineTokens || lineTokens.length === 0) return false;
+        for (let i = lineTokens.length - 1; i >= 0; i--) {
+            const t = lineTokens[i];
+            if (t.type === TokenType.Comment) continue;
+            return t.type === TokenType.LineContinuation || t.value === '|';
+        }
+        return false;
+    }
+
+    /** Reconstructs a physical line's source text. Prefers the lines array
+     *  when DS was constructed with one; otherwise composes a column-faithful
+     *  approximation from the token stream. */
+    private getPhysicalLineText(line: number): string {
+        if (this.lines && line < this.lines.length) {
+            return this.lines[line];
+        }
+        const lineTokens = this.tokensByLine.get(line);
+        if (!lineTokens || lineTokens.length === 0) return '';
+        let cursor = 0;
+        let out = '';
+        for (const t of lineTokens) {
+            if (t.start > cursor) out += ' '.repeat(t.start - cursor);
+            out += t.value;
+            cursor = t.start + t.value.length;
+        }
+        return out;
+    }
+
+    /** Walks lines from `startLine` joining `|`-continued segments, stripping
+     *  inline comments and the `|` markers themselves, and returning a
+     *  LogicalLine with token references and the column-mapping function. */
+    private buildLogicalLine(startLine: number): LogicalLine | undefined {
+        if (this.tokensByLine.get(startLine) === undefined &&
+            this.lines === undefined) {
+            return undefined;
+        }
+        if (this.lines && startLine >= this.lines.length) return undefined;
+
+        const tokens: Token[] = [];
+        const segments: { joinedStart: number; line: number; lineStart: number }[] = [];
+        let joinedText = '';
+        let lastLine = startLine;
+
+        let physicalLine = startLine;
+        while (true) {
+            const lineTokens = this.tokensByLine.get(physicalLine);
+            const continues = this.lineEndsWithContinuation(physicalLine);
+
+            // Decide where to truncate this physical line: stop before the
+            // first Comment token (strip inline comment) or before the
+            // trailing LineContinuation token (strip the `|`).
+            let truncateColumn = this.getPhysicalLineText(physicalLine).length;
+            if (lineTokens) {
+                for (const t of lineTokens) {
+                    if (t.type === TokenType.Comment ||
+                        t.type === TokenType.LineContinuation ||
+                        (t.value === '|' && t.type !== TokenType.String)) {
+                        truncateColumn = Math.min(truncateColumn, t.start);
+                    }
+                }
+            }
+
+            const rawLine = this.getPhysicalLineText(physicalLine);
+            const segText = rawLine.slice(0, truncateColumn);
+
+            // Record segment for column mapping. `joinedStart` is the column
+            // in `joinedText` where this physical line's content begins.
+            segments.push({
+                joinedStart: joinedText.length,
+                line: physicalLine,
+                lineStart: 0,
+            });
+
+            // Add the physical line's content. Separate continuation segments
+            // with a single space so tokens that abut the `|` don't run into
+            // the next line's content.
+            if (joinedText.length > 0) joinedText += ' ';
+            // Re-record the segment after the separator so column 0 of the
+            // physical line corresponds to (joinedStart + (joinedText.length -
+            // segText.length)). Recompute joinedStart now that the separator
+            // is in place.
+            segments[segments.length - 1].joinedStart = joinedText.length;
+            joinedText += segText;
+
+            // Add tokens (excluding LineContinuation and Comment) in source order.
+            if (lineTokens) {
+                for (const t of lineTokens) {
+                    if (t.type === TokenType.LineContinuation) continue;
+                    if (t.type === TokenType.Comment) continue;
+                    tokens.push(t);
+                }
+            }
+
+            lastLine = physicalLine;
+            if (!continues) break;
+            physicalLine++;
+            // Safety guard: bail if we've walked past the document.
+            if (this.lines && physicalLine >= this.lines.length) break;
+            if (!this.lines && this.tokensByLine.get(physicalLine) === undefined) break;
+        }
+
+        const logicalLine: LogicalLine = {
+            startLine,
+            endLine: lastLine,
+            joinedText,
+            tokens,
+            map: (col: number) => {
+                // Binary search for the segment whose joinedStart <= col.
+                let lo = 0, hi = segments.length - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi + 1) >>> 1;
+                    if (segments[mid].joinedStart <= col) lo = mid;
+                    else hi = mid - 1;
+                }
+                const seg = segments[lo];
+                return {
+                    line: seg.line,
+                    column: seg.lineStart + (col - seg.joinedStart),
+                };
+            },
+        };
+        return logicalLine;
+    }
 
     // =====================================================
     // 🎯 Gap N: PROGRAM / MEMBER document helpers
