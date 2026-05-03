@@ -116,6 +116,11 @@ export class HoverRouter {
         const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext, documentStructure } = context;
         const upperWord = word.toUpperCase();
 
+        if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
+            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure);
+            if (containerHover) return containerHover;
+        }
+
         if (upperWord === 'PROGRAM' || upperWord === 'MEMBER') {
             return this.contextHandler.handleProgramOrMemberKeyword(word, documentStructure);
         }
@@ -147,6 +152,65 @@ export class HoverRouter {
         }
 
         return null;
+    }
+
+    /**
+     * Renders a structured hover for a WINDOW / APPLICATION / REPORT keyword.
+     * Pulls the descriptor populated by `DocumentStructure.populateWindowDescriptors`
+     * and formats title, geometry, MDI mode, icon, and residual attributes.
+     * Returns null when the cursor isn't on a container Structure token whose
+     * descriptor has been built (e.g. cursor lands on the keyword text but the
+     * token type is something else entirely).
+     */
+    private handleContainerKeyword(
+        keyword: string,
+        position: { line: number; character: number },
+        tokens: Token[],
+        documentStructure: { getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined }
+    ): Hover | null {
+        // Find the Structure token at this cursor position whose value matches the keyword.
+        const containerToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === keyword &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!containerToken) return null;
+
+        const desc = documentStructure.getWindowDescriptor(containerToken);
+        if (!desc) return null;
+
+        const lines: string[] = [];
+        const labelText = containerToken.label ? `${containerToken.label} ` : '';
+        lines.push(`**${labelText}${keyword}**`);
+        if (desc.title) lines.push(`*${desc.title}*`);
+
+        const meta: string[] = [];
+        if (desc.at) {
+            const geom = typeof desc.at === 'string'
+                ? `AT(${desc.at})`
+                : `${desc.at.w}×${desc.at.h} @ (${desc.at.x},${desc.at.y})`;
+            meta.push(`📐 ${geom}`);
+        }
+        if (desc.mdi) {
+            meta.push(desc.mdiChild ? '🪟 MDI child' : '🪟 MDI parent');
+        }
+        if (desc.systemMenu) meta.push('System menu');
+        if (desc.statusBar) meta.push('Status bar');
+        if (desc.icon) meta.push(`Icon: \`${desc.icon}\``);
+        if (meta.length) {
+            lines.push('');
+            lines.push(meta.join(' · '));
+        }
+
+        if (desc.attributes.length) {
+            lines.push('');
+            lines.push(`**Attributes:** ${desc.attributes.map(a => `\`${a}\``).join(', ')}`);
+        }
+
+        const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
+        return { contents: content };
     }
 
     /**

@@ -2,6 +2,9 @@ import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
+import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
+
+export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
@@ -117,6 +120,14 @@ export class DocumentStructure {
     private equateIndex: Map<string, Token> = new Map();
     /** Cached list of ITEMIZE structure tokens for fast `getItemizeBlocks()` returns. */
     private itemizeBlocks: Token[] = [];
+    /**
+     * Structured WINDOW / APPLICATION / REPORT header descriptors keyed by
+     * the container's Structure token. Built by `populateWindowDescriptors()`
+     * during process(); consumed by `getWindowDescriptor` and the cursor-aware
+     * `getActiveWindowDescriptor`.
+     */
+    private windowDescriptors: Map<Token, WindowDescriptor> = new Map();
+
     /**
      * Reverse IMPLEMENTS index: for each interface name (UPPER), the list of CLASS
      * tokens that declare `IMPLEMENTS(InterfaceName)` in their attribute clause.
@@ -588,6 +599,31 @@ export class DocumentStructure {
         // once on the same DS (e.g. TokenCache fallbacks), and stale chains
         // would point at out-of-date Token references.
         this.clearLogicalLineCache();
+
+        // Parse WINDOW / APPLICATION / REPORT header attributes into structured
+        // descriptors. Runs after the logical-line cache is cleared so the pass
+        // can use a fresh cache via `getLogicalLine` to handle multi-line headers
+        // joined by `|` continuations.
+        this.populateWindowDescriptors();
+    }
+
+    /**
+     * Walks every WINDOW, APPLICATION, and REPORT structure token and parses
+     * its header line (joined across `|` continuations via Alice's Gap P
+     * `getLogicalLine`) into a `WindowDescriptor`. Stored in `windowDescriptors`
+     * keyed by the structure Token for O(1) lookup.
+     */
+    private populateWindowDescriptors(): void {
+        this.windowDescriptors.clear();
+        for (const containerType of ['WINDOW', 'APPLICATION', 'REPORT'] as const) {
+            const tokens = this.structuresByType.get(containerType);
+            if (!tokens) continue;
+            for (const tok of tokens) {
+                const logical = this.getLogicalLine(tok.line);
+                const headerText = logical?.joinedText ?? this.getPhysicalLineText(tok.line);
+                this.windowDescriptors.set(tok, WindowDescriptorParser.parse(headerText));
+            }
+        }
     }
 
     /**
@@ -2528,6 +2564,36 @@ export class DocumentStructure {
     public getImplementors(interfaceName: string): Token[] {
         const list = this.implementorsByInterface.get(interfaceName.toUpperCase());
         return list ? [...list] : [];
+    }
+
+    /**
+     * Returns the structured descriptor for a WINDOW, APPLICATION, or REPORT
+     * token — title, geometry, MDI mode, icon, and the residual attribute list.
+     * Returns undefined when `structureToken` is not one of those three types
+     * (or when it sits before `process()` has run).
+     *
+     * Backed by `populateWindowDescriptors()` which uses Gap P's `getLogicalLine`
+     * to handle headers that span multiple physical lines via `|` continuation.
+     */
+    public getWindowDescriptor(structureToken: Token): WindowDescriptor | undefined {
+        return this.windowDescriptors.get(structureToken);
+    }
+
+    /**
+     * Convenience: returns the descriptor of the innermost WINDOW / APPLICATION
+     * / REPORT structure that contains `line`, or undefined when the cursor is
+     * not inside any container. Walks `getStructureContextAt(line).chain` from
+     * innermost outward and returns the first descriptor it finds — handy for
+     * Hover-at-cursor-on-control implementations that want "what window am I
+     * in?" without re-parsing the structure stack.
+     */
+    public getActiveWindowDescriptor(line: number): WindowDescriptor | undefined {
+        const ctx = this.getStructureContextAt(line);
+        for (const ancestor of ctx.chain) {
+            const desc = this.windowDescriptors.get(ancestor);
+            if (desc) return desc;
+        }
+        return undefined;
     }
 
     /**

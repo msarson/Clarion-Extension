@@ -853,6 +853,161 @@ END`;
         });
     });
 
+    suite('Window descriptors (Gap F)', () => {
+        function buildF(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { tokens, structure };
+        }
+
+        function findStructure(tokens: any[], keyword: string) {
+            return tokens.find(t =>
+                t.type === TokenType.Structure &&
+                t.value.toUpperCase() === keyword.toUpperCase()
+            );
+        }
+
+        test('WINDOW: TITLE + AT(numeric) + MDI parsed structurally', () => {
+            const code = [
+                'MyProc PROCEDURE()',
+                'Win WINDOW(\'My App\'),AT(50,50,400,300),MDI,SYSTEM',
+                '       END',
+                'CODE',
+                '  RETURN',
+                'END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const win = findStructure(tokens, 'WINDOW');
+            assert.ok(win, 'WINDOW token must be present');
+            const desc = structure.getWindowDescriptor(win);
+            assert.ok(desc, 'descriptor must be populated for the WINDOW token');
+            assert.strictEqual(desc!.title, 'My App');
+            assert.deepStrictEqual(desc!.at, { x: 50, y: 50, w: 400, h: 300 });
+            assert.strictEqual(desc!.mdi, true);
+            assert.strictEqual(desc!.systemMenu, true);
+        });
+
+        test('WINDOW: AT with non-numeric expression falls back to raw text', () => {
+            const code = [
+                'MyProc PROCEDURE()',
+                'Win WINDOW(\'X\'),AT(0,0,?Wnd:W,?Wnd:H)',
+                '       END',
+                'CODE',
+                '  RETURN',
+                'END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const desc = structure.getWindowDescriptor(findStructure(tokens, 'WINDOW'));
+            assert.strictEqual(desc!.at, '0,0,?Wnd:W,?Wnd:H');
+        });
+
+        test('APPLICATION container gets the same descriptor shape', () => {
+            const code = [
+                'App APPLICATION(\'Demo\'),AT(0,0,800,600),MDI',
+                '       END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const desc = structure.getWindowDescriptor(findStructure(tokens, 'APPLICATION'));
+            assert.ok(desc, 'descriptor must be populated for APPLICATION');
+            assert.strictEqual(desc!.title, 'Demo');
+            assert.deepStrictEqual(desc!.at, { x: 0, y: 0, w: 800, h: 600 });
+            assert.strictEqual(desc!.mdi, true);
+        });
+
+        test('REPORT container gets the same descriptor shape', () => {
+            const code = [
+                'Rpt REPORT,AT(1000,1000,7000,10000),THOUS',
+                '       END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const desc = structure.getWindowDescriptor(findStructure(tokens, 'REPORT'));
+            assert.ok(desc, 'descriptor must be populated for REPORT');
+            assert.deepStrictEqual(desc!.at, { x: 1000, y: 1000, w: 7000, h: 10000 });
+            assert.deepStrictEqual(desc!.attributes, ['THOUS']);
+        });
+
+        test('WINDOW with only a residual attribute (no title/at/mdi) returns mostly-empty descriptor', () => {
+            // Bare `Win WINDOW` (no parens, no comma) is a Clarion-source edge case
+            // that the tokenizer treats specially; a minimal-attribute form like
+            // `Win WINDOW,RESIZE` is the canonical "no metadata to speak of" shape.
+            const code = [
+                'Win WINDOW,RESIZE',
+                '       END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const desc = structure.getWindowDescriptor(findStructure(tokens, 'WINDOW'));
+            assert.ok(desc);
+            assert.strictEqual(desc!.title, undefined);
+            assert.strictEqual(desc!.at, undefined);
+            assert.strictEqual(desc!.mdi, false);
+            assert.strictEqual(desc!.mdiChild, false);
+            assert.strictEqual(desc!.icon, undefined);
+            assert.strictEqual(desc!.systemMenu, false);
+            assert.strictEqual(desc!.statusBar, false);
+            assert.deepStrictEqual(desc!.attributes, ['RESIZE']);
+        });
+
+        test('getActiveWindowDescriptor: cursor inside a control returns parent WINDOW descriptor', () => {
+            const code = [
+                'MyProc PROCEDURE()',                       // 0
+                'Win WINDOW(\'Outer\'),AT(0,0,400,300)',    // 1
+                '  BUTTON(\'OK\'),AT(120,160),USE(?BtnOk)', // 2  — cursor here
+                '       END',                                // 3
+                'CODE',                                      // 4
+                '  RETURN',                                  // 5
+                'END',                                       // 6
+            ].join('\n');
+            const { structure } = buildF(code);
+            const desc = structure.getActiveWindowDescriptor(2);
+            assert.ok(desc, 'getActiveWindowDescriptor should resolve a parent container');
+            assert.strictEqual(desc!.title, 'Outer');
+        });
+
+        test('getActiveWindowDescriptor outside any container returns undefined', () => {
+            const code = [
+                'MyProc PROCEDURE()',
+                'CODE',
+                '  RETURN',
+                'END',
+            ].join('\n');
+            const { structure } = buildF(code);
+            assert.strictEqual(structure.getActiveWindowDescriptor(2), undefined);
+        });
+
+        test('Multi-line WINDOW header with | continuation joins via getLogicalLine', () => {
+            // Real Clarion code wraps long headers with the `|` continuation marker.
+            // The descriptor parser should see the joined logical line.
+            const code = [
+                'Win WINDOW(\'Wrapped Title\'),AT(0,0,640,480), |',  // 0 — continues
+                '       MDI,SYSTEM,RESIZE',                            // 1
+                '       END',                                           // 2
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const desc = structure.getWindowDescriptor(findStructure(tokens, 'WINDOW'));
+            assert.ok(desc, 'descriptor must be populated even when header wraps');
+            assert.strictEqual(desc!.title, 'Wrapped Title');
+            assert.deepStrictEqual(desc!.at, { x: 0, y: 0, w: 640, h: 480 });
+            assert.strictEqual(desc!.mdi, true,
+                'MDI on the continued segment must be captured via the joined logical line');
+            assert.strictEqual(desc!.systemMenu, true);
+            assert.deepStrictEqual(desc!.attributes, ['RESIZE']);
+        });
+
+        test('Non-container Structure tokens (CLASS / GROUP / FILE) get no descriptor', () => {
+            const code = [
+                'MyClass CLASS,TYPE',
+                '  Foo PROCEDURE()',
+                'END',
+            ].join('\n');
+            const { tokens, structure } = buildF(code);
+            const cls = findStructure(tokens, 'CLASS');
+            assert.ok(cls);
+            assert.strictEqual(structure.getWindowDescriptor(cls), undefined);
+        });
+    });
+
     suite('findRoutines()', () => {
         test('should return all routines when no name supplied', () => {
             const code = `TestProc PROCEDURE()
