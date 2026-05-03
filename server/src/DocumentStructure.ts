@@ -1917,6 +1917,42 @@ export class DocumentStructure {
     }
 
     /**
+     * Returns every MethodImplementation token in this document whose owning
+     * class matches `classToken`'s name (case-insensitive). Strictly matches
+     * the 2-part `ClassName.MethodName` label form; 3-part interface
+     * implementations (`ClassName.IFace.Method`) are excluded — same guard
+     * used by ImplementationProvider's MethodImplementation candidate filter.
+     *
+     * Reads the class name from `classToken.label ?? classToken.value`. Backed
+     * by Gap A's `procedureIndex` — no full token scan.
+     */
+    public getClassMethodImplementations(classToken: Token): Token[] {
+        const className = classToken.label ?? classToken.value;
+        return this.getClassMethodImplementationsByName(className);
+    }
+
+    /**
+     * String-keyed variant of `getClassMethodImplementations` — convenient for
+     * callers that already have a class name (e.g. derived from a token's
+     * dot-prefix) and don't need the CLASS Token.
+     */
+    public getClassMethodImplementationsByName(className: string): Token[] {
+        const upper = className.toUpperCase();
+        const results: Token[] = [];
+        for (const list of this.procedureIndex.values()) {
+            for (const t of list) {
+                if (t.subType !== TokenType.MethodImplementation) continue;
+                if (!t.label) continue;
+                const parts = t.label.split('.');
+                if (parts.length !== 2) continue;
+                if (parts[0].toUpperCase() !== upper) continue;
+                results.push(t);
+            }
+        }
+        return results;
+    }
+
+    /**
      * Returns ROUTINE tokens. With no argument, returns every routine in the
      * document (caller can apply line-range or other filters). With a name,
      * returns only routines whose label matches case-insensitively.

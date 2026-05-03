@@ -703,6 +703,156 @@ END`;
         });
     });
 
+    suite('getClassMethodImplementations()', () => {
+        function buildO(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { tokens, structure };
+        }
+
+        test('returns every MethodImplementation of a class with multiple methods', () => {
+            const code = `MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.Run PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.Kill PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            const results = structure.getClassMethodImplementationsByName('MyClass');
+            const labels = results.map(t => t.label?.toUpperCase()).sort();
+            assert.deepStrictEqual(labels, ['MYCLASS.INIT', 'MYCLASS.KILL', 'MYCLASS.RUN']);
+        });
+
+        test('returns all overloads when methods are overloaded', () => {
+            const code = `MyClass.DoStuff PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.DoStuff PROCEDURE(LONG pId)
+CODE
+  RETURN
+END
+
+MyClass.DoStuff PROCEDURE(STRING pName, LONG pCount)
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            const results = structure.getClassMethodImplementationsByName('MyClass');
+            assert.strictEqual(results.length, 3, 'all three overloads should be returned');
+            assert.ok(results.every(t => t.label === 'MyClass.DoStuff'));
+        });
+
+        test('returns empty array for a declaration-only class with no impls', () => {
+            const code = `MyClass CLASS,TYPE
+  Init PROCEDURE()
+  Run  PROCEDURE()
+END`;
+            const { structure } = buildO(code);
+            const results = structure.getClassMethodImplementationsByName('MyClass');
+            assert.deepStrictEqual(results, []);
+        });
+
+        test('class name match is case-insensitive', () => {
+            const code = `MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            const lower = structure.getClassMethodImplementationsByName('myclass');
+            const upper = structure.getClassMethodImplementationsByName('MYCLASS');
+            const mixed = structure.getClassMethodImplementationsByName('MyClass');
+            assert.strictEqual(lower.length, 1);
+            assert.strictEqual(upper.length, 1);
+            assert.strictEqual(mixed.length, 1);
+            assert.strictEqual(lower[0], upper[0]);
+            assert.strictEqual(lower[0], mixed[0]);
+        });
+
+        test('does NOT return methods of a class with a similar prefix', () => {
+            const code = `MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClassExtra.Foo PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            const results = structure.getClassMethodImplementationsByName('MyClass');
+            assert.strictEqual(results.length, 1, 'only the exact-match class should be returned');
+            assert.strictEqual(results[0].label, 'MyClass.Init');
+        });
+
+        test('does NOT return 3-part interface impls (ClassName.IFace.Method)', () => {
+            const code = `MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.IFoo.Bar PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            const results = structure.getClassMethodImplementationsByName('MyClass');
+            assert.strictEqual(results.length, 1,
+                'only the 2-part class.method form should be returned');
+            assert.strictEqual(results[0].label, 'MyClass.Init');
+        });
+
+        test('token-form and string-form return identical results', () => {
+            const code = `MyClass CLASS,TYPE
+  Init PROCEDURE()
+  Run  PROCEDURE()
+END
+
+MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.Run PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { tokens, structure } = buildO(code);
+            const classToken = tokens.find(t =>
+                t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS'
+            );
+            assert.ok(classToken, 'CLASS token must be present');
+            // The CLASS token's label is set to "MyClass" by handleStructureToken.
+            const tokenForm  = structure.getClassMethodImplementations(classToken!);
+            const stringForm = structure.getClassMethodImplementationsByName('MyClass');
+            assert.deepStrictEqual(tokenForm, stringForm,
+                'token-form and string-form should yield the same array');
+        });
+
+        test('returns empty array for a class name not present in the document', () => {
+            const code = `MyClass.Init PROCEDURE()
+CODE
+  RETURN
+END`;
+            const { structure } = buildO(code);
+            assert.deepStrictEqual(
+                structure.getClassMethodImplementationsByName('NoSuchClass'),
+                []
+            );
+        });
+    });
+
     suite('findRoutines()', () => {
         test('should return all routines when no name supplied', () => {
             const code = `TestProc PROCEDURE()
