@@ -4,6 +4,7 @@ import { TokenType, Token } from './tokenizer/TokenTypes';
 import { PatternMatcher } from './tokenizer/PatternMatcher';
 import { StructureProcessor } from './tokenizer/StructureProcessor';
 import { STRUCTURE_PATTERNS } from './tokenizer/TokenPatterns';
+import { ProcedureParameterParser } from './tokenizer/ProcedureParameterParser';
 
 const logger = LoggerManager.getLogger("Tokenizer");
 logger.setLevel("error"); // Only show errors and PERF
@@ -89,6 +90,13 @@ export class ClarionTokenizer {
             }
             const procedureVarsTime = performance.now() - procedureVarsStart;
             logger.info(`🔍 [DEBUG] Procedure local variables tokenized (${procedureVarsTime.toFixed(2)}ms)`);
+
+            const paramParseStart = performance.now();
+            if (!this.skipStructureProcessing) {
+                this.populateProcedureParameters(); // ✅ Step 5: Attach structured parameter lists to procedure tokens
+            }
+            const paramParseTime = performance.now() - paramParseStart;
+            logger.info(`🔍 [DEBUG] Procedure parameters parsed (${paramParseTime.toFixed(2)}ms)`);
             
             // 📊 METRICS: Calculate and log performance stats
             const totalTime = performance.now() - perfStart;
@@ -604,6 +612,64 @@ export class ClarionTokenizer {
                 }
             }
         }
+    }
+
+    /**
+     * Walks every procedure-style token (the 5 subtypes set by DocumentStructure)
+     * and attaches a structured `parameters` array parsed from its declaration
+     * line. Reconstructs multi-line declarations by following Clarion's `|`
+     * line-continuation runs from the procedure's source line forward.
+     *
+     * This pass runs after DocumentStructure.process() so subType assignments
+     * are final.
+     */
+    private populateProcedureParameters(): void {
+        const procedureSubtypes = new Set<TokenType>([
+            TokenType.GlobalProcedure,
+            TokenType.MethodImplementation,
+            TokenType.MapProcedure,
+            TokenType.MethodDeclaration,
+            TokenType.InterfaceMethod,
+        ]);
+
+        for (const token of this.tokens) {
+            if (token.subType === undefined || !procedureSubtypes.has(token.subType)) continue;
+            if (!token.label) continue;
+
+            const joined = this.joinedDeclarationLine(token.line);
+            token.parameters = ProcedureParameterParser.parse(joined);
+        }
+    }
+
+    /**
+     * Returns the logical declaration line at `startLine`, joining any
+     * subsequent lines that the previous line ended with a `|` continuation
+     * marker. Strips the `|` and any trailing comment so the result is the
+     * pure code text the parameter parser expects.
+     */
+    private joinedDeclarationLine(startLine: number): string {
+        const stripContinuation = (s: string): string => {
+            // Strip end-of-line `!`-comment, then strip a trailing `|` continuation.
+            let out = s.replace(/!.*$/, '');
+            // Trailing optional ampersand-separated continuation: `&|` or `|`
+            out = out.replace(/\s*&?\s*\|\s*$/, '');
+            return out;
+        };
+        const hasContinuation = (s: string): boolean => {
+            const stripped = s.replace(/!.*$/, '').trimEnd();
+            return /\|$/.test(stripped) || /&\s*\|$/.test(stripped);
+        };
+
+        let i = startLine;
+        const parts: string[] = [];
+        while (i < this.lines.length) {
+            const raw = this.lines[i];
+            const cont = hasContinuation(raw);
+            parts.push(stripContinuation(raw));
+            if (!cont) break;
+            i++;
+        }
+        return parts.join(' ');
     }
 
     /** ✅ Tokenize local variables in procedures/methods/functions */

@@ -2,6 +2,7 @@ import { SignatureHelp, SignatureInformation, ParameterInformation, Position } f
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -388,7 +389,7 @@ export class SignatureHelpProvider {
             }
         }
         
-        return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount));
+        return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount, proc.parameters));
     }
 
     /**
@@ -555,36 +556,36 @@ export class SignatureHelpProvider {
         procName: string,
         tokens: Token[],
         document: TextDocument
-    ): { signature: string; paramCount: number }[] {
-        const procedures: { signature: string; paramCount: number }[] = [];
-        
+    ): { signature: string; paramCount: number; parameters?: ProcedureParameter[] }[] {
+        const procedures: { signature: string; paramCount: number; parameters?: ProcedureParameter[] }[] = [];
+
         // Use DocumentStructure to get MAP declarations
         const documentStructure = this.tokenCache.getStructure(document);
         const mapDeclarations = documentStructure.findMapDeclarations(procName);
-        
+
         // Get document content for extracting signatures
         const content = document.getText();
         const lines = content.split('\n');
-        
+
         // Extract signatures from found declarations
         for (const declToken of mapDeclarations) {
             const line = lines[declToken.line];
             if (line) {
                 const signature = line.trim();
                 const paramCount = this.overloadResolver.countParametersInDeclaration(signature);
-                
+
                 // Check for duplicates before adding
-                const isDuplicate = procedures.some(p => 
+                const isDuplicate = procedures.some(p =>
                     p.signature === signature && p.paramCount === paramCount
                 );
-                
+
                 if (!isDuplicate) {
-                    procedures.push({ signature, paramCount });
+                    procedures.push({ signature, paramCount, parameters: declToken.parameters });
                     logger.info(`Found MAP declaration: ${signature}`);
                 }
             }
         }
-        
+
         return procedures;
     }
 
@@ -658,38 +659,56 @@ export class SignatureHelpProvider {
     }
 
     /**
-     * Creates a SignatureInformation object from a signature string
+     * Creates a SignatureInformation object from a signature string.
+     * When `structured` is provided (typically from `Token.parameters` populated
+     * by ClarionTokenizer), it's used directly — bypassing the regex extraction
+     * fallback. Without it, falls back to a regex-based parse of the signature
+     * line (e.g. for cross-file paths that read raw source from disk).
      */
-    private createSignatureInformation(methodName: string, signature: string, paramCount: number): SignatureInformation {
-        // Extract parameters from signature (handles both PROCEDURE and FUNCTION)
-        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+    private createSignatureInformation(
+        methodName: string,
+        signature: string,
+        paramCount: number,
+        structured?: ProcedureParameter[]
+    ): SignatureInformation {
         const parameters: ParameterInformation[] = [];
 
-        if (match && match[1]) {
-            const paramList = match[1].trim();
-            if (paramList !== '') {
-                // Split by comma at depth 0
-                const params = this.splitParameters(paramList);
-                
-                for (const param of params) {
-                    const trimmed = param.trim();
-                    // Strip optional-parameter angle brackets: <Key K> → Key K
-                    const stripped = trimmed.replace(/^<(.*)>$/, '$1').trim();
-                    // Extract parameter name and type
-                    const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
-                    if (paramMatch) {
-                        const type = paramMatch[1].trim();
-                        const name = paramMatch[2];
-                        parameters.push({
-                            label: `${type} ${name}`,
-                            documentation: undefined
-                        });
-                    } else {
-                        // Fallback: use stripped form (without angle brackets) as label
-                        parameters.push({
-                            label: stripped || trimmed,
-                            documentation: undefined
-                        });
+        if (structured) {
+            for (const p of structured) {
+                parameters.push({
+                    label: this.formatStructuredParameterLabel(p),
+                    documentation: undefined,
+                });
+            }
+        } else {
+            // Extract parameters from signature (handles both PROCEDURE and FUNCTION)
+            const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+            if (match && match[1]) {
+                const paramList = match[1].trim();
+                if (paramList !== '') {
+                    // Split by comma at depth 0
+                    const params = this.splitParameters(paramList);
+
+                    for (const param of params) {
+                        const trimmed = param.trim();
+                        // Strip optional-parameter angle brackets: <Key K> → Key K
+                        const stripped = trimmed.replace(/^<(.*)>$/, '$1').trim();
+                        // Extract parameter name and type
+                        const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
+                        if (paramMatch) {
+                            const type = paramMatch[1].trim();
+                            const name = paramMatch[2];
+                            parameters.push({
+                                label: `${type} ${name}`,
+                                documentation: undefined
+                            });
+                        } else {
+                            // Fallback: use stripped form (without angle brackets) as label
+                            parameters.push({
+                                label: stripped || trimmed,
+                                documentation: undefined
+                            });
+                        }
                     }
                 }
             }
@@ -703,6 +722,14 @@ export class SignatureHelpProvider {
             documentation: undefined,
             parameters
         };
+    }
+
+    /** Formats a single structured ProcedureParameter as a human-readable label. */
+    private formatStructuredParameterLabel(p: ProcedureParameter): string {
+        const typePart = p.typeArg !== undefined ? `${p.type}(${p.typeArg})` : p.type;
+        const byRef = p.byRef ? '*' : '';
+        const core = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        return p.optional ? `<${core}>` : core;
     }
 
     /**
