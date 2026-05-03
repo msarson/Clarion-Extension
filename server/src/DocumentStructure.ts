@@ -91,6 +91,15 @@ export class DocumentStructure {
     private equateIndex: Map<string, Token> = new Map();
     /** Cached list of ITEMIZE structure tokens for fast `getItemizeBlocks()` returns. */
     private itemizeBlocks: Token[] = [];
+    /**
+     * Reverse IMPLEMENTS index: for each interface name (UPPER), the list of CLASS
+     * tokens that declare `IMPLEMENTS(InterfaceName)` in their attribute clause.
+     * Built by `linkImplementorsPass` from the CLASS tokens' `implementedInterfaces`
+     * arrays (set by handleStructureToken). First-occurrence order preserved within
+     * each bucket; duplicates of the same class do not occur because each CLASS is
+     * processed once.
+     */
+    private implementorsByInterface: Map<string, Token[]> = new Map();
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -537,6 +546,10 @@ export class DocumentStructure {
         // populateDeclaredValues runs in the tokenizer step before DocumentStructure
         // is even constructed.
         this.linkEquatesPass();
+
+        // Build the reverse IMPLEMENTS index from each CLASS token's
+        // `implementedInterfaces` array (set in handleStructureToken).
+        this.linkImplementorsPass();
     }
 
     /**
@@ -775,6 +788,29 @@ export class DocumentStructure {
             const rawKey = t.value.toUpperCase();
             if (!this.equateIndex.has(rawKey)) {
                 this.equateIndex.set(rawKey, t);
+            }
+        }
+    }
+
+    /**
+     * Builds the reverse IMPLEMENTS index. Walks every CLASS token in
+     * `structuresByType.get('CLASS')` and pushes it into a per-interface bucket
+     * for each name in its `implementedInterfaces` array. Names are normalised
+     * to uppercase for lookup.
+     */
+    private linkImplementorsPass(): void {
+        this.implementorsByInterface.clear();
+        const classes = this.structuresByType.get('CLASS');
+        if (!classes) return;
+
+        for (const cls of classes) {
+            const interfaces = cls.implementedInterfaces;
+            if (!interfaces || interfaces.length === 0) continue;
+            for (const ifaceName of interfaces) {
+                const key = ifaceName.toUpperCase();
+                const bucket = this.implementorsByInterface.get(key);
+                if (bucket) bucket.push(cls);
+                else this.implementorsByInterface.set(key, [cls]);
             }
         }
     }
@@ -2151,5 +2187,66 @@ export class DocumentStructure {
         return Array.from(seen).sort((a, b) =>
             a.line !== b.line ? a.line - b.line : a.start - b.start
         );
+    }
+
+    // =====================================================
+    // 🎯 Gap H: Reverse IMPLEMENTS index
+    // =====================================================
+
+    /**
+     * Every CLASS token in this document that declares
+     * `IMPLEMENTS(<interfaceName>)` — case-insensitive on the interface name.
+     * Returns an empty array when nothing implements the interface (or when
+     * the interface name is unknown to this file). Single-document only —
+     * cross-file implementor lookup is `StructureDeclarationIndexer` territory.
+     */
+    public getImplementors(interfaceName: string): Token[] {
+        const list = this.implementorsByInterface.get(interfaceName.toUpperCase());
+        return list ? [...list] : [];
+    }
+
+    /**
+     * Every IMPLEMENTS()-clause name token in this document that names
+     * `interfaceName` (case-insensitive). Returns the first identifier token
+     * inside each `IMPLEMENTS(...)` whose joined argument matches — useful to
+     * `ReferencesProvider` for finding all places where an interface is wired
+     * up as a contract. Tokens are returned in source order.
+     *
+     * Note: a multi-token IMPLEMENTS argument (e.g. whitespace inside the
+     * parens) collapses to its first identifier token; that's the natural
+     * "navigate to the name" position and matches how the forward extractor
+     * in `handleStructureToken` joins the spelling.
+     */
+    public findInterfaceReferences(interfaceName: string): Token[] {
+        const target = interfaceName.toUpperCase();
+        const refs: Token[] = [];
+        const classes = this.structuresByType.get('CLASS');
+        if (!classes) return refs;
+
+        for (const cls of classes) {
+            const lineTokens = this.tokensByLine.get(cls.line);
+            if (!lineTokens) continue;
+            for (let i = 0; i < lineTokens.length - 1; i++) {
+                const t = lineTokens[i];
+                if (t.value.toUpperCase() !== 'IMPLEMENTS') continue;
+                if (lineTokens[i + 1]?.value !== '(') continue;
+                // Walk inside the parens collecting the joined identifier.
+                let j = i + 2;
+                let joined = '';
+                let firstIdent: Token | undefined;
+                while (j < lineTokens.length && lineTokens[j].value !== ')') {
+                    const seg = lineTokens[j];
+                    if (!firstIdent && /^[A-Za-z_]/.test(seg.value)) {
+                        firstIdent = seg;
+                    }
+                    joined += seg.value;
+                    j++;
+                }
+                if (firstIdent && joined.toUpperCase() === target) {
+                    refs.push(firstIdent);
+                }
+            }
+        }
+        return refs;
     }
 }

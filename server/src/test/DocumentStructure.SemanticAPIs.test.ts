@@ -1610,4 +1610,117 @@ END`;
             assert.strictEqual(structure.getEquates().length, 0);
         });
     });
+
+    suite('Reverse IMPLEMENTS index (Gap H)', () => {
+        function buildH(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { structure, tokens };
+        }
+
+        test('single class implementing one interface: getImplementors returns it', () => {
+            const code = [
+                'IConnection INTERFACE,TYPE',                    // 0
+                '  Open       PROCEDURE()',                       // 1
+                '            END',                                 // 2
+                '',                                                // 3
+                'TcpClient   CLASS,TYPE,IMPLEMENTS(IConnection)', // 4
+                '            END',                                 // 5
+            ].join('\n');
+            const { structure } = buildH(code);
+            const impls = structure.getImplementors('IConnection');
+            assert.strictEqual(impls.length, 1);
+            assert.strictEqual(impls[0].label, 'TcpClient');
+        });
+
+        test('multiple classes implementing one interface: all returned in source order', () => {
+            const code = [
+                'ILogger INTERFACE,TYPE',                              // 0
+                '  Log     PROCEDURE(STRING msg)',                      // 1
+                '         END',                                          // 2
+                '',                                                      // 3
+                'FileLogger     CLASS,TYPE,IMPLEMENTS(ILogger)',         // 4
+                '              END',                                     // 5
+                '',                                                      // 6
+                'ConsoleLogger  CLASS,TYPE,IMPLEMENTS(ILogger)',         // 7
+                '              END',                                     // 8
+            ].join('\n');
+            const { structure } = buildH(code);
+            const impls = structure.getImplementors('ILogger');
+            assert.strictEqual(impls.length, 2);
+            assert.deepStrictEqual(impls.map(c => c.label), ['FileLogger', 'ConsoleLogger']);
+        });
+
+        test('class implementing multiple interfaces: appears in each bucket', () => {
+            const code = [
+                'IConnection INTERFACE,TYPE',                                   // 0
+                '            END',                                               // 1
+                'ICloseable  INTERFACE,TYPE',                                   // 2
+                '            END',                                               // 3
+                '',                                                              // 4
+                'TcpClient CLASS,TYPE,IMPLEMENTS(IConnection),IMPLEMENTS(ICloseable)', // 5
+                '          END',                                                  // 6
+            ].join('\n');
+            const { structure } = buildH(code);
+            assert.strictEqual(structure.getImplementors('IConnection')[0].label, 'TcpClient');
+            assert.strictEqual(structure.getImplementors('ICloseable')[0].label, 'TcpClient');
+        });
+
+        test('interface with no implementors: empty array', () => {
+            const code = [
+                'IUnused INTERFACE,TYPE',                          // 0
+                '       END',                                       // 1
+            ].join('\n');
+            const { structure } = buildH(code);
+            assert.deepStrictEqual(structure.getImplementors('IUnused'), []);
+        });
+
+        test('case-insensitive interface name lookup', () => {
+            const code = [
+                'IConnection INTERFACE,TYPE',                       // 0
+                '           END',                                    // 1
+                'TcpClient CLASS,TYPE,IMPLEMENTS(IConnection)',     // 2
+                '          END',                                     // 3
+            ].join('\n');
+            const { structure } = buildH(code);
+            assert.strictEqual(structure.getImplementors('iconnection').length, 1);
+            assert.strictEqual(structure.getImplementors('ICONNECTION').length, 1);
+            assert.strictEqual(structure.getImplementors('IcOnNeCtIoN').length, 1);
+        });
+
+        test('findInterfaceReferences returns the IMPLEMENTS-clause name tokens', () => {
+            const code = [
+                'IConnection INTERFACE,TYPE',                               // 0
+                '           END',                                            // 1
+                'TcpClient   CLASS,TYPE,IMPLEMENTS(IConnection)',           // 2
+                '           END',                                            // 3
+                'TlsClient   CLASS,TYPE,IMPLEMENTS(IConnection)',           // 4
+                '           END',                                            // 5
+            ].join('\n');
+            const { structure } = buildH(code);
+            const refs = structure.findInterfaceReferences('IConnection');
+            assert.strictEqual(refs.length, 2);
+            assert.deepStrictEqual(refs.map(t => t.line), [2, 4]);
+            // First identifier inside the parens — the interface name itself.
+            assert.strictEqual(refs[0].value, 'IConnection');
+        });
+
+        test('getImplementors does not include classes that do not declare IMPLEMENTS', () => {
+            const code = [
+                'IConnection INTERFACE,TYPE',                       // 0
+                '           END',                                    // 1
+                'PlainClass  CLASS,TYPE',                           // 2 — no IMPLEMENTS
+                '           END',                                    // 3
+                'TcpClient   CLASS,TYPE,IMPLEMENTS(IConnection)',   // 4
+                '           END',                                    // 5
+            ].join('\n');
+            const { structure } = buildH(code);
+            const impls = structure.getImplementors('IConnection');
+            assert.strictEqual(impls.length, 1);
+            assert.strictEqual(impls[0].label, 'TcpClient');
+            assert.ok(!impls.some(c => c.label === 'PlainClass'));
+        });
+    });
 });
