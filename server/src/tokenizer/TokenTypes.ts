@@ -73,6 +73,10 @@ export interface Token {
     isStructureField?: boolean; // ✅ Flag to identify structure fields
     isFileRecord?: boolean;     // ✅ True when this RECORD token is the direct child of a FILE structure (vs. a standalone or QUEUE/GROUP-nested RECORD)
     parameters?: ProcedureParameter[]; // ✅ Structured parameter list, populated by ClarionTokenizer for the 5 procedure subtypes (GlobalProcedure / MethodImplementation / MapProcedure / MethodDeclaration / InterfaceMethod)
+    /** Declared data-type keyword captured for column-0 Label tokens (e.g. 'EQUATE', 'STRING', 'LONG', 'LIKE', 'GROUP'). Set by ClarionTokenizer.populateDeclaredValues() in the same pass that fills `parameters`. Single-line declarations only — Gap P will handle `|` continuation. */
+    dataType?: string;
+    /** Declared value (raw text inside the (...)) for column-0 Label tokens with a parenthesised argument (e.g. '100' for `MAX_ROWS EQUATE(100)`, '20' for `Name STRING(20)`). Undefined for bare-type declarations like `pId LONG`. */
+    dataValue?: string;
     structureParent?: Token;  // ✅ Reference to the parent structure token
     nestedLabel?: string;     // ✅ Store the label of the nesting structure (e.g., "Queue:Browse:1" for fields inside it)
     referencedFile?: string;  // ✅ Resolved path for any file reference (MODULE/INCLUDE/LINK/MEMBER/etc)

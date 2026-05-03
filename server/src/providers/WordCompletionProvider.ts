@@ -550,26 +550,31 @@ export class WordCompletionProvider {
         tokens: Token[],
         add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
     ): void {
-        const equateLines = new Set<number>();
-        for (const t of tokens) {
-            if (t.value && t.value.toUpperCase() === 'EQUATE' && t.start > 0) {
-                equateLines.add(t.line);
-            }
-        }
-        if (equateLines.size === 0) return;
-
         for (const t of tokens) {
             if (t.type !== TokenType.Label) continue;
             if (t.start !== 0) continue;
             if (t.isStructureField) continue;
-            if (!equateLines.has(t.line)) continue;
 
+            // Fast path: structured `dataType` populated by ClarionTokenizer (Gap D).
+            if (t.dataType === 'EQUATE') {
+                const detail = t.dataValue !== undefined
+                    ? `EQUATE(${t.dataValue})`
+                    : 'EQUATE';
+                add(t.value, CompletionItemKind.Constant, detail);
+                continue;
+            }
+
+            // Fallback for labels the populator didn't enrich (defensive — e.g. an
+            // unusual code path that produced a column-0 Label without going
+            // through ClarionTokenizer.tokenize()'s populateDeclaredValues step).
+            if (t.dataType !== undefined) continue; // populator ran, decisive non-EQUATE
             const lineText = document.getText({
                 start: { line: t.line, character: 0 },
                 end: { line: t.line, character: 4000 }
             });
-            const m = lineText.match(/EQUATE(\s*\([^)]*\))?/i);
-            const detail = m ? `EQUATE${m[1] ?? ''}`.replace(/\s+/g, '') : 'EQUATE';
+            const m = lineText.match(/\bEQUATE(\s*\([^)]*\))?/i);
+            if (!m) continue;
+            const detail = `EQUATE${m[1] ?? ''}`.replace(/\s+/g, '');
             add(t.value, CompletionItemKind.Constant, detail);
         }
     }

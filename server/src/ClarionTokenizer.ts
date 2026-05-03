@@ -5,6 +5,7 @@ import { PatternMatcher } from './tokenizer/PatternMatcher';
 import { StructureProcessor } from './tokenizer/StructureProcessor';
 import { STRUCTURE_PATTERNS } from './tokenizer/TokenPatterns';
 import { ProcedureParameterParser } from './tokenizer/ProcedureParameterParser';
+import { DeclaredValueParser } from './tokenizer/DeclaredValueParser';
 
 const logger = LoggerManager.getLogger("Tokenizer");
 logger.setLevel("error"); // Only show errors and PERF
@@ -97,6 +98,13 @@ export class ClarionTokenizer {
             }
             const paramParseTime = performance.now() - paramParseStart;
             logger.info(`🔍 [DEBUG] Procedure parameters parsed (${paramParseTime.toFixed(2)}ms)`);
+
+            const declValueStart = performance.now();
+            if (!this.skipStructureProcessing) {
+                this.populateDeclaredValues(); // ✅ Step 6: Attach dataType/dataValue to column-0 Label tokens
+            }
+            const declValueTime = performance.now() - declValueStart;
+            logger.info(`🔍 [DEBUG] Declared values parsed (${declValueTime.toFixed(2)}ms)`);
             
             // 📊 METRICS: Calculate and log performance stats
             const totalTime = performance.now() - perfStart;
@@ -670,6 +678,33 @@ export class ClarionTokenizer {
             i++;
         }
         return parts.join(' ');
+    }
+
+    /**
+     * Walks every column-0 Label token and parses the declaration line into
+     * `dataType` (and `dataValue` when a parenthesised arg is present). Skips
+     * structure-field labels (their declarations live inside aggregates and
+     * fall under different parsing rules) and labels that already carry a
+     * procedure-style subType (handled by the parameter populator above).
+     */
+    private populateDeclaredValues(): void {
+        for (const token of this.tokens) {
+            if (token.type !== TokenType.Label) continue;
+            if (token.start !== 0) continue;
+            if (token.isStructureField) continue;
+            if (token.subType !== undefined) continue; // procedure / routine declarations excluded
+
+            const line = this.lines[token.line];
+            if (!line) continue;
+
+            const result = DeclaredValueParser.parse(line);
+            if (!result) continue;
+
+            token.dataType = result.dataType;
+            if (result.dataValue !== undefined) {
+                token.dataValue = result.dataValue;
+            }
+        }
     }
 
     /** ✅ Tokenize local variables in procedures/methods/functions */

@@ -1816,6 +1816,26 @@ export class DocumentStructure {
     }
 
     /**
+     * Returns the structured declared-value pair for a Label token.
+     * `type` is the data-type keyword (uppercase, e.g. 'EQUATE', 'STRING', 'LIKE');
+     * `value` is the raw text inside the (...) parens, or undefined for bare-type
+     * declarations like `pId LONG`.
+     *
+     * Returns null when the label has no declared value attached (not a column-0
+     * data declaration, or its line wasn't recognised by the populator).
+     *
+     * Backed by `Token.dataType` / `Token.dataValue`, populated by
+     * `ClarionTokenizer.populateDeclaredValues()` — no re-parse here.
+     */
+    public getDeclaredValue(label: Token): { type?: string; value?: string } | null {
+        if (label.dataType === undefined && label.dataValue === undefined) return null;
+        return {
+            type: label.dataType,
+            value: label.dataValue,
+        };
+    }
+
+    /**
      * Gets all global variables (labels at column 0 before first CODE marker)
      * Excludes procedure declarations and structure declarations
      * @returns Array of global variable tokens (empty if none found)

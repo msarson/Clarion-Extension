@@ -273,6 +273,21 @@ export class VariableHoverResolver {
                     : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
             markdown.push(`${scopeIcon} ${scopeLabel}`);
         }
+
+        // Inline declared-value summary (Gap D). Reads the structured dataType / dataValue
+        // attached by ClarionTokenizer; no re-parse of source text. EQUATE renders as
+        // `Name = value`; sized scalars render as `Name : TYPE(arg)`.
+        if (globalVar.dataType !== undefined) {
+            const summary = this.renderDeclaredValueSummary(
+                globalVar.label ?? globalVar.value,
+                globalVar.dataType,
+                globalVar.dataValue
+            );
+            if (summary) {
+                markdown.push(``);
+                markdown.push(summary);
+            }
+        }
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
@@ -299,6 +314,26 @@ export class VariableHoverResolver {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Renders a one-line markdown summary for the structured declared-value pair
+     * captured by `ClarionTokenizer.populateDeclaredValues()`. Returns the empty
+     * string when nothing useful can be shown (the heading line above already
+     * shows `Name — TYPE`, so we only add value-bearing detail).
+     */
+    private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
+        const upperType = type.toUpperCase();
+        if (value !== undefined) {
+            // EQUATE — show as a value:  **MAX_ROWS** = `100`
+            if (upperType === 'EQUATE') {
+                return `**${name}** = \`${value}\``;
+            }
+            // Sized / parameterised scalar — show full type signature: **Name** : `STRING(20)`
+            return `**${name}** : \`${upperType}(${value})\``;
+        }
+        // Bare-type declaration — heading already shows the type, nothing to add.
+        return '';
     }
 
     /**
