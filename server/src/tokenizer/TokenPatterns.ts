@@ -57,7 +57,10 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=\s|!|$)|(\.)(?=\s|!|$)/i,  // END keyword or dot terminator
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
-    [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
+    // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
+    // anonymous-control marker (e.g. `BUTTON('OK'),USE(?)`); `?Name` is a named
+    // field equate. Both produce the same token type.
+    [TokenType.FieldEquateLabel]: /\?(?:[A-Za-z_][A-Za-z0-9_]*)?/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
     [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly
