@@ -3,8 +3,10 @@ import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
+import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
+export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
 logger.setLevel("error");// Production: Only log errors
@@ -127,6 +129,12 @@ export class DocumentStructure {
      * `getActiveWindowDescriptor`.
      */
     private windowDescriptors: Map<Token, WindowDescriptor> = new Map();
+    /**
+     * VIEW descriptor cache — keyed by the VIEW Structure token, value is the
+     * parsed `{ from, projectedFields, joins }` from `ViewDescriptorParser`.
+     * Populated during process() by `populateViewDescriptors()`.
+     */
+    private viewDescriptors: Map<Token, ViewDescriptor> = new Map();
 
     /**
      * Reverse IMPLEMENTS index: for each interface name (UPPER), the list of CLASS
@@ -605,6 +613,11 @@ export class DocumentStructure {
         // can use a fresh cache via `getLogicalLine` to handle multi-line headers
         // joined by `|` continuations.
         this.populateWindowDescriptors();
+
+        // Parse VIEW headers + bodies into structured descriptors. Like the
+        // window descriptor pass above, this runs after the logical-line cache
+        // is cleared so multi-line VIEW headers / clauses can be joined cleanly.
+        this.populateViewDescriptors();
     }
 
     /**
@@ -623,6 +636,42 @@ export class DocumentStructure {
                 const headerText = logical?.joinedText ?? this.getPhysicalLineText(tok.line);
                 this.windowDescriptors.set(tok, WindowDescriptorParser.parse(headerText));
             }
+        }
+    }
+
+    /**
+     * Walks every VIEW structure, builds a logical-joined header (the
+     * `MyView VIEW(File)` line) and a logical-joined body (every line strictly
+     * between the VIEW opener and its END), and parses both into a
+     * `ViewDescriptor`. Stored in `viewDescriptors` keyed by the VIEW Token
+     * for O(1) `getViewDescriptor` lookup.
+     */
+    private populateViewDescriptors(): void {
+        this.viewDescriptors.clear();
+        const views = this.structuresByType.get('VIEW');
+        if (!views) return;
+        for (const view of views) {
+            if (view.finishesAt === undefined) continue;
+            const headerLogical = this.getLogicalLine(view.line);
+            const headerText = headerLogical?.joinedText ?? this.getPhysicalLineText(view.line);
+
+            // Build the body by joining every logical line strictly between
+            // the VIEW header chain end and the END line. Skip lines that are
+            // already part of the header's `|` chain.
+            const bodyChunks: string[] = [];
+            const headerEnd = headerLogical?.endLine ?? view.line;
+            let line = headerEnd + 1;
+            while (line < view.finishesAt) {
+                const logical = this.getLogicalLine(line);
+                if (logical) {
+                    bodyChunks.push(logical.joinedText);
+                    line = logical.endLine + 1;
+                } else {
+                    line++;
+                }
+            }
+            const bodyText = bodyChunks.join('\n');
+            this.viewDescriptors.set(view, ViewDescriptorParser.parse(headerText, bodyText));
         }
     }
 
@@ -2594,6 +2643,39 @@ export class DocumentStructure {
             if (desc) return desc;
         }
         return undefined;
+    }
+
+    // =====================================================
+    // 🎯 Gap L: VIEW block helpers
+    // =====================================================
+
+    /**
+     * Returns every VIEW structure token in this document — convenience over
+     * `structuresByType.get('VIEW') ?? []`. Empty when the document has no VIEWs.
+     */
+    public getViews(): Token[] {
+        const views = this.structuresByType.get('VIEW');
+        return views ? [...views] : [];
+    }
+
+    /**
+     * Returns the structured `{ from, projectedFields, joins }` descriptor for
+     * a VIEW token, parsed once during `process()` from the VIEW's header line
+     * (joined across `|` continuations) and the body lines between the opener
+     * and its END. Returns undefined when `viewToken` is not a VIEW that this
+     * document tracked.
+     */
+    public getViewDescriptor(viewToken: Token): ViewDescriptor | undefined {
+        return this.viewDescriptors.get(viewToken);
+    }
+
+    /**
+     * @deprecated Use {@link getStructureContextAt}(line).inView. Kept as a
+     * shim mirroring the older isInMapBlock / isInClassBlock helpers; will be
+     * removed once call sites migrate.
+     */
+    public isInViewBlock(line: number): boolean {
+        return this.getStructureContextAt(line).inView;
     }
 
     /**

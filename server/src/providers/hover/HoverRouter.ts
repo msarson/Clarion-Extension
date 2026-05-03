@@ -121,6 +121,11 @@ export class HoverRouter {
             if (containerHover) return containerHover;
         }
 
+        if (upperWord === 'VIEW') {
+            const viewHover = this.handleViewKeyword(position, tokens, documentStructure);
+            if (viewHover) return viewHover;
+        }
+
         if (upperWord === 'PROGRAM' || upperWord === 'MEMBER') {
             return this.contextHandler.handleProgramOrMemberKeyword(word, documentStructure);
         }
@@ -207,6 +212,56 @@ export class HoverRouter {
         if (desc.attributes.length) {
             lines.push('');
             lines.push(`**Attributes:** ${desc.attributes.map(a => `\`${a}\``).join(', ')}`);
+        }
+
+        const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
+        return { contents: content };
+    }
+
+    /**
+     * Renders a hover for a VIEW keyword. Pulls the descriptor populated by
+     * `DocumentStructure.populateViewDescriptors` and formats the source file,
+     * projected field count, and JOIN summary. Returns null when the cursor
+     * isn't on a VIEW Structure token whose descriptor has been built.
+     */
+    private handleViewKeyword(
+        position: { line: number; character: number },
+        tokens: Token[],
+        documentStructure: { getViewDescriptor(t: Token): import('../../tokenizer/ViewDescriptorParser').ViewDescriptor | undefined }
+    ): Hover | null {
+        const viewToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'VIEW' &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!viewToken) return null;
+
+        const desc = documentStructure.getViewDescriptor(viewToken);
+        if (!desc) return null;
+
+        const lines: string[] = [];
+        const labelText = viewToken.label ? `${viewToken.label} ` : '';
+        lines.push(`**${labelText}VIEW**`);
+        if (desc.from) lines.push(`*Source file:* \`${desc.from}\``);
+
+        const fieldCount = desc.projectedFields.length;
+        if (fieldCount > 0) {
+            const preview = desc.projectedFields.slice(0, 6).join(', ');
+            const more = fieldCount > 6 ? `, …${fieldCount - 6} more` : '';
+            lines.push('');
+            lines.push(`**Projected fields (${fieldCount}):** ${preview}${more}`);
+        }
+
+        if (desc.joins.length) {
+            lines.push('');
+            const joinLines = desc.joins.map(j => {
+                const side = j.side ? `${j.side} JOIN` : 'JOIN';
+                return `- ${side} \`${j.joinedFile}\``;
+            });
+            lines.push(`**Joins (${desc.joins.length}):**`);
+            lines.push(joinLines.join('\n'));
         }
 
         const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };

@@ -2265,4 +2265,129 @@ END`;
             assert.strictEqual(logical!.endLine, 1, 'blank line is a single logical line');
         });
     });
+
+    suite('VIEW block helpers (Gap L)', () => {
+        function buildL(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens, code.split('\n'));
+            structure.process();
+            return { structure, tokens };
+        }
+
+        test('VIEW with FROM(File) + PROJECT(F1, F2) populates descriptor', () => {
+            const code = [
+                'MyView VIEW(Customer)',         // 0
+                '       PROJECT(Cus:Id, Cus:Name)', // 1
+                '       END',                     // 2
+            ].join('\n');
+            const { structure, tokens } = buildL(code);
+            const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
+            assert.ok(view);
+            const desc = structure.getViewDescriptor(view!);
+            assert.ok(desc);
+            assert.strictEqual(desc!.from, 'Customer');
+            assert.deepStrictEqual(desc!.projectedFields, ['Cus:Id', 'Cus:Name']);
+            assert.strictEqual(desc!.joins.length, 0);
+        });
+
+        test('VIEW with INNER JOIN(Other) populates joins[0]', () => {
+            const code = [
+                'MyView VIEW(Customer)',                     // 0
+                '       PROJECT(Cus:Id)',                     // 1
+                '       INNER JOIN(Orders, Cus:Id, Ord:CId)', // 2
+                '       END',                                 // 3
+            ].join('\n');
+            const { structure, tokens } = buildL(code);
+            const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
+            assert.ok(view);
+            const desc = structure.getViewDescriptor(view!);
+            assert.ok(desc);
+            assert.strictEqual(desc!.joins.length, 1);
+            assert.strictEqual(desc!.joins[0].side, 'INNER');
+            assert.strictEqual(desc!.joins[0].joinedFile, 'Orders');
+        });
+
+        test('VIEW with multi-line header via `|` continuation parses all clauses', () => {
+            // Header spans physical lines 0-1 via `|`. Body still parses normally.
+            const code = [
+                'MyView VIEW(Customer),    |',           // 0
+                '       THREAD',                          // 1 (continuation of VIEW header)
+                '       PROJECT(Cus:Name, Cus:Id)',       // 2
+                '       JOIN(Orders, Cus:Id)',            // 3
+                '       END',                              // 4
+            ].join('\n');
+            const { structure, tokens } = buildL(code);
+            const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
+            assert.ok(view);
+            const desc = structure.getViewDescriptor(view!);
+            assert.ok(desc);
+            // FROM still recovered from the joined header
+            assert.strictEqual(desc!.from, 'Customer');
+            // Body clauses parsed correctly even though the header was multi-line
+            assert.deepStrictEqual(desc!.projectedFields, ['Cus:Name', 'Cus:Id']);
+            assert.strictEqual(desc!.joins.length, 1);
+            assert.strictEqual(desc!.joins[0].side, undefined, 'plain JOIN has no side');
+            assert.strictEqual(desc!.joins[0].joinedFile, 'Orders');
+        });
+
+        test('isInViewBlock returns true inside VIEW, false in adjacent code', () => {
+            const code = [
+                'MyView VIEW(Customer)',         // 0
+                '       PROJECT(Cus:Id)',         // 1
+                '       END',                     // 2
+                '',                                // 3
+                'TestProc PROCEDURE',             // 4
+                'CODE',                            // 5
+                'END',                             // 6
+            ].join('\n');
+            const { structure } = buildL(code);
+            assert.strictEqual(structure.isInViewBlock(1), true, 'inside VIEW body');
+            assert.strictEqual(structure.isInViewBlock(0), false, 'opening line not inside');
+            assert.strictEqual(structure.isInViewBlock(2), false, 'END line not inside');
+            assert.strictEqual(structure.isInViewBlock(5), false, 'unrelated code is not inside');
+        });
+
+        test('VIEW with no PROJECT/JOIN: descriptor has empty arrays, only FROM populated', () => {
+            const code = [
+                'MyView VIEW(Customer)',         // 0
+                '       END',                     // 1
+            ].join('\n');
+            const { structure, tokens } = buildL(code);
+            const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
+            assert.ok(view);
+            const desc = structure.getViewDescriptor(view!);
+            assert.ok(desc);
+            assert.strictEqual(desc!.from, 'Customer');
+            assert.deepStrictEqual(desc!.projectedFields, []);
+            assert.deepStrictEqual(desc!.joins, []);
+        });
+
+        test('getViews() returns all VIEW structure tokens', () => {
+            const code = [
+                'ViewA VIEW(FileA)',     // 0
+                '      END',              // 1
+                'ViewB VIEW(FileB)',     // 2
+                '      END',              // 3
+            ].join('\n');
+            const { structure } = buildL(code);
+            const views = structure.getViews();
+            assert.strictEqual(views.length, 2);
+            assert.deepStrictEqual(views.map(v => v.label), ['ViewA', 'ViewB']);
+        });
+
+        test('OUTER JOIN side is captured', () => {
+            const code = [
+                'MyView VIEW(Customer)',                  // 0
+                '       OUTER JOIN(Orders, Cus:Id)',       // 1
+                '       END',                              // 2
+            ].join('\n');
+            const { structure, tokens } = buildL(code);
+            const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
+            assert.ok(view);
+            const desc = structure.getViewDescriptor(view!);
+            assert.ok(desc);
+            assert.strictEqual(desc!.joins[0].side, 'OUTER');
+        });
+    });
 });
