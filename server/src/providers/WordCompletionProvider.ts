@@ -9,6 +9,7 @@ import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
+import { AttributeService } from '../utils/AttributeService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
@@ -33,6 +34,7 @@ export class WordCompletionProvider {
     private builtinService = BuiltinFunctionService.getInstance();
     private dataTypeService = DataTypeService.getInstance();
     private controlService = ControlService.getInstance();
+    private attributeService = AttributeService.getInstance();
 
     constructor(tokenCache: TokenCache, scopeAnalyzer: ScopeAnalyzer) {
         this.tokenCache = tokenCache;
@@ -110,6 +112,11 @@ export class WordCompletionProvider {
             // — collected before keywords so richer JSON entries take priority
             // ----------------------------------------------------------------
             this.collectControls(seen);
+
+            // ----------------------------------------------------------------
+            // E2. Attributes — context-aware: filter by control/structure type
+            // ----------------------------------------------------------------
+            this.collectAttributes(document, position, seen);
 
             // ----------------------------------------------------------------
             // F. Language keywords (skipped if already in seen from JSON)
@@ -386,6 +393,41 @@ export class WordCompletionProvider {
                 const paramName = m[2];
                 const paramType = m[1].trim();
                 add(paramName, CompletionItemKind.Variable, `parameter: ${paramType}`);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E2. Attributes
+    // -------------------------------------------------------------------------
+
+    private collectAttributes(document: TextDocument, position: Position, seen: Map<string, CompletionItem>): void {
+        const docStructure = this.tokenCache.getStructure(document);
+        const ctx = docStructure.getControlContextAt(position.line, position.character);
+
+        let attrs;
+        if (ctx.controlType) {
+            // Inside a control declaration — combine control-specific and generic CONTROL attrs
+            const specific = this.attributeService.getAttributesForContext(ctx.controlType);
+            const generic = this.attributeService.getAttributesForContext('CONTROL');
+            const combined = new Map<string, (typeof specific)[0]>();
+            for (const a of [...specific, ...generic]) combined.set(a.name.toUpperCase(), a);
+            attrs = Array.from(combined.values());
+        } else if (ctx.structureType) {
+            attrs = this.attributeService.getAttributesForContext(ctx.structureType);
+        } else {
+            attrs = this.attributeService.getAllAttributes();
+        }
+
+        for (const attr of attrs) {
+            const key = attr.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: attr.name,
+                    kind: CompletionItemKind.Property,
+                    detail: this.attributeService.getAttributeSignature(attr.name),
+                    documentation: attr.description,
+                });
             }
         }
     }
