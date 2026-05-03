@@ -2570,4 +2570,66 @@ END`;
             assert.strictEqual(desc!.joins[0].side, 'OUTER');
         });
     });
+
+    suite('Control keyword recognition (Gap J)', () => {
+        function buildJ(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens, code.split('\n'));
+            structure.process();
+            return structure;
+        }
+
+        // Regression: every keyword that the old hard-coded list recognised
+        // must continue to classify as a control after the ControlService
+        // refactor. The five most commonly-used window controls are pinned.
+        for (const keyword of ['BUTTON', 'ENTRY', 'LIST', 'IMAGE', 'REGION']) {
+            test(`existing window control \`${keyword}\` still classifies via getControlContextAt`, () => {
+                const code = [
+                    "TestProc PROCEDURE",                                  // 0
+                    "Win  WINDOW('Test')",                                  // 1
+                    `         ${keyword}('OK'),AT(10,10,40,15),USE(?Ctl)`,  // 2
+                    '         END',                                          // 3
+                    'CODE',                                                  // 4
+                    'END',                                                   // 5
+                ].join('\n');
+                const s = buildJ(code);
+                // Cursor mid-keyword on line 2.
+                const ctx = s.getControlContextAt(2, 12);
+                assert.ok(ctx.controlType, `expected control context for ${keyword}`);
+                assert.strictEqual(ctx.controlType, keyword, `controlType matches keyword`);
+            });
+        }
+
+        // Single source of truth — confirm that the ControlService recognises
+        // every report-only control listed in clarion-controls.json. Once a
+        // separate follow-up aligns the tokenizer whitelist for DETAIL /
+        // HEADER / FOOTER / FORM (mirroring the ITEMIZE alignment in Gap B),
+        // these classifications will surface through getControlContextAt.
+        // Gap J itself only swaps the dispatch — it doesn't fix tokenization.
+        for (const reportControl of ['DETAIL', 'HEADER', 'FOOTER', 'FORM']) {
+            test(`ControlService recognises report control \`${reportControl}\``, () => {
+                const ControlService = require('../utils/ControlService').ControlService;
+                assert.strictEqual(
+                    ControlService.getInstance().isControl(reportControl),
+                    true,
+                    `${reportControl} must resolve via ControlService`
+                );
+            });
+        }
+
+        test('non-control keyword (PROCEDURE) does NOT classify as a control', () => {
+            const ControlService = require('../utils/ControlService').ControlService;
+            // PROCEDURE/FUNCTION are not in clarion-controls.json — must not
+            // be misclassified as controls.
+            assert.strictEqual(
+                ControlService.getInstance().isControl('PROCEDURE'),
+                false
+            );
+            assert.strictEqual(
+                ControlService.getInstance().isControl('FUNCTION'),
+                false
+            );
+        });
+    });
 });

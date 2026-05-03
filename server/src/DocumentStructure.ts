@@ -5,6 +5,7 @@ import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
+import { ControlService } from './utils/ControlService';
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
@@ -509,16 +510,18 @@ export class DocumentStructure {
     }
 
     /**
-     * Checks if a keyword is a known control type
+     * Checks if a keyword is a known control type. Delegates to `ControlService`
+     * so the recognised set is the union of `clarion-controls.json`'s
+     * `windowControls` and `reportControls` arrays — single source of truth
+     * shared with `WordCompletionProvider.collectControls` and `AttributeService`.
+     *
+     * Previously this method carried its own hard-coded list that drifted from
+     * the JSON: report-only controls (DETAIL, HEADER, FOOTER, FORM) were missed,
+     * and any new control added to the JSON required a parallel edit here.
+     * Refactored as Gap J of the DocumentStructure audit.
      */
     private isControlKeyword(keyword: string): boolean {
-        const controls = [
-            'BUTTON', 'ENTRY', 'LIST', 'COMBO', 'CHECK', 'RADIO', 'OPTION',
-            'TEXT', 'STRING', 'PROMPT', 'IMAGE', 'BOX', 'LINE', 'ELLIPSE',
-            'REGION', 'GROUP', 'SHEET', 'TAB', 'SPIN', 'PANEL', 'PROGRESS',
-            'OLE', 'MENU', 'MENUBAR', 'ITEM', 'TOOLBAR'
-        ];
-        return controls.includes(keyword);
+        return ControlService.getInstance().isControl(keyword);
     }
 
     public process(): void {
