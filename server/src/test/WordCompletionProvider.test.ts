@@ -275,6 +275,40 @@ suite('WordCompletionProvider', () => {
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('MyConst'), `Expected MyConst in: ${labels.join(', ')}`);
         });
+
+        test('user EQUATE label appears as Constant kind with value in detail', async () => {
+            const doc = makeDoc([
+                'MyProg PROGRAM',
+                'MAX_ROWS EQUATE(100)',
+                '',
+                'MyProc PROCEDURE()',
+                'CODE',
+                '  x = MAX_ROWS',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+            const items = await p.provide(doc, { line: 5, character: 4 }, '');
+            const item = items.find(i => i.label === 'MAX_ROWS');
+            assert.ok(item, `Expected MAX_ROWS in completions. Got: ${items.map(i => i.label).join(', ')}`);
+            assert.strictEqual(item!.kind, CompletionItemKind.Constant, `Expected Constant kind, got ${item!.kind}`);
+            assert.strictEqual(item!.detail, 'EQUATE(100)', `Expected detail 'EQUATE(100)', got '${item!.detail}'`);
+        });
+
+        test('procedure-local EQUATE label appears as Constant kind', async () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE()',
+                'LOC_MAX EQUATE(50)',
+                'CODE',
+                '  x = LOC_MAX',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+            const items = await p.provide(doc, { line: 3, character: 4 }, '');
+            const item = items.find(i => i.label === 'LOC_MAX');
+            assert.ok(item, `Expected LOC_MAX in completions. Got: ${items.map(i => i.label).join(', ')}`);
+            assert.strictEqual(item!.kind, CompletionItemKind.Constant, `Expected Constant kind, got ${item!.kind}`);
+            assert.strictEqual(item!.detail, 'EQUATE(50)', `Expected detail 'EQUATE(50)', got '${item!.detail}'`);
+        });
     });
 
     suite('No completions in comments or strings', () => {

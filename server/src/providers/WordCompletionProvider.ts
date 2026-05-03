@@ -87,12 +87,19 @@ export class WordCompletionProvider {
             await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
 
             // ----------------------------------------------------------------
-            // B. Variables / Labels
+            // B. Equates — must run before variables so user EQUATEs land as
+            //    CompletionItemKind.Constant rather than the bare Variable
+            //    entry that collectVariables would otherwise produce.
+            // ----------------------------------------------------------------
+            this.collectEquates(document, tokens, add);
+
+            // ----------------------------------------------------------------
+            // C. Variables / Labels
             // ----------------------------------------------------------------
             this.collectVariables(tokens, scope, procDeclLines, add);
 
             // ----------------------------------------------------------------
-            // C. Parameters from PROCEDURE(...) signature
+            // D. Parameters from PROCEDURE(...) signature
             // ----------------------------------------------------------------
             if (scope?.containingProcedure) {
                 this.collectParameters(document, scope.containingProcedure, add);
@@ -101,11 +108,6 @@ export class WordCompletionProvider {
             if (scope?.containingRoutine && scope.containingProcedure) {
                 this.collectParameters(document, scope.containingProcedure, add);
             }
-
-            // ----------------------------------------------------------------
-            // D. Constants / equates
-            // ----------------------------------------------------------------
-            this.collectConstants(tokens, add);
 
             // ----------------------------------------------------------------
             // E. Container structures (WINDOW, APPLICATION, REPORT) + controls
@@ -537,14 +539,38 @@ export class WordCompletionProvider {
     // D. Constants / equates
     // -------------------------------------------------------------------------
 
-    private collectConstants(
+    /**
+     * Surface user-defined EQUATE labels (`MyConst EQUATE(42)`) as Constant
+     * completions. These tokens are tokenized as TokenType.Label, not
+     * TokenType.Constant — the latter is the lexer's literal-value class
+     * (numeric/string literals) and is intentionally not used here.
+     */
+    private collectEquates(
+        document: TextDocument,
         tokens: Token[],
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
     ): void {
+        const equateLines = new Set<number>();
         for (const t of tokens) {
-            if (t.type === TokenType.Constant && t.value) {
-                add(t.value, CompletionItemKind.Constant);
+            if (t.value && t.value.toUpperCase() === 'EQUATE' && t.start > 0) {
+                equateLines.add(t.line);
             }
+        }
+        if (equateLines.size === 0) return;
+
+        for (const t of tokens) {
+            if (t.type !== TokenType.Label) continue;
+            if (t.start !== 0) continue;
+            if (t.isStructureField) continue;
+            if (!equateLines.has(t.line)) continue;
+
+            const lineText = document.getText({
+                start: { line: t.line, character: 0 },
+                end: { line: t.line, character: 4000 }
+            });
+            const m = lineText.match(/EQUATE(\s*\([^)]*\))?/i);
+            const detail = m ? `EQUATE${m[1] ?? ''}`.replace(/\s+/g, '') : 'EQUATE';
+            add(t.value, CompletionItemKind.Constant, detail);
         }
     }
 
