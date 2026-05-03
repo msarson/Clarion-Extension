@@ -252,6 +252,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('MENU') ||
                             upperSubstring.startsWith('MENUBAR') ||
                             upperSubstring.startsWith('TOOLBAR') ||
+                            upperSubstring.startsWith('ITEMIZE') ||
                             upperSubstring.startsWith('OLE');
                         
                         // Skip DECLARATION structures in CODE section (they're not valid there)

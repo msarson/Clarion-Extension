@@ -82,6 +82,15 @@ export class DocumentStructure {
      * see TODO(Gap C follow-up) for the diagnostic candidate).
      */
     private fieldEquatesByStructure: Map<Token, Map<string, Token>> = new Map();
+    /**
+     * EQUATE Label index keyed by uppercase name. Plain EQUATEs are keyed by
+     * their raw label (`MAX_ROWS`); ITEMIZE-EQUATEs are keyed by both their
+     * raw label AND their PRE-expanded form (`Clr:Red`). Population happens
+     * in linkEquatesPass after Gap D's `dataType` is on the Label tokens.
+     */
+    private equateIndex: Map<string, Token> = new Map();
+    /** Cached list of ITEMIZE structure tokens for fast `getItemizeBlocks()` returns. */
+    private itemizeBlocks: Token[] = [];
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -522,6 +531,12 @@ export class DocumentStructure {
 
         // Build the FieldEquate (?Ctrl) indexes and link USE() tokens to their targets.
         this.linkUsesPass();
+
+        // Build the EQUATE / ITEMIZE-EQUATE index. Reads `dataType` set by Charlie's
+        // Gap D populator, so it must run after that — which is implicit because
+        // populateDeclaredValues runs in the tokenizer step before DocumentStructure
+        // is even constructed.
+        this.linkEquatesPass();
     }
 
     /**
@@ -692,7 +707,94 @@ export class DocumentStructure {
             }
         }
     }
-    
+
+    /**
+     * Builds the equate index and PRE-expands ITEMIZE_EQUATE labels.
+     *
+     * Detection: a column-0 Label whose line carries an `EQUATE` keyword token.
+     * Charlie's Gap D `dataType` field is NOT used here, even though it would be
+     * the natural check, because `populateDeclaredValues` runs at tokenize step 6
+     * — AFTER `DocumentStructure.process()` (step 2) — so `dataType` is undefined
+     * when this pass runs. The shared Token instances do receive `dataType` later,
+     * which means consumers reading from this index post-tokenize see the enriched
+     * value (e.g. `findEquate(name).dataValue`); only the in-pass detection needs
+     * the line-token fallback.
+     *
+     * For each EQUATE Label, walks `parentIndex` upward looking for the nearest
+     * ITEMIZE ancestor that carries a PRE prefix. If one is found, the Label gets
+     * `prefixedEquateName = '<prefix>:<label>'` and the equateIndex receives both
+     * the prefixed and the bare-name keys (callers can look up either form).
+     *
+     * Inner ITEMIZE without PRE inherits the next ancestor's PRE — the loop keeps
+     * walking past prefix-less ITEMIZE blocks until either a PRE-bearing ancestor
+     * is found or the chain ends. This handles the nested-no-PRE / outer-with-PRE
+     * case that StructureDeclarationIndexer's regex pass already supports.
+     *
+     * TODO(Gap B follow-up): an ITEMIZE block containing a non-EQUATE statement is
+     * a Clarion compile error — candidate Diagnostic, tracked separately.
+     */
+    private linkEquatesPass(): void {
+        this.equateIndex.clear();
+        this.itemizeBlocks = this.structuresByType.get('ITEMIZE')
+            ? [...this.structuresByType.get('ITEMIZE')!]
+            : [];
+
+        for (const t of this.tokens) {
+            if (t.type !== TokenType.Label) continue;
+            if (t.start !== 0) continue;
+            // Note: deliberately NOT filtering on `isStructureField`. Tokenizer step 2.5
+            // (StructureProcessor.processStructureFieldPrefixes) marks every Label inside
+            // a PRE-bearing structure — including ITEMIZE — as a structure field, which
+            // would skip the very EQUATEs we want to index. The line-text EQUATE check
+            // below is a stricter filter that already excludes non-EQUATE structure
+            // fields (RECORD/GROUP/QUEUE etc. carry STRING/LONG/LIKE on their lines, not
+            // EQUATE), so the redundant filter is dropped here.
+            if (!this.lineContainsEquateKeyword(t.line, t.start)) continue;
+
+            // Walk ancestors looking for the nearest ITEMIZE with a PRE prefix.
+            let pre: string | undefined;
+            let cursor: Token | undefined = this.parentIndex.get(t);
+            while (cursor) {
+                if (
+                    cursor.type === TokenType.Structure &&
+                    cursor.value.toUpperCase() === 'ITEMIZE' &&
+                    cursor.structurePrefix
+                ) {
+                    pre = cursor.structurePrefix;
+                    break;
+                }
+                cursor = this.parentIndex.get(cursor);
+            }
+
+            if (pre) {
+                t.prefixedEquateName = `${pre}:${t.value}`;
+                this.equateIndex.set(t.prefixedEquateName.toUpperCase(), t);
+            }
+            // Always index by the raw label too — callers may look up either form.
+            // First-occurrence-wins on collisions (rare; would be a duplicate symbol).
+            const rawKey = t.value.toUpperCase();
+            if (!this.equateIndex.has(rawKey)) {
+                this.equateIndex.set(rawKey, t);
+            }
+        }
+    }
+
+    /**
+     * True iff a token on `line` after column `afterColumn` has value EQUATE.
+     * Used by `linkEquatesPass` to recognise EQUATE Label declarations without
+     * relying on Gap D's `dataType` (which is populated later in the tokenize
+     * pipeline — see linkEquatesPass docstring for the timing rationale).
+     */
+    private lineContainsEquateKeyword(line: number, afterColumn: number): boolean {
+        const lineTokens = this.tokensByLine.get(line);
+        if (!lineTokens) return false;
+        for (const t of lineTokens) {
+            if (t.start <= afterColumn) continue;
+            if (t.value && t.value.toUpperCase() === 'EQUATE') return true;
+        }
+        return false;
+    }
+
     private handleExecutionMarker(token: Token): void {
         const currentProcedure = this.procedureStack[this.procedureStack.length - 1] ?? null;
         const currentRoutine = this.routineStack[this.routineStack.length - 1] ?? null;
@@ -1988,5 +2090,66 @@ export class DocumentStructure {
             }
         }
         return refs;
+    }
+
+    // =====================================================
+    // 🎯 Gap B: EQUATE / ITEMIZE block APIs
+    // =====================================================
+
+    /**
+     * Returns every ITEMIZE structure token in the document. Cached at the end of
+     * `process()` from `structuresByType.get('ITEMIZE')` — empty when there are none.
+     */
+    public getItemizeBlocks(): Token[] {
+        return [...this.itemizeBlocks];
+    }
+
+    /**
+     * Returns the EQUATE Label tokens declared inside the given ITEMIZE block,
+     * in declaration order. Each member already has `prefixedEquateName` populated
+     * if the ITEMIZE (or an outer ITEMIZE ancestor) carries a PRE prefix.
+     * Returns an empty array if `itemizeToken` is not an ITEMIZE structure.
+     */
+    public getItemizeMembers(itemizeToken: Token): Token[] {
+        if (
+            itemizeToken.type !== TokenType.Structure ||
+            itemizeToken.value.toUpperCase() !== 'ITEMIZE' ||
+            itemizeToken.finishesAt === undefined
+        ) {
+            return [];
+        }
+        // Filter the equateIndex to tokens that fall strictly inside this ITEMIZE.
+        // `getEquates()` already deduplicates and orders by source position.
+        return this.getEquates().filter(t =>
+            t.line > itemizeToken.line && t.line < itemizeToken.finishesAt!
+        );
+    }
+
+    /**
+     * O(1) lookup. Accepts either the raw EQUATE label (`MAX_ROWS`) or the
+     * PRE-expanded ITEMIZE_EQUATE form (`Clr:Red`); both are keyed in the
+     * same map. Case-insensitive. Returns the declaring Label token, which
+     * already has `dataValue` populated by Charlie's Gap D when present.
+     */
+    public findEquate(name: string): Token | undefined {
+        return this.equateIndex.get(name.toUpperCase());
+    }
+
+    /**
+     * Every EQUATE Label in the document — plain or ITEMIZE-EQUATE — in
+     * declaration order, deduplicated. Use to drive word-completion or any
+     * other consumer that wants the full set without filtering tokens manually.
+     *
+     * Built from the equateIndex (populated by linkEquatesPass), then re-sorted
+     * by source position so the iteration order is predictable for callers.
+     */
+    public getEquates(): Token[] {
+        const seen = new Set<Token>();
+        for (const t of this.equateIndex.values()) {
+            seen.add(t);
+        }
+        return Array.from(seen).sort((a, b) =>
+            a.line !== b.line ? a.line - b.line : a.start - b.start
+        );
     }
 }

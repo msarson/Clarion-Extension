@@ -99,4 +99,12 @@ export interface Token {
     /** True when a USE() argument list is empty — the Clarion `USE(?)` "no field equate" idiom.
      * Set on USE keyword tokens. Distinct from `linkedTo === undefined` (which means "couldn't resolve"). */
     hasNoFieldEquate?: boolean;
+    /** PRE-expanded fully-qualified name for an EQUATE Label declared inside an
+     * `ITEMIZE,PRE(...)` block (e.g. `Clr:Red` for `Red EQUATE` inside
+     * `Color ITEMIZE,PRE(Clr)`). Set by DocumentStructure.linkEquatesPass on
+     * Label tokens whose `dataType === 'EQUATE'` and whose nearest ITEMIZE
+     * ancestor (walking up `parentIndex`) carries a PRE prefix.
+     * Undefined for plain EQUATEs, ITEMIZE blocks without PRE, or labels not
+     * inside an ITEMIZE at all. */
+    prefixedEquateName?: string;
 }

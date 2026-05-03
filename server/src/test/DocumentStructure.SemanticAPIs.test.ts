@@ -1461,4 +1461,153 @@ END`;
             assert.strictEqual(structure.findControlAll('?Btn').length, 2);
         });
     });
+
+    suite('EQUATE / ITEMIZE blocks (Gap B)', () => {
+        function buildB(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { structure, tokens };
+        }
+
+        test('plain EQUATE outside any structure is indexed by raw name', () => {
+            const code = [
+                'MyProg PROGRAM',                  // 0
+                'MAX_ROWS EQUATE(100)',             // 1
+                '',                                  // 2
+                'TestProc PROCEDURE()',             // 3
+                'CODE',                              // 4
+                'END',                               // 5
+            ].join('\n');
+            const { structure } = buildB(code);
+            const t = structure.findEquate('MAX_ROWS');
+            assert.ok(t, 'findEquate should resolve the plain EQUATE');
+            assert.strictEqual(t!.value, 'MAX_ROWS');
+            assert.strictEqual(t!.prefixedEquateName, undefined, 'No PRE → no prefixedEquateName');
+            assert.strictEqual(t!.dataValue, '100');
+        });
+
+        test('ITEMIZE,PRE(Clr) members get prefixedEquateName and are indexed under both forms', () => {
+            const code = [
+                'Color ITEMIZE,PRE(Clr)',           // 0
+                'Red    EQUATE',                     // 1
+                'Green  EQUATE',                     // 2
+                'Blue   EQUATE',                     // 3
+                '       END',                         // 4
+            ].join('\n');
+            const { structure } = buildB(code);
+            const red = structure.findEquate('Clr:Red');
+            assert.ok(red, 'PRE-expanded form should resolve');
+            assert.strictEqual(red!.value, 'Red');
+            assert.strictEqual(red!.prefixedEquateName, 'Clr:Red');
+            // Raw-name lookup also works:
+            assert.strictEqual(structure.findEquate('Red'), red, 'Raw name lookup should also resolve');
+            // Case-insensitive:
+            assert.strictEqual(structure.findEquate('CLR:RED'), red);
+            assert.strictEqual(structure.findEquate('clr:red'), red);
+        });
+
+        test('ITEMIZE without PRE: members keep raw names, no prefixedEquateName', () => {
+            const code = [
+                'Color ITEMIZE',                    // 0
+                'Red    EQUATE',                     // 1
+                'Green  EQUATE',                     // 2
+                '       END',                         // 3
+            ].join('\n');
+            const { structure } = buildB(code);
+            const red = structure.findEquate('Red');
+            assert.ok(red, 'Member should be indexed by bare name');
+            assert.strictEqual(red!.prefixedEquateName, undefined);
+        });
+
+        test('nested ITEMIZE: inner PRE wins over outer PRE', () => {
+            const code = [
+                'OuterColor ITEMIZE,PRE(Out)',      // 0
+                'Inner       ITEMIZE,PRE(In)',      // 1 — inner ITEMIZE with its own PRE
+                'Red          EQUATE',              // 2 — should be In:Red, not Out:Red
+                '             END',                  // 3
+                '            END',                   // 4
+            ].join('\n');
+            const { structure } = buildB(code);
+            const red = structure.findEquate('In:Red');
+            assert.ok(red, 'Inner PRE should win');
+            assert.strictEqual(red!.prefixedEquateName, 'In:Red');
+            // The outer PRE should NOT resolve this same token.
+            assert.strictEqual(structure.findEquate('Out:Red'), undefined, 'Outer PRE does not apply');
+        });
+
+        test('parent ITEMIZE without PRE, grandparent ITEMIZE with PRE: ancestor walk picks up the PRE', () => {
+            const code = [
+                'Outer ITEMIZE,PRE(Out)',           // 0
+                'Inner  ITEMIZE',                    // 1 — no PRE
+                'Red     EQUATE',                    // 2 — should inherit Out:
+                '        END',                        // 3
+                '       END',                         // 4
+            ].join('\n');
+            const { structure } = buildB(code);
+            const red = structure.findEquate('Out:Red');
+            assert.ok(red, 'Should inherit grandparent PRE');
+            assert.strictEqual(red!.prefixedEquateName, 'Out:Red');
+        });
+
+        test('blank-label ITEMIZE: members PRE-expand normally', () => {
+            const code = [
+                '          ITEMIZE,PRE(CLType)',    // 0 — no top-level label
+                'Byte_      EQUATE',                 // 1
+                '           END',                     // 2
+            ].join('\n');
+            const { structure } = buildB(code);
+            const byte = structure.findEquate('CLType:Byte_');
+            assert.ok(byte, 'Member should PRE-expand even when ITEMIZE has no label');
+            assert.strictEqual(byte!.prefixedEquateName, 'CLType:Byte_');
+        });
+
+        test('getItemizeBlocks returns ITEMIZE structure tokens; getItemizeMembers lists EQUATE labels', () => {
+            const code = [
+                'Color ITEMIZE,PRE(Clr)',           // 0
+                'Red    EQUATE',                     // 1
+                'Green  EQUATE',                     // 2
+                '       END',                         // 3
+            ].join('\n');
+            const { structure } = buildB(code);
+            const blocks = structure.getItemizeBlocks();
+            assert.strictEqual(blocks.length, 1);
+            assert.strictEqual(blocks[0].value.toUpperCase(), 'ITEMIZE');
+
+            const members = structure.getItemizeMembers(blocks[0]);
+            assert.strictEqual(members.length, 2);
+            assert.deepStrictEqual(members.map(m => m.value), ['Red', 'Green']);
+            assert.strictEqual(members[0].prefixedEquateName, 'Clr:Red');
+            assert.strictEqual(members[1].prefixedEquateName, 'Clr:Green');
+        });
+
+        test('getEquates returns plain + ITEMIZE-EQUATEs in declaration order, deduplicated', () => {
+            const code = [
+                'MAX_ROWS EQUATE(100)',             // 0
+                'Color ITEMIZE,PRE(Clr)',           // 1
+                'Red    EQUATE',                     // 2
+                '       END',                         // 3
+                'MIN_ROWS EQUATE(0)',               // 4
+            ].join('\n');
+            const { structure } = buildB(code);
+            const all = structure.getEquates();
+            const names = all.map(t => t.value);
+            assert.deepStrictEqual(names, ['MAX_ROWS', 'Red', 'MIN_ROWS']);
+        });
+
+        test('non-EQUATE labels (STRING, LONG, GROUP, …) are NOT in the equate index', () => {
+            const code = [
+                'TestProc PROCEDURE',               // 0
+                'Name      STRING(30)',              // 1
+                'Counter   LONG',                    // 2
+                'CODE',                              // 3
+                'END',                               // 4
+            ].join('\n');
+            const { structure } = buildB(code);
+            assert.strictEqual(structure.findEquate('Name'), undefined);
+            assert.strictEqual(structure.findEquate('Counter'), undefined);
+            assert.strictEqual(structure.getEquates().length, 0);
+        });
+    });
 });

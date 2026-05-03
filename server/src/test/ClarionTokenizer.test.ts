@@ -82,6 +82,21 @@ suite('ClarionTokenizer Tests', () => {
         assert.ok(queueToken, 'Should find QUEUE token');
     });
 
+    test('ITEMIZE keyword should tokenize as TokenType.Structure (Gap B whitelist alignment)', () => {
+        // Regression test: ITEMIZE was listed in STRUCTURE_PATTERNS but missing from
+        // the tokenizer's `isDeclarationStructure` early-exit guard, so the regex
+        // pass never fired and ITEMIZE was downgraded to TokenType.Variable. This
+        // broke any consumer that expected `structuresByType.get('ITEMIZE')` to
+        // return tokens — including DocumentStructure.linkEquatesPass (Gap B).
+        const code = 'Color ITEMIZE,PRE(Clr)\nRed EQUATE\nEND';
+        const tokenizer = new ClarionTokenizer(code);
+        const tokens = tokenizer.tokenize();
+
+        const itemize = tokens.find(t => t.value.toUpperCase() === 'ITEMIZE');
+        assert.ok(itemize, 'Should find ITEMIZE token');
+        assert.strictEqual(itemize!.type, TokenType.Structure, 'ITEMIZE must be Structure-typed');
+    });
+
     test('Should NOT treat keywords after colons as keywords (nts:case)', () => {
         const code = `
    if GlobalResponse=RequestCancelled
