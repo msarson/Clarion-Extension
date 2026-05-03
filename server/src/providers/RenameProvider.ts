@@ -1,6 +1,7 @@
 import { Range, WorkspaceEdit, TextEdit, ResponseError, ErrorCodes } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
+import * as fs from 'fs';
 import { TokenCache } from '../TokenCache';
 import { TokenType } from '../tokenizer/TokenTypes';
 import { SolutionManager } from '../solution/solutionManager';
@@ -155,18 +156,45 @@ export class RenameProvider {
             return `Cannot rename '${name}': procedure is declared with ,DLL and may be defined in an external project. Rename the source manually.`;
         }
 
-        // Check whether the parent MODULE's target file is resolvable
+        // Check whether the parent MODULE's target file is resolvable.
+        //   - Bare MODULE keyword (no parenthesised filename) → referencedFile undefined → reject.
+        //   - MODULE('Foo.clw') with a solution loaded → look the filename up via every
+        //     project's redirection parser; reject when no project finds a real on-disk file.
+        //   - MODULE('Foo.clw') with no solution loaded → skip the check (no graph to consult).
         const parentModule = mapProc.parent;
         if (
             parentModule?.type === TokenType.Structure &&
-            parentModule.value.toUpperCase() === 'MODULE' &&
-            !parentModule.referencedFile
+            parentModule.value.toUpperCase() === 'MODULE'
         ) {
-            const moduleRef = parentModule.label ?? '(unknown)';
-            return `Cannot rename '${name}': the source file '${moduleRef}' could not be resolved within the current solution. Rename the source manually.`;
+            const refFile = parentModule.referencedFile;
+            const solutionManager = SolutionManager.getInstance();
+            const unresolvable = !refFile
+                ? true
+                : (solutionManager?.solution ? !this.resolvesViaRedirection(solutionManager, refFile) : false);
+
+            if (unresolvable) {
+                const display = refFile || '(no filename)';
+                return `Cannot rename '${name}': the source file '${display}' could not be resolved within the current solution. Rename the source manually.`;
+            }
         }
 
         return null;
+    }
+
+    /**
+     * Returns true if `refFile` resolves to a real on-disk path via any project's
+     * redirection parser. Mirrors MapProcedureResolver's resolution pattern.
+     */
+    private resolvesViaRedirection(solutionManager: SolutionManager, refFile: string): boolean {
+        for (const proj of solutionManager.solution.projects) {
+            const redirectionParser = proj.getRedirectionParser?.();
+            if (!redirectionParser) continue;
+            const resolved = redirectionParser.findFile(refFile);
+            if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Converts a file:// URI to a normalised file-system path. */
