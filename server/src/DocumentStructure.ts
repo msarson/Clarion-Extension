@@ -69,6 +69,19 @@ export class DocumentStructure {
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
     private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
+    /**
+     * Flat ?name → all matching FieldEquateLabel tokens across the document.
+     * Used by `findControl(name)` (no scope) and `findControlAll(name)`.
+     * Names are stored uppercase including the leading `?` so `?MyButton` keys as `?MYBUTTON`.
+     */
+    private fieldEquateIndex: Map<string, Token[]> = new Map();
+    /**
+     * Per-structure ?name → FieldEquateLabel token, keyed by the containing
+     * WINDOW/REPORT/APPLICATION/TOOLBAR/MENUBAR token. First-occurrence-wins
+     * when a window declares the same `?name` twice (Clarion compile error;
+     * see TODO(Gap C follow-up) for the diagnostic candidate).
+     */
+    private fieldEquatesByStructure: Map<Token, Map<string, Token>> = new Map();
 
     constructor(private tokens: Token[], private lines?: string[]) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
@@ -506,6 +519,145 @@ export class DocumentStructure {
 
         // Build name-keyed indexes for procedures and routines now that subTypes are final.
         this.buildSemanticIndexes();
+
+        // Build the FieldEquate (?Ctrl) indexes and link USE() tokens to their targets.
+        this.linkUsesPass();
+    }
+
+    /**
+     * Single-pass over the token stream that:
+     *   1) builds the flat fieldEquateIndex of every `?Name` FieldEquateLabel,
+     *   2) builds per-structure ?name maps for windows/reports/applications/toolbars/menubars,
+     *   3) sets `linkedTo` on every USE keyword token whose argument resolves to a known
+     *      FieldEquateLabel, Label/Variable, or StructurePrefix-qualified field,
+     *   4) sets `hasNoFieldEquate = true` on USE tokens whose argument is the bare `?`
+     *      "no field equate" idiom (a FieldEquateLabel with value `?` since the
+     *      tokenizer follow-up; falls back to detecting the empty-arg form for safety).
+     *
+     * TODO(Gap C follow-up): a duplicate ?name within a single window is a Clarion
+     * compiler error and is a candidate Diagnostic — first-occurrence wins in the
+     * per-structure index here, but no warning is currently raised. See kanban for
+     * the diagnostic ticket.
+     */
+    private linkUsesPass(): void {
+        this.fieldEquateIndex.clear();
+        this.fieldEquatesByStructure.clear();
+
+        // Container structures whose direct FieldEquateLabel descendants we map per-structure.
+        const containerKeywords = ['WINDOW', 'APPLICATION', 'REPORT', 'TOOLBAR', 'MENUBAR'];
+
+        // 1. Flat index of every ?name token in the document.
+        for (const token of this.tokens) {
+            if (token.type !== TokenType.FieldEquateLabel) continue;
+            const key = token.value.toUpperCase();
+            const list = this.fieldEquateIndex.get(key);
+            if (list) list.push(token); else this.fieldEquateIndex.set(key, [token]);
+        }
+
+        // 2. Per-structure maps. Walk each known container and grab the FieldEquateLabel
+        //    tokens between its open and close. First-occurrence wins on duplicate names.
+        for (const kw of containerKeywords) {
+            const containers = this.structuresByType.get(kw);
+            if (!containers) continue;
+            for (const c of containers) {
+                if (c.finishesAt === undefined) continue;
+                const perName = new Map<string, Token>();
+                for (const token of this.tokens) {
+                    if (token.line <= c.line) continue;
+                    if (token.line >= c.finishesAt) break;
+                    if (token.type !== TokenType.FieldEquateLabel) continue;
+                    const key = token.value.toUpperCase();
+                    if (!perName.has(key)) perName.set(key, token);
+                }
+                if (perName.size > 0) this.fieldEquatesByStructure.set(c, perName);
+            }
+        }
+
+        // 3. Walk USE keyword tokens and resolve their argument to a target token.
+        for (let i = 0; i < this.tokens.length; i++) {
+            const t = this.tokens[i];
+            if (t.value.toUpperCase() !== 'USE') continue;
+            // USE outside an attribute list (e.g. a stray label, comment matching) — skip
+            // unless followed immediately by '('.
+            const open = this.tokens[i + 1];
+            if (!open || open.value !== '(' || open.line !== t.line) continue;
+
+            // Collect the tokens between this `(` and its matching `)`. We use the
+            // token stream's existing depth tracking rather than the source string.
+            const args: Token[] = [];
+            let depth = 1;
+            let j = i + 2;
+            for (; j < this.tokens.length; j++) {
+                const a = this.tokens[j];
+                if (a.value === '(') { depth++; args.push(a); continue; }
+                if (a.value === ')') {
+                    depth--;
+                    if (depth === 0) break;
+                    args.push(a);
+                    continue;
+                }
+                args.push(a);
+            }
+
+            // v1 forms only: single FieldEquateLabel, single Label/Variable, single StructurePrefix.
+            // The Clarion `USE(?)` "no field equate" idiom now tokenises as a FieldEquateLabel
+            // with value `?` (Gap C follow-up). It still gets the convenience flag so
+            // consumers can branch on it directly without reading linkedTo's value.
+            if (args.length === 0) {
+                // Defensive — older tokenizer behaviour where `?` was dropped entirely.
+                t.hasNoFieldEquate = true;
+                continue;
+            }
+            if (args.length === 1) {
+                const a = args[0];
+                if (a.type === TokenType.FieldEquateLabel) {
+                    if (a.value === '?') {
+                        // Bare `?` — no underlying control; flag and skip linking.
+                        t.hasNoFieldEquate = true;
+                    } else {
+                        t.linkedTo = a;
+                    }
+                    continue;
+                }
+                if (a.type === TokenType.StructurePrefix) {
+                    // Resolve the structure-prefix target via the existing prefix machinery.
+                    const target = this.resolveStructurePrefixTarget(a);
+                    if (target) t.linkedTo = target;
+                    continue;
+                }
+                if (a.type === TokenType.Variable || a.type === TokenType.Label || a.type === TokenType.Function) {
+                    const target = this.labelIndex.get(a.value.toUpperCase());
+                    if (target) t.linkedTo = target;
+                    continue;
+                }
+            }
+            // Multi-token argument forms — defer.
+        }
+    }
+
+    /**
+     * Resolve a StructurePrefix token (`PRE:Name`) to the field token it references.
+     * Looks for a structure with matching `structurePrefix` and a child Label whose
+     * value matches the suffix. Returns undefined when ambiguous or unresolved.
+     */
+    private resolveStructurePrefixTarget(prefixToken: Token): Token | undefined {
+        const colonIdx = prefixToken.value.indexOf(':');
+        if (colonIdx < 0) return undefined;
+        const prefix = prefixToken.value.slice(0, colonIdx).toUpperCase();
+        const fieldName = prefixToken.value.slice(colonIdx + 1).toUpperCase();
+        if (!prefix || !fieldName) return undefined;
+
+        for (const token of this.tokens) {
+            if (
+                token.type === TokenType.Structure &&
+                token.structurePrefix?.toUpperCase() === prefix &&
+                token.children
+            ) {
+                const hit = token.children.find(c => c.value.toUpperCase() === fieldName);
+                if (hit) return hit;
+            }
+        }
+        return undefined;
     }
 
     /**
@@ -1748,5 +1900,73 @@ export class DocumentStructure {
         
         // Token is in global scope if it comes before first PROCEDURE
         return token.line < firstProc.line;
+    }
+
+    // =====================================================
+    // 🎯 Gap C: FieldEquate (?Ctrl) and USE() relationship APIs
+    // =====================================================
+
+    /**
+     * Returns every FieldEquateLabel (`?Name`) token contained in `structureToken`,
+     * which is expected to be a WINDOW / APPLICATION / REPORT / TOOLBAR / MENUBAR
+     * — i.e. a structure that owns named controls. Pulled from the per-structure
+     * index built by `linkUsesPass`. Order is declaration order.
+     */
+    public getControlsInStructure(structureToken: Token): Token[] {
+        const map = this.fieldEquatesByStructure.get(structureToken);
+        if (!map) return [];
+        return Array.from(map.values());
+    }
+
+    /**
+     * Look up a control by its `?Name` (case-insensitive; the leading `?` is required).
+     * If `scope` is provided, search only that structure's per-name index. Without
+     * `scope`, returns the first hit from the flat index, or null when ambiguous —
+     * callers needing every match should use {@link findControlAll} instead.
+     */
+    public findControl(name: string, scope?: Token): Token | null {
+        const key = name.toUpperCase();
+        if (scope) {
+            return this.fieldEquatesByStructure.get(scope)?.get(key) ?? null;
+        }
+        const list = this.fieldEquateIndex.get(key);
+        if (!list || list.length === 0) return null;
+        return list.length === 1 ? list[0] : null;
+    }
+
+    /**
+     * Every match for `?Name` across the document. Used to disambiguate when the
+     * same `?` identifier is declared in multiple windows in one file, or when a
+     * caller wants to surface all candidates (e.g. ReferencesProvider).
+     */
+    public findControlAll(name: string): Token[] {
+        const list = this.fieldEquateIndex.get(name.toUpperCase());
+        return list ? [...list] : [];
+    }
+
+    /**
+     * What does this USE keyword token's argument resolve to? Returns the linked
+     * FieldEquateLabel / Label / Variable / StructurePrefix-qualified field token
+     * set by `linkUsesPass`. Returns undefined for the `USE(?)` empty-arg idiom
+     * (use {@link Token.hasNoFieldEquate} to detect that), and for v1-deferred
+     * forms like chained access.
+     */
+    public getBoundTarget(useToken: Token): Token | undefined {
+        return useToken.linkedTo;
+    }
+
+    /**
+     * Reverse lookup: every USE keyword token in the current document whose
+     * `linkedTo` resolves to `controlToken`. Single-document only in v1 — see
+     * the `findReferencesToControlAcrossFiles` follow-up for cross-file support.
+     */
+    public findReferencesToControlInFile(controlToken: Token): Token[] {
+        const refs: Token[] = [];
+        for (const t of this.tokens) {
+            if (t.value.toUpperCase() === 'USE' && t.linkedTo === controlToken) {
+                refs.push(t);
+            }
+        }
+        return refs;
     }
 }

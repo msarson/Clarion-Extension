@@ -1287,4 +1287,178 @@ END`;
             assert.strictEqual(structure.isInClassBlock(2), false, 'isInClassBlock shim');
         });
     });
+
+    suite('FieldEquate index + USE() relationships (Gap C)', () => {
+        function buildC(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return { structure, tokens };
+        }
+
+        test('USE(?Ctrl) sets linkedTo on the USE token to the FieldEquateLabel', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test'),AT(0,0,200,100)",                  // 1
+                "         BUTTON('OK'),AT(10,10,40,15),USE(?BtnOK)",    // 2
+                '         END',                                          // 3
+                'CODE',                                                  // 4
+                'END',                                                   // 5
+            ].join('\n');
+            const { tokens } = buildC(code);
+            const useToken = tokens.find(t => t.value.toUpperCase() === 'USE');
+            assert.ok(useToken, 'Should find USE token');
+            assert.ok(useToken!.linkedTo, 'USE token should be linked');
+            assert.strictEqual(useToken!.linkedTo!.type, TokenType.FieldEquateLabel);
+            assert.strictEqual(useToken!.linkedTo!.value, '?BtnOK');
+            assert.strictEqual(useToken!.hasNoFieldEquate, undefined);
+        });
+
+        test('USE(?) bare-? idiom sets hasNoFieldEquate=true and leaves linkedTo undefined', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test')",                                  // 1
+                "         ENTRY(@s30),AT(10,10,80,10),USE(?)",          // 2
+                '         END',                                          // 3
+                'CODE',                                                  // 4
+                'END',                                                   // 5
+            ].join('\n');
+            const { tokens } = buildC(code);
+            const useToken = tokens.find(t => t.value.toUpperCase() === 'USE');
+            assert.ok(useToken, 'Should find USE token');
+            assert.strictEqual(useToken!.hasNoFieldEquate, true);
+            assert.strictEqual(useToken!.linkedTo, undefined);
+        });
+
+        test('USE(VarName) links to a Label declared in scope', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                'CustName  STRING(30)',                                 // 1
+                "Win  WINDOW('Test')",                                  // 2
+                "         ENTRY(@s30),AT(10,10,80,10),USE(CustName)",   // 3
+                '         END',                                          // 4
+                'CODE',                                                  // 5
+                'END',                                                   // 6
+            ].join('\n');
+            const { tokens } = buildC(code);
+            const useToken = tokens.find(t => t.value.toUpperCase() === 'USE');
+            assert.ok(useToken, 'Should find USE token');
+            assert.ok(useToken!.linkedTo, 'USE should link to a label');
+            assert.strictEqual(useToken!.linkedTo!.value, 'CustName');
+            assert.strictEqual(useToken!.linkedTo!.type, TokenType.Label);
+        });
+
+        test('duplicate ?name in one window: per-structure records first, findControlAll returns both', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test')",                                  // 1
+                "         BUTTON('A'),AT(10,10,40,15),USE(?Btn)",       // 2
+                "         BUTTON('B'),AT(60,10,40,15),USE(?Btn)",       // 3
+                '         END',                                          // 4
+                'CODE',                                                  // 5
+                'END',                                                   // 6
+            ].join('\n');
+            const { structure, tokens } = buildC(code);
+            const winToken = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(winToken);
+
+            const scoped = structure.findControl('?Btn', winToken!);
+            assert.ok(scoped, 'Per-structure lookup returns first occurrence');
+            assert.strictEqual(scoped!.line, 2, 'First-occurrence-wins on duplicate');
+
+            const all = structure.findControlAll('?Btn');
+            assert.strictEqual(all.length, 2, 'findControlAll returns every occurrence');
+            assert.deepStrictEqual(all.map(t => t.line), [2, 3]);
+
+            const flat = structure.findControl('?Btn');
+            assert.strictEqual(flat, null, 'Flat findControl returns null on ambiguity');
+        });
+
+        test('getControlsInStructure returns FieldEquateLabel tokens in declaration order', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test')",                                  // 1
+                "         BUTTON('OK'),AT(10,10,40,15),USE(?BtnOK)",    // 2
+                "         BUTTON('Cancel'),AT(60,10,40,15),USE(?BtnCancel)", // 3
+                '         END',                                          // 4
+                'CODE',                                                  // 5
+                'END',                                                   // 6
+            ].join('\n');
+            const { structure, tokens } = buildC(code);
+            const winToken = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(winToken);
+
+            const controls = structure.getControlsInStructure(winToken!);
+            const names = controls.map(c => c.value);
+            assert.deepStrictEqual(names, ['?BtnOK', '?BtnCancel']);
+        });
+
+        test('anonymous control (no ?name) is NOT in the index', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test')",                                  // 1
+                "         BUTTON('OK'),AT(10,10,40,15)",                // 2 — no USE clause
+                '         END',                                          // 3
+                'CODE',                                                  // 4
+                'END',                                                   // 5
+            ].join('\n');
+            const { structure, tokens } = buildC(code);
+            const winToken = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(winToken);
+            assert.strictEqual(structure.getControlsInStructure(winToken!).length, 0);
+        });
+
+        test('findReferencesToControlInFile returns the USE token that links to a control', () => {
+            const code = [
+                'TestProc PROCEDURE',                                  // 0
+                "Win  WINDOW('Test')",                                  // 1
+                "         BUTTON('OK'),AT(10,10,40,15),USE(?BtnOK)",    // 2
+                '         END',                                          // 3
+                'CODE',                                                  // 4
+                '  DISABLE(?BtnOK)',                                     // 5 — runtime ref, not a USE
+                'END',                                                   // 6
+            ].join('\n');
+            const { structure, tokens } = buildC(code);
+            const ctrl = tokens.find(t =>
+                t.type === TokenType.FieldEquateLabel && t.value === '?BtnOK'
+            );
+            assert.ok(ctrl);
+            const refs = structure.findReferencesToControlInFile(ctrl!);
+            assert.strictEqual(refs.length, 1, 'Exactly one USE token links to ?BtnOK');
+            assert.strictEqual(refs[0].value.toUpperCase(), 'USE');
+            assert.strictEqual(refs[0].line, 2);
+        });
+
+        test('findControl with scope returns the right window when multiple windows share a name', () => {
+            const code = [
+                'ProcA PROCEDURE',                                     // 0
+                "WinA WINDOW('A')",                                     // 1
+                "         BUTTON('OK'),AT(10,10,40,15),USE(?Btn)",      // 2
+                '         END',                                          // 3
+                'CODE',                                                  // 4
+                'END',                                                   // 5
+                '',                                                      // 6
+                'ProcB PROCEDURE',                                     // 7
+                "WinB WINDOW('B')",                                     // 8
+                "         BUTTON('Go'),AT(10,10,40,15),USE(?Btn)",      // 9
+                '         END',                                          // 10
+                'CODE',                                                  // 11
+                'END',                                                   // 12
+            ].join('\n');
+            const { structure, tokens } = buildC(code);
+            const wins = tokens.filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.strictEqual(wins.length, 2);
+
+            const inA = structure.findControl('?Btn', wins[0]);
+            const inB = structure.findControl('?Btn', wins[1]);
+            assert.ok(inA && inB);
+            assert.notStrictEqual(inA, inB, "Per-structure lookup returns the right window's ?Btn");
+            assert.strictEqual(inA!.line, 2);
+            assert.strictEqual(inB!.line, 9);
+
+            assert.strictEqual(structure.findControl('?Btn'), null, 'No-scope lookup is ambiguous → null');
+            assert.strictEqual(structure.findControlAll('?Btn').length, 2);
+        });
+    });
 });

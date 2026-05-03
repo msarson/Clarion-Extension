@@ -86,4 +86,13 @@ export interface Token {
     };
     implementedInterfaces?: string[];  // Names of interfaces a CLASS implements (from IMPLEMENTS() attributes)
     structureType?: string;           // ✅ Set by DocumentStructure: the Structure/Type keyword on the same line as this label (e.g. 'FILE', 'VIEW', 'GROUP', 'CLASS', 'WINDOW', 'QUEUE', 'REPORT', etc.)
+    /** USE() target resolution. Set on USE keyword tokens by DocumentStructure.linkUsesPass:
+     * - For USE(?Name): the FieldEquateLabel token of the owning control's `?` identifier.
+     * - For USE(VarName): the Label/Variable token of the bound data symbol (resolved via labelIndex).
+     * - For USE(File:Field): the StructurePrefix-qualified field token.
+     * Undefined when the argument is a deferred form (chained access, dot-paths). */
+    linkedTo?: Token;
+    /** True when a USE() argument list is empty — the Clarion `USE(?)` "no field equate" idiom.
+     * Set on USE keyword tokens. Distinct from `linkedTo === undefined` (which means "couldn't resolve"). */
+    hasNoFieldEquate?: boolean;
 }
