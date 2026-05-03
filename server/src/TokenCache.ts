@@ -238,6 +238,17 @@ export class TokenCache {
     }
 
     /**
+     * Get the cached DocumentStructure for a URI without a TextDocument.
+     * Returns null when the URI has no cache entry or the structure has not
+     * been built yet. Callers that need a guaranteed structure should use
+     * getStructure(document) instead — that path builds on demand.
+     */
+    public getStructureByUri(uri: string): DocumentStructure | null {
+        const cached = this.cache.get(uri);
+        return cached?.structure ?? null;
+    }
+
+    /**
      * Clear tokens for a document
      * @param uri The document URI
      */

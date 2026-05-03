@@ -623,13 +623,218 @@ END`;
             const tokens = tokenizer.tokenize();
             const structure = new DocumentStructure(tokens);
             structure.process();
-            
+
             const implementations = structure.findProcedureImplementations('testproc');
-            
+
             assert.strictEqual(implementations.length, 1, 'Should find with case-insensitive search');
         });
     });
-    
+
+    // ─── Index-backed APIs (Gap A) ────────────────────────────────────────────
+
+    suite('findMethodImplementations()', () => {
+        test('should return empty array when method not found', () => {
+            const code = `MyClass.DoStuff PROCEDURE()
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const results = structure.findMethodImplementations('MyClass.NotThere');
+
+            assert.ok(Array.isArray(results));
+            assert.strictEqual(results.length, 0);
+        });
+
+        test('should find a single method implementation by qualified name', () => {
+            const code = `MyClass.DoStuff PROCEDURE()
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const results = structure.findMethodImplementations('MyClass.DoStuff');
+
+            assert.strictEqual(results.length, 1);
+            assert.strictEqual(results[0].subType, TokenType.MethodImplementation);
+            assert.strictEqual(results[0].label?.toUpperCase(), 'MYCLASS.DOSTUFF');
+        });
+
+        test('should find all overloaded method implementations', () => {
+            const code = `MyClass.DoStuff PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.DoStuff PROCEDURE(STRING s)
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const results = structure.findMethodImplementations('MyClass.DoStuff');
+
+            assert.strictEqual(results.length, 2, 'Should find both overloads');
+            assert.ok(results.every(t => t.subType === TokenType.MethodImplementation));
+        });
+
+        test('should be case-insensitive', () => {
+            const code = `MyClass.DoStuff PROCEDURE()
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const results = structure.findMethodImplementations('myclass.dostuff');
+
+            assert.strictEqual(results.length, 1);
+        });
+    });
+
+    suite('findRoutines()', () => {
+        test('should return all routines when no name supplied', () => {
+            const code = `TestProc PROCEDURE()
+CODE
+DoOne ROUTINE
+  RETURN
+DoTwo ROUTINE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const all = structure.findRoutines();
+
+            assert.strictEqual(all.length, 2, 'Should find both routines');
+            assert.ok(all.every(t => t.subType === TokenType.Routine));
+            const names = all.map(t => t.label?.toUpperCase()).sort();
+            assert.deepStrictEqual(names, ['DOONE', 'DOTWO']);
+        });
+
+        test('should return only matching routines when a name is supplied', () => {
+            const code = `TestProc PROCEDURE()
+CODE
+DoOne ROUTINE
+  RETURN
+DoTwo ROUTINE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const matches = structure.findRoutines('DoOne');
+
+            assert.strictEqual(matches.length, 1);
+            assert.strictEqual(matches[0].label?.toUpperCase(), 'DOONE');
+        });
+
+        test('should be case-insensitive on the name lookup', () => {
+            const code = `TestProc PROCEDURE()
+CODE
+DoOne ROUTINE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const matches = structure.findRoutines('doONE');
+
+            assert.strictEqual(matches.length, 1);
+        });
+
+        test('should return an empty array when no routines exist', () => {
+            const code = `TestProc PROCEDURE()
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            assert.strictEqual(structure.findRoutines().length, 0);
+            assert.strictEqual(structure.findRoutines('AnyName').length, 0);
+        });
+    });
+
+    suite('getAllProcedures()', () => {
+        test('should return every indexed procedure regardless of subtype', () => {
+            const code = `MyMap MAP
+  DeclProc PROCEDURE()
+END
+
+GlobalProc PROCEDURE()
+CODE
+  RETURN
+END
+
+MyClass.MethodOne PROCEDURE()
+CODE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const all = structure.getAllProcedures();
+            const labels = all.map(t => t.label?.toUpperCase()).sort();
+
+            // Expect at least the global procedure, the class method, and the MAP-declared proc.
+            assert.ok(labels.includes('GLOBALPROC'),     `Should include GlobalProc, got: ${labels.join(',')}`);
+            assert.ok(labels.includes('MYCLASS.METHODONE'), `Should include MyClass.MethodOne, got: ${labels.join(',')}`);
+            assert.ok(labels.includes('DECLPROC'),       `Should include DeclProc (MAP declaration), got: ${labels.join(',')}`);
+
+            // Every entry should have a procedure-style subType.
+            const procedureSubtypes = new Set([
+                TokenType.GlobalProcedure,
+                TokenType.MethodImplementation,
+                TokenType.MapProcedure,
+                TokenType.MethodDeclaration,
+                TokenType.InterfaceMethod,
+            ]);
+            assert.ok(
+                all.every(t => t.subType !== undefined && procedureSubtypes.has(t.subType)),
+                'Every entry should have a procedure-style subType'
+            );
+        });
+
+        test('should return empty array on a routine-only document', () => {
+            const code = `TestProc PROCEDURE()
+CODE
+DoOne ROUTINE
+  RETURN
+END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+
+            const labels = structure.getAllProcedures().map(t => t.label?.toUpperCase());
+            // Only TestProc itself should appear; the ROUTINE goes into routineIndex, not procedureIndex.
+            assert.ok(labels.includes('TESTPROC'));
+            assert.ok(!labels.includes('DOONE'), 'Routines must not leak into getAllProcedures()');
+        });
+    });
+
     suite('getGlobalVariables()', () => {
         test('should return empty array when no global variables', () => {
             const code = `TestProc PROCEDURE()

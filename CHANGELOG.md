@@ -35,6 +35,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - ✨ **Rename Symbol — block ,DLL and unresolvable-MODULE procedures** (issue #93): Rename Symbol (F2) now refuses to rename a procedure declared with the `,DLL` attribute on its prototype line, returning a clear VS Code rename error rather than silently producing a partial edit that desyncs the local MAP from the external DLL implementation. The same guard fires when the parent `MODULE('x.clw')` filename cannot be resolved through any project's redirection parser in the loaded solution — the source CLW lives outside the solution graph, so a workspace-local rename would be incomplete. The check skips when no solution is loaded (no graph to consult). A bare `MODULE` keyword with no parenthesised filename is also rejected.
 
+**Performance**
+
+- ⚡ **Document-level procedure and routine indexes** (DocumentStructure Gap A): `DocumentStructure` now populates two name-keyed indexes — `procedureIndex` (covering `GlobalProcedure` / `MethodImplementation` / `MapProcedure` / `MethodDeclaration` / `InterfaceMethod` subtypes) and `routineIndex` — at the end of `process()` once subtypes are final. New public helpers `findMethodImplementations(qualifiedName)`, `findRoutines(name?)`, and `getAllProcedures()` give O(1) name lookups and a flat O(N) "all procedures in document" accessor backed by the index instead of full-token-array scans. `findProcedureImplementations()` now reads from the index. Two consumer hot paths migrated: `UnreachableCodeProvider` (procedure list + per-procedure routine slice) and `ImplementationProvider`'s MethodImplementation candidate filter. New `TokenCache.getStructureByUri(uri)` helper exposes the cached structure for URI-only call sites. No behaviour change — purely faster on large solutions.
+
 **Hover Improvements**
 
 - 🎨 **Standardised hover location format**: all hover tooltips (procedures, methods, variables, structure types, fields, class declarations) now display the source location as `filename:N` placed at the bottom of the tooltip, after the code block — consistent across every hover type.

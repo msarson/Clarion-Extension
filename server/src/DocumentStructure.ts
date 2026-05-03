@@ -17,7 +17,12 @@ export class DocumentStructure {
 
     // 🚀 PERFORMANCE: Index structures for O(1) lookups
     private labelIndex: Map<string, Token> = new Map();
-    private procedureIndex: Map<string, Token> = new Map();
+    // Procedure / routine indexes keyed by uppercase label.
+    // Built by buildSemanticIndexes() at the end of process(), once subType
+    // assignments are final. Values are arrays because Clarion allows overloads
+    // (multiple procedures sharing a name with different signatures).
+    private procedureIndex: Map<string, Token[]> = new Map();
+    private routineIndex: Map<string, Token[]> = new Map();
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
     private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
@@ -352,6 +357,42 @@ export class DocumentStructure {
         // isStructureToken() had no subType data — the index was effectively empty.
         this.parentIndex.clear();
         this.buildParentIndex();
+
+        // Build name-keyed indexes for procedures and routines now that subTypes are final.
+        this.buildSemanticIndexes();
+    }
+
+    /**
+     * Walk the token list once and populate procedureIndex + routineIndex by uppercase label.
+     * Procedure subtypes covered: GlobalProcedure, MethodImplementation, MapProcedure,
+     * MethodDeclaration, InterfaceMethod. Tokens with no label are skipped (cannot be looked
+     * up by name anyway).
+     */
+    private buildSemanticIndexes(): void {
+        this.procedureIndex.clear();
+        this.routineIndex.clear();
+
+        for (const token of this.tokens) {
+            if (!token.label) continue;
+            const upperKey = token.label.toUpperCase();
+
+            const sub = token.subType;
+            if (
+                sub === TokenType.GlobalProcedure ||
+                sub === TokenType.MethodImplementation ||
+                sub === TokenType.MapProcedure ||
+                sub === TokenType.MethodDeclaration ||
+                sub === TokenType.InterfaceMethod
+            ) {
+                const list = this.procedureIndex.get(upperKey);
+                if (list) list.push(token); else this.procedureIndex.set(upperKey, [token]);
+            }
+
+            if (sub === TokenType.Routine) {
+                const list = this.routineIndex.get(upperKey);
+                if (list) list.push(token); else this.routineIndex.set(upperKey, [token]);
+            }
+        }
     }
     
     private handleExecutionMarker(token: Token): void {
@@ -1449,23 +1490,55 @@ export class DocumentStructure {
     }
 
     /**
-     * Finds all global procedure implementations (not in MAP blocks)
+     * Finds all global procedure implementations (not in MAP blocks).
+     * Backed by procedureIndex; filters to GlobalProcedure subtype to preserve
+     * the long-standing behaviour of skipping MAP declarations and method impls.
      * @param procName Procedure name to search for (case-insensitive)
      * @returns Array of matching procedure tokens (empty if none found)
      */
     public findProcedureImplementations(procName: string): Token[] {
-        const results: Token[] = [];
-        const upperProcName = procName.toUpperCase();
-        
-        // Search for GlobalProcedure tokens
-        for (const token of this.tokens) {
-            if (token.subType === TokenType.GlobalProcedure &&
-                token.label?.toUpperCase() === upperProcName) {
-                results.push(token);
-            }
+        const candidates = this.procedureIndex.get(procName.toUpperCase());
+        if (!candidates) return [];
+        return candidates.filter(t => t.subType === TokenType.GlobalProcedure);
+    }
+
+    /**
+     * Finds all method implementation tokens for a fully-qualified label such as
+     * "ClassName.MethodName" (case-insensitive). Used by ImplementationProvider's
+     * MethodImplementation hot path. Returns multiple results when the method is
+     * overloaded.
+     */
+    public findMethodImplementations(qualifiedName: string): Token[] {
+        const candidates = this.procedureIndex.get(qualifiedName.toUpperCase());
+        if (!candidates) return [];
+        return candidates.filter(t => t.subType === TokenType.MethodImplementation);
+    }
+
+    /**
+     * Returns ROUTINE tokens. With no argument, returns every routine in the
+     * document (caller can apply line-range or other filters). With a name,
+     * returns only routines whose label matches case-insensitively.
+     */
+    public findRoutines(name?: string): Token[] {
+        if (name === undefined) {
+            const all: Token[] = [];
+            for (const list of this.routineIndex.values()) all.push(...list);
+            return all;
         }
-        
-        return results;
+        const list = this.routineIndex.get(name.toUpperCase());
+        return list ? list.slice() : [];
+    }
+
+    /**
+     * Returns every indexed procedure-style token regardless of subtype
+     * (Global, MethodImplementation, MapProcedure, MethodDeclaration, InterfaceMethod).
+     * Used by consumers that need a flat list of "all procedures in this document"
+     * — e.g. UnreachableCodeProvider iterating procedure bodies.
+     */
+    public getAllProcedures(): Token[] {
+        const all: Token[] = [];
+        for (const list of this.procedureIndex.values()) all.push(...list);
+        return all;
     }
 
     /**

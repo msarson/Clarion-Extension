@@ -903,22 +903,16 @@ export class ImplementationProvider {
     ): Location | null {
         const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
 
-        // Fast path: use cached tokens to find MethodImplementation candidates
+        // Fast path: use cached tokens + DocumentStructure index to find MethodImplementation candidates.
+        // Two-part label only (ClassName.MethodName) to avoid false positives with 3-part interface
+        // implementations (ClassName.InterfaceName.MethodName).
         const cachedTokens = this.tokenCache.getTokensByUri(fileUri);
         if (cachedTokens && cachedTokens.length > 0) {
-            const matchesLabel = (lbl: string): boolean => {
-                const parts = lbl.split('.');
-                // Require exactly 2 parts (ClassName.MethodName) to avoid false positives
-                // with 3-part interface implementations (ClassName.InterfaceName.MethodName)
-                return parts.length === 2 &&
-                    parts[0].toUpperCase() === className.toUpperCase() &&
-                    parts[1].toUpperCase() === methodName.toUpperCase();
-            };
-            const tokenCandidates = cachedTokens.filter(t =>
-                t.type === TokenType.Procedure &&
-                t.subType === TokenType.MethodImplementation &&
-                t.label !== undefined &&
-                matchesLabel(t.label)
+            const structure = this.tokenCache.getStructureByUri(fileUri);
+            const qualifiedName = `${className}.${methodName}`;
+            const indexedCandidates = structure?.findMethodImplementations(qualifiedName) ?? [];
+            const tokenCandidates = indexedCandidates.filter(t =>
+                t.label !== undefined && t.label.split('.').length === 2
             );
 
             if (tokenCandidates.length === 1) {

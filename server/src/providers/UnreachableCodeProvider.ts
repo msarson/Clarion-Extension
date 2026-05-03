@@ -31,6 +31,8 @@ export class UnreachableCodeProvider {
                 return [];
             }
 
+            const structure = TokenCache.getInstance().getStructure(document);
+
             const lines = document.getText().split(/\r?\n/);
             const ranges: Range[] = [];
 
@@ -43,12 +45,10 @@ export class UnreachableCodeProvider {
                 tokensByLine.get(token.line)!.push(token);
             }
 
-            // Find all procedures/methods/functions
-            const procedures = tokens.filter(t => 
-                t.type === TokenType.Procedure || 
-                t.type === TokenType.Function ||
-                t.subType === TokenType.MethodImplementation
-            );
+            // Pull every indexed procedure-style token (Global/MethodImpl/MapProc/MethodDecl/InterfaceMethod).
+            // Procedures without a CODE body are filtered out below by the executionMarker check.
+            const procedures = structure.getAllProcedures();
+            const allRoutines = structure.findRoutines();
 
             logger.info(`Found ${procedures.length} procedures to analyze`);
 
@@ -69,9 +69,8 @@ export class UnreachableCodeProvider {
 
                 const procEnd = proc.finishesAt!; // Already checked above
 
-                // Find all ROUTINE tokens within this procedure
-                const routines = tokens.filter(t =>
-                    t.subType === TokenType.Routine &&
+                // Filter cached routines down to those inside this procedure
+                const routines = allRoutines.filter(t =>
                     t.line > proc.line &&
                     t.line <= procEnd
                 );
