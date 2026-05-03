@@ -1,6 +1,5 @@
 import { languages, ExtensionContext, Disposable } from 'vscode';
 import { DocumentManager } from '../documentManager';
-import { ClarionDocumentLinkProvider } from './documentLinkProvier';
 import { ClarionHoverProvider } from './hoverProvider';
 // Implementation provider moved to server-side
 // import { ClarionImplementationProvider } from './implementationProvider';
@@ -15,7 +14,6 @@ logger.setLevel("error");
 
 // Track disposables to ensure only one instance of each provider
 let hoverProviderDisposable: Disposable | null = null;
-let documentLinkProviderDisposable: Disposable | null = null;
 // Implementation provider now handled by language server
 // let implementationProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
@@ -34,41 +32,22 @@ export function registerLanguageFeatures(context: ExtensionContext, documentMana
         return;
     }
     
-    // ✅ Fix: Ensure only one Document Link Provider is registered
-    if (documentLinkProviderDisposable) {
-        documentLinkProviderDisposable.dispose(); // Remove old provider if it exists
-    }
+    // Document links are now served by the language server (DocumentLinkProvider.ts)
+    // which uses the FileRelationshipGraph — no client-side registration needed.
 
-    logger.info("🔗 Registering Document Link Provider...");
-
-    // Get the default lookup extensions from settings
     const lookupExtensions = globalSettings.defaultLookupExtensions || [".clw", ".inc", ".equ", ".eq", ".int"];
-
-    // Create document selectors for all Clarion file extensions
     const documentSelectors = [
         { scheme: "file", language: "clarion" },
-        ...lookupExtensions.map(ext => ({ scheme: "file", pattern: `**/*${ext}` }))
+        ...lookupExtensions.map((ext: string) => ({ scheme: "file", pattern: `**/*${ext}` }))
     ];
-
-    // Register the document link provider for all selectors
-    documentLinkProviderDisposable = languages.registerDocumentLinkProvider(
-        documentSelectors,
-        new ClarionDocumentLinkProvider(documentManager)
-    );
-    context.subscriptions.push(documentLinkProviderDisposable);
-
-    logger.info(`📄 Registered Document Link Provider for extensions: ${lookupExtensions.join(', ')}`);
 
     // ✅ Fix: Ensure only one Hover Provider is registered
     if (hoverProviderDisposable) {
-        hoverProviderDisposable.dispose(); // Remove old provider if it exists
+        hoverProviderDisposable.dispose();
     }
 
-    // ✅ Client and server hover providers work together:
-    // - Client handles: declaration → implementation (cross-file lookups)
-    // - Server handles: implementation → declaration (same document context)
-    // Client detects implementation lines and defers to server to avoid duplicate info
-    
+    // Client handles: declaration → implementation (cross-file lookups)
+    // Server handles: implementation → declaration (same document context)
     logger.info("📝 Registering Hover Provider...");
     hoverProviderDisposable = languages.registerHoverProvider(
         documentSelectors,
@@ -122,11 +101,7 @@ export function disposeLanguageFeatures() {
         hoverProviderDisposable.dispose();
         hoverProviderDisposable = null;
     }
-    if (documentLinkProviderDisposable) {
-        documentLinkProviderDisposable.dispose();
-        documentLinkProviderDisposable = null;
-    }
-    // Implementation provider is now server-side, no client disposal needed
+    // Implementation provider and document links are now server-side, no client disposal needed
     if (semanticTokensProviderDisposable) {
         semanticTokensProviderDisposable.dispose();
         semanticTokensProviderDisposable = null;

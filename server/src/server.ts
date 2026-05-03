@@ -34,7 +34,9 @@ import {
     TextDocumentSyncKind,
     SignatureHelp,
     ReferenceParams,
-    RenameParams
+    RenameParams,
+    DocumentLink,
+    DocumentLinkParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -74,6 +76,7 @@ import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
+import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -112,6 +115,7 @@ const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
 const completionProvider = new CompletionProvider();
+const documentLinkProvider = new DocumentLinkProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -188,6 +192,7 @@ connection.onInitialize((params) => {
                     triggerCharacters: ['.', ':'],
                     resolveProvider: false
                 },
+                documentLinkProvider: { resolveProvider: false },
                 semanticTokensProvider: {
                     legend: clarionSemanticTokensProvider.getLegend(),
                     range: false,
@@ -816,6 +821,12 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
 // Cache for document symbols to avoid recomputing during rapid typing
 const symbolCache = new Map<string, DocumentSymbol[]>();
 const foldingCache = new Map<string, FoldingRange[]>();
+
+connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    return documentLinkProvider.provideDocumentLinks(document);
+});
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     const perfStart = performance.now();
