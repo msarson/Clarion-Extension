@@ -33,6 +33,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -228,7 +229,8 @@ export class HoverProvider {
                     logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
                     
                     // First check if this is a procedure in the MAP (before treating as variable)
-                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line);
+                    const localScope = getLocalMapScope(document.uri);
+                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line, localScope?.containingProcedure);
                     
                     if (mapDecl) {
                         logger.info(`✅ Found MAP declaration for ${word} in parent - treating as procedure call`);
