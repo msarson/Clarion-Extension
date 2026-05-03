@@ -2193,6 +2193,74 @@ export class DocumentStructure {
     // 🎯 Gap H: Reverse IMPLEMENTS index
     // =====================================================
 
+    // =====================================================
+    // 🎯 Gap N: PROGRAM / MEMBER document helpers
+    // =====================================================
+
+    /**
+     * Returns the document kind of this file based on the leading
+     * `TokenType.ClarionDocument` token (PROGRAM or MEMBER). Returns
+     * `undefined` for files that have neither — typically standalone
+     * `.inc` definition files or empty documents.
+     */
+    public getDocumentKind(): 'PROGRAM' | 'MEMBER' | undefined {
+        for (const t of this.tokens) {
+            if (t.type !== TokenType.ClarionDocument) continue;
+            const v = t.value.toUpperCase();
+            if (v === 'PROGRAM' || v === 'MEMBER') return v;
+        }
+        return undefined;
+    }
+
+    /**
+     * Returns the program label preceding the PROGRAM keyword
+     * (`MyProg PROGRAM` → `'MyProg'`). Looks at the same-line Label
+     * token immediately before the PROGRAM keyword. Returns `undefined`
+     * when the file has no PROGRAM declaration or PROGRAM has no label.
+     */
+    public getProgramName(): string | undefined {
+        for (const t of this.tokens) {
+            if (t.type !== TokenType.ClarionDocument) continue;
+            if (t.value.toUpperCase() !== 'PROGRAM') continue;
+            const lineTokens = this.tokensByLine.get(t.line);
+            if (!lineTokens) return undefined;
+            const idx = lineTokens.indexOf(t);
+            for (let i = idx - 1; i >= 0; i--) {
+                const prev = lineTokens[i];
+                if (prev.type === TokenType.Label) return prev.value;
+            }
+            return undefined;
+        }
+        return undefined;
+    }
+
+    /**
+     * Returns the unresolved filename argument of a `MEMBER('parent.clw')`
+     * declaration — the literal text between the quotes. Returns `undefined`
+     * for non-MEMBER files or for a bare `MEMBER` keyword without parens.
+     *
+     * The path-resolution variant {@link getMemberParentFile} returns the
+     * resolved `referencedFile` (which may be a full path post-redirection);
+     * use this method when the raw textual argument is what callers want
+     * (e.g. hover surface area).
+     */
+    public getMemberParent(): string | undefined {
+        for (const t of this.tokens) {
+            if (t.type !== TokenType.ClarionDocument) continue;
+            if (t.value.toUpperCase() !== 'MEMBER') continue;
+            const lineTokens = this.tokensByLine.get(t.line);
+            if (!lineTokens) return undefined;
+            const idx = lineTokens.indexOf(t);
+            // Pattern: MEMBER ( 'name.clw' )
+            if (lineTokens[idx + 1]?.value !== '(') return undefined;
+            const arg = lineTokens[idx + 2];
+            if (!arg) return undefined;
+            // String literal — strip surrounding quotes if present.
+            return arg.value.replace(/^['"]|['"]$/g, '');
+        }
+        return undefined;
+    }
+
     /**
      * Every CLASS token in this document that declares
      * `IMPLEMENTS(<interfaceName>)` — case-insensitive on the interface name.

@@ -113,8 +113,12 @@ export class HoverRouter {
      * Handle special keywords (MODULE, TO, ELSE, PROCEDURE, HIDE, DISABLE, TYPE)
      */
     private handleSpecialKeywords(context: HoverContext): Hover | null {
-        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext } = context;
+        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext, documentStructure } = context;
         const upperWord = word.toUpperCase();
+
+        if (upperWord === 'PROGRAM' || upperWord === 'MEMBER') {
+            return this.contextHandler.handleProgramOrMemberKeyword(word, documentStructure);
+        }
 
         if (upperWord === 'MODULE') {
             return this.contextHandler.handleModuleKeyword(isInMapBlock);

@@ -1723,4 +1723,81 @@ END`;
             assert.ok(!impls.some(c => c.label === 'PlainClass'));
         });
     });
+
+    suite('PROGRAM / MEMBER document helpers (Gap N)', () => {
+        function buildN(code: string) {
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const structure = new DocumentStructure(tokens);
+            structure.process();
+            return structure;
+        }
+
+        test('PROGRAM document: getDocumentKind=PROGRAM, getProgramName returns the label', () => {
+            const code = [
+                'MyProg PROGRAM',                   // 0
+                '',                                  // 1
+                'MAP',                               // 2
+                '  Foo PROCEDURE()',                 // 3
+                'END',                               // 4
+                '',                                  // 5
+                'CODE',                              // 6
+                'END',                               // 7
+            ].join('\n');
+            const s = buildN(code);
+            assert.strictEqual(s.getDocumentKind(), 'PROGRAM');
+            assert.strictEqual(s.getProgramName(), 'MyProg');
+            assert.strictEqual(s.getMemberParent(), undefined);
+        });
+
+        test("MEMBER('parent.clw') document: getDocumentKind=MEMBER, getMemberParent returns the unquoted filename", () => {
+            const code = [
+                "  MEMBER('Parent.clw')",            // 0
+                '',                                  // 1
+                'TestProc PROCEDURE',                // 2
+                'CODE',                              // 3
+                'END',                               // 4
+            ].join('\n');
+            const s = buildN(code);
+            assert.strictEqual(s.getDocumentKind(), 'MEMBER');
+            assert.strictEqual(s.getMemberParent(), 'Parent.clw');
+            assert.strictEqual(s.getProgramName(), undefined);
+        });
+
+        test('bare MEMBER without parens: kind=MEMBER but getMemberParent is undefined', () => {
+            const code = [
+                '  MEMBER',                          // 0
+                '',                                  // 1
+                'TestProc PROCEDURE',                // 2
+                'CODE',                              // 3
+                'END',                               // 4
+            ].join('\n');
+            const s = buildN(code);
+            assert.strictEqual(s.getDocumentKind(), 'MEMBER');
+            assert.strictEqual(s.getMemberParent(), undefined);
+        });
+
+        test('document with neither PROGRAM nor MEMBER: all helpers return undefined', () => {
+            const code = [
+                'MyClass CLASS,TYPE',                // 0
+                '       END',                         // 1
+            ].join('\n');
+            const s = buildN(code);
+            assert.strictEqual(s.getDocumentKind(), undefined);
+            assert.strictEqual(s.getProgramName(), undefined);
+            assert.strictEqual(s.getMemberParent(), undefined);
+        });
+
+        test('PROGRAM without a label returns getProgramName=undefined but kind=PROGRAM', () => {
+            // The Clarion spec strongly prefers a label, but defensively cover the case.
+            const code = [
+                '  PROGRAM',                         // 0
+                'CODE',                              // 1
+                'END',                               // 2
+            ].join('\n');
+            const s = buildN(code);
+            assert.strictEqual(s.getDocumentKind(), 'PROGRAM');
+            assert.strictEqual(s.getProgramName(), undefined);
+        });
+    });
 });
