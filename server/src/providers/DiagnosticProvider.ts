@@ -2,12 +2,14 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token } from '../ClarionTokenizer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
 import { validateStructureTerminators, validateConditionalBlocks, validateFileStructures, validateCaseStructures, validateExecuteStructures, validateViewProjectFields } from './diagnostics/StructureDiagnostics';
 import { validateClassInterfaceImplementation, validateClassProperties } from './diagnostics/ClassDiagnostics';
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
+import { validateUndeclaredVariables } from './diagnostics/UndeclaredVariableDiagnostics';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
@@ -44,6 +46,7 @@ export class DiagnosticProvider {
             ...validateClassProperties(tokens, document),
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
+            ...(serverSettings.undeclaredVariablesEnabled ? validateUndeclaredVariables(tokens, document) : []),
             ...validateReservedKeywordLabels(tokens, document),
             ...validateUnicodeCharacters(document),
             ...validateAttributeApplicability(tokens, document),

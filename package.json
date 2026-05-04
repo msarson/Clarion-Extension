@@ -1265,6 +1265,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
+        },
+        "clarion.diagnostics.undeclaredVariables.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in. When enabled, raises a Warning on assignments whose left-hand side identifier cannot be resolved to any in-scope declaration (parameter, local, module, global, equate). v1 only checks bare-identifier LHS of assignments — prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked. Toggling requires reloading the VS Code window. Disabled by default until coverage is proven across real codebases (issue #62)."
         }
       }
     }

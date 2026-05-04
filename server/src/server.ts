@@ -1020,6 +1020,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     libsrcPaths: string[];
     solutionFilePath?: string; // Add optional solution file path
     defaultLookupExtensions?: string[]; // Add default lookup extensions
+    undeclaredVariablesEnabled?: boolean; // #62 opt-in
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1048,6 +1049,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
             serverSettings.defaultLookupExtensions = params.defaultLookupExtensions;
             logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
         }
+
+        serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
 
         // Always-visible startup summary of Clarion folder configuration
         // Use logger.error so it's visible even when log level is set to "error"

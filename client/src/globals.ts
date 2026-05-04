@@ -172,6 +172,10 @@ export const globalSettings = {
         return workspace.getConfiguration("clarion").get<string[]>("fileSearchExtensions", DEFAULT_EXTENSIONS);
     },
 
+    get undeclaredVariablesEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", false);
+    },
+
     get configuration() {
         return _globalClarionConfiguration;
     },

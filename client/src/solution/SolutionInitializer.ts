@@ -358,7 +358,8 @@ export async function initializeSolution(
             redirectionFile: globalSettings.redirectionFile,
             macros: globalSettings.macros,
             libsrcPaths: globalSettings.libsrcPaths,
-            defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
+            defaultLookupExtensions: globalSettings.defaultLookupExtensions, // Add default lookup extensions
+            undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled // #62 opt-in
         });
         logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
         

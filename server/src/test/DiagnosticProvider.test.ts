@@ -2254,6 +2254,8 @@ End`;
 // Gap L follow-up — VIEW PROJECT(field) validation against FROM file
 // ─────────────────────────────────────────────────────────────────────────────
 import { validateViewProjectFields } from '../providers/diagnostics/StructureDiagnostics';
+import { validateUndeclaredVariables } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
+import { serverSettings } from '../serverSettings';
 
 suite('DiagnosticProvider - VIEW PROJECT field validation (Gap L follow-up)', () => {
 
@@ -2394,5 +2396,229 @@ MyView VIEW(Customer)
         const diags = DiagnosticProvider.validateDocument(doc);
         const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
         assert.ok(viewDiags.length >= 1, 'validateDocument should surface VIEW PROJECT diagnostic');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #62 — Undeclared LHS-of-assignment diagnostic (opt-in v1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('DiagnosticProvider - Undeclared variables (#62, opt-in v1)', () => {
+
+    function undeclaredDiags(code: string) {
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+        return validateUndeclaredVariables(tokens, doc);
+    }
+
+    suite('Gate behaviour', () => {
+        test('default state — validator runs but only fires on real undeclared LHS', () => {
+            // Direct validator call ignores the gate; the gate is enforced by
+            // DiagnosticProvider.validateDocument (covered separately below).
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('validateDocument respects the serverSettings gate (default off)', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  TyposVar = 1
+  RETURN`;
+            const doc = createDocument(code);
+            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            try {
+                serverSettings.undeclaredVariablesEnabled = false;
+                const diags = DiagnosticProvider.validateDocument(doc);
+                const undecl = diags.filter(d => d.code === 'undeclared-variable');
+                assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
+            } finally {
+                serverSettings.undeclaredVariablesEnabled = wasEnabled;
+            }
+        });
+
+        test('validateDocument fires the diagnostic when the gate is on', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  TyposVar = 1
+  RETURN`;
+            const doc = createDocument(code);
+            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            try {
+                serverSettings.undeclaredVariablesEnabled = true;
+                const diags = DiagnosticProvider.validateDocument(doc);
+                const undecl = diags.filter(d => d.code === 'undeclared-variable');
+                assert.strictEqual(undecl.length, 1);
+                assert.ok(undecl[0].message.includes("'TyposVar'"));
+            } finally {
+                serverSettings.undeclaredVariablesEnabled = wasEnabled;
+            }
+        });
+    });
+
+    suite('Positive cases — fires on truly undeclared LHS', () => {
+        test('bare undeclared identifier on LHS warns', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  Foo = 1
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Foo'"));
+        });
+
+        test('augmented assignment += also flagged', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  TypoVar += 1
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'TypoVar'"));
+        });
+
+        test('reference assignment &= also flagged', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  TypoRef &= ANY
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+        });
+    });
+
+    suite('Negative cases — declared identifiers not flagged', () => {
+        test('local variable declared in data section', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('procedure parameter on LHS', () => {
+            const code = `MyProc PROCEDURE(LONG pCounter)
+  CODE
+  pCounter = 5
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('module-level variable declared above first procedure', () => {
+            const code = `ModVar LONG
+
+MyProc PROCEDURE()
+  CODE
+  ModVar = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('EQUATE label is treated as declared', () => {
+            const code = `MAX_ROWS EQUATE(100)
+
+MyProc PROCEDURE()
+  CODE
+  MAX_ROWS = 1
+  RETURN`;
+            // (Assigning to an equate is semantically wrong, but it IS declared
+            // so the LHS-existence check shouldn't warn — that's a separate
+            // diagnostic's job.)
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('SELF and PARENT — built-ins, never warned', () => {
+            const code = `MyClass.Init PROCEDURE()
+  CODE
+  SELF = 1
+  PARENT = 2
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('RECORDS / ERRORCODE — built-in identifiers', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  RECORDS = 1
+  ERRORCODE = 0
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
+    suite('Out-of-scope shapes — intentionally NOT flagged in v1', () => {
+        test('prefixed Cus:Field LHS — skipped (has colon)', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  Cus:UnknownField = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('dotted member access LHS — skipped (has dot)', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  obj.UnknownMember = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('indexed array LHS — skipped (has bracket)', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  arr[1] = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('field-equate ?Ctrl LHS — skipped (has question mark)', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  ?MyButton{PROP:Hide} = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
+    suite('Non-LHS contexts — never flagged', () => {
+        test('IF / THEN expressions on the same line', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  IF Bogus > 1 THEN x = 1.
+  RETURN`;
+            // Bogus is in the RHS / condition — not first non-trivia token;
+            // the line starts with IF, which is a Keyword, not Variable.
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('BREAK Loop1 — first token is Keyword, not LHS', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+Loop1 LOOP
+    BREAK Loop1
+  END
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('procedure-call statement (not assignment) — never flagged', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  SomeFunc(1, 2)
+  RETURN`;
+            // First token is SomeFunc but next is '(' not '=' — skipped.
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
+    test('outside any procedure (no CODE marker) — no diagnostics', () => {
+        const code = `GlobalVar LONG
+ModVar STRING(10)
+`;
+        assert.strictEqual(undeclaredDiags(code).length, 0);
     });
 });
