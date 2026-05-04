@@ -2838,4 +2838,361 @@ MyVar LONG
             cache.clearTokens(uri);
         });
     });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // #62 stale-diagnostic — all-in-one PROGRAM shape repro
+    //
+    // Mark's repro file (f:\Playground\SimpleNewSln\SimpleNewSln.clw) has the
+    // unusual shape where PROGRAM declarations + main CODE are followed by
+    // multiple inline procedure definitions in the SAME file:
+    //
+    //     PROGRAM
+    //     INCLUDE('StringTheory.inc'),ONCE
+    //     MAP / ... / END
+    //     ... structure declarations ...
+    //     CODE                    ← PROGRAM main code
+    //     ... PROGRAM body ...
+    //     SomeProcedure   PROCEDURE()
+    //                            ← data section (empty in v14)
+    //       CODE
+    //       MyVar = 1            ← undeclared LHS — should fire 1 diagnostic
+    //     ... more procedures ...
+    //
+    // Live LSP log capture (2026-05-04) showed validator running for every
+    // edit but returning 0 diagnostics for v14 (189 tokens) where MyVar is
+    // unambiguously undeclared anywhere in the file. This pins the bug as
+    // either H1 (stale Variable token .line outside any codeRange) or H2
+    // (isInsideCode wrong via wrong executionMarker / finishesAt for the
+    // inline procedures).
+    //
+    // Test only — does NOT fix. Pinning the cause for dispatcher routing.
+    // ─────────────────────────────────────────────────────────────────────────
+    suite('All-in-one PROGRAM shape — #62 stale-diagnostic repro', () => {
+
+        // Mark's exact v14 file content (51 lines), MyVar undeclared on line 37.
+        const programWithInlineProcedures =
+            '  PROGRAM\n' +
+            "  INCLUDE('StringTheory.inc'),ONCE\n" +
+            '\n' +
+            '  MAP\n' +
+            'SomeProcedure   PROCEDURE()  \n' +
+            "    MODULE('MyNewModule.clw')\n" +
+            'TestProc1 PROCEDURE()\n' +
+            '    END\n' +
+            '\n' +
+            "    MODULE('MyNextProcedure.clw')\n" +
+            'MyNextProcedure PROCEDURE(STRING param1, STRING param2)\n' +
+            '    END\n' +
+            '\n' +
+            "    MODULE('MyNextProcedure2.clw')\n" +
+            'MyNextProcedure2  PROCEDURE(long param1, long param2, string param3, string param4)\n' +
+            'MyProc            PROCEDURE(string param1, string param2)\n' +
+            '    END\n' +
+            '    \n' +
+            '    \n' +
+            '    TestingNewStyleRename()\n' +
+            '    TestNewStyle2()\n' +
+            '    TestSaving()\n' +
+            '\n' +
+            '  END\n' +
+            'st  StringTheory \n' +
+            'sf  StringFormat \n' +
+            "  TestWin WINDOW('Test'),AT(0,0,200,100),MDI,RESIZE\n" +
+            "    BUTTON('OK'),AT(10,10,50,15),USE(?Ok),DEFAULT,HIDE\n" +
+            "    BUTTON('Bad'),AT(10,30,50,15)\n" +
+            '  END\n' +
+            '  CODE\n' +
+            "  st.SetValue('Hello World!')\n" +
+            '  SomeProcedure()\n' +
+            'SomeProcedure   PROCEDURE()\n' +
+            '\n' +
+            '  CODE\n' +
+            '  MyVar = 1\n' +
+            "  MyNextProcedure2(1,2,'test','test2')\n" +
+            "  st.SetValue('Hello World 2!')\n" +
+            '\n' +
+            '  MESSAGE(st.GetValue())\n' +
+            '\n' +
+            'TestingNewStyleRename   PROCEDURE()\n' +
+            '  CODE\n' +
+            '\n' +
+            'TestNewStyle2   PROCEDURE()\n' +
+            '  CODE\n' +
+            '\n' +
+            'TestSaving      PROCEDURE()\n' +
+            '    CODE\n';
+
+        test('validator fires 1 diagnostic for MyVar undeclared in SomeProcedure body (v14 repro)', () => {
+            const doc = createDocument(programWithInlineProcedures);
+            const tokens = new ClarionTokenizer(programWithInlineProcedures).tokenize();
+
+            // Live LSP capture had v14 = 189 tokens. Print our token count so
+            // we can tell whether the embedded source is reproducing v14
+            // exactly or is one edit behind.
+            // eslint-disable-next-line no-console
+            console.log(`[#62 fingerprint] embedded source tokenized to ${tokens.length} tokens (live v14 had 189)`);
+
+            const diags = validateUndeclaredVariables(tokens, doc);
+
+            // The bug: Mark's live LSP log shows 0 diagnostics for this exact
+            // file content at v14. Live capture excerpt:
+            //   [#62] scanned 189 tokens, 4 code ranges, 0 diagnostics
+            // Token count here will differ slightly from the live LSP path
+            // because the live cache has fed through edits while this test
+            // runs the tokenizer fresh — but the validator's logic only
+            // depends on the final token shape, so the diagnostic count
+            // must match.
+            //
+            // Asserting the EXPECTED behaviour (1 diag): the test goes RED
+            // when the bug is present. When the underlying cause is fixed,
+            // this assertion turns GREEN. Per Bob's dispatcher direction —
+            // this is a regression test pinning the bug, not a workaround.
+            assert.strictEqual(
+                diags.length,
+                1,
+                `Expected 1 diagnostic for undeclared MyVar at line 37, got ${diags.length}. ` +
+                `Diagnostics: ${JSON.stringify(diags.map(d => ({ msg: d.message, line: d.range.start.line })))}`
+            );
+        });
+
+        // H1 vs H2 fingerprint probes. These run independently of the main
+        // assertion so a failure in any one tells us where the bug lives,
+        // without the test bailing early on the first failed assert.
+        test('[fingerprint] SomeProcedure (line 34) executionMarker is the CODE on line 36', () => {
+            const tokens = new ClarionTokenizer(programWithInlineProcedures).tokenize();
+            // Find SomeProcedure-the-implementation (line 34, 0-indexed = 33).
+            const someProcImpl = tokens.find(t =>
+                t.label === 'SomeProcedure' &&
+                t.line === 33 &&
+                t.value.toUpperCase() === 'PROCEDURE'
+            );
+            assert.ok(someProcImpl, 'SomeProcedure implementation token (line 34) must be present');
+            assert.ok(
+                someProcImpl!.executionMarker !== undefined,
+                'SomeProcedure must have executionMarker set (else it is missing from codeRanges)'
+            );
+            assert.strictEqual(
+                someProcImpl!.executionMarker!.line,
+                35,
+                `SomeProcedure.executionMarker.line should be 35 (CODE marker), got ${someProcImpl!.executionMarker!.line}`
+            );
+        });
+
+        test('[fingerprint] SomeProcedure (line 34) finishesAt covers MyVar use on line 37', () => {
+            const tokens = new ClarionTokenizer(programWithInlineProcedures).tokenize();
+            const someProcImpl = tokens.find(t =>
+                t.label === 'SomeProcedure' &&
+                t.line === 33 &&
+                t.value.toUpperCase() === 'PROCEDURE'
+            );
+            assert.ok(someProcImpl, 'SomeProcedure implementation token must be present');
+            assert.ok(
+                someProcImpl!.finishesAt !== undefined,
+                'SomeProcedure must have finishesAt set (else it is missing from codeRanges)'
+            );
+            // Line 37 in source is 0-indexed 36. finishesAt must be >= 36 for
+            // codeRanges' isInsideCode(36) → true (line > codeStart && line <= end).
+            assert.ok(
+                someProcImpl!.finishesAt! >= 36,
+                `SomeProcedure.finishesAt should be >= 36 (covers MyVar use), got ${someProcImpl!.finishesAt}`
+            );
+        });
+
+        test('[fingerprint] every Variable token named "MyVar" lives on line 37', () => {
+            const tokens = new ClarionTokenizer(programWithInlineProcedures).tokenize();
+            const myVarTokens = tokens.filter(t => t.value === 'MyVar');
+            assert.ok(myVarTokens.length > 0, 'expected at least one MyVar token in the file');
+            for (const t of myVarTokens) {
+                assert.strictEqual(
+                    t.line,
+                    36,
+                    `MyVar token at unexpected line: ${t.line} (expected 36 = source line 37). ` +
+                    `Stale .line from incremental tokenize would show up here as a non-36 value.`
+                );
+            }
+        });
+
+        // Cache-based edit cycle. Above tests proved fresh-tokenize of v14
+        // content gives 1 diagnostic correctly. Live LSP capture shows v14
+        // returning 0. The difference is the path: TokenCache + incremental
+        // retokenize across many edits. This test simulates that path: open
+        // the file with `myvar long` declaration on line 35, edit to remove
+        // it, run validator on the cached tokens. If incremental tokenize
+        // diverges from fresh tokenize on this all-in-one PROGRAM shape, we
+        // see 0 diagnostics here too — confirming H1 (cache-state stale).
+        test('[fingerprint] TokenCache edit cycle: declared → declaration removed → diagnostic must return', () => {
+            // v0 source: line 35 has `myvar long` (declared form).
+            const v0Source = programWithInlineProcedures.replace(
+                'SomeProcedure   PROCEDURE()\n\n  CODE\n',
+                'SomeProcedure   PROCEDURE()\nmyvar long\n  CODE\n'
+            );
+            // Sanity: replacement actually fired.
+            assert.notStrictEqual(v0Source, programWithInlineProcedures, 'replace seed must change the source');
+
+            const uri = `file:///fingerprint-allinone-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const doc = TextDocument.create(uri, 'clarion', 1, v0Source);
+
+            // Step 1: file as-loaded with declaration → expect 0 diagnostics.
+            const v0Tokens = cache.getTokens(doc);
+            const v0Diags = validateUndeclaredVariables(v0Tokens, doc);
+            assert.strictEqual(v0Diags.length, 0,
+                `step 1 (declared): expected 0 diagnostics, got ${v0Diags.length}`);
+
+            // Step 2: remove the `myvar long\n` line (in-place line delete).
+            // Find the line index from v0Source by counting newlines before
+            // the literal text.
+            const myvarLineIdx = v0Source.split('\n').findIndex(l => l === 'myvar long');
+            assert.ok(myvarLineIdx > 0, 'expected myvar declaration line in v0 source');
+
+            TextDocument.update(doc, [{
+                range: {
+                    start: { line: myvarLineIdx, character: 0 },
+                    end:   { line: myvarLineIdx + 1, character: 0 }
+                },
+                text: ''
+            }], 2);
+
+            const v1Tokens = cache.getTokens(doc);
+            const v1Diags = validateUndeclaredVariables(v1Tokens, doc);
+
+            // eslint-disable-next-line no-console
+            console.log(`[#62 fingerprint] cache cycle v1: ${v1Tokens.length} tokens, ${v1Diags.length} diagnostics`);
+
+            // Compare against fresh tokenize of the same final text.
+            const freshTokens = new ClarionTokenizer(doc.getText()).tokenize();
+            const freshDiags = validateUndeclaredVariables(freshTokens, doc);
+            // eslint-disable-next-line no-console
+            console.log(`[#62 fingerprint] fresh tokenize same text: ${freshTokens.length} tokens, ${freshDiags.length} diagnostics`);
+
+            // If cache-path and fresh-path diverge here, we have proven H1.
+            assert.strictEqual(
+                v1Diags.length,
+                freshDiags.length,
+                `Cache-path and fresh-path diverge: cache=${v1Diags.length} diags, fresh=${freshDiags.length} diags. ` +
+                `If cache=0 and fresh=1, the incremental retokenize for this file shape leaves stale tokens that ` +
+                `pollute declaredNames. Hands H1 to Alice (TokenCache surface).`
+            );
+
+            // And both must produce 1 diagnostic for MyVar.
+            assert.strictEqual(v1Diags.length, 1,
+                `step 2 (declaration removed): expected 1 diagnostic, got ${v1Diags.length}`);
+
+            cache.clearTokens(uri);
+        });
+
+        // Simulates Mark's actual editing: typing keystrokes one at a time
+        // (each character is a separate `TextDocument.update` with its own
+        // incremental tokenize pass through TokenCache). The live LSP
+        // capture went v0 → v14 across 13 small edits. Single-edit tests
+        // above pass; this one tests whether accumulated incremental-tokenize
+        // state diverges from fresh-tokenize after many small edits on the
+        // all-in-one PROGRAM shape.
+        test('[fingerprint] TokenCache char-by-char delete of "myvar long" — expect symmetric end state', () => {
+            const v0Source = programWithInlineProcedures.replace(
+                'SomeProcedure   PROCEDURE()\n\n  CODE\n',
+                'SomeProcedure   PROCEDURE()\nmyvar long\n  CODE\n'
+            );
+            const myvarLineIdx = v0Source.split('\n').findIndex(l => l === 'myvar long');
+            assert.ok(myvarLineIdx > 0, 'expected myvar declaration line in v0 source');
+
+            const uri = `file:///fingerprint-allinone-charcycle-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const doc = TextDocument.create(uri, 'clarion', 1, v0Source);
+
+            // Prime the cache at v0.
+            cache.getTokens(doc);
+
+            // Delete characters one at a time from `myvar long` line, ending
+            // with the line itself empty. 10 chars in "myvar long" + 1 newline.
+            // After each backspace, run validator and record token+diag count.
+            const trace: { v: number; tokens: number; diags: number }[] = [];
+            let version = 1;
+            const lineText = 'myvar long';
+
+            // For each backspace step we check: cache result must match fresh
+            // tokenize result of the SAME final text. Any divergence proves
+            // H1 — incremental tokenize leaves stale state that pollutes
+            // declaredNames.
+            const divergences: { v: number; cacheDiags: number; freshDiags: number; text: string }[] = [];
+
+            for (let charsRemaining = lineText.length; charsRemaining > 0; charsRemaining--) {
+                version++;
+                // Delete the LAST character of the line.
+                TextDocument.update(doc, [{
+                    range: {
+                        start: { line: myvarLineIdx, character: charsRemaining - 1 },
+                        end:   { line: myvarLineIdx, character: charsRemaining }
+                    },
+                    text: ''
+                }], version);
+                const t = cache.getTokens(doc);
+                const d = validateUndeclaredVariables(t, doc);
+                trace.push({ v: version, tokens: t.length, diags: d.length });
+
+                // Cross-check this version against fresh tokenize of identical text.
+                const freshT = new ClarionTokenizer(doc.getText()).tokenize();
+                const freshD = validateUndeclaredVariables(freshT, doc);
+                if (freshD.length !== d.length) {
+                    divergences.push({
+                        v: version,
+                        cacheDiags: d.length,
+                        freshDiags: freshD.length,
+                        text: doc.getText().split('\n')[myvarLineIdx] ?? '<line gone>'
+                    });
+                }
+            }
+
+            // Final edit: delete the now-empty line + its newline (line-merge).
+            version++;
+            TextDocument.update(doc, [{
+                range: {
+                    start: { line: myvarLineIdx, character: 0 },
+                    end:   { line: myvarLineIdx + 1, character: 0 }
+                },
+                text: ''
+            }], version);
+            const finalCacheTokens = cache.getTokens(doc);
+            const finalCacheDiags = validateUndeclaredVariables(finalCacheTokens, doc);
+            trace.push({ v: version, tokens: finalCacheTokens.length, diags: finalCacheDiags.length });
+
+            // eslint-disable-next-line no-console
+            console.log(`[#62 fingerprint] char-by-char trace:\n` + trace.map(s =>
+                `  v${s.v}: ${s.tokens} tokens, ${s.diags} diagnostics`
+            ).join('\n'));
+
+            // Compare against fresh tokenize of the same final text.
+            const freshTokens = new ClarionTokenizer(doc.getText()).tokenize();
+            const freshDiags = validateUndeclaredVariables(freshTokens, doc);
+            // eslint-disable-next-line no-console
+            console.log(`[#62 fingerprint] fresh tokenize of final text: ${freshTokens.length} tokens, ${freshDiags.length} diagnostics`);
+
+            // Killer assertion 1: at the end of the edit cycle, cache and
+            // fresh-tokenize must agree.
+            assert.strictEqual(
+                finalCacheDiags.length,
+                freshDiags.length,
+                `Cache vs fresh-tokenize diverge at end of char-by-char edit cycle. ` +
+                `cache=${finalCacheDiags.length} diags, fresh=${freshDiags.length} diags. ` +
+                `Char-by-char trace: ${JSON.stringify(trace)}`
+            );
+
+            // Killer assertion 2: NO intermediate version can diverge either.
+            // This is what catches Mark's bug — he stopped editing at an
+            // intermediate state where cache disagreed with fresh-tokenize.
+            // eslint-disable-next-line no-console
+            if (divergences.length > 0) console.log(`[#62 fingerprint] divergences:\n` +
+                divergences.map(d => `  v${d.v}: cache=${d.cacheDiags}, fresh=${d.freshDiags}, line=${JSON.stringify(d.text)}`).join('\n'));
+            assert.strictEqual(
+                divergences.length, 0,
+                `Cache and fresh-tokenize diverge at ${divergences.length} intermediate version(s). ` +
+                `H1 confirmed: TokenCache.incrementalTokenize for the all-in-one PROGRAM shape ` +
+                `produces stale state that pollutes the validator's declaredNames set. ` +
+                `Hands the fix to Alice (TokenCache surface). ` +
+                `Divergence list: ${JSON.stringify(divergences)}`
+            );
+
+            cache.clearTokens(uri);
+        });
+    });
 });
