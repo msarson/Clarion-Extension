@@ -284,7 +284,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
 
-            logger.warn(`⏱️ [SDI] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
+            logger.debug(`⏱️ [SDI] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
 
             const allFiles: string[] = [];
             for (const dir of searchPaths) {
@@ -296,7 +296,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
 
-            logger.warn(`⏱️ [SDI] Scanning ${allFiles.length} files in batches`);
+            logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches`);
 
             const BATCH_SIZE = 20;
             let total = 0;
@@ -316,7 +316,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             }
 
             const duration = Date.now() - startTime;
-            logger.warn(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
+            logger.debug(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
 
         } catch (err) {
             logger.error(`Error building index: ${err instanceof Error ? err.message : String(err)}`);

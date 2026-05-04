@@ -125,7 +125,7 @@ export class FileRelationshipGraph {
         this._built = true;
         this._building = false;
         const edgeCount = this.getAllEdges().length;
-        logger.error(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
+        logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
     }
 
     /**
@@ -170,7 +170,7 @@ export class FileRelationshipGraph {
         this.classModuleIndex.clear();
         this._built = false;
         this._building = false;
-        logger.error(`🔄 [FRG] FileRelationshipGraph reset`);
+        logger.debug(`🔄 [FRG] FileRelationshipGraph reset`);
     }
 
     // ── Core processor ─────────────────────────────────────────────────────────
