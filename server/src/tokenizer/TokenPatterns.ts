@@ -6,7 +6,7 @@ import { TokenType } from './TokenTypes';
 
 export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
-    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,))/i,
+    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,|!|$))/i,
     // ✅ CASE, IF, LOOP should not match after : or . (qualified identifiers like nts:case, obj.case)
     CASE: /(?<![:\w.])\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
@@ -19,7 +19,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     JOIN: /\bJOIN\b/i,
     LOOP: /(?<![:\w.])\bLOOP\b/i,  // ✅ Prevent matching after : or . or word char
     MAP: /\bMAP\b/i,
-    MENU: /\bMENU\b(?=\s*(\(|,))/i,
+    MENU: /\bMENU\b(?=\s*(\(|,|!|$))/i,
     MENUBAR: /\bMENUBAR\b/i,
     // ✅ QUEUE changed to use negative lookbehind for qualified identifiers
     QUEUE: /(?<![:\w.])\bQUEUE\b/i,
@@ -32,7 +32,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
-    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
+    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,|!|$))/i,  // Only match TOOLBAR at beginning of line followed by ( , ! or end of line
     // ✅ VIEW changed to use word boundary instead of requiring leading space
     VIEW: /\bVIEW\b/i,
     WINDOW: /\bWINDOW\b(?=\s*(\(|,|!|$))/i,

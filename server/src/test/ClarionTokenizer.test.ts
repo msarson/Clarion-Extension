@@ -313,4 +313,125 @@ TestProc PROCEDURE()
             assert.ok(windowStruct, 'Attribute-only WINDOW must still tokenize as Structure');
         });
     });
+
+    // Task 81347859 — APPLICATION / MENU / TOOLBAR share the same bare-keyword
+    // lookahead bug as WINDOW (c0650731). For these three keywords the failure
+    // mode differs slightly: they're NOT in the Variable regex's exclusion list,
+    // so when the Structure lookahead fails the bare keyword tokenizes as
+    // Variable rather than skipping a char. Either way it's wrong — must be
+    // Structure.
+    suite('81347859 - bare APPLICATION/MENU/TOOLBAR keywords', () => {
+
+        test('bare APPLICATION after label tokenizes as Structure', () => {
+            const code = `BareApp APPLICATION\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'APPLICATION');
+            assert.ok(struct, 'Bare APPLICATION must tokenize as a Structure token');
+        });
+
+        test('bare APPLICATION followed by trailing comment tokenizes as Structure', () => {
+            const code = `BareApp APPLICATION  ! main app shell\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'APPLICATION');
+            assert.ok(struct, 'Bare APPLICATION + comment must tokenize as a Structure token');
+        });
+
+        test('parameterised APPLICATION(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyApp APPLICATION('Title'),AT(,,200,100)\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'APPLICATION');
+            assert.ok(struct, 'Parameterised APPLICATION must still tokenize as Structure');
+        });
+
+        test('attribute-only APPLICATION,AT(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyApp APPLICATION,AT(,,200,100)\n  END`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'APPLICATION');
+            assert.ok(struct, 'Attribute-only APPLICATION must still tokenize as Structure');
+        });
+
+        test('bare MENU after label tokenizes as Structure', () => {
+            const code = `BareMenu MENU\n  ITEM('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MENU');
+            assert.ok(struct, 'Bare MENU must tokenize as a Structure token');
+        });
+
+        test('bare MENU followed by trailing comment tokenizes as Structure', () => {
+            const code = `BareMenu MENU  ! file menu\n  ITEM('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MENU');
+            assert.ok(struct, 'Bare MENU + comment must tokenize as a Structure token');
+        });
+
+        test('parameterised MENU(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyMenu MENU('&File')\n  ITEM('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MENU');
+            assert.ok(struct, 'Parameterised MENU must still tokenize as Structure');
+        });
+
+        test('attribute-only MENU,USE(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyMenu MENU,USE(?File)\n  ITEM('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MENU');
+            assert.ok(struct, 'Attribute-only MENU must still tokenize as Structure');
+        });
+
+        test('bare indented TOOLBAR tokenizes as Structure', () => {
+            // TOOLBAR's pattern is anchored to ^[ \t]* — the keyword must be at
+            // line start (or after leading whitespace). At literal column 0 the
+            // Label pattern wins (TOOLBAR isn't in Label's exclusion list), so
+            // realistic bare TOOLBAR appears indented inside a WINDOW body.
+            const code = `MyWin WINDOW('Title')\n  TOOLBAR\n    BUTTON('OK'),USE(?OK)\n  END\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'TOOLBAR');
+            assert.ok(struct, 'Bare indented TOOLBAR must tokenize as a Structure token');
+        });
+
+        test('bare TOOLBAR followed by trailing comment tokenizes as Structure', () => {
+            const code = `  TOOLBAR  ! main toolbar\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'TOOLBAR');
+            assert.ok(struct, 'Bare TOOLBAR + comment must tokenize as a Structure token');
+        });
+
+        test('parameterised TOOLBAR(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `  TOOLBAR(2,2)\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'TOOLBAR');
+            assert.ok(struct, 'Parameterised TOOLBAR must still tokenize as Structure');
+        });
+
+        test('attribute-only TOOLBAR,AT(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `  TOOLBAR,AT(0,0,100,30)\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'TOOLBAR');
+            assert.ok(struct, 'Attribute-only TOOLBAR must still tokenize as Structure');
+        });
+    });
 });
