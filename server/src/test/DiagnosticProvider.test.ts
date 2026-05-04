@@ -3196,3 +3196,119 @@ MyVar LONG
         });
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// d2fadc09 — bare-filename URI in MapDeclarationDiagnostics.validateMissingImplementations
+//
+// MODULE token.referencedFile stores the unresolved filename from the source
+// (DocumentStructure.resolveFileReferences:1915). Before this fix, the
+// validator constructed cache URIs by string-prefixing `file:///` directly
+// onto the bare name, producing entries like `file:///OtherModule.clw` that
+// duplicate the canonical `file:///c:/tmp/OtherModule.clw` cache key. This
+// caused redundant tokenization on every validate pass and stale diagnostics
+// when only one of the two cache entries was refreshed.
+//
+// The fix mirrors the INCLUDE pattern (validateMissingMapDeclarations:128-148):
+// resolve via same-dir join first, fall back to redirection, skip if neither
+// finds the file on disk. Test confirms the cache only contains the full-path
+// URI after a validate pass.
+// ─────────────────────────────────────────────────────────────────────────────
+import * as nodeFs from 'fs';
+import * as nodeOs from 'os';
+import * as nodePathTest from 'path';
+import { validateMissingImplementations } from '../providers/diagnostics/MapDeclarationDiagnostics';
+
+suite('MapDeclarationDiagnostics — MODULE filename URI resolution (d2fadc09)', () => {
+
+    let tmpDir: string;
+    let parentClwPath: string;
+    let moduleClwPath: string;
+
+    suiteSetup(() => {
+        tmpDir = nodeFs.mkdtempSync(nodePathTest.join(nodeOs.tmpdir(), 'd2fadc09-'));
+        parentClwPath = nodePathTest.join(tmpDir, 'Parent.clw');
+        moduleClwPath = nodePathTest.join(tmpDir, 'OtherModule.clw');
+
+        nodeFs.writeFileSync(parentClwPath,
+            '  PROGRAM\n' +
+            '\n' +
+            '  MAP\n' +
+            "    MODULE('OtherModule.clw')\n" +
+            'OtherProc PROCEDURE()\n' +
+            '    END\n' +
+            '  END\n' +
+            '  CODE\n' +
+            '  OtherProc()\n',
+            'utf8'
+        );
+
+        nodeFs.writeFileSync(moduleClwPath,
+            "  MEMBER('Parent.clw')\n" +
+            '\n' +
+            '  MAP\n' +
+            '  END\n' +
+            'OtherProc PROCEDURE()\n' +
+            '  CODE\n' +
+            '  RETURN\n',
+            'utf8'
+        );
+    });
+
+    suiteTeardown(() => {
+        try {
+            nodeFs.unlinkSync(parentClwPath);
+            nodeFs.unlinkSync(moduleClwPath);
+            nodeFs.rmdirSync(tmpDir);
+        } catch { /* best-effort cleanup */ }
+    });
+
+    test('validateMissingImplementations caches OtherModule.clw under full-path URI, never bare-filename URI', async () => {
+        // Construct the parent doc with the canonical full-path URI shape that
+        // VS Code uses (lower-case drive letter, percent-encoded colon).
+        const parentContent = nodeFs.readFileSync(parentClwPath, 'utf8');
+        const driveAndPath = parentClwPath.replace(/\\/g, '/');
+        const colonIdx = driveAndPath.indexOf(':');
+        const encodedDrive = driveAndPath.slice(0, colonIdx).toLowerCase() + '%3A';
+        const parentUri = 'file:///' + encodedDrive + driveAndPath.slice(colonIdx + 1);
+        const parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContent);
+
+        const parentTokens = new ClarionTokenizer(parentContent).tokenize();
+
+        // Snapshot cache state before. Tolerant of unrelated entries already
+        // present (other tests in the same process); we only check that OUR
+        // test's new URIs land in the right shape.
+        const cacheBefore = new Set(TokenCache.getInstance().getAllCachedUris());
+
+        // The call that previously created a bare-filename URI cache entry.
+        await validateMissingImplementations(parentTokens, parentDoc);
+
+        const cacheAfter = TokenCache.getInstance().getAllCachedUris();
+        const newEntries = cacheAfter.filter(u => !cacheBefore.has(u));
+
+        const moduleEntry = newEntries.find(u =>
+            u.toLowerCase().endsWith('/othermodule.clw')
+        );
+
+        assert.ok(moduleEntry,
+            `Expected a cache entry for OtherModule.clw after validateMissingImplementations. ` +
+            `New entries: ${JSON.stringify(newEntries)}`);
+
+        // The bug: a bare `file:///OtherModule.clw` URI ends up in the cache.
+        // The fix: only the full-path form ends up in the cache.
+        assert.notStrictEqual(moduleEntry, 'file:///OtherModule.clw',
+            'Cache should NOT contain bare-filename URI for OtherModule.clw — that is the d2fadc09 bug.');
+
+        // Positive assertion: the cached URI must contain the path (not just
+        // the bare basename).
+        assert.ok(
+            moduleEntry!.length > 'file:///OtherModule.clw'.length,
+            `Expected full-path URI, got bare or short URI: ${moduleEntry}`
+        );
+
+        // Cleanup so this test doesn't leak state into later test files
+        // sharing the mocha process.
+        for (const u of newEntries) {
+            TokenCache.getInstance().clearTokens(u);
+        }
+    });
+});

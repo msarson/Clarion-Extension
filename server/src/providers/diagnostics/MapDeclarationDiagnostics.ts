@@ -334,6 +334,12 @@ export async function validateMissingImplementations(
     const docLines = document.getText().split('\n');
     const diagnostics: Diagnostic[] = [];
 
+    // Same-dir resolution context for MODULE filename lookup (mirrors the
+    // INCLUDE pattern at validateMissingMapDeclarations:128-148).
+    const currentClwDir = nodePath.dirname(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    );
+
     // Find all MODULE tokens that reference a file
     const moduleTokens = tokens.filter(t =>
         t.type === TokenType.Structure &&
@@ -343,9 +349,17 @@ export async function validateMissingImplementations(
     );
 
     for (const moduleToken of moduleTokens) {
-        const clwPath = moduleToken.referencedFile!;
-
-        if (!fs.existsSync(clwPath)) {
+        // MODULE filenames are stored unresolved on the token
+        // (DocumentStructure.resolveFileReferences:1915 — "We're storing
+        // unresolved filenames"). Resolve to an absolute path before any URI
+        // construction, otherwise bare filenames leak into the cache as
+        // `file:///MyOther.clw` URIs (task d2fadc09). Same-dir first (most
+        // common in practice), redirection fallback — same shape as the
+        // INCLUDE handler at line 145-148.
+        const bareName = moduleToken.referencedFile!;
+        const sameDirPath = nodePath.join(currentClwDir, bareName);
+        const clwPath = fs.existsSync(sameDirPath) ? sameDirPath : resolveClwPath(bareName);
+        if (!clwPath) {
             continue;
         }
 
