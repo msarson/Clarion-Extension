@@ -2602,11 +2602,11 @@ END`;
         }
 
         // Single source of truth — confirm that the ControlService recognises
-        // every report-only control listed in clarion-controls.json. Once a
-        // separate follow-up aligns the tokenizer whitelist for DETAIL /
-        // HEADER / FOOTER / FORM (mirroring the ITEMIZE alignment in Gap B),
-        // these classifications will surface through getControlContextAt.
-        // Gap J itself only swaps the dispatch — it doesn't fix tokenization.
+        // every report-only control listed in clarion-controls.json. Tokenizer
+        // whitelist for DETAIL / HEADER / FOOTER / FORM is aligned by task
+        // 9c3c9c20 (mirroring the ITEMIZE alignment in Gap B), so these
+        // classifications now surface through getControlContextAt — covered by
+        // the next test loop.
         for (const reportControl of ['DETAIL', 'HEADER', 'FOOTER', 'FORM']) {
             test(`ControlService recognises report control \`${reportControl}\``, () => {
                 const ControlService = require('../utils/ControlService').ControlService;
@@ -2615,6 +2615,50 @@ END`;
                     true,
                     `${reportControl} must resolve via ControlService`
                 );
+            });
+        }
+
+        // Task 9c3c9c20 — tokenizer whitelist alignment for the report-only
+        // controls. Each must (a) tokenize as TokenType.Structure when used
+        // inside a REPORT body, and (b) surface as the controlType through
+        // getControlContextAt at child positions.
+        for (const reportControl of ['DETAIL', 'HEADER', 'FOOTER', 'FORM']) {
+            test(`report-only control \`${reportControl}\` tokenizes as Structure inside REPORT body`, () => {
+                const code = [
+                    'TestProc PROCEDURE',                // 0
+                    "MyRpt REPORT('Title')",             // 1
+                    `       ${reportControl}`,           // 2 — bare report band keyword
+                    "         STRING('hi')",             // 3
+                    '       END',                        // 4
+                    'CODE',                              // 5
+                    'END',                               // 6
+                ].join('\n');
+                const tokenizer = new ClarionTokenizer(code);
+                const tokens = tokenizer.tokenize();
+
+                const struct = tokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === reportControl
+                );
+                assert.ok(struct, `expected ${reportControl} to tokenize as TokenType.Structure`);
+            });
+
+            test(`report-only control \`${reportControl}\` surfaces via getControlContextAt`, () => {
+                const code = [
+                    'TestProc PROCEDURE',                // 0
+                    "MyRpt REPORT('Title')",             // 1
+                    `       ${reportControl},AT(0,0,400,30)`, // 2
+                    "         STRING('hi')",             // 3
+                    '       END',                        // 4
+                    'CODE',                              // 5
+                    'END',                               // 6
+                ].join('\n');
+                const s = buildJ(code);
+
+                // Cursor mid-keyword on line 2 (after the 7-space indent).
+                const ctx = s.getControlContextAt(2, 9);
+                assert.ok(ctx.controlType, `expected control context for ${reportControl}`);
+                assert.strictEqual(ctx.controlType, reportControl, `controlType matches keyword`);
             });
         }
 
