@@ -1408,6 +1408,16 @@ export class DocumentStructure {
             const prevToken = lineTokens[tokenIndex - 1];
             if (prevToken.type === TokenType.Label) {
                 token.label = prevToken.value;
+            } else if (
+                tokenIndex === 1 &&
+                prevToken.type === TokenType.Variable &&
+                (token.value.toUpperCase() === 'LOOP' || token.value.toUpperCase() === 'ACCEPT')
+            ) {
+                // Issue #65: indented `Label LOOP` / `Label ACCEPT` inside CODE
+                // sections — the tokenizer only emits TokenType.Label at column 0,
+                // so an indented loop label arrives as a leading Variable. Promote
+                // it so BREAK <Label> / CYCLE <Label> can resolve to this loop.
+                token.label = prevToken.value;
             }
         }
         logger.info(`🧱 Opened ${token.value} at Line ${token.line} ${token.label}`);
@@ -2755,6 +2765,43 @@ export class DocumentStructure {
      */
     public getBranches(caseOrIfToken: Token): BranchInfo[] {
         return caseOrIfToken.branches ? [...caseOrIfToken.branches] : [];
+    }
+
+    // =====================================================
+    // 🎯 Issue #65: labelled LOOP / ACCEPT resolution
+    // =====================================================
+
+    /**
+     * Resolves a `BREAK <Label>` / `CYCLE <Label>` target. Walks every LOOP
+     * and ACCEPT structure that carries a label and contains `fromLine`, and
+     * returns the innermost match by name (case-insensitive).
+     *
+     * Returns undefined when:
+     *   - `name` is empty
+     *   - no labelled LOOP/ACCEPT enclosing `fromLine` matches the name
+     *   - the candidate has no `finishesAt` (incomplete document)
+     *
+     * Backed by `structuresByType` — no token re-walk per call. Consumers:
+     * the BREAK/CYCLE-outside-LOOP diagnostic (#64) once it accepts label
+     * targets, plus future hover / go-to-definition on loop labels.
+     */
+    public resolveLoopLabel(name: string, fromLine: number): Token | undefined {
+        if (!name) return undefined;
+        const target = name.toUpperCase();
+        const buckets = ['LOOP', 'ACCEPT'];
+        let best: Token | undefined;
+        for (const bucket of buckets) {
+            const list = this.structuresByType.get(bucket);
+            if (!list) continue;
+            for (const t of list) {
+                if (!t.label) continue;
+                if (t.label.toUpperCase() !== target) continue;
+                if (t.finishesAt === undefined) continue;
+                if (fromLine < t.line || fromLine > t.finishesAt) continue;
+                if (!best || t.line > best.line) best = t;
+            }
+        }
+        return best;
     }
 
     // =====================================================
