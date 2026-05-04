@@ -267,10 +267,10 @@ last LONG
     x = pAdr
   UNTIL pAdr > last
   RETURN`;
-            
+
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
-            
+
             assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics');
         });
 
@@ -2866,6 +2866,130 @@ MyProc PROCEDURE()
         });
     });
 
+    // 4a2ddc24 sub-feature 1 — RHS expressions on assignment lines.
+    suite('RHS expression validation (4a2ddc24, sub-feature 1)', () => {
+        test('RHS bare-identifier undeclared — flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = BogusVar + 1
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusVar'"));
+        });
+
+        test('RHS bare-identifier declared — no warning', () => {
+            const code = `MyProc PROCEDURE()
+LocalA LONG
+LocalB LONG
+  CODE
+  LocalA = LocalB + 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('LHS undeclared AND RHS undeclared — both flagged independently', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  BogusLhs = BogusRhs
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 2);
+            const messages = diags.map(d => d.message).sort();
+            assert.ok(messages[0].includes("'BogusLhs'") || messages[0].includes("'BogusRhs'"));
+            assert.ok(messages[1].includes("'BogusLhs'") || messages[1].includes("'BogusRhs'"));
+        });
+
+        test('Compound assignment += — RHS still walked', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar += BogusVar
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusVar'"));
+        });
+
+        test('RHS prefixed identifier — still skipped (containsSpecialChars)', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = Cus:UnknownField
+  RETURN`;
+            // Prefixed forms are intentionally skipped — same shape contract
+            // as the LHS check.
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('RHS dotted member — still skipped (sub-feature 3 will handle)', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = obj.member
+  RETURN`;
+            // Dotted forms are deferred to sub-feature 3 which will narrow
+            // the check to the leading scope name. v1 RHS still skips them.
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('RHS built-in identifier — never flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = TRUE
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('RHS multiple undeclared — one diagnostic per name', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = BogusA + BogusB - BogusC
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 3);
+            const names = diags.map(d => d.message).join(' ');
+            assert.ok(names.includes('BogusA'));
+            assert.ok(names.includes('BogusB'));
+            assert.ok(names.includes('BogusC'));
+        });
+
+        test('RHS function-call argument undeclared — flagged on the bare arg', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = ABS(BogusArg)
+  RETURN`;
+            // ABS is a built-in function (TokenType.Function in the tokenizer's
+            // builtins list); the RHS walk skips non-Variable tokens. BogusArg
+            // is a Variable token — flagged.
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusArg'"));
+        });
+
+        test('Self-reference on RHS — declared name, no warning', () => {
+            const code = `MyProc PROCEDURE()
+Counter LONG
+  CODE
+  Counter = Counter + 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('RHS literal-only — no diagnostic', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = 42
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
     suite('Non-LHS contexts — never flagged', () => {
         test('IF / THEN expressions on the same line', () => {
             const code = `MyProc PROCEDURE()
@@ -2874,6 +2998,8 @@ MyProc PROCEDURE()
   RETURN`;
             // Bogus is in the RHS / condition — not first non-trivia token;
             // the line starts with IF, which is a Keyword, not Variable.
+            // (Sub-feature 2 will start flagging IF/WHILE/CASE conditions —
+            // when that ships, this test moves to a "flagged" assertion.)
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
 

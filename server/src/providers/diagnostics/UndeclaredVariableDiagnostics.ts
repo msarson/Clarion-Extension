@@ -12,15 +12,23 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
 
 /**
- * Issue #62 v1 — opt-in diagnostic for assignments whose LEFT-HAND SIDE is an
- * identifier that doesn't resolve to any declaration in the current file.
+ * Issue #62 — opt-in diagnostic for identifiers used in code that don't
+ * resolve to any declaration in the current file.
  *
  * Conservative by design: false-positive trust is critical for diagnostics.
- * v1 only checks bare-identifier LHS of assignments — prefixed (`Cus:Field`),
- * dotted (`obj.member`), indexed (`arr[i]`), and field-equate (`?Ctrl`) forms
- * are intentionally left untouched. Cross-file global resolution is also out
- * of scope; if a name isn't declared in the current document the diagnostic
- * fires, so users with cross-file globals should keep the feature off.
+ * Cross-file global resolution is out of scope; if a name isn't declared in
+ * the current document the diagnostic fires, so users with cross-file globals
+ * should keep the feature off.
+ *
+ * v1 (commit a8a8e3e): bare-identifier LHS of assignments only.
+ * v2 (task 4a2ddc24): expanded to RHS expressions on assignment lines —
+ * `MyVar = BogusName + 1` flags `BogusName` too. Multi-line `|` continuation
+ * is a follow-up. Conditions (IF/WHILE/CASE) and dotted-access shapes are
+ * separate v2 sub-features in adjacent commits.
+ *
+ * Forms intentionally still skipped: prefixed (`Cus:Field`), dotted
+ * (`obj.member` — sub-feature 3 will narrow this), indexed (`arr[i]`),
+ * field-equate (`?Ctrl`).
  *
  * Resolution: a name is considered declared when it appears anywhere in this
  * file as a `TokenType.Label`, or as a `TokenType.Variable` outside any CODE
@@ -129,28 +137,36 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         if (!next) continue;
 
         let isAssignment = false;
+        let rhsStartIdx = -1; // first token index after the assignment operator
         if (next.value === '=') {
             isAssignment = true;
+            rhsStartIdx = lineTokens.indexOf(next) + 1;
         } else if (COMPOUND_LEADERS.has(next.value)) {
             const after = firstSignificant(lineTokens, lineTokens.indexOf(next) + 1);
             if (after && after.value === '=' && after.line === next.line) {
                 isAssignment = true;
+                rhsStartIdx = lineTokens.indexOf(after) + 1;
             }
         }
         if (!isAssignment) continue;
 
-        if (declaredNames.has(first.value.toUpperCase())) continue;
+        // LHS check (v1): flag the leading bare-identifier when undeclared.
+        if (!declaredNames.has(first.value.toUpperCase())) {
+            diagnostics.push(makeDiagnostic(first));
+        }
 
-        diagnostics.push({
-            severity: DiagnosticSeverity.Warning,
-            range: {
-                start: { line: first.line, character: first.start },
-                end: { line: first.line, character: first.start + first.value.length }
-            },
-            message: `'${first.value}' is not declared in this file.`,
-            source: 'clarion',
-            code: 'undeclared-variable'
-        });
+        // RHS check (v2 — task 4a2ddc24, sub-feature 1): walk every name
+        // token after the assignment operator and flag the same way the LHS
+        // is flagged. Conservative tokens-only scan: only `TokenType.Variable`
+        // tokens that pass the same shape filters as the LHS check are
+        // candidates. Function calls (`SomeFunc(...)`) tokenise the function
+        // name as `TokenType.Function`, not Variable, so they're skipped
+        // automatically — call-site validation lives elsewhere.
+        if (rhsStartIdx >= 0) {
+            for (const rhsDiag of collectUndeclaredInRange(lineTokens, rhsStartIdx, declaredNames, document)) {
+                diagnostics.push(rhsDiag);
+            }
+        }
     }
 
     logger.info(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
@@ -170,4 +186,98 @@ function containsSpecialChars(value: string): boolean {
     // field-equate (?Ctrl) forms. These have member / scope / runtime
     // semantics that the LHS-only v1 deliberately doesn't try to validate.
     return /[:.\[\]?]/.test(value);
+}
+
+/**
+ * Build the diagnostic for an undeclared bare-identifier reference. Centralised
+ * so LHS, RHS, condition, and dotted-access checks all surface identical text
+ * + range shape — the offending name, ranged on its token.
+ */
+function makeDiagnostic(token: Token): Diagnostic {
+    return {
+        severity: DiagnosticSeverity.Warning,
+        range: {
+            start: { line: token.line, character: token.start },
+            end: { line: token.line, character: token.start + token.value.length }
+        },
+        message: `'${token.value}' is not declared in this file.`,
+        source: 'clarion',
+        code: 'undeclared-variable'
+    };
+}
+
+/**
+ * Walk a slice of `lineTokens` (`fromIdx` to end) and produce a diagnostic for
+ * every `TokenType.Variable` token that fails the same declared-name test as
+ * the LHS check. Used by the v2 RHS / conditions / dotted-access extensions.
+ *
+ * Filter set is intentionally identical to the LHS check:
+ *   - skip comments;
+ *   - skip non-Variable tokens (Function calls, Keywords, operators, literals);
+ *   - skip tokens whose value contains `:.\[\]?` (prefix / dotted / indexed /
+ *     field-equate forms) — sub-feature 3 narrows the dotted case;
+ *   - skip built-in identifiers (SELF, PARENT, …);
+ *   - skip declared names;
+ *   - skip Variable tokens that sit IMMEDIATELY adjacent to a preceding
+ *     `TokenType.Number` token. The Clarion tokenizer doesn't recognise hex
+ *     (`1000h`), binary (`101b`), or octal (`17q`) numeric suffixes — it
+ *     splits them into a Number token and a 1-char Variable token glued
+ *     against it. The validator treats that glued Variable as part of the
+ *     number literal, not a name reference. Otherwise tests like
+ *     `pAdr = 1000h` (valid Clarion hex assignment) trip the RHS check on
+ *     the `h`. Adjacency = no whitespace gap between the tokens.
+ *
+ * Each surviving Variable token produces one diagnostic.
+ */
+function collectUndeclaredInRange(
+    lineTokens: Token[],
+    fromIdx: number,
+    declaredNames: Set<string>,
+    document: TextDocument
+): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    for (let i = fromIdx; i < lineTokens.length; i++) {
+        const t = lineTokens[i];
+        if (t.type === TokenType.Comment) continue;
+        if (t.type !== TokenType.Variable) continue;
+        if (containsSpecialChars(t.value)) continue;
+        if (BUILT_IN_IDENTIFIERS.has(t.value.toUpperCase())) continue;
+        if (declaredNames.has(t.value.toUpperCase())) continue;
+        if (isGluedNumberSuffix(t, document)) continue;
+        diagnostics.push(makeDiagnostic(t));
+    }
+    return diagnostics;
+}
+
+/**
+ * Detect Variable tokens that are actually trailing characters of a numeric
+ * literal (Clarion hex / binary / octal suffix patterns: `1000h`, `101b`,
+ * `17q`, `377o`).
+ *
+ * The tokenizer doesn't recognise these suffixes — for `pAdr = 1000h` it
+ * silently drops the `1000` Number token entirely and emits `h` as a
+ * `TokenType.Variable` at the position the suffix sits. The token-stream
+ * adjacency check therefore can't fire (no Number token to compare against).
+ *
+ * Workaround: peek at the source text immediately to the left of the
+ * Variable token's start column on the same line. If that character is a
+ * decimal digit (with no whitespace between), treat the Variable as a
+ * glued numeric suffix and skip it. Real identifier references are always
+ * separated from preceding numbers by whitespace, an operator, a comma,
+ * or a paren.
+ *
+ * Limitation: this rejects `(1)foo`-style expressions where `foo` is a
+ * legitimate identifier glued to a closing `)`. Clarion grammar doesn't
+ * emit that shape — function calls and indexing both insert delimiters
+ * between the closing paren/bracket and any following identifier.
+ */
+function isGluedNumberSuffix(token: Token, document: TextDocument): boolean {
+    if (token.start <= 0) return false;
+    const lineText = document.getText({
+        start: { line: token.line, character: 0 },
+        end: { line: token.line, character: token.start }
+    });
+    if (lineText.length === 0) return false;
+    const prevChar = lineText.charAt(lineText.length - 1);
+    return /[0-9]/.test(prevChar);
 }
