@@ -11,6 +11,7 @@ import { AttributeService } from '../../utils/AttributeService';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
+import { KeywordService } from '../../utils/KeywordService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -30,6 +31,7 @@ export class HoverRouter {
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
     private directiveService = DirectiveService.getInstance();
+    private keywordService = KeywordService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -100,6 +102,14 @@ export class HoverRouter {
         // 9.7 Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, etc.)
         const directiveHover = this.handleDirective(word);
         if (directiveHover) return directiveHover;
+
+        // 9.8 Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.) —
+        // entries previously living in clarion-builtins.json under issue #77
+        // moved to clarion-keywords.json. Routing intentionally sits next to
+        // directives and ahead of builtins so a misclassified entry can't be
+        // shadowed by an unrelated function with the same name.
+        const languageKeywordHover = this.handleKeyword(word);
+        if (languageKeywordHover) return languageKeywordHover;
 
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
         const builtinHover = this.handleBuiltin(word, line, wordRange, document, position, tokens);
@@ -362,6 +372,16 @@ export class HoverRouter {
         if (!entry) return null;
         logger.info(`Found compiler directive: ${word}`);
         return this.formatter.formatDirective(entry);
+    }
+
+    /**
+     * Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.).
+     */
+    private handleKeyword(word: string): Hover | null {
+        const entry = this.keywordService.getKeyword(word);
+        if (!entry) return null;
+        logger.info(`Found language keyword: ${word}`);
+        return this.formatter.formatKeyword(entry);
     }
 
     /**

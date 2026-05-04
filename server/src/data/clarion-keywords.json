@@ -1,0 +1,197 @@
+{
+  "description": "Clarion language keywords — control flow, program structure, OOP, and operators",
+  "keywords": [
+    {
+      "name": "ACCEPT",
+      "syntax": "ACCEPT",
+      "description": "Initiates event processing loop for WINDOW or APPLICATION structures. Processes user input, mouse events, and control events. Loop cycles automatically when field-specific events occur. Use EVENT(), FIELD(), ACCEPTED() to determine what happened. Terminates with BREAK or implicit events like CloseWindow.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "BEGIN",
+      "syntax": "BEGIN\n  statements\nEND",
+      "description": "Groups multiple statements into single executable structure. Primarily used within EXECUTE to treat several statements as one. Must be terminated by END or period. Allows multiple lines of code where single statement is expected.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "BREAK",
+      "syntax": "BREAK [label]",
+      "description": "Immediately exits LOOP or ACCEPT structure and transfers control to first statement after terminator (END/WHILE/UNTIL). Optional label allows breaking out of nested loops by specifying which loop to exit. Only valid within LOOP or ACCEPT structures.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "BY",
+      "syntax": "BY",
+      "description": "Specifies the increment/decrement step in a LOOP counter iteration. Used with TO: i = initial TO limit BY step. If omitted, counter increments by 1. Negative values cause decrement. Step expression evaluated once at loop start.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "CASE",
+      "syntax": "CASE",
+      "description": "Initiates selective execution structure based on condition evaluation. Executes first matching OF/OROF statement group. More efficient than IF/ELSIF for multiple equivalence tests. Terminates with END statement.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "CYCLE",
+      "syntax": "CYCLE",
+      "description": "Transfers control back to top of LOOP or ACCEPT structure. Optional label allows cycling to outer nested loops. In ACCEPT loop, terminates certain automatic actions before performed (Iconize, Maximize, Move, Size, Restore, CloseWindow events).",
+      "category": "Control Flow"
+    },
+    {
+      "name": "ELSE",
+      "syntax": "ELSE",
+      "description": "Executes statements when all preceding IF and ELSIF conditions evaluate as false. Optional but must be last option in IF structure if used. Provides default action when no conditions are true.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "ELSIF",
+      "syntax": "ELSIF",
+      "description": "Evaluates an alternate condition in an IF structure. Logical expression following ELSIF is evaluated only when all preceding IF or ELSIF conditions were false. Can have multiple ELSIF clauses.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "END",
+      "syntax": "END",
+      "description": "Terminates a data declaration structure (GROUP, CLASS, FILE, RECORD, etc.) or compound executable statement (IF, LOOP, CASE, ACCEPT, etc.). Functionally equivalent to period (.). By convention, END aligns with structure start and is used for multi-line structures. Multiple periods on one line can replace multiple END statements.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "EXECUTE",
+      "syntax": "EXECUTE expression\n  statement1\n  statement2\n  [BEGIN...END]\n  [ELSE statement]\nEND",
+      "description": "Single statement execution structure. Executes statement at position based on expression value (1=first, 2=second, etc.). Can use BEGIN/END for multi-statement blocks. Optional ELSE clause for out-of-range values. More efficient than IF/ELSIF or CASE for numeric selection. Must terminate with END.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "EXIT",
+      "syntax": "EXIT",
+      "description": "Immediately leaves a ROUTINE and returns control to statement following the DO that called it. Different from RETURN which exits entire PROCEDURE. EXIT not required - ROUTINE terminates automatically when statements complete.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "IF",
+      "syntax": "IF",
+      "description": "Initiates a conditional execution structure. Executes statements based on logical expression evaluation. Zero or blank evaluates as false, anything else is true. Structure ends with END statement.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "LOOP",
+      "syntax": "LOOP",
+      "description": "Initiates an iterative statement execution structure. Forms: LOOP (infinite), LOOP count TIMES, LOOP i=initial TO limit BY step, LOOP UNTIL expression, LOOP WHILE expression. Must end with END or UNTIL/WHILE terminator.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "OF",
+      "syntax": "OF",
+      "description": "Specifies an expression to compare with CASE condition. Statements following OF execute when expression equals CASE condition. Can use ranges with TO keyword. Multiple OF options allowed in CASE structure.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "OROF",
+      "syntax": "OROF",
+      "description": "Adds alternative expression to preceding OF option. Statements execute when either OROF expression or preceding OF expression equals CASE condition. Can be on same line or separate line. Control falls into OROF statements from preceding statements.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "RETURN",
+      "syntax": "RETURN",
+      "description": "Terminates PROGRAM or PROCEDURE and returns control to caller. Expression required for procedures returning values (may be NULL for reference returns). Automatically closes local APPLICATION/WINDOW/REPORT/VIEW/QUEUE structures. Implicit RETURN occurs at end if not specified. Closes program and files when used in PROGRAM.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "THEN",
+      "syntax": "THEN",
+      "description": "Optional keyword following IF or ELSIF. Statements after THEN execute when the preceding logical expression is true. Must appear on same line as IF or ELSIF if used.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "TIMES",
+      "syntax": "LOOP count TIMES\n  statements\nEND",
+      "description": "Used with LOOP to execute count number of iterations. Syntax: LOOP count TIMES. Executes the loop statements exactly count times. Simpler alternative to LOOP variable = 1 TO count when you don't need the counter variable.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "TO",
+      "syntax": "TO",
+      "description": "Specifies a range in LOOP iterations or CASE OF statements.\n\nIn LOOP: i = initial TO limit [BY step] - Specifies terminating value. When counter exceeds limit (or is less than, if step is negative), loop terminates. Limit expression evaluated once at loop start.\n\nIn CASE: OF expression TO expression - Allows a range of values. Statements execute if condition falls within the inclusive range. Both expressions are evaluated even if condition is less than lower boundary.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "UNTIL",
+      "syntax": "UNTIL",
+      "description": "Evaluates condition to terminate LOOP. When on LOOP statement, tests before each iteration. When terminating LOOP structure (after statements), tests after each iteration. Loop terminates when expression evaluates to true.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "WHILE",
+      "syntax": "WHILE",
+      "description": "Evaluates condition to continue LOOP. When on LOOP statement, tests before each iteration. When terminating LOOP structure (after statements), tests after each iteration. Loop terminates when expression evaluates to false.",
+      "category": "Control Flow"
+    },
+    {
+      "name": "PARENT",
+      "syntax": "PARENT.member",
+      "description": "Reference to parent CLASS in derived CLASS methods. Used to call parent class implementation of overridden methods or access parent class members. Enables calling base class functionality from derived class. Example: PARENT.MethodName() calls parent's version of method.",
+      "category": "OOP Reference"
+    },
+    {
+      "name": "SELF",
+      "syntax": "SELF.member",
+      "description": "Implicit reference to current CLASS instance within CLASS methods. Automatically passed as first parameter to non-static methods. Used to access current object's properties and methods. In method implementation, can be explicit parameter or implicit. Example: SELF.PropertyName or SELF.MethodName()",
+      "category": "OOP Reference"
+    },
+    {
+      "name": "NEW",
+      "syntax": "NEW",
+      "description": "Allocates heap memory for a new instance of the specified data type. Used on source side of reference assignment (reference &= NEW(datatype)). Memory is automatically initialized to blank/zero and must be explicitly de-allocated with DISPOSE to prevent memory leaks. Parentheses around datatype are optional.",
+      "category": "Operator"
+    },
+    {
+      "name": "NOT",
+      "syntax": "NOT expression",
+      "description": "Boolean logical NOT operator. Reverses the logical value of an expression - returns TRUE (1) if expression is FALSE (0), returns FALSE (0) if expression is TRUE. Can also use tilde (~) as synonym. Example: IF NOT Condition or IF ~Flag.",
+      "category": "Operator"
+    },
+    {
+      "name": "CODE",
+      "syntax": "CODE",
+      "description": "Begins the executable code section of a PROCEDURE. Must appear after all data declarations (variables, files, windows, etc.). Everything after CODE until END is executable statements.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "FUNCTION",
+      "syntax": "FUNCTION",
+      "description": "Legacy synonym for PROCEDURE. In modern Clarion, PROCEDURE and FUNCTION are identical - both can return values when prototyped with a return type. FUNCTION keyword retained for backward compatibility with older DOS-era code where FUNCTION returned values and PROCEDURE did not.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "MAP",
+      "syntax": "MAP",
+      "description": "Declares a block of external procedure prototypes. Used in PROGRAM or MEMBER modules to declare procedures from other modules. Contains MODULE() sections and/or individual procedure prototypes. Ends with END.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "MODULE",
+      "syntax": "MODULE",
+      "description": "Declares a module block within a MAP structure. Names a MEMBER source file or external library containing procedure definitions. Contains procedure prototypes and ends with END. Can only be used inside MAP...END blocks.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "PROCEDURE",
+      "syntax": "PROCEDURE",
+      "description": "Defines executable code section that can be called from within a PROGRAM.\n\nPrototype (in MAP/CLASS): Declares procedure signature with optional parameters and return type.\nSyntax: label PROCEDURE[(params)] [,returnType] [,attributes]\n\nImplementation: Defines the actual executable code.\nSyntax: label PROCEDURE[(params)]\n       [local data]\n       CODE\n       statements\n       [RETURN(value)]\n\nFor CLASS methods, use ClassName.MethodName PROCEDURE format. Can return values when prototyped with return type. Must have matching prototype in MAP or CLASS.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "PROGRAM",
+      "syntax": "PROGRAM",
+      "description": "Declares the main program module. Only one PROGRAM per application. Must be the first declaration in the main source file. Use MEMBER for additional source modules that contain procedures called by the program.",
+      "category": "Program Structure"
+    },
+    {
+      "name": "ROUTINE",
+      "syntax": "label ROUTINE\n[DATA\n  local data\nCODE]\n  statements",
+      "description": "Declares a local subroutine within PROCEDURE. Can have optional DATA/CODE sections for local variables. Called with DO statement. Cannot duplicate PROCEDURE label. Useful for organizing code within procedures without overhead of separate procedure calls.",
+      "category": "Program Structure"
+    }
+  ]
+}
