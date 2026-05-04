@@ -1,6 +1,13 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import LoggerManager from '../../logger';
+
+const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
+// Default to error so the per-call breadcrumb stays quiet; users diagnosing
+// "isn't firing?" reports can crank the Clarion log level to info to surface
+// the `[#62]` trace below.
+logger.setLevel('error');
 
 /**
  * Issue #62 v1 — opt-in diagnostic for assignments whose LEFT-HAND SIDE is an
@@ -44,6 +51,10 @@ interface ScopeRange {
 export function validateUndeclaredVariables(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     if (tokens.length === 0) return diagnostics;
+
+    // Searchable diagnostic breadcrumb for "is this firing?" reports — set
+    // Clarion log level to info to see it. Tag `[#62]` is intentional.
+    const startLen = tokens.length;
 
     // Collect every procedure / method / routine that has a known code marker
     // and end line. We only flag identifiers that sit strictly inside a code
@@ -129,6 +140,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         });
     }
 
+    logger.info(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
     return diagnostics;
 }
 

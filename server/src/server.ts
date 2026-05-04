@@ -1050,7 +1050,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
         }
 
-        serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+        // Preserve the constructor default when a (legacy) client doesn't include
+        // the field. Only an explicit boolean from the client wins. (#62 fix)
+        if (params.undeclaredVariablesEnabled !== undefined) {
+            serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+        }
 
         // Always-visible startup summary of Clarion folder configuration
         // Use logger.error so it's visible even when log level is set to "error"

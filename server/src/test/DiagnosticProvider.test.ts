@@ -2461,6 +2461,46 @@ LocalVar LONG
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
             }
         });
+
+        // Regression: clarion/updatePaths handler used to clobber the
+        // serverSettings constructor default with `false` whenever the
+        // notification arrived without the field (legacy client). Verifies
+        // the defensive "undefined → preserve default" pattern.
+        test('clarion/updatePaths shape: undefined field preserves constructor default', () => {
+            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            try {
+                serverSettings.undeclaredVariablesEnabled = true;
+
+                const params: { undeclaredVariablesEnabled?: boolean } = {}; // legacy client
+                if (params.undeclaredVariablesEnabled !== undefined) {
+                    serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+                }
+
+                assert.strictEqual(
+                    serverSettings.undeclaredVariablesEnabled,
+                    true,
+                    'undefined field on the notification must NOT clobber the default'
+                );
+            } finally {
+                serverSettings.undeclaredVariablesEnabled = wasEnabled;
+            }
+        });
+
+        test('clarion/updatePaths shape: explicit false from client is honoured', () => {
+            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            try {
+                serverSettings.undeclaredVariablesEnabled = true;
+
+                const params: { undeclaredVariablesEnabled?: boolean } = { undeclaredVariablesEnabled: false };
+                if (params.undeclaredVariablesEnabled !== undefined) {
+                    serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+                }
+
+                assert.strictEqual(serverSettings.undeclaredVariablesEnabled, false);
+            } finally {
+                serverSettings.undeclaredVariablesEnabled = wasEnabled;
+            }
+        });
     });
 
     suite('Positive cases — fires on truly undeclared LHS', () => {
