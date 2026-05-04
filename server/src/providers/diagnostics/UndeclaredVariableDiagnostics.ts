@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 
 // The `[#62]` breadcrumb below uses logger.error so it remains visible at
@@ -63,7 +64,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
     const codeRanges: ScopeRange[] = [];
     for (const t of tokens) {
         const isProc =
-            t.type === TokenType.Procedure &&
+            TokenHelper.isProcedureOrFunction(t) &&
             (t.subType === TokenType.GlobalProcedure ||
                 t.subType === TokenType.MethodImplementation);
         const isRoutine = t.type === TokenType.Routine;
