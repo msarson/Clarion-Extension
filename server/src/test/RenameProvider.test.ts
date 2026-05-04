@@ -338,6 +338,64 @@ suite('RenameProvider', () => {
             assert.ok(funcResult !== null,
                 'FUNCTION call site should also be renameable (hotfix 4d1435b1)');
         });
+
+        // ─── Cross-file procedure rename (follow-up to hotfix 4d1435b1) ─────────
+        // SymbolFinder is per-file: when F2 lands on a call site whose declaration
+        // lives in another module, findSymbol returns null and the original
+        // prepareRename rejected. provideRename, on the other hand, delegates to
+        // ReferencesProvider which IS solution-aware (findProcedureReferences walks
+        // project sourceFiles). The fix mirrors that fallback in prepareRename.
+
+        test('cross-file procedure call site is renameable via ReferencesProvider fallback', async () => {
+            const projectDir = 'f:/CrossFileRename';
+            const procUri    = `file:///${projectDir}/proc.clw`;
+            const callerUri  = `file:///${projectDir}/caller.clw`;
+
+            // Declaration file (Foo PROCEDURE) — seeded into the cache so
+            // findProcedureReferences finds it without going to disk.
+            const procDoc = createDocument(
+                ['Foo PROCEDURE', 'CODE', '  RETURN'].join('\n'),
+                procUri
+            );
+            seedCache(procDoc);
+
+            // Caller file (no MAP, no Foo declaration locally — SymbolFinder must miss).
+            const callerDoc = createDocument(
+                [
+                    'MyProg PROGRAM',   // 0
+                    'CODE',              // 1
+                    '  Foo()',           // 2 ← cursor on Foo
+                ].join('\n'),
+                callerUri
+            );
+            seedCache(callerDoc);
+
+            // Solution stub exposing both files as project sourceFiles. The equates +
+            // project-path shims satisfy SolutionManager methods consulted by SymbolFinder
+            // (getEquatesTokens / getEquatesPath) and ReferencesProvider's class-type
+            // routing path (getProjectPathForFile / findProjectForFile).
+            (SolutionManager as any).instance = {
+                solution: {
+                    projects: [{
+                        path: projectDir,
+                        sourceFiles: [
+                            { relativePath: 'proc.clw' },
+                            { relativePath: 'caller.clw' }
+                        ],
+                        getRedirectionParser: () => null
+                    }]
+                },
+                getEquatesTokens: () => [],
+                getEquatesPath: () => null,
+                getProjectPathForFile: () => projectDir,
+                getProjectCwprojForFile: () => null,
+                findProjectForFile: () => null
+            };
+
+            const result = await provider.prepareRename(callerDoc, { line: 2, character: 4 });
+            assert.ok(result !== null,
+                'prepareRename should accept a cross-file call site (declaration in proc.clw)');
+        });
     });
 
     // ─── provideRename ────────────────────────────────────────────────────────

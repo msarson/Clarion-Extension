@@ -72,12 +72,21 @@ export class RenameProvider {
         }
 
         // Confirm symbol is known — rejects keywords, punctuation, etc.
+        // SymbolFinder is per-file, so it misses cross-file procedure declarations
+        // (e.g. F2 on a call site whose MAP/MODULE declaration lives in another file).
+        // Fall back to ReferencesProvider, which is solution-aware via findProcedureReferences;
+        // any non-empty result means provideRename will succeed, so the symbol is renameable.
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
-            throw new ResponseError(
-                ErrorCodes.InvalidRequest,
-                `Cannot rename '${word}': symbol not found or not renameable.`
+            const locations = await this.referencesProvider.provideReferences(
+                document, position, { includeDeclaration: false }
             );
+            if (!locations || locations.length === 0) {
+                throw new ResponseError(
+                    ErrorCodes.InvalidRequest,
+                    `Cannot rename '${word}': symbol not found or not renameable.`
+                );
+            }
         }
 
         return wordRange;
