@@ -2736,5 +2736,53 @@ MyVar LONG
 
             cache.clearTokens(uri);
         });
+
+        test('TokenCache singleton, large file — incremental path actually fires', () => {
+            // The three tests above all use ~60-char files. For those,
+            // canUseIncrementalUpdate's 20% length-diff gate and the 30%
+            // line-count fallback inside incrementalTokenize both bail out
+            // to FULL retokenization on every edit — so the incremental
+            // merge code path (TokenCache.ts:431-559) is never exercised.
+            //
+            // This test pads the document with 80 lines of unchanged content
+            // so a single-line insert/remove near the bottom triggers the
+            // incremental path. With TokenCache logger temporarily at info,
+            // both step 2 (insert) and step 3 (remove) report "✅ Incremental
+            // tokenization successful" and produce the symmetric token
+            // counts (89 → 91 → 89) and diagnostic counts (1 → 0 → 1).
+            //
+            // Pinned baseline for the #62 stale-diagnostic investigation
+            // (Alice, 2026-05-04, task 1850456f): the cache path under test
+            // here is correct end-to-end. If a future change breaks the
+            // incremental merge so step 3 fails to revert declaredNames,
+            // this test catches it before it ships.
+            const filler = Array.from({ length: 80 },
+                (_, i) => `! filler line ${i + 1}`).join('\n');
+            const undeclaredLarge = `${filler}\nMyProc PROCEDURE()\n  CODE\n  MyVar = 5\n  RETURN\n`;
+
+            const uri = `file:///regression-large-doc-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const doc = TextDocument.create(uri, 'clarion', 1, undeclaredLarge);
+            const validate = () => validateUndeclaredVariables(cache.getTokens(doc), doc);
+
+            assert.strictEqual(validate().length, 1, 'step 1: undeclared');
+
+            // Insert the declaration on the line right after PROCEDURE().
+            // Line 80 in the original = "MyProc PROCEDURE()", so insert at line 81.
+            TextDocument.update(doc, [{
+                range: { start: { line: 81, character: 0 }, end: { line: 81, character: 0 } },
+                text: 'MyVar LONG\n'
+            }], 2);
+            assert.strictEqual(validate().length, 0, 'step 2: declared');
+
+            // Remove the declaration line entirely.
+            TextDocument.update(doc, [{
+                range: { start: { line: 81, character: 0 }, end: { line: 82, character: 0 } },
+                text: ''
+            }], 3);
+            assert.strictEqual(validate().length, 1, 'step 3: declaration removed → diagnostic returns');
+
+            cache.clearTokens(uri);
+        });
     });
 });
