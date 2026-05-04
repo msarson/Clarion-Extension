@@ -1,6 +1,7 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 import { FormattingOptions } from 'vscode-languageserver';
+import { TokenHelper } from "./utils/TokenHelper";
 
 type StructureToken = Token & {
     type: TokenType.Structure;
@@ -63,7 +64,7 @@ class ClarionFormatter {
     private identifyExecutionRanges(): void {
         this.executionRanges = [];
         for (const token of this.tokens) {
-            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
+            if (TokenHelper.isProcedureOrFunction(token) || token.subType === TokenType.Routine) {
                 const executionStart = token.executionMarker ? token.executionMarker.line + 1 : token.line + 1;
                 this.executionRanges.push({
                     startsAt: executionStart,
@@ -74,7 +75,7 @@ class ClarionFormatter {
     }
     private identifyLocalDataSections(): void {
         for (const token of this.tokens) {
-            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
+            if (TokenHelper.isProcedureOrFunction(token) || token.subType === TokenType.Routine) {
                 if (token.executionMarker) {
                     const startLine = token.line + 1;
                     const endLine = token.executionMarker.line - 1;

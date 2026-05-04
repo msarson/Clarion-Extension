@@ -10,6 +10,7 @@ import {
 } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
 import { TokenType } from '../tokenizer/TokenTypes';
+import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -165,8 +166,8 @@ export class MapDeclarationCodeActionProvider {
                 t.type === TokenType.Structure &&
                 t.value.toUpperCase() === 'MAP' &&
                 t.finishesAt !== undefined &&
-                // Global MAP: not nested inside a procedure (parent is not a Procedure token)
-                (t.parent === undefined || t.parent.type !== TokenType.Procedure)
+                // Global MAP: not nested inside a procedure (parent is not a Procedure/Function token)
+                (t.parent === undefined || !TokenHelper.isProcedureOrFunction(t.parent))
             );
 
             if (!globalMap) return [];

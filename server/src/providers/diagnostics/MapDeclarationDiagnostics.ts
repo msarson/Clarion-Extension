@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
@@ -65,7 +66,7 @@ export async function validateMissingMapDeclarations(
     // Collect GlobalProcedure tokens only — MethodImplementation (dotted names)
     // are declared in CLASS blocks, not MAP, so they are excluded by subtype.
     const implementations = tokens.filter(t =>
-        t.type === TokenType.Procedure &&
+        TokenHelper.isProcedureOrFunction(t) &&
         t.subType === TokenType.GlobalProcedure &&
         t.label
     );
@@ -397,7 +398,7 @@ export async function validateMissingImplementations(
         // Build a map of implemented procedure names → their line numbers
         const implemented = new Map<string, number>();
         for (const t of implTokens) {
-            if (t.type === TokenType.Procedure &&
+            if (TokenHelper.isProcedureOrFunction(t) &&
                 t.subType === TokenType.GlobalProcedure &&
                 t.label) {
                 implemented.set(t.label.toUpperCase(), t.line);
@@ -438,7 +439,7 @@ export async function validateMissingImplementations(
                 // Implementation exists — compare signatures
                 try {
                     const implLine = implTokens.find(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure &&
                         t.label?.toUpperCase() === procName.toUpperCase()
                     );

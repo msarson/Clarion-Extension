@@ -189,7 +189,7 @@ export class HoverProvider {
             // local class methods to access the enclosing procedure's parameters.
             if (currentScope.subType === TokenType.MethodImplementation) {
                 const outerProcs = tokens.filter(t =>
-                    t.type === TokenType.Procedure && t.subType === TokenType.GlobalProcedure
+                    TokenHelper.isProcedureOrFunction(t) && t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of outerProcs) {
                     const outerParamHover = this.variableResolver.findParameterHover(word, document, gp);

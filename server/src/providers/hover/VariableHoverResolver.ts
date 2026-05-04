@@ -8,6 +8,7 @@ import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationInd
 import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
@@ -142,7 +143,7 @@ export class VariableHoverResolver {
             t.line < globalScopeEndLine &&
             (t.type === TokenType.Label
                 ? t.value.toLowerCase() === searchWord.toLowerCase()
-                : (t.type === TokenType.Structure || t.type === TokenType.Procedure) && t.label?.toLowerCase() === searchWord.toLowerCase()
+                : (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) && t.label?.toLowerCase() === searchWord.toLowerCase()
             )
         );
         
@@ -226,7 +227,7 @@ export class VariableHoverResolver {
         const structure = this.tokenCache.getStructure(document);
         const isClassProperty = structure.isInClassBlock(globalVar.line);
         const isInterfaceMethod = !isClassProperty && tokens.some(t =>
-            t.type === TokenType.Procedure &&
+            TokenHelper.isProcedureOrFunction(t) &&
             (t as any).subType === TokenType.InterfaceMethod &&
             t.line === globalVar.line
         );

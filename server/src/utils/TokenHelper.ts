@@ -249,10 +249,21 @@ export class TokenHelper {
     }
 
     /**
+     * True for any callable declaration token (Procedure or Function).
+     * In modern Clarion both can return values; the distinction is a legacy
+     * tokenizer artifact, so callers asking "is this a callable declaration?"
+     * must accept both. Use this anywhere a per-file check on `t.type` is
+     * filtering for callable declarations.
+     */
+    public static isProcedureOrFunction(token: Token): boolean {
+        return token.type === TokenType.Procedure || token.type === TokenType.Function;
+    }
+
+    /**
      * Case-insensitive string comparison (optimized to avoid unnecessary allocations)
      * 🚀 PERFORMANCE: Only allocates uppercase strings once, not in tight loops
      * @param a First string
-     * @param b Second string  
+     * @param b Second string
      * @returns true if strings are equal (case-insensitive)
      */
     public static equalsIgnoreCase(a: string, b: string): boolean {

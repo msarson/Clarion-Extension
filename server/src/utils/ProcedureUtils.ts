@@ -24,7 +24,9 @@ export class ProcedureUtils {
      */
     public static isProcedureToken(token: Token): boolean {
         if (!token.value) return false;
-        return (token.type === TokenType.Keyword || token.type === TokenType.Procedure) &&
+        return (token.type === TokenType.Keyword ||
+                token.type === TokenType.Procedure ||
+                token.type === TokenType.Function) &&
                this.isProcedureKeyword(token.value);
     }
 
@@ -35,6 +37,7 @@ export class ProcedureUtils {
      */
     public static isAnyProcedureType(token: Token): boolean {
         if (token.type === TokenType.Procedure) return true;
+        if (token.type === TokenType.Function) return true;
         if (token.subType === TokenType.MethodDeclaration) return true;
         if (token.subType === TokenType.InterfaceMethod) return true;
         if (token.subType === TokenType.MapProcedure) return true;

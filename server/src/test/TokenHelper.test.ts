@@ -214,4 +214,52 @@ END`;
             }
         });
     });
+
+    suite('isProcedureOrFunction', () => {
+        function makeToken(type: TokenType): Token {
+            return {
+                type,
+                value: 'X',
+                line: 0,
+                start: 0,
+                finishesAt: undefined,
+            } as unknown as Token;
+        }
+
+        test('returns true for TokenType.Procedure', () => {
+            assert.strictEqual(TokenHelper.isProcedureOrFunction(makeToken(TokenType.Procedure)), true);
+        });
+
+        test('returns true for TokenType.Function', () => {
+            assert.strictEqual(TokenHelper.isProcedureOrFunction(makeToken(TokenType.Function)), true);
+        });
+
+        test('returns false for unrelated token types', () => {
+            const others = [
+                TokenType.Keyword,
+                TokenType.Variable,
+                TokenType.Label,
+                TokenType.Structure,
+                TokenType.Routine,
+                TokenType.Comment,
+            ];
+            for (const t of others) {
+                assert.strictEqual(
+                    TokenHelper.isProcedureOrFunction(makeToken(t)),
+                    false,
+                    `Expected false for ${TokenType[t]}`
+                );
+            }
+        });
+
+        test('FUNCTION declaration tokenized as Function returns true', () => {
+            const code = `MyProc FUNCTION(),STRING
+  CODE
+  RETURN ''`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+            const callable = tokens.find(t => TokenHelper.isProcedureOrFunction(t));
+            assert.ok(callable, 'Expected at least one Procedure or Function token');
+        });
+    });
 });

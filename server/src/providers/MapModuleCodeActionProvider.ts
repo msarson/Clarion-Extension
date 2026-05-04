@@ -8,6 +8,7 @@ import {
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenType } from '../tokenizer/TokenTypes';
+import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 import * as path from 'path';
 
@@ -70,7 +71,7 @@ export class MapModuleCodeActionProvider {
                     line < mapToken.finishesAt
                 ) {
                     mapEndLine = mapToken.finishesAt;
-                    isLocalMap = mapToken.parent?.type === TokenType.Procedure;
+                    isLocalMap = mapToken.parent !== undefined && TokenHelper.isProcedureOrFunction(mapToken.parent);
                     break;
                 }
             }

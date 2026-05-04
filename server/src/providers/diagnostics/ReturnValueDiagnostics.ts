@@ -5,6 +5,7 @@ import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenCache } from '../../TokenCache';
+import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
@@ -19,7 +20,7 @@ function getCodeBlockRanges(
 
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
-        if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
+        if (!TokenHelper.isProcedureOrFunction(t) && t.type !== TokenType.Routine) continue;
         if (!t.executionMarker) continue;
 
         const sub = t.subType;
@@ -223,7 +224,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
             }
 
             for (let j = i + 1; j < tokens.length && (mapEndLine === -1 || tokens[j].line < mapEndLine); j++) {
-                if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
                     const procNameToken = tokens.find(t =>
@@ -279,7 +280,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
             }
 
             for (let j = i + 1; j < tokens.length && (classEndLine === -1 || tokens[j].line < classEndLine); j++) {
-                if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
                     const methodNameToken = tokens.find(t =>
@@ -340,7 +341,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
 
             if (inMapOrClass) continue;
 
-            if ((token.type === TokenType.Procedure || token.type === TokenType.Routine) &&
+            if ((TokenHelper.isProcedureOrFunction(token) || token.type === TokenType.Routine) &&
                 (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
 
                 let fullName = '';
@@ -373,7 +374,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                             codeLineStart = tokens[j].line;
                             break;
                         }
-                        if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                        if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                             (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
                             break;
                         }
@@ -385,7 +386,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                     for (let j = i + 1; j < tokens.length; j++) {
                         if (j !== i && tokens[j].type === TokenType.Label) {
                             if (j + 1 < tokens.length &&
-                                (tokens[j + 1].type === TokenType.Procedure || tokens[j + 1].type === TokenType.Routine) &&
+                                (TokenHelper.isProcedureOrFunction(tokens[j + 1]) || tokens[j + 1].type === TokenType.Routine) &&
                                 (tokens[j + 1].value.toUpperCase() === 'PROCEDURE' || tokens[j + 1].value.toUpperCase() === 'FUNCTION')) {
                                 procedureEndLine = tokens[j].line - 1;
                                 break;
@@ -513,7 +514,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
             if (t.type === TokenType.EndStatement && mapClassDepth > 0) mapClassDepth--;
 
             if (mapClassDepth === 0) continue;
-            if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
+            if (!TokenHelper.isProcedureOrFunction(t) && t.type !== TokenType.Routine) continue;
             if (val !== 'PROCEDURE' && val !== 'FUNCTION') continue;
 
             const nameToken = tokens.find(n =>
@@ -563,7 +564,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
     // (GlobalProcedure) that is never declared in a MAP is missed by those paths.
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
-        if (t.type !== TokenType.Procedure || t.subType !== TokenType.GlobalProcedure) continue;
+        if (!TokenHelper.isProcedureOrFunction(t) || t.subType !== TokenType.GlobalProcedure) continue;
 
         const name = (t.label ?? '').toUpperCase();
         if (!name || excluded.has(name)) continue;
@@ -624,7 +625,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
             }
 
             if (codeStart !== -1 &&
-                (t.type === TokenType.Procedure || t.type === TokenType.Routine) &&
+                (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) &&
                 (val === 'PROCEDURE' || val === 'FUNCTION' || val === 'ROUTINE') &&
                 t.line > codeStart) {
                 const labelOnLine = tokens.find(l =>

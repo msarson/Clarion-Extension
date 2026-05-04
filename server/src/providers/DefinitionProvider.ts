@@ -461,7 +461,7 @@ export class DefinitionProvider {
                 // A local class method can access the parameters of the procedure that declares the class.
                 if (containingProc.subType === TokenType.MethodImplementation) {
                     const outerProcs = tokens.filter(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure
                     );
                     for (const gp of outerProcs) {
@@ -1171,7 +1171,7 @@ export class DefinitionProvider {
                 // data sections — local class method implementations share their parent procedure's locals.
                 if (currentScope.subType === TokenType.MethodImplementation) {
                     const globalProcs = tokens.filter(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure
                     );
                     for (const gp of globalProcs) {

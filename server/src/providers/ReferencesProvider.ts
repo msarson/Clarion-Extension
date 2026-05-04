@@ -1575,7 +1575,7 @@ export class ReferencesProvider {
             const tokens = this.getTokensForUri(uri);
             return tokens.some(t =>
                 t.line === line &&
-                t.type === TokenType.Procedure &&
+                TokenHelper.isProcedureOrFunction(t) &&
                 (t.subType === TokenType.MapProcedure ||
                  t.subType === TokenType.GlobalProcedure ||
                  t.subType === TokenType.MethodDeclaration)
@@ -1627,7 +1627,7 @@ export class ReferencesProvider {
 
             if (startLine > 0 || endLine < Number.MAX_SAFE_INTEGER) {
                 const scopeToken = symbolInfo.scope.token;
-                if (scopeToken.type === TokenType.Procedure) {
+                if (TokenHelper.isProcedureOrFunction(scopeToken)) {
                     // Collect locally-declared CLASS names from the data section of the parent procedure.
                     // Data section is between the procedure line and the CODE execution marker.
                     const dataEndLine = scopeToken.executionMarker?.line ?? endLine;
@@ -1643,7 +1643,7 @@ export class ReferencesProvider {
 
                     if (localClassNames.size > 0) {
                         for (const t of tokens) {
-                            if (t.type === TokenType.Procedure &&
+                            if (TokenHelper.isProcedureOrFunction(t) &&
                                 t.subType === TokenType.MethodImplementation &&
                                 t.label &&
                                 t.line > endLine) {
@@ -1658,7 +1658,7 @@ export class ReferencesProvider {
                                     // between our scope end and this impl, the impl belongs to that later
                                     // procedure, not to our scope procedure.
                                     const hasInterveningProc = tokens.some(tp =>
-                                        tp.type === TokenType.Procedure &&
+                                        TokenHelper.isProcedureOrFunction(tp) &&
                                         tp.subType === TokenType.GlobalProcedure &&
                                         tp.line > endLine && tp.line < t.line
                                     );
@@ -1730,7 +1730,7 @@ export class ReferencesProvider {
                     }
                 } else if (token.label?.toLowerCase() === searchWordLower &&
                            token.value.toLowerCase() !== searchWordLower &&
-                           token.type !== TokenType.Procedure &&
+                           !TokenHelper.isProcedureOrFunction(token) &&
                            token.type !== TokenType.Structure) {
                     // MAP shorthand / structure label: the Structure/Procedure token itself carries
                     // label="ZipQueueType" but the Label token on the same line already matches.
@@ -1882,7 +1882,7 @@ export class ReferencesProvider {
         // Build a set of lines that have a PROCEDURE keyword with a procedure subType
         const procedureLines = new Set<number>();
         for (const t of tokens) {
-            if (t.type === TokenType.Procedure && t.subType !== undefined && procedureSubTypes.has(t.subType)) {
+            if (TokenHelper.isProcedureOrFunction(t) && t.subType !== undefined && procedureSubTypes.has(t.subType)) {
                 procedureLines.add(t.line);
             }
         }

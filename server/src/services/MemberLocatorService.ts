@@ -13,6 +13,7 @@ import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { TokenHelper } from '../utils/TokenHelper';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
@@ -351,7 +352,7 @@ export class MemberLocatorService {
      */
     private tokenMatchesName(t: Token, nameLower: string): boolean {
         if (t.type === TokenType.Label) return t.value.toLowerCase() === nameLower;
-        if (t.type === TokenType.Structure || t.type === TokenType.Procedure) {
+        if (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) {
             return t.label?.toLowerCase() === nameLower;
         }
         return false;
@@ -384,7 +385,7 @@ export class MemberLocatorService {
 
         for (const token of tokens) {
             if (token.line <= ifaceToken.line || token.line >= ifaceEnd) continue;
-            if (token.type !== TokenType.Procedure) continue;
+            if (!TokenHelper.isProcedureOrFunction(token)) continue;
             if (token.subType !== TokenType.InterfaceMethod) continue;
             if (token.label?.toLowerCase() !== methodName.toLowerCase()) continue;
 

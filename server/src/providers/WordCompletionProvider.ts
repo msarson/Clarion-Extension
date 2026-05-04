@@ -6,6 +6,7 @@ import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { TokenHelper } from '../utils/TokenHelper';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
@@ -58,7 +59,7 @@ export class WordCompletionProvider {
             // Label tokens on these lines are the procedure/routine *names*, not variables.
             const procDeclLines = new Set<number>();
             for (const t of tokens) {
-                if (t.type === TokenType.Procedure || t.type === TokenType.Routine) {
+                if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
                     procDeclLines.add(t.line);
                 }
             }
@@ -224,7 +225,8 @@ export class WordCompletionProvider {
         );
 
         for (const mapToken of mapTokens) {
-            const isLocalMap = mapToken.parent?.type === TokenType.Procedure &&
+            const isLocalMap = mapToken.parent !== undefined &&
+                TokenHelper.isProcedureOrFunction(mapToken.parent) &&
                 (mapToken.parent.subType === TokenType.GlobalProcedure ||
                  mapToken.parent.subType === TokenType.MethodImplementation);
 
@@ -330,7 +332,7 @@ export class WordCompletionProvider {
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
         const firstProcLine = tokens.find(t =>
-            t.type === TokenType.Procedure &&
+            TokenHelper.isProcedureOrFunction(t) &&
             (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)
         )?.line ?? Number.MAX_SAFE_INTEGER;
 

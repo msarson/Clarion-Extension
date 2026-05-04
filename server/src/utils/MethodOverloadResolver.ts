@@ -65,7 +65,7 @@ export class MethodOverloadResolver {
             // Class member methods are tokenized as Procedure/MethodDeclaration with label = method name.
             const children = classToken.children ?? [];
             for (const childToken of children) {
-                if (childToken.type === TokenType.Procedure &&
+                if (TokenHelper.isProcedureOrFunction(childToken) &&
                     childToken.subType === TokenType.MethodDeclaration &&
                     childToken.label?.toLowerCase() === methodName.toLowerCase()) {
 
