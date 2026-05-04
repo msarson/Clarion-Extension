@@ -163,6 +163,30 @@ export class DocumentStructure {
     }
 
     /**
+     * Idempotently add a child to a parent token's children array. Replaces
+     * the legacy
+     *
+     *   parent.children = parent.children || [];
+     *   parent.children.push(child);
+     *
+     * pattern that appeared at ~10 sites in this file. The `.push` is NOT
+     * idempotent across `process()` passes — and `process()` is called more
+     * than once on the same token array in production paths (TokenCache.
+     * incrementalTokenize merging cached + freshly tokenized tokens;
+     * ScopeAnalyzer / MapProcedureResolver / AttributeDiagnostics constructing
+     * their own DocumentStructure on tokens the tokenizer already processed
+     * once). Without a guard, every re-pass appends the same child again,
+     * growing children arrays unboundedly across edits. Filed as task
+     * da2e9721 after the aeb6cea dispatch-gate fix exposed the duplication
+     * path. See `project_documentstructure_idempotency.md` for the broader
+     * idempotency contract.
+     */
+    private addChildOnce(parent: Token, child: Token): void {
+        if (!parent.children) parent.children = [];
+        if (!parent.children.includes(child)) parent.children.push(child);
+    }
+
+    /**
      * 🚀 PERFORMANCE: Build index structures for fast lookups
      */
     private buildIndexes(): void {
@@ -579,8 +603,7 @@ export class DocumentStructure {
                     const parentStructure = this.structureStack[this.structureStack.length - 1];
                     const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
                     if (structureTypes.includes(parentStructure.value.toUpperCase())) {
-                        parentStructure.children = parentStructure.children || [];
-                        parentStructure.children.push(token);
+                        this.addChildOnce(parentStructure, token);
                         token.parent = parentStructure;
                         logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
                     }
@@ -1135,10 +1158,9 @@ export class DocumentStructure {
                     if (structureTypes.includes(parentStructure.value.toUpperCase())) {
                         token.isStructureField = true;
                         token.structureParent = parentStructure;
-                        
+
                         // ✅ Add field as child of the parent structure
-                        parentStructure.children = parentStructure.children || [];
-                        parentStructure.children.push(token);
+                        this.addChildOnce(parentStructure, token);
                         logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
 
                         // Find the label of the parent structure (if any)
@@ -1368,8 +1390,7 @@ export class DocumentStructure {
             if (parentType === 'CLASS' || parentType === 'INTERFACE') {
                 // MODULE inside CLASS/INTERFACE - don't push to stack, just set parent relationship
                 token.parent = parentStructure;
-                parentStructure.children = parentStructure.children || [];
-                parentStructure.children.push(token);
+                this.addChildOnce(parentStructure, token);
                 // Set finishesAt to the parent's finishesAt (will be set when parent closes)
                 // For now, we'll set it in handleEndStatementForStructure
                 logger.info(`📌 MODULE inside ${parentType} at Line ${token.line} - not pushing to stack`);
@@ -1390,8 +1411,7 @@ export class DocumentStructure {
             // Prioritize structure stack (nested structures or MODULE in MAP)
             const parentStructure = this.structureStack[this.structureStack.length - 2];
             token.parent = parentStructure;
-            parentStructure.children = parentStructure.children || [];
-            parentStructure.children.push(token);
+            this.addChildOnce(parentStructure, token);
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
 
             // Mark RECORD tokens whose direct parent is a FILE — lifts the manual
@@ -1406,8 +1426,7 @@ export class DocumentStructure {
             // Fall back to procedure parent only if no structure parent exists
             const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
             token.parent = parentProcedure;
-            parentProcedure.children = parentProcedure.children || [];
-            parentProcedure.children.push(token);
+            this.addChildOnce(parentProcedure, token);
             logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
         }
 
@@ -1577,9 +1596,8 @@ export class DocumentStructure {
                 // This looks like a shorthand procedure declaration
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
-                mapToken.children = mapToken.children || [];
-                mapToken.children.push(token);
-                
+                this.addChildOnce(mapToken, token);
+
                 // Extract the procedure name (everything before the opening parenthesis)
                 const procName = token.value.split("(")[0].trim();
                 
@@ -1602,9 +1620,8 @@ export class DocumentStructure {
                 // This looks like a shorthand procedure declaration with separate tokens
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
-                mapToken.children = mapToken.children || [];
-                mapToken.children.push(token);
-                
+                this.addChildOnce(mapToken, token);
+
                 // Set the token's label to the procedure name
                 token.label = token.value;
                 
@@ -1765,9 +1782,8 @@ export class DocumentStructure {
             }
         
             token.parent = parent;
-            parent.children = parent.children || [];
-            parent.children.push(token);
-        
+            this.addChildOnce(parent, token);
+
             logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
             return;
         }
@@ -1841,8 +1857,7 @@ export class DocumentStructure {
         if (!isMethodImpl && this.structureStack.length > 0) {
             const parent = this.structureStack[this.structureStack.length - 1];
             token.parent = parent;
-            parent.children = parent.children || [];
-            parent.children.push(token);
+            this.addChildOnce(parent, token);
         }
         
         this.procedureStack.push(token);
@@ -1857,8 +1872,7 @@ export class DocumentStructure {
 
         let parentProcedure = this.procedureStack[this.procedureStack.length - 1];
         token.parent = parentProcedure;
-        parentProcedure.children = parentProcedure.children || [];
-        parentProcedure.children.push(token);
+        this.addChildOnce(parentProcedure, token);
 
         token.subType = TokenType.Routine;
         const prevToken = this.tokens[index - 1];

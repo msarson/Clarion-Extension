@@ -253,4 +253,134 @@ Field1           STRING(10)
         // O(1) operation should be < 0.01ms per call
         assert.ok(avgTime < 0.01, `getParent should be O(1) (was ${avgTime.toFixed(4)}ms per call)`);
     });
+
+    // Filed as task da2e9721 after the aeb6cea dispatch-gate fix.
+    // Background: the tokenizer already runs DocumentStructure.process() once
+    // internally. Several caller paths (TokenCache.incrementalTokenize merging
+    // cached + fresh tokens; ScopeAnalyzer / MapProcedureResolver /
+    // AttributeDiagnostics constructing their own DocumentStructure on the
+    // tokens they're given) then call process() a SECOND time on the same
+    // token array. Every place that does `parent.children.push(token)` without
+    // a "is this child already here?" guard appends the same child twice on
+    // the second pass, growing the children arrays unboundedly across edits.
+    //
+    // This pinning suite calls process() twice on the same token array and
+    // asserts no parent has duplicate children. Goes RED on the unguarded
+    // .push pattern, GREEN with the includes() guards.
+    suite('Idempotency: process() can run more than once safely', () => {
+        function collectDuplicates(tokens: Token[]): { parent: Token; dup: Token; count: number }[] {
+            const issues: { parent: Token; dup: Token; count: number }[] = [];
+            for (const t of tokens) {
+                if (!t.children) continue;
+                const seen = new Map<Token, number>();
+                for (const c of t.children) {
+                    seen.set(c, (seen.get(c) ?? 0) + 1);
+                }
+                for (const [c, n] of seen) {
+                    if (n > 1) issues.push({ parent: t, dup: c, count: n });
+                }
+            }
+            return issues;
+        }
+
+        test('GROUP fields — no duplicate children after a second process() pass', () => {
+            const source = `   PROGRAM
+MyGroup    GROUP
+Field1       STRING(10)
+Field2       LONG
+           END
+   CODE
+   RETURN
+`;
+            const tokens = new ClarionTokenizer(source).tokenize();
+            // First pass already done by ClarionTokenizer.tokenize()'s internal
+            // DocumentStructure.process() call. Run a second pass via a fresh
+            // DocumentStructure on the same tokens — this mirrors the cache /
+            // ScopeAnalyzer paths that build their own DS on already-processed
+            // tokens.
+            new DocumentStructure(tokens).process();
+
+            const dups = collectDuplicates(tokens);
+            assert.strictEqual(
+                dups.length, 0,
+                `Found ${dups.length} duplicate children entries after second process(). ` +
+                `Examples: ${dups.slice(0, 3).map(d => `parent='${d.parent.value}'(L${d.parent.line}) duplicates child='${d.dup.value}'(L${d.dup.line}) ${d.count}x`).join('; ')}`
+            );
+        });
+
+        test('MAP procedures — no duplicate children after a second process() pass', () => {
+            const source = `   PROGRAM
+   MAP
+ProcA   PROCEDURE()
+ProcB   PROCEDURE(STRING p1)
+   END
+   CODE
+   RETURN
+`;
+            const tokens = new ClarionTokenizer(source).tokenize();
+            new DocumentStructure(tokens).process();
+
+            const dups = collectDuplicates(tokens);
+            assert.strictEqual(
+                dups.length, 0,
+                `Found ${dups.length} duplicate children entries after second process(). ` +
+                `Examples: ${dups.slice(0, 3).map(d => `parent='${d.parent.value}'(L${d.parent.line}) duplicates child='${d.dup.value}'(L${d.dup.line}) ${d.count}x`).join('; ')}`
+            );
+        });
+
+        test('Multiple inline procedures + MAP + WINDOW — no duplicate children', () => {
+            // Same shape as Mark's #62 SimpleNewSln.clw repro: PROGRAM with
+            // MAP declarations + inline procedure implementations after a
+            // global CODE marker. This is the richest children graph we have.
+            const source =
+                '  PROGRAM\n' +
+                '  MAP\n' +
+                'ProcA   PROCEDURE()\n' +
+                'ProcB   PROCEDURE()\n' +
+                '  END\n' +
+                "win WINDOW('Test'),AT(0,0,200,100)\n" +
+                "  BUTTON('OK'),AT(10,10,50,15),USE(?Ok)\n" +
+                '  END\n' +
+                '  CODE\n' +
+                '  ProcA()\n' +
+                'ProcA   PROCEDURE()\n' +
+                '  CODE\n' +
+                '  RETURN\n' +
+                'ProcB   PROCEDURE()\n' +
+                '  CODE\n' +
+                '  RETURN\n';
+            const tokens = new ClarionTokenizer(source).tokenize();
+            new DocumentStructure(tokens).process();
+
+            const dups = collectDuplicates(tokens);
+            assert.strictEqual(
+                dups.length, 0,
+                `Found ${dups.length} duplicate children entries after second process(). ` +
+                `Examples: ${dups.slice(0, 5).map(d => `parent='${d.parent.value}'(L${d.parent.line}) duplicates child='${d.dup.value}'(L${d.dup.line}) ${d.count}x`).join('; ')}`
+            );
+        });
+
+        test('Three process() passes — duplication does not grow unbounded', () => {
+            // Belt-and-braces: each pass on top of an already-double-processed
+            // token array should still leave the children arrays at their
+            // first-pass shape. If guards are missing, this test produces
+            // 3x duplication instead of 2x.
+            const source = `   PROGRAM
+MyGroup    GROUP
+Field1       STRING(10)
+           END
+   CODE
+   RETURN
+`;
+            const tokens = new ClarionTokenizer(source).tokenize();
+            new DocumentStructure(tokens).process();
+            new DocumentStructure(tokens).process();
+
+            const dups = collectDuplicates(tokens);
+            assert.strictEqual(
+                dups.length, 0,
+                `Found ${dups.length} duplicate children entries after three process() passes.`
+            );
+        });
+    });
 });
