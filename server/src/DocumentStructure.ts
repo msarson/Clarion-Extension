@@ -527,9 +527,19 @@ export class DocumentStructure {
     public process(): void {
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
-    
-            // ✅ Always prioritize structure tokens first
-            if (token.type === TokenType.Keyword || token.type === TokenType.ExecutionMarker) {
+
+            // ✅ Always prioritize structure tokens first.
+            // TokenType.Procedure is included for idempotency: handleProcedureToken
+            // rewrites Keyword → Procedure on the first pass, so when process()
+            // runs a second time on the same token array (e.g. via TokenCache
+            // incrementalTokenize merging cached + freshly tokenized tokens),
+            // PROCEDURE / FUNCTION tokens kept from the prior pass would otherwise
+            // fall through every branch and get skipped. That made the procedureStack
+            // and executionMarker assignments drift across edits — symptom: #62
+            // stale-diagnostic on multi-procedure PROGRAM shapes (Alice, 2026-05-04).
+            if (token.type === TokenType.Keyword ||
+                token.type === TokenType.ExecutionMarker ||
+                token.type === TokenType.Procedure) {
                 const upperValue = token.value.toUpperCase();
                 
                 // Handle PROCEDURE and FUNCTION (both are procedure declarations in modern Clarion)
