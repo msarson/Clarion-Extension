@@ -1,7 +1,10 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
-import { Token, TokenType } from '../../ClarionTokenizer';
+import * as fs from 'fs';
+import * as nodePath from 'path';
+import { ClarionTokenizer, Token, TokenType } from '../../ClarionTokenizer';
 import { ViewDescriptorParser } from '../../tokenizer/ViewDescriptorParser';
+import { TokenCache } from '../../TokenCache';
 
 interface StructureStackItem {
     token: Token;
@@ -397,26 +400,39 @@ export function validateExecuteStructures(tokens: Token[], document: TextDocumen
 
 /**
  * Warns when a `VIEW(File)` structure has a `PROJECT(field)` clause naming a
- * field that doesn't exist on the FROM file's RECORD.
+ * field that doesn't exist on the FROM file's RECORD, and likewise for fields
+ * named in `JOIN(JoinedFile, ...)` clauses.
  *
- * v1: single-document only. When the FROM file is declared in another file
- * (the typical SV AppGen pattern) the validator skips silently — cross-file
- * resolution is a follow-up. Built on the existing `ViewDescriptorParser`
- * (Gap L) and the `isFileRecord` parent-child marker (Gap M).
+ * v2 (task `d4fe847b`): two extensions over the v1 single-document validator.
+ *   1. **Cross-file FROM resolution.** When the FROM file isn't declared in
+ *      the current document, walk the INCLUDE/MEMBER chain — tokens cached
+ *      via `TokenCache.getTokensByUri` first, then disk fallback for files
+ *      that haven't been opened yet. Includes are walked recursively (1 hop)
+ *      to reach FILE declarations in `.inc` files included by the parent.
+ *   2. **JOIN field validation.** `JOIN(JoinedFile, fieldRefs...)` clauses
+ *      now validate every name token after the joined file against the
+ *      joined file's RECORD fields, with the SAME cross-file resolution as
+ *      the FROM lookup. Mirrors the PROJECT shape exactly.
  *
- * Gap L follow-up; closes the validation half of issue #7dedd7c8.
+ * Both extensions degrade gracefully: if the joined/FROM file can't be
+ * resolved (no INCLUDE chain reachable, build hasn't run, etc.) the
+ * validator skips silently — same false-positive-trust contract as v1.
+ *
+ * Built on `ViewDescriptorParser` (Gap L) and the `isFileRecord` parent-child
+ * marker (Gap M). Gap L follow-up; closes the validation half of issue
+ * `7dedd7c8`.
  */
 export function validateViewProjectFields(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
-    // Index in-document FILE structures by their label (uppercase).
-    const filesByName = new Map<string, Token>();
-    for (const t of tokens) {
-        if (t.type === TokenType.Structure && t.value.toUpperCase() === 'FILE' && t.label) {
-            filesByName.set(t.label.toUpperCase(), t);
-        }
-    }
-    if (filesByName.size === 0) return diagnostics;
+    // Look for any VIEW first — bail before doing any cross-file work if the
+    // document has no VIEWs at all (the common case).
+    const hasView = tokens.some(t =>
+        t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW'
+    );
+    if (!hasView) return diagnostics;
+
+    const fileResolver = new FileResolver(tokens, document);
 
     for (const view of tokens) {
         if (view.type !== TokenType.Structure) continue;
@@ -438,43 +454,257 @@ export function validateViewProjectFields(tokens: Token[], document: TextDocumen
             : '';
 
         const desc = ViewDescriptorParser.parse(headerText, bodyText);
-        if (!desc.from || desc.projectedFields.length === 0) continue;
+        if (!desc.from) continue;
 
-        const file = filesByName.get(desc.from.toUpperCase());
-        if (!file) continue; // FROM declared in another file — v2 follow-up
-
-        const record = file.children?.find(c => c.isFileRecord === true);
-        if (!record) continue; // FILE missing RECORD is reported by validateFileStructures
-
-        // Build the set of valid field names — both bare (Id) and prefix-form
-        // (Cus:Id) so PROJECT can address either, matching how the field is
-        // typed at the call site (TokenType.Variable / Label / StructurePrefix).
-        const validFields = new Set<string>();
-        for (const child of record.children ?? []) {
-            if (child.type !== TokenType.Label) continue;
-            validFields.add(child.value.toUpperCase());
-            if (child.structurePrefix) {
-                validFields.add(`${child.structurePrefix.toUpperCase()}:${child.value.toUpperCase()}`);
+        // PROJECT(...) field validation — fields are resolved against the FROM file.
+        if (desc.projectedFields.length > 0) {
+            const fromFile = fileResolver.resolve(desc.from);
+            if (fromFile) {
+                const validFields = collectFieldNames(fromFile.fileToken);
+                if (validFields.size > 0) {
+                    for (const fieldToken of collectProjectFieldTokens(tokens, view)) {
+                        const value = fieldToken.value.toUpperCase();
+                        if (validFields.has(value)) continue;
+                        diagnostics.push({
+                            severity: DiagnosticSeverity.Warning,
+                            range: {
+                                start: { line: fieldToken.line, character: fieldToken.start },
+                                end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
+                            },
+                            message: `'${fieldToken.value}' is not a field on FILE '${fromFile.fileLabel}'.`,
+                            source: 'clarion'
+                        });
+                    }
+                }
             }
         }
-        if (validFields.size === 0) continue;
 
-        for (const fieldToken of collectProjectFieldTokens(tokens, view)) {
-            const value = fieldToken.value.toUpperCase();
-            if (validFields.has(value)) continue;
-            diagnostics.push({
-                severity: DiagnosticSeverity.Warning,
-                range: {
-                    start: { line: fieldToken.line, character: fieldToken.start },
-                    end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
-                },
-                message: `'${fieldToken.value}' is not a field on FILE '${file.label}'.`,
-                source: 'clarion'
-            });
+        // JOIN(File, fieldRefs...) field validation — fields resolved against the
+        // JOINED file. Same shape as PROJECT, using the cross-file resolver for
+        // the joined file.
+        for (const join of collectJoinClauses(tokens, view)) {
+            if (!join.fileToken) continue;
+            const joinedFile = fileResolver.resolve(join.fileToken.value);
+            if (!joinedFile) continue; // joined file not reachable — skip silently
+            const validFields = collectFieldNames(joinedFile.fileToken);
+            if (validFields.size === 0) continue;
+            for (const fieldToken of join.fieldTokens) {
+                const value = fieldToken.value.toUpperCase();
+                if (validFields.has(value)) continue;
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: {
+                        start: { line: fieldToken.line, character: fieldToken.start },
+                        end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
+                    },
+                    message: `'${fieldToken.value}' is not a field on FILE '${joinedFile.fileLabel}'.`,
+                    source: 'clarion'
+                });
+            }
         }
     }
 
     return diagnostics;
+}
+
+/**
+ * Build the set of valid field names on a FILE structure's RECORD child —
+ * both bare (`Id`) and prefix-form (`Cus:Id`) so the call site can address
+ * either. Returns empty set if the FILE has no RECORD or no Label children.
+ */
+function collectFieldNames(fileToken: Token): Set<string> {
+    const validFields = new Set<string>();
+    const record = fileToken.children?.find(c => c.isFileRecord === true);
+    if (!record) return validFields;
+    for (const child of record.children ?? []) {
+        if (child.type !== TokenType.Label) continue;
+        validFields.add(child.value.toUpperCase());
+        if (child.structurePrefix) {
+            validFields.add(`${child.structurePrefix.toUpperCase()}:${child.value.toUpperCase()}`);
+        }
+    }
+    return validFields;
+}
+
+interface ResolvedFile {
+    fileToken: Token;
+    fileLabel: string;
+}
+
+interface JoinClause {
+    fileToken?: Token;        // first arg of JOIN(...) — the joined file name
+    fieldTokens: Token[];     // subsequent name args — fields to validate against the joined file
+}
+
+/**
+ * Resolves Clarion FILE-structure tokens by their label name, with cross-file
+ * fallback. Constructed once per `validateViewProjectFields` call to amortise
+ * INCLUDE chain walking across multiple VIEWs in the same document.
+ *
+ * Lookup order:
+ *   1. FILE structures declared in the current document.
+ *   2. FILE structures in INCLUDE / MEMBER targets (1-hop): for each `INCLUDE`
+ *      / `MEMBER` token in the current document with a `referencedFile` set,
+ *      load the target's tokens (cached or via disk read) and search.
+ *   3. Recursively, INCLUDE chains 1 hop deeper from the included files.
+ *      Bounded depth — keeps this O(includeFanout × tokensPerFile).
+ *
+ * Token loading uses `TokenCache.getDocumentText` first (covers open files
+ * with unsaved edits), then `fs.readFileSync` for unopened files. Failures
+ * are swallowed silently — the validator's contract is "no false positives
+ * if cross-file resolution fails".
+ */
+class FileResolver {
+    private filesByName = new Map<string, ResolvedFile>();
+    private visitedUris = new Set<string>();
+    private currentClwDir: string;
+    private tokenCache = TokenCache.getInstance();
+
+    constructor(currentTokens: Token[], private document: TextDocument) {
+        this.indexFiles(currentTokens);
+        // Resolve the URI to a directory so include filenames can be resolved
+        // relative to the current CLW. Mirrors the same-dir-first approach in
+        // MapDeclarationDiagnostics.ts.
+        const filePath = decodeURIComponent(this.document.uri.replace(/^file:\/\/\//i, ''));
+        this.currentClwDir = nodePath.dirname(filePath.replace(/\//g, nodePath.sep));
+        this.visitedUris.add(this.document.uri);
+        // Walk include chain lazily — only when resolve() is called for a name
+        // that doesn't hit the in-doc index. Prevents unnecessary disk reads
+        // for documents whose VIEW FROM/JOIN files are all locally declared.
+        this.pendingExpansion = currentTokens;
+    }
+
+    private pendingExpansion?: Token[];
+
+    public resolve(name: string): ResolvedFile | undefined {
+        const upper = name.toUpperCase();
+        const local = this.filesByName.get(upper);
+        if (local) return local;
+
+        if (this.pendingExpansion) {
+            // First miss — walk the include chain and try again. If still no
+            // hit, the FILE genuinely isn't reachable from this document.
+            this.expandIncludes(this.pendingExpansion);
+            this.pendingExpansion = undefined;
+        }
+        return this.filesByName.get(upper);
+    }
+
+    private indexFiles(tokens: Token[]): void {
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.value.toUpperCase() === 'FILE' && t.label) {
+                const key = t.label.toUpperCase();
+                if (!this.filesByName.has(key)) {
+                    this.filesByName.set(key, { fileToken: t, fileLabel: t.label });
+                }
+            }
+        }
+    }
+
+    private expandIncludes(tokens: Token[], depth: number = 0): void {
+        if (depth > 1) return; // 1-hop fan-out — depth 0 = current doc, 1 = its includes/members.
+        for (const t of tokens) {
+            const isInclude = t.type === TokenType.Directive && t.value.toUpperCase() === 'INCLUDE';
+            const isMember = t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER';
+            if (!isInclude && !isMember) continue;
+            if (!t.referencedFile) continue;
+            const targetTokens = this.loadTokensForFile(t.referencedFile);
+            if (!targetTokens) continue;
+            this.indexFiles(targetTokens);
+            // 1 hop deeper — INCLUDEs declared inside the included file.
+            this.expandIncludes(targetTokens, depth + 1);
+        }
+    }
+
+    private loadTokensForFile(referencedFile: string): Token[] | undefined {
+        // Same-dir-first lookup matches MapDeclarationDiagnostics.ts; falls back
+        // to absolute path if the referencedFile is itself absolute.
+        const sameDir = nodePath.join(this.currentClwDir, referencedFile);
+        const candidate = fs.existsSync(sameDir)
+            ? sameDir
+            : (nodePath.isAbsolute(referencedFile) && fs.existsSync(referencedFile)
+                ? referencedFile
+                : undefined);
+        if (!candidate) return undefined;
+
+        const uri = 'file:///' + candidate.replace(/\\/g, '/');
+        if (this.visitedUris.has(uri)) return undefined;
+        this.visitedUris.add(uri);
+
+        // Prefer cached tokens if the file is open in another editor pane —
+        // they already reflect unsaved edits. Fall through to disk read.
+        const cachedTokens = this.tokenCache.getTokensByUri(uri);
+        if (cachedTokens) return cachedTokens;
+
+        try {
+            const content = this.tokenCache.getDocumentText(uri) ?? fs.readFileSync(candidate, 'utf8');
+            return new ClarionTokenizer(content).tokenize();
+        } catch {
+            return undefined;
+        }
+    }
+}
+
+/**
+ * Walks the body of a VIEW structure and returns every JOIN clause — the
+ * joined-file name token (first arg) and any field-name tokens after it.
+ * Mirrors the structure of `collectProjectFieldTokens` but separated because
+ * JOIN args have positional meaning (first = file; rest = fields) while
+ * PROJECT args are flat field references.
+ */
+function collectJoinClauses(tokens: Token[], view: Token): JoinClause[] {
+    const result: JoinClause[] = [];
+    if (view.finishesAt === undefined) return result;
+
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.line <= view.line || t.line >= view.finishesAt) continue;
+        // JOIN keyword can appear with an optional INNER/OUTER prefix — the
+        // bare JOIN token is what we look for; the prefix sits on the same
+        // line and isn't tokenized as part of JOIN itself.
+        if (t.value.toUpperCase() !== 'JOIN') continue;
+
+        let j = i + 1;
+        if (j >= tokens.length || tokens[j].value !== '(') continue;
+        j++;
+
+        const clause: JoinClause = { fieldTokens: [] };
+        let depth = 1;
+        let isFirstArg = true;
+        let argStarted = false;
+        while (j < tokens.length && depth > 0) {
+            const inner = tokens[j];
+            if (inner.value === '(') {
+                depth++;
+            } else if (inner.value === ')') {
+                depth--;
+                if (depth === 0) break;
+            } else if (inner.value === ',') {
+                if (isFirstArg) isFirstArg = false;
+                argStarted = false;
+            } else if (inner.type !== TokenType.Comment) {
+                // Skip operators inside an arg (e.g. `Cus:Id = Other:Id` — only
+                // the first name token of the arg is captured for diagnostics).
+                if (argStarted) { j++; continue; }
+                if (
+                    inner.type === TokenType.StructurePrefix ||
+                    inner.type === TokenType.Variable ||
+                    inner.type === TokenType.Label ||
+                    inner.type === TokenType.StructureField
+                ) {
+                    if (isFirstArg) {
+                        clause.fileToken = inner;
+                    } else {
+                        clause.fieldTokens.push(inner);
+                    }
+                    argStarted = true;
+                }
+            }
+            j++;
+        }
+        result.push(clause);
+    }
+    return result;
 }
 
 /**

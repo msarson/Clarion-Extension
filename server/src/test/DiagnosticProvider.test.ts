@@ -2402,6 +2402,243 @@ MyView VIEW(Customer)
         const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
         assert.ok(viewDiags.length >= 1, 'validateDocument should surface VIEW PROJECT diagnostic');
     });
+
+    // d4fe847b — two extensions over v1.
+    suite('JOIN field validation (d4fe847b)', () => {
+        test('JOIN with all fields present on joined file — no warning', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+CusId LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(Orders, Ord:CusId, Ord:Id)
+       END
+`;
+            assert.strictEqual(viewProjectDiags(code).length, 0);
+        });
+
+        test('JOIN with bogus field on joined file — warns on the offending field', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+CusId LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(Orders, Ord:Bogus)
+       END
+`;
+            const diags = viewProjectDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+            assert.ok(diags[0].message.includes("'Orders'"));
+        });
+
+        test('JOIN with unresolved file — skipped silently (no false positive)', () => {
+            // Mirror of the v1 FROM-not-found case. Joined file isn't declared
+            // anywhere reachable, so the validator can't tell whether the
+            // following names are valid fields. Silent skip.
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(SomeOtherFile, BogusField)
+       END
+`;
+            assert.strictEqual(viewProjectDiags(code).length, 0);
+        });
+
+        test('INNER JOIN / OUTER JOIN — same field validation applied', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       INNER JOIN(Orders, Ord:Bogus)
+       END
+`;
+            const diags = viewProjectDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+        });
+
+        test('Multiple JOIN clauses — each validated independently', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+     END
+     END
+
+Items FILE,DRIVER('TopSpeed'),PRE(Itm)
+Record RECORD
+Id    LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(Orders, Ord:Id)
+       JOIN(Items, Itm:Bogus)
+       END
+`;
+            const diags = viewProjectDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Itm:Bogus'"));
+            assert.ok(diags[0].message.includes("'Items'"));
+        });
+    });
+
+    suite('Cross-file FROM resolution (d4fe847b)', () => {
+        // Cross-file resolution depends on the FileResolver finding INCLUDEs
+        // in the current document and walking them. The simplest test path
+        // is to write the include target to a temp file and reference it
+        // via INCLUDE('...'). The tokenizer parses INCLUDE directives and
+        // sets `referencedFile`, which the resolver consumes.
+        const fs = require('fs');
+        const os = require('os');
+        const path = require('path');
+
+        let tempDir: string;
+
+        suiteSetup(() => {
+            tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clarion-d4fe847b-'));
+        });
+
+        suiteTeardown(() => {
+            try {
+                fs.rmSync(tempDir, { recursive: true, force: true });
+            } catch { /* best-effort cleanup */ }
+        });
+
+        function writeIncFile(name: string, content: string): string {
+            const incPath = path.join(tempDir, name);
+            fs.writeFileSync(incPath, content, 'utf8');
+            return incPath;
+        }
+
+        function viewProjectDiagsAtPath(clwBaseName: string, code: string) {
+            const clwPath = path.join(tempDir, clwBaseName);
+            const uri = 'file:///' + clwPath.replace(/\\/g, '/');
+            const doc = TextDocument.create(uri, 'clarion', 1, code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            return validateViewProjectFields(tokens, doc);
+        }
+
+        test('FROM file declared in INCLUDEd .inc — resolves cross-file', () => {
+            writeIncFile('files.inc',
+                `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+Name STRING(40)
+     END
+     END
+`);
+            const code = `  MEMBER('parent.clw')
+  INCLUDE('files.inc')
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id, Cus:Name)
+       END
+`;
+            assert.strictEqual(viewProjectDiagsAtPath('childA.clw', code).length, 0);
+        });
+
+        test('FROM file declared in INCLUDEd .inc — bogus field warns cross-file', () => {
+            writeIncFile('files2.inc',
+                `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+`);
+            const code = `  MEMBER('parent.clw')
+  INCLUDE('files2.inc')
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Bogus)
+       END
+`;
+            const diags = viewProjectDiagsAtPath('childB.clw', code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Cus:Bogus'"));
+        });
+
+        test('JOIN file declared in INCLUDEd .inc — bogus field warns cross-file', () => {
+            writeIncFile('files3.inc',
+                `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+     END
+     END
+`);
+            const code = `  MEMBER('parent.clw')
+  INCLUDE('files3.inc')
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(Orders, Ord:Bogus)
+       END
+`;
+            const diags = viewProjectDiagsAtPath('childC.clw', code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+        });
+
+        test('FROM file unreachable (no INCLUDE) — silent skip preserved', () => {
+            // No INCLUDE directive, no local FILE — should still be the v1
+            // silent-skip path, not a false positive.
+            const code = `  MEMBER('parent.clw')
+
+MyView VIEW(SomeFile)
+       PROJECT(Smt:Id)
+       END
+`;
+            assert.strictEqual(viewProjectDiagsAtPath('childD.clw', code).length, 0);
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3305,8 +3542,75 @@ suite('MapDeclarationDiagnostics — MODULE filename URI resolution (d2fadc09)',
             `Expected full-path URI, got bare or short URI: ${moduleEntry}`
         );
 
+        // Encoding-shape assertion (5b42b29b follow-up): on Windows the cached
+        // URI must use VS Code's canonical form — lowercase drive letter +
+        // percent-encoded colon. This catches the `f:` (uppercase, unencoded)
+        // vs `f%3A` (canonical) divergence that would otherwise leave the
+        // cache with two entries for the same physical file. POSIX systems
+        // skip this check (no drive letter to canonicalise).
+        if (process.platform === 'win32') {
+            assert.ok(
+                /^file:\/\/\/[a-z]%3A\//.test(moduleEntry!),
+                `Cached URI must be in VS Code's canonical form (lowercase drive + %3A): ${moduleEntry}`
+            );
+            assert.ok(
+                !/^file:\/\/\/[A-Z]:\//.test(moduleEntry!),
+                `Cached URI must NOT use uppercase unencoded drive form: ${moduleEntry}`
+            );
+        }
+
         // Cleanup so this test doesn't leak state into later test files
         // sharing the mocha process.
+        for (const u of newEntries) {
+            TokenCache.getInstance().clearTokens(u);
+        }
+    });
+
+    // Open→first-edit window regression test (5b42b29b). Even after the
+    // post-edit dedupe sweep at server.ts:728-739 (commit f347767), URIs
+    // constructed during synchronous validation that runs from onDidOpen
+    // can leave duplicate cache entries until the user makes their first
+    // edit. The fix in 5b42b29b canonicalises URIs at construction time
+    // (no `file:///C:/...` ever lands in the cache to begin with), so the
+    // dedupe sweep is now defence-in-depth rather than load-bearing.
+    test('no duplicate cache entries normalise to the same physical path after validation', async () => {
+        const parentContent = nodeFs.readFileSync(parentClwPath, 'utf8');
+        const driveAndPath = parentClwPath.replace(/\\/g, '/');
+        const colonIdx = driveAndPath.indexOf(':');
+        const encodedDrive = driveAndPath.slice(0, colonIdx).toLowerCase() + '%3A';
+        const parentUri = 'file:///' + encodedDrive + driveAndPath.slice(colonIdx + 1);
+        const parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContent);
+        const parentTokens = new ClarionTokenizer(parentContent).tokenize();
+
+        const cacheBefore = new Set(TokenCache.getInstance().getAllCachedUris());
+
+        await validateMissingImplementations(parentTokens, parentDoc);
+
+        const cacheAfter = TokenCache.getInstance().getAllCachedUris();
+        const newEntries = cacheAfter.filter(u => !cacheBefore.has(u));
+
+        // Group new entries by their normalised physical path. Any group with
+        // more than one URI is a duplicate that wastes cache state.
+        const byNormalisedPath = new Map<string, string[]>();
+        for (const u of newEntries) {
+            const normalised = decodeURIComponent(u.replace(/^file:\/\/\//i, ''))
+                .toLowerCase()
+                .replace(/\\/g, '/');
+            const existing = byNormalisedPath.get(normalised) ?? [];
+            existing.push(u);
+            byNormalisedPath.set(normalised, existing);
+        }
+
+        const duplicates = Array.from(byNormalisedPath.entries())
+            .filter(([, uris]) => uris.length > 1);
+
+        assert.strictEqual(
+            duplicates.length, 0,
+            `Cache contains duplicate entries for the same physical path: ` +
+            `${JSON.stringify(duplicates)}. The 5b42b29b fix should canonicalise ` +
+            `URIs at construction so no two entries normalise to the same path.`
+        );
+
         for (const u of newEntries) {
             TokenCache.getInstance().clearTokens(u);
         }
