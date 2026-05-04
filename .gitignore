@@ -15,8 +15,12 @@ StringTheory.clw
 dev/
 ai/
 
-# PowerShell scripts
+# Claude Code per-machine settings (project shared settings live in .claude/settings.json)
+.claude/settings.local.json
+
+# PowerShell scripts (except project-level Claude Code hooks, which travel with the repo)
 *.ps1
+!.claude/hooks/*.ps1
 
 # ANTLR generated files (exploratory)
 antlr-grammar/.antlr/

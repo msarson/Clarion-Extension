@@ -123,6 +123,10 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **GlobalSolutionHistory saves full settings on all paths**: history entries now always include `propertiesFile`, `version`, and `configuration` regardless of which code path triggered the save, so cross-folder restore has the information it needs.
 - 🐛 **Blank `currentSolution` no longer prevents solution load**: when `clarion.currentSolution` is empty but `clarion.solutions` contains entries (e.g. after closing a solution), the extension now falls back to the first solutions array entry so the solution loads correctly on next activation.
 
+**Infrastructure**
+
+- 🔧 **Multiterminal session-start hook is now portable across clones**: the `.claude/settings.json` project-shared settings file and the `.claude/hooks/session-start.ps1` script are now tracked. Previously the hook script was caught by the broad `*.ps1` ignore rule, and the hook registration only existed in the per-machine `.claude/settings.local.json`, so cloning the repo on another machine left no multiterminal session-start wiring. `.gitignore` now carries an exception (`!.claude/hooks/*.ps1`) so project-level Claude Code hooks travel with the repo, while general dev `.ps1` scripts remain ignored. `.claude/settings.local.json` continues to be gitignored as the per-machine override slot.
+
 ---
 
 ### [0.9.6] - 2026-04-23
