@@ -2784,5 +2784,58 @@ MyVar LONG
 
             cache.clearTokens(uri);
         });
+
+        // Mark's hypothesis (2026-05-04): the prior tests cover line-count-changing
+        // edits (insert / delete). They do NOT cover an in-place line-content
+        // rewrite where the line count stays constant — e.g. uncommenting a
+        // declaration and recommenting it. If incrementalTokenize handles
+        // "lines added/removed" correctly but mishandles "same line, new
+        // content", that fits the time-dependent symptom on SimpleNewSln.clw.
+        //
+        // This variant rewrites the contents of a single filler line at
+        // module scope (not inside the procedure) and rewrites it back, so
+        // step 2 makes MyVar a module-level Label and step 3 reverts it to
+        // a comment. The PROCEDURE token spans lines 80–84 and finishesAt is
+        // unaffected, so expandToDependencies leaves the changed line at
+        // file scope and incrementalTokenize fires for both step 2 and 3.
+        test('TokenCache singleton, large file — in-place line content rewrite', () => {
+            const lineCount = 80;
+            const fillerLine = (i: number) => `! filler line ${i + 1}`;
+            const filler = Array.from({ length: lineCount }, (_, i) => fillerLine(i)).join('\n');
+            const original = `${filler}\nMyProc PROCEDURE()\n  CODE\n  MyVar = 5\n  RETURN\n`;
+
+            const uri = `file:///regression-inplace-doc-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const doc = TextDocument.create(uri, 'clarion', 1, original);
+            const validate = () => validateUndeclaredVariables(cache.getTokens(doc), doc);
+
+            assert.strictEqual(validate().length, 1, 'step 1: undeclared');
+
+            // In-place rewrite of line index 40 (mid-filler): replace its
+            // content with the declaration. Line count stays at 85.
+            const targetLineIdx = 40;
+            const oldLine = fillerLine(targetLineIdx);
+            const newLine = 'MyVar LONG';
+            TextDocument.update(doc, [{
+                range: {
+                    start: { line: targetLineIdx, character: 0 },
+                    end:   { line: targetLineIdx, character: oldLine.length }
+                },
+                text: newLine
+            }], 2);
+            assert.strictEqual(validate().length, 0, 'step 2: declared (in-place rewrite)');
+
+            // In-place rewrite back to the original filler content.
+            TextDocument.update(doc, [{
+                range: {
+                    start: { line: targetLineIdx, character: 0 },
+                    end:   { line: targetLineIdx, character: newLine.length }
+                },
+                text: oldLine
+            }], 3);
+            assert.strictEqual(validate().length, 1, 'step 3: in-place revert → diagnostic returns');
+
+            cache.clearTokens(uri);
+        });
     });
 });
