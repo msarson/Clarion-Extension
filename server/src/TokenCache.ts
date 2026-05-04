@@ -99,15 +99,15 @@ export class TokenCache {
             // 🚀 PERFORMANCE: Check if we can use incremental update
             if (cached && cached.version === document.version) {
                 const cacheTime = performance.now() - perfStart;
-                logger.info(`🟢 [TC] Cache HIT v${document.version} tokens=${cached.tokens.length} uri=${document.uri}`);
+                logger.error(`🟢 [TC] Cache HIT v${document.version} tokens=${cached.tokens.length} uri=${document.uri}`);
                 return cached.tokens;
             }
-            
+
             // 🚀 DEBUG: Log incremental check
             if (cached) {
-                logger.info(`🔴 [TC] Cache MISS v${document.version} cached.v=${cached.version} uri=${document.uri}`);
+                logger.error(`🔴 [TC] Cache MISS v${document.version} cached.v=${cached.version} uri=${document.uri}`);
             } else {
-                logger.info(`🔴 [TC] Cache EMPTY (first tokenize) uri=${document.uri}`);
+                logger.error(`🔴 [TC] Cache EMPTY (first tokenize) uri=${document.uri}`);
             }
             
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
