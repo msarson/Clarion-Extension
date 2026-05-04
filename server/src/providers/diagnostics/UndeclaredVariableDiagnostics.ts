@@ -3,11 +3,11 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import LoggerManager from '../../logger';
 
+// Inherit the default log level (debug in dev, error in release per
+// LoggingConfig). The `[#62]` breadcrumb below uses logger.info so dev users
+// running this extension via F5 can see it in the Clarion Language Server
+// output channel; release users won't see it (no extra noise).
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
-// Default to error so the per-call breadcrumb stays quiet; users diagnosing
-// "isn't firing?" reports can crank the Clarion log level to info to surface
-// the `[#62]` trace below.
-logger.setLevel('error');
 
 /**
  * Issue #62 v1 — opt-in diagnostic for assignments whose LEFT-HAND SIDE is an

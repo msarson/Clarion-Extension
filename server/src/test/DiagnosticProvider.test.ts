@@ -2260,6 +2260,7 @@ End`;
 import { validateViewProjectFields } from '../providers/diagnostics/StructureDiagnostics';
 import { validateUndeclaredVariables } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
 import { serverSettings } from '../serverSettings';
+import { TokenCache } from '../TokenCache';
 
 suite('DiagnosticProvider - VIEW PROJECT field validation (Gap L follow-up)', () => {
 
@@ -2664,5 +2665,76 @@ Loop1 LOOP
 ModVar STRING(10)
 `;
         assert.strictEqual(undeclaredDiags(code).length, 0);
+    });
+
+    // Regression baseline: edit-add then edit-remove should give symmetric
+    // diagnostic behaviour (1 → 0 → 1). Real-world bug report (Mark, 2026-05-04
+    // SimpleNewSln.clw) — diagnostic clears when MyVar LONG is added but
+    // doesn't return when the declaration is removed. Cause not reproduced
+    // in isolation; this suite pins the working baseline so future drift on
+    // the validator + TokenCache pipeline is caught early.
+    suite('Edit cycle regression — declaration add/remove symmetry', () => {
+
+        const undeclared = `MyProc PROCEDURE()
+  CODE
+  MyVar = 5
+  RETURN`;
+        const declared = `MyProc PROCEDURE()
+MyVar LONG
+  CODE
+  MyVar = 5
+  RETURN`;
+
+        test('pure direct calls — fresh tokenizer + validator each step', () => {
+            assert.strictEqual(undeclaredDiags(undeclared).length, 1, 'step 1: undeclared');
+            assert.strictEqual(undeclaredDiags(declared).length, 0,   'step 2: declared');
+            assert.strictEqual(undeclaredDiags(undeclared).length, 1, 'step 3: removed');
+        });
+
+        test('TokenCache singleton with fresh TextDocument per step', () => {
+            // Fresh URI to avoid interference with other suites running in the
+            // same process; TokenCache keys on URI.
+            const uri = `file:///regression-fresh-doc-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const run = (text: string, version: number) => {
+                const doc = TextDocument.create(uri, 'clarion', version, text);
+                const tokens = cache.getTokens(doc);
+                return validateUndeclaredVariables(tokens, doc);
+            };
+            assert.strictEqual(run(undeclared, 1).length, 1, 'step 1: undeclared');
+            assert.strictEqual(run(declared, 2).length, 0,   'step 2: declared');
+            assert.strictEqual(run(undeclared, 3).length, 1, 'step 3: removed');
+            cache.clearTokens(uri);
+        });
+
+        test('TokenCache singleton, same TextDocument mutated via TextDocument.update', () => {
+            // Mimics the LSP flow: VSCode bumps version + applies incremental
+            // edits to a single TextDocument instance. This is the closest
+            // simulation of the real-world repro path that did NOT reproduce
+            // the bug — pinning it as the baseline.
+            const uri = `file:///regression-evolving-doc-${Date.now()}.clw`;
+            const cache = TokenCache.getInstance();
+            const doc = TextDocument.create(uri, 'clarion', 1, undeclared);
+            const validate = () => validateUndeclaredVariables(cache.getTokens(doc), doc);
+
+            assert.strictEqual(validate().length, 1, 'step 1: undeclared');
+
+            // Insert "MyVar LONG\n" between proc declaration (line 0) and CODE
+            // (line 1) — the data-section position.
+            TextDocument.update(doc, [{
+                range: { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } },
+                text: 'MyVar LONG\n'
+            }], 2);
+            assert.strictEqual(validate().length, 0, 'step 2: declared');
+
+            // Remove the declaration line entirely.
+            TextDocument.update(doc, [{
+                range: { start: { line: 1, character: 0 }, end: { line: 2, character: 0 } },
+                text: ''
+            }], 3);
+            assert.strictEqual(validate().length, 1, 'step 3: declaration removed → diagnostic returns');
+
+            cache.clearTokens(uri);
+        });
     });
 });
