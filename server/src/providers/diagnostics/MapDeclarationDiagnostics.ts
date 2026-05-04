@@ -8,6 +8,7 @@ import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
+import { pathToCanonicalUri } from '../../utils/UriUtils';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -148,7 +149,7 @@ export async function validateMissingMapDeclarations(
                 : resolveClwPath(inclToken.referencedFile!);
             if (!incPath) continue;
             try {
-                const incUri = 'file:///' + incPath.replace(/\\/g, '/');
+                const incUri = pathToCanonicalUri(incPath);
                 const incContent = tokenCache.getDocumentText(incUri) ?? fs.readFileSync(incPath, 'utf8');
                 const incDoc = TextDocument.create(incUri, 'clarion', 1, incContent);
                 const incTokens = await tokenCache.getTokens(incDoc);
@@ -375,7 +376,7 @@ export async function validateMissingImplementations(
             if (openText !== null) {
                 // File is open in VS Code — use the live buffer content directly.
                 implFileContent = openText;
-                const implUri = 'file:///' + clwPath.replace(/\\/g, '/');
+                const implUri = pathToCanonicalUri(clwPath);
                 const implDoc = TextDocument.create(implUri, 'clarion', 1, openText);
                 implTokens = tokenCache.getTokens(implDoc);
             } else {
@@ -400,7 +401,7 @@ export async function validateMissingImplementations(
                     }
                 } else {
                     implFileContent = fs.readFileSync(clwPath, 'utf8');
-                    const implDoc = TextDocument.create('file:///' + clwPath.replace(/\\/g, '/'), 'clarion', 1, implFileContent);
+                    const implDoc = TextDocument.create(pathToCanonicalUri(clwPath), 'clarion', 1, implFileContent);
                     implTokens = tokenCache.getTokens(implDoc);
                 }
             }
@@ -443,7 +444,7 @@ export async function validateMissingImplementations(
                     code: 'missing-map-implementation',
                     data: {
                         procName,
-                        clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                        clwFileUri: pathToCanonicalUri(clwPath),
                         declLine: decl.line,
                         currentFileUri: document.uri
                     }
@@ -474,7 +475,7 @@ export async function validateMissingImplementations(
                                 code: 'map-impl-signature-mismatch',
                                 data: {
                                     procName,
-                                    clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                                    clwFileUri: pathToCanonicalUri(clwPath),
                                     implLine: implLine.line,
                                     declLine: decl.line,
                                     currentFileUri: document.uri

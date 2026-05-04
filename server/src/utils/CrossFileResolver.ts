@@ -12,6 +12,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -110,7 +111,7 @@ export class CrossFileResolver {
             logger.info(`Searching for MAP MODULE('${currentFileName}') in ${resolvedPath}`);
 
             // Read parent file — prefer live TokenCache content over stale disk
-            const resolvedUri = 'file:///' + resolvedPath.replace(/\\/g, '/');
+            const resolvedUri = pathToCanonicalUri(resolvedPath);
             const normalizedResolved = resolvedPath.toLowerCase().replace(/\\/g, '/');
             const liveUri = this.tokenCache.getAllCachedUris().find(uri => {
                 const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
@@ -343,7 +344,7 @@ export class CrossFileResolver {
             }
 
             // Read parent file — prefer live TokenCache content over stale disk
-            const resolvedUri2 = 'file:///' + resolvedPath.replace(/\\/g, '/');
+            const resolvedUri2 = pathToCanonicalUri(resolvedPath);
             const normalizedResolved2 = resolvedPath.toLowerCase().replace(/\\/g, '/');
             const liveUri2 = this.tokenCache.getAllCachedUris().find(uri => {
                 const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
@@ -409,7 +410,7 @@ export class CrossFileResolver {
     ): Promise<MapDeclarationResult | null> {
         try {
             const osDiskPath = frgFilePath.replace(/\//g, path.sep);
-            const resolvedUri = 'file:///' + frgFilePath;
+            const resolvedUri = pathToCanonicalUri(osDiskPath);
 
             // Prefer live TokenCache content
             const liveUri = this.tokenCache.getAllCachedUris().find(uri => {

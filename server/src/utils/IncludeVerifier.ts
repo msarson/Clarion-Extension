@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -403,7 +404,7 @@ export class IncludeVerifier {
             const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
             logger.debug(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
             const parentDoc = TextDocument.create(
-                `file:///${resolvedPath.replace(/\\/g, '/')}`,
+                pathToCanonicalUri(resolvedPath),
                 'clarion',
                 1,
                 parentContents

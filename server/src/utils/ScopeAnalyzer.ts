@@ -5,6 +5,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from './TokenHelper';
 import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -354,8 +355,8 @@ export class ScopeAnalyzer {
                 // sourceFile.relativePath is relative to project.path
                 // Need to construct full URI
                 const fullPath = `${project.path}\\${sourceFile.relativePath}`;
-                // Convert to URI format
-                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                // Convert to canonical URI (5b42b29b — keeps cache keys aligned)
+                const uri = pathToCanonicalUri(fullPath);
                 allFiles.push(uri);
             }
         }
@@ -639,7 +640,7 @@ export class ScopeAnalyzer {
             logger.info(`         📖 Read ${content.length} characters from file`);
             
             // Create a TextDocument for tokenization
-            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            const fileUri = pathToCanonicalUri(filePath);
             const document = TextDocument.create(fileUri, 'clarion', 1, content);
             
             // Get tokens from cache (which will tokenize if not already cached)

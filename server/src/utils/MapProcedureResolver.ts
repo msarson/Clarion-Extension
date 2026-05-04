@@ -13,6 +13,7 @@ import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
@@ -760,7 +761,7 @@ export class MapProcedureResolver {
                             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                 logger.info(`✅ Resolved CLW file: ${resolved.path}`);
                                 const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                const clwUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
+                                const clwUri = pathToCanonicalUri(resolved.path);
                                 const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
                                 const tokenCache = TokenCache.getInstance();
                                 const clwTokens = tokenCache.getTokens(clwDocument);
@@ -844,7 +845,7 @@ export class MapProcedureResolver {
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
                                         const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
+                                        const clwUri = pathToCanonicalUri(resolved.path);
                                         const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
                                         const tokenCache = TokenCache.getInstance();
                                         const clwTokens = tokenCache.getTokens(clwDocument);
@@ -879,7 +880,7 @@ export class MapProcedureResolver {
             
             // Fallback: Use full tokenization if fast extraction failed
             logger.info(`⚠️ Fast extraction failed, falling back to full tokenization`);
-            const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+            const fileUri = pathToCanonicalUri(resolvedPath);
             const moduleDocument = TextDocument.create(fileUri, 'clarion', 1, content);
             const tokenCache = TokenCache.getInstance();
             const moduleTokens = tokenCache.getTokens(moduleDocument);
@@ -991,7 +992,7 @@ export class MapProcedureResolver {
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
                                         const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
+                                        const clwUri = pathToCanonicalUri(resolved.path);
                                         const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
                                         const tokenCache = TokenCache.getInstance();
                                         const clwTokens = tokenCache.getTokens(clwDocument);
