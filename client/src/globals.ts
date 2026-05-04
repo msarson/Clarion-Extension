@@ -173,7 +173,7 @@ export const globalSettings = {
     },
 
     get undeclaredVariablesEnabled() {
-        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", false);
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", true);
     },
 
     get configuration() {

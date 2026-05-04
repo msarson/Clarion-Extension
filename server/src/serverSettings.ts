@@ -11,11 +11,12 @@ export const serverSettings = {
     defaultLookupExtensions: [".clw", ".inc", ".equ", ".eq", ".int"] as string[],
 
     /**
-     * Issue #62 — opt-in diagnostic for undeclared LHS-of-assignment identifiers.
+     * Issue #62 — diagnostic for undeclared LHS-of-assignment identifiers.
      * Populated from `clarion.diagnostics.undeclaredVariables.enabled` via the
-     * `clarion/updatePaths` notification. Toggling requires a VS Code reload.
+     * `clarion/updatePaths` notification; defaults to true so the diagnostic
+     * fires out of the box. Toggling requires a VS Code reload.
      */
-    undeclaredVariablesEnabled: false,
+    undeclaredVariablesEnabled: true,
 
     get primaryRedirectionPath(): string {
         return this.redirectionPaths[0] ?? "";

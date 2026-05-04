@@ -33,6 +33,7 @@ suite('DiagnosticProvider - TDD Tests', () => {
         test('Should detect IF without any terminator', () => {
             const code = `TestProc PROCEDURE()
 x LONG
+y LONG
   CODE
   IF x > 0 THEN
     y = 1
@@ -51,6 +52,7 @@ x LONG
         test('Should NOT flag IF with dot terminator', () => {
             const code = `TestProc PROCEDURE()
 x LONG
+y LONG
   CODE
   IF x > 0 THEN
     y = 1
@@ -66,6 +68,7 @@ x LONG
         test('Should NOT flag IF with END terminator', () => {
             const code = `TestProc PROCEDURE()
 x LONG
+y LONG
   CODE
   IF x > 0 THEN
     y = 1
@@ -609,6 +612,7 @@ z LONG
         test('Should handle IF at end of file', () => {
             const code = `TestProc PROCEDURE()
 x LONG
+y LONG
   CODE
   IF x > 0 THEN
     y = 1`;
@@ -2423,24 +2427,7 @@ LocalVar LONG
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
 
-        test('validateDocument respects the serverSettings gate (default off)', () => {
-            const code = `MyProc PROCEDURE()
-  CODE
-  TyposVar = 1
-  RETURN`;
-            const doc = createDocument(code);
-            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
-            try {
-                serverSettings.undeclaredVariablesEnabled = false;
-                const diags = DiagnosticProvider.validateDocument(doc);
-                const undecl = diags.filter(d => d.code === 'undeclared-variable');
-                assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
-            } finally {
-                serverSettings.undeclaredVariablesEnabled = wasEnabled;
-            }
-        });
-
-        test('validateDocument fires the diagnostic when the gate is on', () => {
+        test('validateDocument fires the diagnostic at the default-on gate state', () => {
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
@@ -2453,6 +2440,23 @@ LocalVar LONG
                 const undecl = diags.filter(d => d.code === 'undeclared-variable');
                 assert.strictEqual(undecl.length, 1);
                 assert.ok(undecl[0].message.includes("'TyposVar'"));
+            } finally {
+                serverSettings.undeclaredVariablesEnabled = wasEnabled;
+            }
+        });
+
+        test('explicit gate=false silences the diagnostic', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  TyposVar = 1
+  RETURN`;
+            const doc = createDocument(code);
+            const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            try {
+                serverSettings.undeclaredVariablesEnabled = false;
+                const diags = DiagnosticProvider.validateDocument(doc);
+                const undecl = diags.filter(d => d.code === 'undeclared-variable');
+                assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
             }

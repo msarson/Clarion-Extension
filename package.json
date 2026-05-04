@@ -1268,8 +1268,8 @@
         },
         "clarion.diagnostics.undeclaredVariables.enabled": {
           "type": "boolean",
-          "default": false,
-          "description": "Opt-in. When enabled, raises a Warning on assignments whose left-hand side identifier cannot be resolved to any in-scope declaration (parameter, local, module, global, equate). v1 only checks bare-identifier LHS of assignments — prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked. Toggling requires reloading the VS Code window. Disabled by default until coverage is proven across real codebases (issue #62)."
+          "default": true,
+          "description": "Enabled by default. Raises a Warning on assignments whose left-hand side identifier cannot be resolved to any declaration in the current file. v1 only checks bare-identifier LHS of assignments — prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked. Set to false if false-positives surface in your codebase. Toggling requires reloading the VS Code window (issue #62)."
         }
       }
     }
