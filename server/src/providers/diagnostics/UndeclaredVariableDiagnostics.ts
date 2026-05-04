@@ -3,10 +3,10 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import LoggerManager from '../../logger';
 
-// Inherit the default log level (debug in dev, error in release per
-// LoggingConfig). The `[#62]` breadcrumb below uses logger.info so dev users
-// running this extension via F5 can see it in the Clarion Language Server
-// output channel; release users won't see it (no extra noise).
+// The `[#62]` breadcrumb below uses logger.error so it remains visible at
+// the default release log level (error). Mark needs the trace to land in
+// the Clarion Language Server output channel without manually cranking
+// the log level when reproducing the time-dependent stale-diagnostic bug.
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
 
 /**
@@ -140,7 +140,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         });
     }
 
-    logger.info(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
+    logger.error(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
     return diagnostics;
 }
 
