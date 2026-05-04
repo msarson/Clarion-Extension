@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import { ViewDescriptorParser } from '../../tokenizer/ViewDescriptorParser';
 
 interface StructureStackItem {
     token: Token;
@@ -392,4 +393,128 @@ export function validateExecuteStructures(tokens: Token[], document: TextDocumen
     }
 
     return diagnostics;
+}
+
+/**
+ * Warns when a `VIEW(File)` structure has a `PROJECT(field)` clause naming a
+ * field that doesn't exist on the FROM file's RECORD.
+ *
+ * v1: single-document only. When the FROM file is declared in another file
+ * (the typical SV AppGen pattern) the validator skips silently — cross-file
+ * resolution is a follow-up. Built on the existing `ViewDescriptorParser`
+ * (Gap L) and the `isFileRecord` parent-child marker (Gap M).
+ *
+ * Gap L follow-up; closes the validation half of issue #7dedd7c8.
+ */
+export function validateViewProjectFields(tokens: Token[], document: TextDocument): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+
+    // Index in-document FILE structures by their label (uppercase).
+    const filesByName = new Map<string, Token>();
+    for (const t of tokens) {
+        if (t.type === TokenType.Structure && t.value.toUpperCase() === 'FILE' && t.label) {
+            filesByName.set(t.label.toUpperCase(), t);
+        }
+    }
+    if (filesByName.size === 0) return diagnostics;
+
+    for (const view of tokens) {
+        if (view.type !== TokenType.Structure) continue;
+        if (view.value.toUpperCase() !== 'VIEW') continue;
+        if (view.finishesAt === undefined) continue;
+
+        // Reconstruct header (VIEW opener line) and body (lines strictly between
+        // the opener and END) from the document text — same shape the parser was
+        // designed for in DocumentStructure.populateViewDescriptors.
+        const headerText = document.getText({
+            start: { line: view.line, character: 0 },
+            end: { line: view.line + 1, character: 0 }
+        });
+        const bodyText = view.finishesAt > view.line
+            ? document.getText({
+                start: { line: view.line + 1, character: 0 },
+                end: { line: view.finishesAt, character: 0 }
+            })
+            : '';
+
+        const desc = ViewDescriptorParser.parse(headerText, bodyText);
+        if (!desc.from || desc.projectedFields.length === 0) continue;
+
+        const file = filesByName.get(desc.from.toUpperCase());
+        if (!file) continue; // FROM declared in another file — v2 follow-up
+
+        const record = file.children?.find(c => c.isFileRecord === true);
+        if (!record) continue; // FILE missing RECORD is reported by validateFileStructures
+
+        // Build the set of valid field names — both bare (Id) and prefix-form
+        // (Cus:Id) so PROJECT can address either, matching how the field is
+        // typed at the call site (TokenType.Variable / Label / StructurePrefix).
+        const validFields = new Set<string>();
+        for (const child of record.children ?? []) {
+            if (child.type !== TokenType.Label) continue;
+            validFields.add(child.value.toUpperCase());
+            if (child.structurePrefix) {
+                validFields.add(`${child.structurePrefix.toUpperCase()}:${child.value.toUpperCase()}`);
+            }
+        }
+        if (validFields.size === 0) continue;
+
+        for (const fieldToken of collectProjectFieldTokens(tokens, view)) {
+            const value = fieldToken.value.toUpperCase();
+            if (validFields.has(value)) continue;
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: fieldToken.line, character: fieldToken.start },
+                    end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
+                },
+                message: `'${fieldToken.value}' is not a field on FILE '${file.label}'.`,
+                source: 'clarion'
+            });
+        }
+    }
+
+    return diagnostics;
+}
+
+/**
+ * Walks the body of a VIEW structure and returns every name token that sits
+ * inside a PROJECT(...) argument list. Used by validateViewProjectFields to
+ * place diagnostic ranges on the offending field token (not the PROJECT
+ * keyword) and to ignore non-PROJECT references inside JOIN clauses.
+ */
+function collectProjectFieldTokens(tokens: Token[], view: Token): Token[] {
+    const result: Token[] = [];
+    if (view.finishesAt === undefined) return result;
+
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.line <= view.line || t.line >= view.finishesAt) continue;
+        if (t.value.toUpperCase() !== 'PROJECT') continue;
+
+        let j = i + 1;
+        if (j >= tokens.length || tokens[j].value !== '(') continue;
+        j++;
+        let depth = 1;
+        while (j < tokens.length && depth > 0) {
+            const inner = tokens[j];
+            if (inner.value === '(') {
+                depth++;
+            } else if (inner.value === ')') {
+                depth--;
+                if (depth === 0) break;
+            } else if (inner.value !== ',' && inner.type !== TokenType.Comment) {
+                if (
+                    inner.type === TokenType.StructurePrefix ||
+                    inner.type === TokenType.Variable ||
+                    inner.type === TokenType.Label ||
+                    inner.type === TokenType.StructureField
+                ) {
+                    result.push(inner);
+                }
+            }
+            j++;
+        }
+    }
+    return result;
 }

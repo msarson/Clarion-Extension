@@ -2249,3 +2249,150 @@ End`;
         assert.strictEqual(diags.length, 1, 'CODE as standalone procedure label should still be flagged');
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gap L follow-up — VIEW PROJECT(field) validation against FROM file
+// ─────────────────────────────────────────────────────────────────────────────
+import { validateViewProjectFields } from '../providers/diagnostics/StructureDiagnostics';
+
+suite('DiagnosticProvider - VIEW PROJECT field validation (Gap L follow-up)', () => {
+
+    function viewProjectDiags(code: string) {
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+        return validateViewProjectFields(tokens, doc);
+    }
+
+    test('PROJECT with all fields present on FROM file — no warning', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+Name STRING(40)
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id, Cus:Name)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('PROJECT with one missing field — warns on the offending name only', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+Name STRING(40)
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id, Cus:Bogus)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 1);
+        assert.ok(diags[0].message.includes("'Cus:Bogus'"));
+        assert.ok(diags[0].message.includes("'Customer'"));
+    });
+
+    test('PROJECT with bare (unprefixed) field name matches RECORD field — no warning', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Id)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('case-insensitive name match — no warning', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(CUS:id)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('FROM file declared in another doc — skipped silently (no false positive)', () => {
+        // No FILE structure in this document — simulates the cross-file case.
+        const code = `MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('VIEW with no PROJECT clause — skipped silently', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('JOIN field name is NOT validated as a PROJECT target', () => {
+        // Bogus field appears inside JOIN(...) — only PROJECT clauses are validated.
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(SomeFile, Bogus, Cus:Id)
+       END
+`;
+        assert.strictEqual(viewProjectDiags(code).length, 0);
+    });
+
+    test('multiple missing fields — one warning per offending name', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Bogus1, Cus:Id, Cus:Bogus2)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 2);
+        assert.ok(diags[0].message.includes('Bogus1'));
+        assert.ok(diags[1].message.includes('Bogus2'));
+    });
+
+    test('validateDocument includes the VIEW PROJECT diagnostic', () => {
+        const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Bogus)
+       END
+`;
+        const doc = createDocument(code);
+        const diags = DiagnosticProvider.validateDocument(doc);
+        const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
+        assert.ok(viewDiags.length >= 1, 'validateDocument should surface VIEW PROJECT diagnostic');
+    });
+});

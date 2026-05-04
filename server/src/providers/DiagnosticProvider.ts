@@ -4,7 +4,7 @@ import { ClarionTokenizer, Token } from '../ClarionTokenizer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import LoggerManager from '../logger';
 
-import { validateStructureTerminators, validateConditionalBlocks, validateFileStructures, validateCaseStructures, validateExecuteStructures } from './diagnostics/StructureDiagnostics';
+import { validateStructureTerminators, validateConditionalBlocks, validateFileStructures, validateCaseStructures, validateExecuteStructures, validateViewProjectFields } from './diagnostics/StructureDiagnostics';
 import { validateClassInterfaceImplementation, validateClassProperties } from './diagnostics/ClassDiagnostics';
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
@@ -38,6 +38,7 @@ export class DiagnosticProvider {
             ...validateFileStructures(tokens, document),
             ...validateCaseStructures(tokens, document),
             ...validateExecuteStructures(tokens, document),
+            ...validateViewProjectFields(tokens, document),
             ...validateClassInterfaceImplementation(tokens, document),
             ...validateReturnStatements(tokens, document),
             ...validateClassProperties(tokens, document),
