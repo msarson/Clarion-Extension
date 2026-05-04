@@ -4,10 +4,11 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import LoggerManager from '../../logger';
 
-// The `[#62]` breadcrumb below uses logger.error so it remains visible at
-// the default release log level (error). Mark needs the trace to land in
-// the Clarion Language Server output channel without manually cranking
-// the log level when reproducing the time-dependent stale-diagnostic bug.
+// Inherit the default log level (debug in dev, error in release per
+// LoggingConfig). The `[#62]` breadcrumbs below use logger.info so dev users
+// running this extension via F5 can see them in the Clarion Language Server
+// output channel; release users won't see them (no extra noise). Promote to
+// error level temporarily when chasing a regression on the validator path.
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
 
 /**
@@ -81,7 +82,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         // populating those fields for the file's procedure shape (e.g. the
         // all-in-one PROGRAM layout where inline procedures sit AFTER the
         // PROGRAM's main CODE marker).
-        logger.error(`[#62] early-exit: 0 code ranges in ${tokens.length} tokens — no procedure/function/routine impl with executionMarker+finishesAt — uri=${document.uri}`);
+        logger.info(`[#62] early-exit: 0 code ranges in ${tokens.length} tokens — no procedure/function/routine impl with executionMarker+finishesAt — uri=${document.uri}`);
         return diagnostics;
     }
 
@@ -152,7 +153,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         });
     }
 
-    logger.error(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
+    logger.info(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
     return diagnostics;
 }
 
