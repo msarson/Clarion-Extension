@@ -265,4 +265,52 @@ TestProc PROCEDURE()
             assert.ok(windowLabelTokens.length > 0, 'Should have at least one Label token');
         });
     });
+
+    // Task c0650731 — bare WINDOW keyword (no parens, no comma, no attributes)
+    // must tokenize as Structure, not be skipped (Label + Variable("INDOW") was the bug).
+    suite('c0650731 - bare WINDOW keyword', () => {
+
+        test('bare WINDOW after label tokenizes as Structure (no spurious INDOW)', () => {
+            const code = `BareWin WINDOW\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            // The bug: WINDOW skipped → "INDOW" matched Variable.
+            const indowToken = tokens.find(t => t.value.toUpperCase() === 'INDOW');
+            assert.strictEqual(indowToken, undefined, 'Bare WINDOW must not leave a spurious INDOW token');
+
+            const windowStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(windowStruct, 'Bare WINDOW must tokenize as a Structure token');
+        });
+
+        test('bare WINDOW followed by trailing comment tokenizes as Structure', () => {
+            const code = `BareWin WINDOW  ! main app window\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const indowToken = tokens.find(t => t.value.toUpperCase() === 'INDOW');
+            assert.strictEqual(indowToken, undefined, 'Bare WINDOW + comment must not leave a spurious INDOW token');
+
+            const windowStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(windowStruct, 'Bare WINDOW + comment must tokenize as a Structure token');
+        });
+
+        test('parameterised WINDOW(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyWin WINDOW('Title'),AT(,,200,100)\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const windowStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(windowStruct, 'Parameterised WINDOW must still tokenize as Structure');
+        });
+
+        test('attribute-only WINDOW,AT(...) still tokenizes as Structure (regression guard)', () => {
+            const code = `MyWin WINDOW,AT(,,200,100)\n  BUTTON('OK'),USE(?OK)\nEND`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const windowStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'WINDOW');
+            assert.ok(windowStruct, 'Attribute-only WINDOW must still tokenize as Structure');
+        });
+    });
 });

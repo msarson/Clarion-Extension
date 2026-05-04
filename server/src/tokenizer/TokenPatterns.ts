@@ -35,7 +35,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
     // ✅ VIEW changed to use word boundary instead of requiring leading space
     VIEW: /\bVIEW\b/i,
-    WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
+    WINDOW: /\bWINDOW\b(?=\s*(\(|,|!|$))/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
