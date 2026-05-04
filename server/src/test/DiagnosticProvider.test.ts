@@ -1988,6 +1988,97 @@ MyProc  PROCEDURE()
             const cfDiags = diags.filter(d => d.message.includes('CYCLE') || d.message.includes('BREAK'));
             assert.ok(cfDiags.length >= 1, 'validateDocument should include CYCLE/BREAK diagnostics');
         });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // #65 follow-up: labelled BREAK/CYCLE target validation
+        // ─────────────────────────────────────────────────────────────────────
+
+        test('BREAK Label inside matching labelled LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+Loop1 LOOP
+    BREAK Loop1
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('CYCLE Label inside matching labelled ACCEPT — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+Outer ACCEPT
+    CYCLE Outer
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('case-mismatched label — case-insensitive match — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+Loop1 LOOP
+    BREAK loop1
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK Outer from inside nested Inner labelled LOOP — no warning', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+Outer LOOP
+  Inner LOOP
+      BREAK Outer
+    END
+  END
+`;
+            assert.strictEqual(cycleBreakDiags(code).length, 0);
+        });
+
+        test('BREAK NoSuchLabel inside an unlabelled loop — warns (label not enclosing)', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  LOOP
+    BREAK NoSuchLabel
+  END
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'NoSuchLabel'"));
+            assert.ok(diags[0].message.includes('does not refer to'));
+        });
+
+        test('BREAK Label outside any loop at all — warns (label not enclosing)', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+  BREAK Loop1
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Loop1'"));
+        });
+
+        test('BREAK Inner from outer scope but past inner loop end — warns', () => {
+            const code = `
+MyProc  PROCEDURE()
+  CODE
+Outer LOOP
+  Inner LOOP
+      x = 1
+    END
+    BREAK Inner
+  END
+`;
+            const diags = cycleBreakDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Inner'"));
+        });
     });
 });
 
