@@ -72,7 +72,18 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         if (t.executionMarker === undefined || t.finishesAt === undefined) continue;
         codeRanges.push({ codeStart: t.executionMarker.line, end: t.finishesAt });
     }
-    if (codeRanges.length === 0) return diagnostics;
+    if (codeRanges.length === 0) {
+        // #62 mode-C breadcrumb: validator ran but found no procedure/function
+        // implementations with both executionMarker and finishesAt set. The
+        // declared-name set + diagnostic loop is skipped, so no findings are
+        // produced. If this fires for a file the user thinks SHOULD have
+        // diagnostics, the suspect is `DocumentStructure.process()` not
+        // populating those fields for the file's procedure shape (e.g. the
+        // all-in-one PROGRAM layout where inline procedures sit AFTER the
+        // PROGRAM's main CODE marker).
+        logger.error(`[#62] early-exit: 0 code ranges in ${tokens.length} tokens — no procedure/function/routine impl with executionMarker+finishesAt — uri=${document.uri}`);
+        return diagnostics;
+    }
 
     const isInsideCode = (line: number): boolean =>
         codeRanges.some(r => line > r.codeStart && line <= r.end);
