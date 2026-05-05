@@ -21,20 +21,22 @@ const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
  * should keep the feature off.
  *
  * v1 (commit a8a8e3e): bare-identifier LHS of assignments only.
- * v2 (task 4a2ddc24): expanded to RHS expressions on assignment lines —
- * `MyVar = BogusName + 1` flags `BogusName` too. Multi-line `|` continuation
- * is a follow-up. Conditions (IF/WHILE/CASE) and dotted-access shapes are
- * separate v2 sub-features in adjacent commits.
+ * v2 sub-feature 1 (commit 626480d): RHS expressions on assignment lines.
+ * v2 sub-feature 2 (commit f161c40): IF / WHILE / UNTIL / CASE / OF / OROF /
+ * ELSIF condition expressions.
+ * v2 sub-feature 3 (this commit): dotted-access shapes — `Obj.Field` checks
+ * the leading scope name `Obj` and leaves the member portion alone.
  *
- * Forms intentionally still skipped: prefixed (`Cus:Field`), dotted
- * (`obj.member` — sub-feature 3 will narrow this), indexed (`arr[i]`),
- * field-equate (`?Ctrl`).
+ * Forms still skipped: prefixed (`Cus:Field`), indexed (`arr[i]`),
+ * field-equate (`?Ctrl`), and dotted forms whose leading scope contains any
+ * of those characters (`Cus:Field.method` still skipped — has a colon).
  *
  * Resolution: a name is considered declared when it appears anywhere in this
  * file as a `TokenType.Label`, or as a `TokenType.Variable` outside any CODE
  * section (covering procedure parameters and structure-shape declarations).
  * Built-in Clarion identifiers (SELF, PARENT, RECORDS, ERRORCODE, …) are
- * always treated as declared.
+ * always treated as declared — `SELF.Method` doesn't fire because `SELF` is
+ * built-in.
  *
  * Gate: `serverSettings.undeclaredVariablesEnabled`. Caller short-circuits.
  */
@@ -135,15 +137,14 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
     for (const [line, lineTokens] of tokensByLine) {
         if (!isInsideCode(line)) continue;
 
-        // Assignment check: LHS (v1) + RHS (v2 sub-feature 1) only fire when
-        // the first significant token on the line is a bare Variable.
+        // Assignment check: LHS (v1 + v2 sub-feature 3 dotted) + RHS
+        // (v2 sub-feature 1) fire when the first significant token on the
+        // line resolves to a checkable name shape — bare identifier OR
+        // dotted-access scope.
         const first = firstSignificant(lineTokens, 0);
-        if (first &&
-            first.type === TokenType.Variable &&
-            !containsSpecialChars(first.value) &&
-            !BUILT_IN_IDENTIFIERS.has(first.value.toUpperCase())
-        ) {
-            const firstIdx = lineTokens.indexOf(first);
+        const lhsCandidate = first ? detectCheckableName(first) : null;
+        if (lhsCandidate) {
+            const firstIdx = lineTokens.indexOf(first!);
             const next = firstSignificant(lineTokens, firstIdx + 1);
             let rhsStartIdx = -1;
             if (next && next.value === '=') {
@@ -155,9 +156,9 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
                 }
             }
             if (rhsStartIdx >= 0) {
-                // LHS check (v1): flag the leading bare-identifier when undeclared.
-                if (!declaredNames.has(first.value.toUpperCase())) {
-                    diagnostics.push(makeDiagnostic(first));
+                // LHS check (v1 + dotted v2.3): flag the checkable name when undeclared.
+                if (!declaredNames.has(lhsCandidate.name.toUpperCase())) {
+                    diagnostics.push(makeDiagnostic(first!, lhsCandidate.name, lhsCandidate.length));
                 }
                 // RHS check (v2 sub-feature 1): walk every name token after the
                 // assignment operator. Function calls tokenise as
@@ -200,21 +201,72 @@ function containsSpecialChars(value: string): boolean {
 }
 
 /**
- * Build the diagnostic for an undeclared bare-identifier reference. Centralised
- * so LHS, RHS, condition, and dotted-access checks all surface identical text
- * + range shape — the offending name, ranged on its token.
+ * Build the diagnostic for an undeclared name reference. Centralised so LHS,
+ * RHS, condition, and dotted-access checks all surface identical text + range
+ * shape. For dotted-access shapes the `name` is the leading scope and the
+ * `length` is shorter than the token's full value, so the diagnostic range
+ * covers only the offending scope name (`Obj` in `Obj.Field.Deeper`).
  */
-function makeDiagnostic(token: Token): Diagnostic {
+function makeDiagnostic(token: Token, name: string, length: number): Diagnostic {
     return {
         severity: DiagnosticSeverity.Warning,
         range: {
             start: { line: token.line, character: token.start },
-            end: { line: token.line, character: token.start + token.value.length }
+            end: { line: token.line, character: token.start + length }
         },
-        message: `'${token.value}' is not declared in this file.`,
+        message: `'${name}' is not declared in this file.`,
         source: 'clarion',
         code: 'undeclared-variable'
     };
+}
+
+/**
+ * Decide whether a Variable token is a checkable name reference, returning
+ * the `{ name, length }` to use for the declared-name lookup AND the
+ * diagnostic range. Returns null if the token is not checkable.
+ *
+ * Two shapes are checkable:
+ *   1. Bare identifier (no `:`, `.`, `[`, `]`, `?`). The whole value IS the
+ *      name.
+ *   2. Dotted access (`Obj.Field` / `Obj.Field.Deeper`) where the leading
+ *      scope is a bare identifier and the value contains no other special
+ *      characters. The leading scope is the name; the diagnostic range
+ *      covers only that part.
+ *
+ * Built-in identifiers (SELF, PARENT, …) are non-checkable in either shape —
+ * `SELF.Method` doesn't fire because `SELF` is built-in.
+ */
+interface CheckableName {
+    name: string;
+    length: number;
+}
+function detectCheckableName(token: Token): CheckableName | null {
+    // Bare-identifier shape — `TokenType.Variable` only. Dotted shapes
+    // (`Obj.Field`) tokenise as `TokenType.StructureField` so the dotted
+    // branch below also accepts that type.
+    if (token.type === TokenType.Variable) {
+        if (!containsSpecialChars(token.value)) {
+            if (BUILT_IN_IDENTIFIERS.has(token.value.toUpperCase())) return null;
+            return { name: token.value, length: token.value.length };
+        }
+    }
+
+    // Dotted-access shape — must have at least one `.`, no `:`, no brackets,
+    // no `?`. The leading part before the first `.` must be a bare
+    // identifier (letter/underscore start, then alphanumerics / underscores).
+    // Both `TokenType.Variable` (when the tokenizer happened to keep it as
+    // Variable) and `TokenType.StructureField` (the typical bucket for
+    // `prefix.member` style values) are accepted here. Other token types
+    // (Function, Keyword, etc.) are not — those are not name references.
+    if (token.type !== TokenType.Variable && token.type !== TokenType.StructureField) {
+        return null;
+    }
+    if (/[:\[\]?]/.test(token.value)) return null;
+    const dottedMatch = /^([A-Za-z_][A-Za-z0-9_]*)\./.exec(token.value);
+    if (!dottedMatch) return null;
+    const scope = dottedMatch[1];
+    if (BUILT_IN_IDENTIFIERS.has(scope.toUpperCase())) return null;
+    return { name: scope, length: scope.length };
 }
 
 /**
@@ -250,12 +302,11 @@ function collectUndeclaredInRange(
     for (let i = fromIdx; i < lineTokens.length; i++) {
         const t = lineTokens[i];
         if (t.type === TokenType.Comment) continue;
-        if (t.type !== TokenType.Variable) continue;
-        if (containsSpecialChars(t.value)) continue;
-        if (BUILT_IN_IDENTIFIERS.has(t.value.toUpperCase())) continue;
-        if (declaredNames.has(t.value.toUpperCase())) continue;
+        const candidate = detectCheckableName(t);
+        if (!candidate) continue;
+        if (declaredNames.has(candidate.name.toUpperCase())) continue;
         if (isGluedNumberSuffix(t, document)) continue;
-        diagnostics.push(makeDiagnostic(t));
+        diagnostics.push(makeDiagnostic(t, candidate.name, candidate.length));
     }
     return diagnostics;
 }
@@ -315,34 +366,59 @@ function collectUndeclaredInConditions(
 }
 
 /**
- * Detect Variable tokens that are actually trailing characters of a numeric
- * literal (Clarion hex / binary / octal suffix patterns: `1000h`, `101b`,
- * `17q`, `377o`).
+ * Detect Variable tokens that are part of a larger expression where the
+ * bare-identifier check shouldn't fire. The Clarion tokenizer doesn't always
+ * emit composite expressions as a single token — `arr[1].member`,
+ * `BogusObj.Field.Deeper`, `?MyButton.Hide`, and numeric suffixes like
+ * `1000h` all break apart in subtle ways, leaving small Variable tokens
+ * that misleadingly look like name references. Each of those is handled by
+ * a different surface signal in the source text, but the discriminator is
+ * the SAME: peek at the character immediately to the left of the token's
+ * start (and immediately to the right of its end) and skip the token when
+ * the surrounding character is one of:
  *
- * The tokenizer doesn't recognise these suffixes — for `pAdr = 1000h` it
- * silently drops the `1000` Number token entirely and emits `h` as a
- * `TokenType.Variable` at the position the suffix sits. The token-stream
- * adjacency check therefore can't fire (no Number token to compare against).
+ *   - prev char is a digit  → numeric suffix (`1000h` / `101b` / `17q`).
+ *   - prev char is `.`      → dotted-access member continuation
+ *                              (`Deeper` in `BogusObj.Field.Deeper` after
+ *                              the tokenizer split it).
+ *   - prev char is `:`      → prefix-form field after the colon (defensive
+ *                              cover for tokenizer edge cases).
+ *   - next char is `[`      → indexed-access subject (`arr` in `arr[1]`).
+ *   - next char is `:`      → prefix-form prefix (`Cus` in `Cus:Field`).
  *
- * Workaround: peek at the source text immediately to the left of the
- * Variable token's start column on the same line. If that character is a
- * decimal digit (with no whitespace between), treat the Variable as a
- * glued numeric suffix and skip it. Real identifier references are always
- * separated from preceding numbers by whitespace, an operator, a comma,
- * or a paren.
+ * The validator's contract (matching v1 LHS behaviour) is that none of
+ * these composite forms should fire diagnostics — they're either valid
+ * member / index / field-equate references whose semantics live elsewhere,
+ * or they're Clarion literals the tokenizer doesn't understand.
  *
  * Limitation: this rejects `(1)foo`-style expressions where `foo` is a
  * legitimate identifier glued to a closing `)`. Clarion grammar doesn't
  * emit that shape — function calls and indexing both insert delimiters
  * between the closing paren/bracket and any following identifier.
+ *
+ * Function name kept as `isGluedNumberSuffix` for backward-compat with
+ * existing callers; behaviour is now the broader "is this token glued to
+ * any non-bare-identifier expression shape" check.
  */
 function isGluedNumberSuffix(token: Token, document: TextDocument): boolean {
-    if (token.start <= 0) return false;
-    const lineText = document.getText({
-        start: { line: token.line, character: 0 },
-        end: { line: token.line, character: token.start }
+    const lineEnd = token.start + token.value.length;
+    const before = token.start > 0
+        ? document.getText({
+            start: { line: token.line, character: 0 },
+            end: { line: token.line, character: token.start }
+        })
+        : '';
+    const after = document.getText({
+        start: { line: token.line, character: lineEnd },
+        end: { line: token.line, character: lineEnd + 1 }
     });
-    if (lineText.length === 0) return false;
-    const prevChar = lineText.charAt(lineText.length - 1);
-    return /[0-9]/.test(prevChar);
+    const prevChar = before.length > 0 ? before.charAt(before.length - 1) : '';
+    const nextChar = after.length > 0 ? after.charAt(0) : '';
+
+    if (/[0-9]/.test(prevChar)) return true;
+    if (prevChar === '.') return true;
+    if (prevChar === ':') return true;
+    if (nextChar === '[') return true;
+    if (nextChar === ':') return true;
+    return false;
 }

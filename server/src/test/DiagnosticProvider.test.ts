@@ -2848,12 +2848,17 @@ MyProc PROCEDURE()
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
 
-        test('dotted member access LHS — skipped (has dot)', () => {
+        test('dotted member access LHS — leading scope flagged (sub-feature 3)', () => {
             const code = `MyProc PROCEDURE()
   CODE
   obj.UnknownMember = 1
   RETURN`;
-            assert.strictEqual(undeclaredDiags(code).length, 0);
+            // Sub-feature 3 narrows the dotted-skip rule: the leading
+            // scope (`obj`) is now checked. The trailing member is left
+            // alone — member resolution lives elsewhere.
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'obj'"));
         });
 
         test('indexed array LHS — skipped (has bracket)', () => {
@@ -2930,15 +2935,18 @@ LocalVar LONG
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
 
-        test('RHS dotted member — still skipped (sub-feature 3 will handle)', () => {
+        test('RHS dotted member — leading scope flagged (sub-feature 3)', () => {
             const code = `MyProc PROCEDURE()
 LocalVar LONG
   CODE
   LocalVar = obj.member
   RETURN`;
-            // Dotted forms are deferred to sub-feature 3 which will narrow
-            // the check to the leading scope name. v1 RHS still skips them.
-            assert.strictEqual(undeclaredDiags(code).length, 0);
+            // Sub-feature 3 narrows the dotted-skip rule: the leading
+            // scope (`obj`) is now checked. The trailing member is left
+            // alone — member resolution lives elsewhere.
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'obj'"));
         });
 
         test('RHS built-in identifier — never flagged', () => {
@@ -3147,6 +3155,115 @@ LocalVar LONG
   RETURN`;
             // Prefixed forms are intentionally skipped (consistent with
             // LHS / RHS shape contract).
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
+    // 4a2ddc24 sub-feature 3 — dotted-access shapes (`Obj.Field`).
+    suite('Dotted-access scope validation (4a2ddc24, sub-feature 3)', () => {
+        test('Dotted LHS with undeclared scope — flagged on the leading scope only', () => {
+            const code = `MyProc PROCEDURE()
+  CODE
+  BogusObj.Field = 1
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusObj'"));
+            // Range covers only the leading scope name (chars 2..2+8), not
+            // the full `BogusObj.Field` token.
+            assert.strictEqual(diags[0].range.end.character - diags[0].range.start.character, 'BogusObj'.length);
+        });
+
+        test('Dotted LHS with declared scope — no warning', () => {
+            const code = `MyProc PROCEDURE()
+LocalObj LONG
+  CODE
+  LocalObj.Field = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Dotted RHS with undeclared scope — flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = BogusObj.Field
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusObj'"));
+        });
+
+        test('Dotted in IF condition with undeclared scope — flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF BogusObj.Field > 0 THEN
+    LocalVar = 1
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusObj'"));
+        });
+
+        test('SELF.Method — never flagged (SELF is built-in)', () => {
+            const code = `MyClass.MyMethod PROCEDURE()
+  CODE
+  SELF.SomeProperty = 1
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('PARENT.Method — never flagged (PARENT is built-in)', () => {
+            const code = `MyClass.MyMethod PROCEDURE()
+  CODE
+  PARENT.Init()
+  RETURN`;
+            // PARENT.Init() is a method call. First significant is `PARENT.Init`
+            // (Variable token). Next is `(` not `=`, so assignment-shape gate
+            // fails. No diagnostic — consistent with the v1 procedure-call
+            // skip behaviour.
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Multi-level dotted (Obj.Field.Deeper) — only the leading scope flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = BogusObj.Field.Deeper
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusObj'"));
+            assert.ok(!diags[0].message.includes("'Field'"));
+            assert.ok(!diags[0].message.includes("'Deeper'"));
+        });
+
+        test('Prefixed-then-dotted (Cus:Field.method) — still skipped (has colon)', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = Cus:Field.Method()
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Indexed-then-dotted (arr[i].member) — still skipped (has bracket)', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = arr[1].member
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Field-equate (?Ctrl.member) — still skipped (has question mark)', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LocalVar = ?MyButton.Hide
+  RETURN`;
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
     });
