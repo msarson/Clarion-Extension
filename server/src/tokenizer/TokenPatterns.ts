@@ -76,7 +76,14 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Attribute]: /\b(?:ALONE|AT|AUTO|BINARY|BINDABLE|CENTERED|COM|CREATE|CURSOR|DEFAULT|DERIVED|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|IMPLEMENTS|INS|MASK|MAX|MDI|MODAL|MODULE|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|TYPE|UPR|USE|VBX|VCR|VIRTUAL|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
     [TokenType.Property]: /\b(?:color|width|height|top|left|right|bottom|text|visible|enabled|font|size|style|value|caption)\b/i,
-    [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
+    // Decimal (`1`, `1.5`), hex (`1000h`, `0FFh`), octal (`777o`), binary (`1010b`).
+    // All non-decimal forms require a leading decimal digit per Clarion's lexer
+    // convention — `0FFh` is valid hex, `FFh` falls through to Variable. Without
+    // this, the leading digits of a suffixed literal were silently dropped and
+    // the suffix character emerged as a 1-char Variable glued to the source
+    // position (Alice traced this from a `pAdr = 1000h` repro that surfaced as
+    // a spurious undeclared-variable diagnostic — task 7a98d63f).
+    [TokenType.Number]: /\b(?:[0-9][0-9A-Fa-f]*[hH]|[0-7]+[oO]|[01]+[bB]|[0-9]+(?:\.[0-9]+)?)\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
     [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END|CODE|DATA)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. CODE/DATA are execution markers, never labels.
