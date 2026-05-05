@@ -162,11 +162,18 @@ result LONG
                                      lcl:Preset_NTS  = TRUE
                                      lcl:Empty_Notes = CHOOSE( LEN(CLIP(NTS:Notes)) = 0 )
                                 end`;
-            
+
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
-            
-            assert.strictEqual(diagnostics.length, 0, 'Should have no diagnostics - ELSE can have single-line statement');
+
+            // Filter out undeclared-variable diagnostics — this test pins the
+            // STRUCTURE validator's handling of single-line ELSE statements.
+            // The fixture's bare identifiers (`GlobalResponse`,
+            // `RequestCancelled`) are intentionally skinny and trigger #62
+            // sub-feature 2's condition check; that's expected and orthogonal
+            // to what this test is asserting.
+            const structDiags = diagnostics.filter(d => d.code !== 'undeclared-variable');
+            assert.strictEqual(structDiags.length, 0, 'Should have no structure diagnostics - ELSE can have single-line statement');
         });
     });
 
@@ -2990,17 +2997,174 @@ LocalVar LONG
         });
     });
 
+    // 4a2ddc24 sub-feature 2 — IF / WHILE / UNTIL / CASE / OF / OROF / ELSIF
+    // condition expressions.
+    suite('Condition expression validation (4a2ddc24, sub-feature 2)', () => {
+        test('IF condition with undeclared identifier — flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF BogusVar > 0 THEN
+    LocalVar = 1
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusVar'"));
+        });
+
+        test('IF condition with declared identifier — no warning', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+OtherVar LONG
+  CODE
+  IF OtherVar > 0 THEN
+    LocalVar = 1
+  END
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Single-line IF — condition checked, trailing statement deferred', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF Bogus > 1 THEN LocalVar = 1.
+  RETURN`;
+            // Sub-feature 2 stops scanning at THEN, so the trailing
+            // `LocalVar = 1.` statement isn't reached. Bogus in the
+            // condition IS flagged.
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Bogus'"));
+        });
+
+        test('ELSIF condition flagged the same as IF', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF LocalVar = 1 THEN
+    LocalVar = 2
+  ELSIF BogusElse > 0 THEN
+    LocalVar = 3
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusElse'"));
+        });
+
+        test('WHILE condition (start-of-LOOP) flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LOOP WHILE BogusWhile > 0
+    LocalVar = 1
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusWhile'"));
+        });
+
+        test('UNTIL condition (LOOP terminator) flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  LOOP
+    LocalVar = LocalVar + 1
+  UNTIL BogusUntil > 10
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusUntil'"));
+        });
+
+        test('CASE expression flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  CASE BogusCase
+  OF 1
+    LocalVar = 1
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'BogusCase'"));
+        });
+
+        test('OF / OROF case-match expressions flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  CASE LocalVar
+  OF BogusOf
+    LocalVar = 1
+  OROF BogusOrof
+    LocalVar = 2
+  END
+  RETURN`;
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 2);
+            const names = diags.map(d => d.message).join(' ');
+            assert.ok(names.includes('BogusOf'));
+            assert.ok(names.includes('BogusOrof'));
+        });
+
+        test('CASE with literal OF clauses — no warning', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  CASE LocalVar
+  OF 1
+    LocalVar = 1
+  OF 2
+    LocalVar = 2
+  END
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Condition with built-in identifier — never flagged', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF SELF = NULL THEN
+    LocalVar = 1
+  END
+  RETURN`;
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+
+        test('Condition with prefixed identifier — still skipped', () => {
+            const code = `MyProc PROCEDURE()
+LocalVar LONG
+  CODE
+  IF Cus:Unknown > 0 THEN
+    LocalVar = 1
+  END
+  RETURN`;
+            // Prefixed forms are intentionally skipped (consistent with
+            // LHS / RHS shape contract).
+            assert.strictEqual(undeclaredDiags(code).length, 0);
+        });
+    });
+
     suite('Non-LHS contexts — never flagged', () => {
-        test('IF / THEN expressions on the same line', () => {
+        test('IF / THEN expressions on the same line — condition flagged, trailing stmt deferred', () => {
             const code = `MyProc PROCEDURE()
   CODE
   IF Bogus > 1 THEN x = 1.
   RETURN`;
-            // Bogus is in the RHS / condition — not first non-trivia token;
-            // the line starts with IF, which is a Keyword, not Variable.
-            // (Sub-feature 2 will start flagging IF/WHILE/CASE conditions —
-            // when that ships, this test moves to a "flagged" assertion.)
-            assert.strictEqual(undeclaredDiags(code).length, 0);
+            // Sub-feature 2 (4a2ddc24) added condition checking — Bogus is
+            // now flagged. The trailing single-line statement (`x = 1.`)
+            // remains unchecked: it sits past THEN, which the condition
+            // scanner treats as a stop-token. Trailing-statement coverage
+            // is a separate follow-up if user demand surfaces.
+            const diags = undeclaredDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Bogus'"));
         });
 
         test('BREAK Loop1 — first token is Keyword, not LHS', () => {
