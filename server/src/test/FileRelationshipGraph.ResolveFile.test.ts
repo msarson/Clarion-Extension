@@ -195,20 +195,32 @@ suite('FileRelationshipGraph.resolveFile (5cbb2f27)', () => {
         );
     });
 
-    // --- (5) no-red+sub safety net → line 484 hits projectRoot ---
-    test('no-red+sub safety net — target at projectRoot, source in sub → line 484 fallback hits projectRoot', () => {
+    // --- (5) no-red+sub → parser Tier 2 project-root fallback ---
+    test('no-red+sub — target at projectRoot, source in sub → parser Tier 2 project-root fallback hits projectRoot', () => {
         // Target NOT in sub — only at project root. Source in sub.
-        // Pre-fix: line 484 (project-dir fallback) finds <projDir>/Target.clw.
-        //          line 490 (sibling probe) checks <sub>/Target.clw — misses.
-        // Post-fix (per locked contract): line 484 KEPT as no-red safety net,
-        //          still finds <projDir>/Target.clw.
-        // If Alice accidentally drops line 484, this test goes RED.
+        //
+        // History:
+        //   Pre-3161ea89: FRG.resolveFile's per-project safety net (line 484,
+        //     `path.join(project.path, filename)` after findFile miss) caught this.
+        //     Original 5cbb2f27 contract preserved this safety net under Eve's
+        //     pushback to avoid silent failure for no-red+sub cases.
+        //   Post-3161ea89 (Phase A): parser added an explicit Tier 2 probe
+        //     (`<projectPath>/<filename>`) inside findFile/findFileAsync; the
+        //     no-red+sub case now resolves via parser Tier 2 directly.
+        //   Post-2a2656b1 (Phase B step 2): FRG.resolveFile drops the now-
+        //     redundant per-project safety net since parser Tier 2 covers it.
+        //
+        // The test name + comments anticipate the Phase B step-2 deletion of
+        // the FRG safety-net block. Assertion is unchanged because both the
+        // old FRG safety net and the new parser Tier 2 produce the same
+        // resolved path.
         const { fix } = setupNoRedCase(['Target.clw', path.join('sub', 'Source.clw')]);
         const result = callResolveFile('Target.clw', path.join(fix.subDir, 'Source.clw'));
         assert.strictEqual(
             result,
             path.join(fix.projDir, 'Target.clw'),
-            'expected <projDir>/Target.clw via line 484 safety net (no Tier 1, sibling-probe in <sub> would miss)'
+            'expected <projDir>/Target.clw via parser Tier 2 project-root fallback ' +
+            '(no Tier 1 entries; pathed-vs-bare branching wouldn\'t fire on bare "Target.clw")'
         );
     });
 
