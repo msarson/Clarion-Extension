@@ -1285,6 +1285,7 @@
     "package:release": "npm run compile:release && vsce package --allow-star-activation",
     "watch": "tsc -b -w",
     "test": "npm run test:server",
+    "pretest:server": "rimraf out/server/src/test && tsc -b",
     "test:server": "mocha",
     "test:client": "mocha --config .mocharc-client.json",
     "test:all": "npm run compile:dev && npm run test:server && npm run test:client"
