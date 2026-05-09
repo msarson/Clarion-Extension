@@ -14,7 +14,8 @@ logger.setLevel("error");
 export enum FilePathSource {
   Redirected = "redirected",
   Project = "project",
-  Solution = "solution"
+  Solution = "solution",
+  LibSrc = "libsrc"
 }
 
 /**
@@ -553,12 +554,34 @@ export class RedirectionFileParserServer {
         return result;
       }
     }
-    
+
+    // Tier 3: libsrc fallback (b8b2d748). When RED entries + sibling probe
+    // both miss, walk serverSettings.libsrcPaths in declared order and
+    // return the first existing match. No-op when libsrcPaths is empty.
+    if (serverSettings.libsrcPaths?.length) {
+      for (const libDir of serverSettings.libsrcPaths) {
+        const candidate = path.join(libDir, filename);
+        const normalized = path.normalize(candidate);
+        if (checkedPaths.has(normalized)) continue;
+        checkedPaths.add(normalized);
+        if (fs.existsSync(normalized)) {
+          const result = {
+            path: normalized,
+            source: FilePathSource.LibSrc,
+            entry: undefined
+          };
+          const duration = Date.now() - t0;
+          logger.debug(`[RED][resolve:end] name="${filename}" → ${normalized} (libsrc) durMs=${duration}`);
+          return result;
+        }
+      }
+    }
+
     const duration = Date.now() - t0;
     logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND durMs=${duration}`);
     return null;
   }
-  
+
   // Async version of findFile
   public async findFileAsync(filename: string, sourceFilePath?: string): Promise<ResolvedFilePath | null> {
     // Add instrumentation
@@ -639,7 +662,7 @@ export class RedirectionFileParserServer {
       const sourceDir = path.dirname(sourceFilePath);
       const localCandidate = path.join(sourceDir, filename);
       const normalizedLocal = path.normalize(localCandidate);
-      
+
       if (!checkedPaths.has(normalizedLocal) && await fileExists(normalizedLocal)) {
         result = {
           path: normalizedLocal,
@@ -648,14 +671,36 @@ export class RedirectionFileParserServer {
         };
       }
     }
-    
+
+    // Tier 3: libsrc fallback (b8b2d748). When RED entries + sibling probe
+    // both miss, walk serverSettings.libsrcPaths in declared order and
+    // return the first existing match. Sequential rather than parallel —
+    // declared-order priority matters and the fallback only fires after a
+    // miss, so the cost is bounded.
+    if (!result && serverSettings.libsrcPaths?.length) {
+      for (const libDir of serverSettings.libsrcPaths) {
+        const candidate = path.join(libDir, filename);
+        const normalized = path.normalize(candidate);
+        if (checkedPaths.has(normalized)) continue;
+        checkedPaths.add(normalized);
+        if (await fileExists(normalized)) {
+          result = {
+            path: normalized,
+            source: FilePathSource.LibSrc,
+            entry: undefined
+          };
+          break;
+        }
+      }
+    }
+
     const duration = Date.now() - t0;
     if (result) {
       logger.debug(`[RED][resolve:end] name="${filename}" → ${result.path} durMs=${duration}`);
     } else {
       logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND durMs=${duration}`);
     }
-    
+
     return result;
   }
 
