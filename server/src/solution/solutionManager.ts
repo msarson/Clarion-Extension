@@ -7,7 +7,6 @@ import { Connection } from 'vscode-languageserver';
 import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
-import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -352,7 +351,8 @@ export class SolutionManager {
     public getEquatesTokens(): Token[] | null {
         if (this.equatesTokens !== null) return this.equatesTokens;
 
-        // Try project redirection first
+        // findFile already walks RED + project + libsrc tiers (b8b2d748);
+        // a separate libsrcPaths fallback here would re-probe the same dirs.
         for (const project of this.solution.projects) {
             const redParser = project.getRedirectionParser();
             const result = redParser.findFile('equates.clw');
@@ -361,15 +361,7 @@ export class SolutionManager {
             }
         }
 
-        // Fallback: search libsrcPaths (e.g. C:\Clarion\11.1\LibSrc\win)
-        for (const libPath of serverSettings.libsrcPaths) {
-            const candidate = path.join(libPath, 'equates.clw');
-            if (fs.existsSync(candidate)) {
-                if (this.loadEquatesFrom(candidate)) return this.equatesTokens;
-            }
-        }
-
-        logger.info(`equates.clw not found via redirection or libsrcPaths`);
+        logger.info(`equates.clw not found via redirection`);
         return null;
     }
 
