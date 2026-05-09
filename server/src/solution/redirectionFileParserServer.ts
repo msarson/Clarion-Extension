@@ -503,10 +503,12 @@ export class RedirectionFileParserServer {
               const baseDir = this.projectPath ?? path.dirname(entry.redFile);
               resolvedDir = path.resolve(baseDir, dir);
             } else if (!path.isAbsolute(dir)) {
-              // Other relative paths still resolve against the .red dir
-              // (existing behavior — not pinned by 01d635ef tests).
-              const redFileDir = path.dirname(entry.redFile);
-              resolvedDir = path.resolve(redFileDir, dir);
+              // Other relative paths (e.g. `.\classes`, `.\SharedCode\equates`)
+              // also resolve against the project dir per Clarion 11.1 docs
+              // (cfaa7584 — completes the 01d635ef Layer 1 work). Fall back
+              // to the .red dir only if projectPath is unset.
+              const baseDir = this.projectPath ?? path.dirname(entry.redFile);
+              resolvedDir = path.resolve(baseDir, dir);
             }
 
             const candidate = path.join(resolvedDir, filename);
@@ -619,10 +621,12 @@ export class RedirectionFileParserServer {
               const baseDir = this.projectPath ?? path.dirname(entry.redFile);
               resolvedDir = path.resolve(baseDir, dir);
             } else if (!path.isAbsolute(dir)) {
-              // Other relative paths still resolve against the .red dir
-              // (existing behavior — not pinned by 01d635ef tests).
-              const redFileDir = path.dirname(entry.redFile);
-              resolvedDir = path.resolve(redFileDir, dir);
+              // Other relative paths (e.g. `.\classes`, `.\SharedCode\equates`)
+              // also resolve against the project dir per Clarion 11.1 docs
+              // (cfaa7584 — completes the 01d635ef Layer 1 work). Fall back
+              // to the .red dir only if projectPath is unset.
+              const baseDir = this.projectPath ?? path.dirname(entry.redFile);
+              resolvedDir = path.resolve(baseDir, dir);
             }
 
             const candidate = path.join(resolvedDir, filename);
