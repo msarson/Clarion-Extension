@@ -40,6 +40,11 @@ export class RedirectionFileParserServer {
   private entries: RedirectionEntry[] = [];
   // Track parse sequence for debugging
   private static parseSeq: number = 0;
+  // Project directory passed to parseRedFile / parseRedFileAsync. Used as the
+  // anchor for `.`/`..` resolution and the synthetic `*.*` catch-all per
+  // Clarion 11.1 docs (redirection_file.htm) — the .red file's own dir is
+  // wrong for global-fallback reds (01d635ef).
+  private projectPath: string | undefined;
 
   constructor() {
     this.macros = serverSettings.macros;
@@ -80,6 +85,7 @@ export class RedirectionFileParserServer {
   }
 
   public parseRedFile(projectPath: string): RedirectionEntry[] {
+    this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
       return [];
@@ -136,6 +142,7 @@ export class RedirectionFileParserServer {
 
   // Async version of parseRedFile for better performance
   public async parseRedFileAsync(projectPath: string): Promise<RedirectionEntry[]> {
+    this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
       return [];
@@ -227,9 +234,11 @@ export class RedirectionFileParserServer {
       const includeEntries: RedirectionEntry[] = [];
 
       if (isFirst) {
-        // Store the actual directory path, not just "."
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: [redPath] });
-        logger.info(`Added default *.* = '${redPath}' entry for ${redFileToParse}`);
+        // Synthetic catch-all: store '.' (resolved against project dir at
+        // lookup time) rather than the .red dir, so global-fallback reds
+        // don't anchor lookups in %ClarionRoot%\bin (01d635ef).
+        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
+        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
       }
 
       // Use a more efficient approach to process the file
@@ -342,9 +351,11 @@ export class RedirectionFileParserServer {
       const includeEntries: RedirectionEntry[] = [];
 
       if (isFirst) {
-        // Store the actual directory path, not just "."
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: [redPath] });
-        logger.info(`Added default *.* = '${redPath}' entry for ${redFileToParse}`);
+        // Synthetic catch-all: store '.' (resolved against project dir at
+        // lookup time) rather than the .red dir, so global-fallback reds
+        // don't anchor lookups in %ClarionRoot%\bin (01d635ef).
+        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
+        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
       }
 
       // Process the file line by line
@@ -482,28 +493,31 @@ export class RedirectionFileParserServer {
       for (const entry of this.entries) {
         if (this.matchesMask(entry.extension, filename)) {
           for (const dir of entry.paths) {
-            // Resolve relative paths ('.' or '..') relative to the RED file location
+            // Resolve relative paths against the project dir per Clarion 11.1
+            // docs (01d635ef). The .red file's own dir is wrong for the
+            // global-fallback case (e.g. %ClarionRoot%\bin\Clarion110.red).
+            // Fall back to the .red dir only if no project dir was supplied.
             let resolvedDir = dir;
             if (dir === '.' || dir === '..') {
-              // '.' and '..' are relative to the RED file location
-              const redFileDir = path.dirname(entry.redFile);
-              resolvedDir = path.resolve(redFileDir, dir);
+              const baseDir = this.projectPath ?? path.dirname(entry.redFile);
+              resolvedDir = path.resolve(baseDir, dir);
             } else if (!path.isAbsolute(dir)) {
-              // Other relative paths are also resolved relative to RED file
+              // Other relative paths still resolve against the .red dir
+              // (existing behavior — not pinned by 01d635ef tests).
               const redFileDir = path.dirname(entry.redFile);
               resolvedDir = path.resolve(redFileDir, dir);
             }
-            
+
             const candidate = path.join(resolvedDir, filename);
             const normalizedCandidate = path.normalize(candidate);
-            
+
             // Skip if we've already checked this path
             if (checkedPaths.has(normalizedCandidate)) {
               continue;
             }
-            
+
             checkedPaths.add(normalizedCandidate);
-            
+
             if (fs.existsSync(normalizedCandidate)) {
               const result = {
                 path: normalizedCandidate,
@@ -573,28 +587,31 @@ export class RedirectionFileParserServer {
       for (const entry of this.entries) {
         if (this.matchesMask(entry.extension, filename)) {
           for (const dir of entry.paths) {
-            // Resolve relative paths ('.' or '..') relative to the RED file location
+            // Resolve relative paths against the project dir per Clarion 11.1
+            // docs (01d635ef). The .red file's own dir is wrong for the
+            // global-fallback case (e.g. %ClarionRoot%\bin\Clarion110.red).
+            // Fall back to the .red dir only if no project dir was supplied.
             let resolvedDir = dir;
             if (dir === '.' || dir === '..') {
-              // '.' and '..' are relative to the RED file location
-              const redFileDir = path.dirname(entry.redFile);
-              resolvedDir = path.resolve(redFileDir, dir);
+              const baseDir = this.projectPath ?? path.dirname(entry.redFile);
+              resolvedDir = path.resolve(baseDir, dir);
             } else if (!path.isAbsolute(dir)) {
-              // Other relative paths are also resolved relative to RED file
+              // Other relative paths still resolve against the .red dir
+              // (existing behavior — not pinned by 01d635ef tests).
               const redFileDir = path.dirname(entry.redFile);
               resolvedDir = path.resolve(redFileDir, dir);
             }
-            
+
             const candidate = path.join(resolvedDir, filename);
             const normalizedCandidate = path.normalize(candidate);
-            
+
             // Skip if we've already checked this path
             if (checkedPaths.has(normalizedCandidate)) {
               continue;
             }
-            
+
             checkedPaths.add(normalizedCandidate);
-            
+
             // Create a promise to check this path
             const checkPromise = fileExists(normalizedCandidate).then(exists => {
               if (exists) {
