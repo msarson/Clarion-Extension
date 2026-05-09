@@ -194,7 +194,12 @@ suite("RedirectionParser — Tier 2 project-root fallback when no entry mask mat
             "got " + (result && result.path) +
             " — Tier 2 project-root fallback should resolve unmasked extensions against the project dir, not the .red file's dir"
         );
-        assert.strictEqual(result!.source, FilePathSource.Redirected);
+        // Tier 2 (project-root probe added under 3161ea89) emits Project, NOT
+        // Redirected. Project semantics align with "found at project root";
+        // Redirected is reserved for entries-walk hits. The pre-3161ea89 use
+        // of Project (sourceFilePath sibling probe) was deleted under the
+        // same task — the value name is freed up to mean "project-root".
+        assert.strictEqual(result!.source, FilePathSource.Project);
     });
 
     test("findFileAsync — Tier 2 project-root fallback resolves to project dir when no entry mask matches", async () => {
@@ -211,6 +216,7 @@ suite("RedirectionParser — Tier 2 project-root fallback when no entry mask mat
             "got " + (result && result.path) +
             " — Tier 2 project-root fallback should resolve unmasked extensions against the project dir, not the .red file's dir"
         );
-        assert.strictEqual(result!.source, FilePathSource.Redirected);
+        // See sync sibling for source-value rationale (3161ea89).
+        assert.strictEqual(result!.source, FilePathSource.Project);
     });
 });
