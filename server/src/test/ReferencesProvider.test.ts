@@ -293,23 +293,24 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
 
     // ─── procedure implementation finding ───────────────────────────────────
 
-    test('Find All References includes procedure implementations (ClassName.Method PROCEDURE)', async () => {
-        // Searching for AddRelation should find:
-        //   line 1  — declaration in CLASS body
-        //   line 5  — first overload implementation  (AddRelation(RM))
-        //   line 9  — second overload implementation (AddRelation(RM,UpdateMode,...))
-        //   line 12 — SELF.AddRelation call site
+    test('Find All References on overload-1 decl returns matching impl only — fe254d6f overload distinction', async () => {
+        // Post-fe254d6f: FAR cursor on the BYTE-X overload decl returns ONLY:
+        //   line 1  — BYTE X declaration in CLASS body (cursor)
+        //   line 5  — BYTE X implementation (matching signature)
+        // The (BYTE X, BYTE Y) overload's decl + impl are filtered via signaturesMatch.
+        // (Pre-fe254d6f this test asserted ALL overloads were aggregated — that was the
+        //  over-match bug Mark reported for stringtheory.inc:415.)
         const code = [
             'MyClass CLASS,TYPE',                          // line 0
-            'AddRelation  PROCEDURE(BYTE X),PROTECTED',   // line 1  — declaration
+            'AddRelation  PROCEDURE(BYTE X),PROTECTED',   // line 1  — declaration (cursor)
             '             PROCEDURE(BYTE X,BYTE Y)',      // line 2  — second overload declaration
             '             END',                           // line 3
             '',                                           // line 4
-            'MyClass.AddRelation PROCEDURE(BYTE X)',      // line 5  — impl 1
+            'MyClass.AddRelation PROCEDURE(BYTE X)',      // line 5  — impl 1 (matching)
             '  CODE',                                     // line 6
             '  RETURN',                                   // line 7
             '',                                           // line 8
-            'MyClass.AddRelation PROCEDURE(BYTE X,BYTE Y)', // line 9  — impl 2 (overload)
+            'MyClass.AddRelation PROCEDURE(BYTE X,BYTE Y)', // line 9  — impl 2 (wrong overload — filtered)
             '  CODE',                                     // line 10
             '  RETURN',                                   // line 11
         ].join('\n');
@@ -323,9 +324,10 @@ suite('ReferencesProvider – member access (SELF.Member)', () => {
 
         assert.ok(refs !== null, 'Should find references to AddRelation');
         const refLines = refs!.map(r => r.range.start.line);
-        assert.ok(refLines.includes(1), 'Should find CLASS declaration (line 1)');
-        assert.ok(refLines.includes(5), 'Should find first implementation (line 5)');
-        assert.ok(refLines.includes(9), 'Should find second overload implementation (line 9)');
+        assert.ok(refLines.includes(1), 'Should find BYTE-X declaration (line 1)');
+        assert.ok(refLines.includes(5), 'Should find BYTE-X implementation (line 5)');
+        assert.ok(!refLines.includes(2), 'Should NOT find wrong-overload BYTE-X-BYTE-Y declaration (line 2) post-fe254d6f');
+        assert.ok(!refLines.includes(9), 'Should NOT find wrong-overload BYTE-X-BYTE-Y implementation (line 9) post-fe254d6f');
     });
 });
 

@@ -12,6 +12,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -22,7 +23,17 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
 
-type OverloadFilter = { minArgs: number; maxArgs: number; declarationLine: number; declarationFileNorm: string };
+type OverloadFilter = {
+    minArgs: number;
+    maxArgs: number;
+    declarationLine: number;
+    declarationFileNorm: string;
+    /** Cursor's declaration signature (line text). Plain-symbol path uses this
+     *  with `MethodOverloadResolver.signaturesMatch` for type-aware decl-on-decl
+     *  filtering (fe254d6f). Optional — dot-access path doesn't populate it; its
+     *  filter remains arity-only via minArgs/maxArgs. */
+    declSignature?: string;
+};
 
 /**
  * Provides "Find All References" for Clarion symbols.
@@ -38,6 +49,7 @@ export class ReferencesProvider {
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private memberResolver: ClassMemberResolver;
+    private overloadResolver: MethodOverloadResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -45,6 +57,7 @@ export class ReferencesProvider {
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
         this.memberResolver = new ClassMemberResolver();
+        this.overloadResolver = new MethodOverloadResolver();
     }
 
     /**
@@ -247,6 +260,12 @@ export class ReferencesProvider {
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
 
+        // Build OverloadFilter for procedure / method declarations to distinguish
+        // overloads (fe254d6f). When the cursor is on an overloaded procedure decl,
+        // sibling decls + impls with non-matching signatures are filtered from the
+        // result. Type-aware via `MethodOverloadResolver.signaturesMatch` (5f7478dc).
+        const overloadFilter = this.buildPlainSymbolOverloadFilter(symbolInfo, document);
+
         logger.error(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
 
         // When the declaration is in a MEMBER file, also walk MAP INCLUDE files to find
@@ -287,7 +306,7 @@ export class ReferencesProvider {
                 t.subType === TokenType.Class
             );
         for (const fileUri of filesToSearch) {
-            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl);
+            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
 
@@ -726,21 +745,50 @@ export class ReferencesProvider {
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
-        // Build overload filter: use the matched declaration to determine which arg-count range to accept
+        // Build overload filter: capture both arity range AND cursor decl signature.
+        // - arity range: used by call-site filters (existing behavior pre-fe254d6f).
+        // - declSignature: used for type-aware decl-on-decl filtering via
+        //   `MethodOverloadResolver.signaturesMatch` (fe254d6f Phase A B-extension).
+        //
+        // Resolution order:
+        //   1. Use resolved declarationFile + declarationLine when available (existing path).
+        //   2. Fallback: when class-body cursor route is taken and declarationFile didn't
+        //      resolve (findClassMemberInfo failed), use the cursor's own document + position
+        //      line — the cursor IS on the decl in the class-body route.
         let overloadFilter: OverloadFilter | undefined;
+        let filterDeclFile: string | null = null;
+        let filterDeclLine: number = -1;
         if (declarationFile && declarationLine >= 0) {
-            const declLineText = ClassMemberResolver.getDeclarationLineText(declarationFile, declarationLine);
-            if (declLineText && /PROCEDURE/i.test(declLineText)) {
+            filterDeclFile = declarationFile;
+            filterDeclLine = declarationLine;
+        } else if (knownClassName) {
+            // Class-body / MethodImpl-of-local-class fallback — cursor IS the decl.
+            filterDeclFile = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            filterDeclLine = position.line;
+        }
+        if (filterDeclFile && filterDeclLine >= 0) {
+            // Try in-memory document text first if cursor file matches; fall back to disk.
+            let declLineText: string | null = null;
+            const declFileNorm = filterDeclFile.replace(/\\/g, '/').toLowerCase();
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''));
+            if (docFsPath.replace(/\\/g, '/').toLowerCase() === declFileNorm) {
+                declLineText = document.getText().split(/\r?\n/)[filterDeclLine] ?? null;
+            }
+            if (!declLineText) {
+                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFile, filterDeclLine);
+            }
+            if (declLineText && /\bPROCEDURE\b/i.test(declLineText)) {
                 const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
                 const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
                 const minArgs = maxArgs - defaultCount;
                 overloadFilter = {
                     minArgs,
                     maxArgs,
-                    declarationLine,
-                    declarationFileNorm: declarationFile.toLowerCase()
+                    declarationLine: filterDeclLine,
+                    declarationFileNorm: filterDeclFile.toLowerCase(),
+                    declSignature: declLineText.trim()
                 };
-                logger.info(`🎯 Overload filter: args ${minArgs}–${maxArgs} (decl at line ${declarationLine} in ${declarationFile.split('/').pop()})`);
+                logger.info(`🎯 Overload filter: args ${minArgs}–${maxArgs}, sig="${overloadFilter.declSignature}" (decl at line ${filterDeclLine})`);
             }
         }
 
@@ -768,7 +816,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document);
             locations.push(...hits);
         }
 
@@ -1163,7 +1211,8 @@ export class ReferencesProvider {
         classFamily?: Set<string>,
         chainPrefix?: string,
         overloadFilter?: OverloadFilter,
-        includeDeclaration: boolean = true
+        includeDeclaration: boolean = true,
+        currentDocument?: TextDocument
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
@@ -1200,13 +1249,20 @@ export class ReferencesProvider {
             return classFamily ? classFamily.has(scope.classLower) : scope.classLower === classLower;
         };
 
-        // Read file lines once for overload-filtered MethodImplementation param checking
+        // Read file lines once for overload-filtered MethodImplementation param checking.
+        // Use in-memory document text when fileUri matches currentDocument; otherwise
+        // fall back to disk read (fe254d6f Phase A B-extension — necessary for in-memory
+        // test fixtures + matches the plain-symbol path's findReferencesInFile pattern).
         let fileLines: string[] | null = null;
         if (overloadFilter) {
-            try {
-                const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
-            } catch { fileLines = null; }
+            if (currentDocument && currentDocument.uri === fileUri) {
+                fileLines = currentDocument.getText().split(/\r?\n/);
+            } else {
+                try {
+                    const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                    fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                } catch { fileLines = null; }
+            }
         }
         const fileUriNorm = fileUri.toLowerCase();
 
@@ -1397,7 +1453,18 @@ export class ReferencesProvider {
                 if (enclosingStruct && enclosingStruct.subType === TokenType.Class) {
                     // When className is known, verify the label of the CLASS matches
                     if (!classLower || (enclosingStruct.label ?? '').toLowerCase() === classLower) {
-                        if (isMatchedDeclaration(token.line, fileUriNorm)) {
+                        // Type-aware overload distinction (fe254d6f Phase A B-extension):
+                        // when the cursor's decl signature is known, only include this
+                        // candidate decl when its signature matches via signaturesMatch.
+                        // Falls back to line/file equality (existing isMatchedDeclaration
+                        // semantics) when no signature is captured.
+                        let isSigMatch = isMatchedDeclaration(token.line, fileUriNorm);
+                        if (overloadFilter?.declSignature && fileLines) {
+                            const candidateSig = fileLines[token.line]?.trim() ?? '';
+                            isSigMatch = candidateSig.length > 0 &&
+                                this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig);
+                        }
+                        if (isSigMatch) {
                             locations.push(Location.create(fileUri,
                                 Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                         }
@@ -1408,8 +1475,9 @@ export class ReferencesProvider {
             // Procedure implementation: "ClassName.MethodName PROCEDURE" at col 0
             // The PROCEDURE token has subType=MethodImplementation and label="ClassName.MethodName".
             // The method name itself is the Variable token immediately before PROCEDURE on the same line.
-            // All overloads of the same method name are included (overload resolution at
-            // call sites requires full type inference, so we aggregate them).
+            // Post-fe254d6f: only the matching-signature impl is included when overloadFilter
+            // carries declSignature; falls back to arity-only filtering otherwise. Pre-fe254d6f
+            // aggregated all overloads — that was the bug Mark reported for stringtheory.inc:415.
             if (token.subType === TokenType.MethodImplementation && token.label) {
                 if (!includeDeclaration) continue; // skip implementation headers when not wanted
                 const dotIdx = token.label.indexOf('.');
@@ -1418,12 +1486,24 @@ export class ReferencesProvider {
                     const implMethod = token.label.substring(dotIdx + 1).toLowerCase();
                     const inFamily = classFamily ? classFamily.has(implClass) : implClass === classLower;
                     if (implMethod === memberLower && (!classLower || inFamily)) {
-                        // Filter by overload: count params in this implementation's signature
+                        // Filter by overload (fe254d6f Phase A B-extension): when the
+                        // cursor's decl signature is known, prefer type-aware
+                        // signaturesMatch; fall back to arity range when only minArgs/
+                        // maxArgs are populated (e.g. dot-access path's pre-fe254d6f
+                        // arity-only filter for non-procedure callers).
                         if (overloadFilter && fileLines) {
                             const implLineText = fileLines[token.line] ?? '';
-                            const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
-                            if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
-                                continue; // wrong overload
+                            if (overloadFilter.declSignature) {
+                                const candidateSig = implLineText.trim();
+                                if (!candidateSig ||
+                                    !this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig)) {
+                                    continue; // wrong overload (type-aware check)
+                                }
+                            } else {
+                                const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
+                                if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
+                                    continue; // wrong overload (arity-only check)
+                                }
                             }
                         }
                         // The method-name token is the Variable immediately before PROCEDURE on the same line
@@ -1443,6 +1523,45 @@ export class ReferencesProvider {
     }
 
     // ─── Plain symbol helpers ─────────────────────────────────────────────────
+
+    /**
+     * Build an OverloadFilter for the plain-symbol path when the symbol is a
+     * procedure/method/global procedure declaration. Captures the cursor's
+     * declaration signature so `findReferencesInFile` can use
+     * `MethodOverloadResolver.signaturesMatch` (5f7478dc) for type-aware
+     * decl-on-decl filtering — siblings of the same name with different
+     * signatures are filtered out (fe254d6f).
+     *
+     * Returns undefined when the declaration line text doesn't match the
+     * PROCEDURE shape (no overload distinction needed for non-procedure symbols).
+     */
+    private buildPlainSymbolOverloadFilter(symbolInfo: SymbolInfo, document?: TextDocument): OverloadFilter | undefined {
+        // Read the declaration line from the in-memory TextDocument when possible
+        // (declaration is in the same file as the cursor); fall back to disk read.
+        let declLineText: string | null = null;
+        if (document && document.uri === symbolInfo.location.uri) {
+            const docLines = document.getText().split(/\r?\n/);
+            declLineText = docLines[symbolInfo.location.line] ?? null;
+        }
+        if (!declLineText) {
+            const declFile = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            declLineText = ClassMemberResolver.getDeclarationLineText(declFile, symbolInfo.location.line);
+        }
+        if (!declLineText || !/\bPROCEDURE\b/i.test(declLineText)) return undefined;
+
+        const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+        const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
+        const minArgs = maxArgs - defaultCount;
+        const filter: OverloadFilter = {
+            minArgs,
+            maxArgs,
+            declarationLine: symbolInfo.location.line,
+            declarationFileNorm: symbolInfo.location.uri.toLowerCase(),
+            declSignature: declLineText.trim()
+        };
+        logger.error(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, sig="${filter.declSignature}"`);
+        return filter;
+    }
 
     /**
      * Determine the set of file URIs to scan based on the symbol's scope.
@@ -1593,7 +1712,9 @@ export class ReferencesProvider {
         symbolInfo: SymbolInfo,
         includeDeclaration: boolean,
         fieldPrefixes?: Set<string>,
-        ignoreLineScope?: boolean
+        ignoreLineScope?: boolean,
+        overloadFilter?: OverloadFilter,
+        currentDocument?: TextDocument
     ): Location[] {
         const locations: Location[] = [];
         const searchWordLower = searchWord.toLowerCase();
@@ -1601,6 +1722,46 @@ export class ReferencesProvider {
         try {
             const tokens = this.getTokensForUri(fileUri);
             if (!tokens || tokens.length === 0) return locations;
+
+            // For overload distinction (fe254d6f): pre-build the set of lines
+            // that are procedure declarations / implementations + lazily-loaded
+            // file-line text for signature lookup. Used to classify each match
+            // as "decl/impl line" (filter via signaturesMatch) vs "call site"
+            // (no per-match filter — call-site type-aware filtering is P2b).
+            const procedureSubTypesForFilter = new Set<TokenType>([
+                TokenType.GlobalProcedure,
+                TokenType.MapProcedure,
+                TokenType.MethodDeclaration,
+                TokenType.MethodImplementation
+            ]);
+            const procedureDeclLines: Set<number> = new Set();
+            if (overloadFilter) {
+                for (const t of tokens) {
+                    if (TokenHelper.isProcedureOrFunction(t) &&
+                        t.subType !== undefined &&
+                        procedureSubTypesForFilter.has(t.subType)) {
+                        procedureDeclLines.add(t.line);
+                    }
+                }
+            }
+            // Lazily-loaded line text array for signaturesMatch lookups.
+            // Tries in-memory document first when fileUri matches the current
+            // document; falls back to disk read.
+            let candidateFileLines: string[] | null = null;
+            const getCandidateFileLines = (): string[] | null => {
+                if (candidateFileLines !== null) return candidateFileLines;
+                if (currentDocument && currentDocument.uri === fileUri) {
+                    candidateFileLines = currentDocument.getText().split(/\r?\n/);
+                    return candidateFileLines;
+                }
+                try {
+                    const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    candidateFileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                } catch {
+                    candidateFileLines = null;
+                }
+                return candidateFileLines;
+            };
 
             const scopeType = symbolInfo.scope.type;
             let startLine = 0;
@@ -1674,7 +1835,8 @@ export class ReferencesProvider {
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
 
-            for (const token of tokens) {
+            for (let i = 0; i < tokens.length; i++) {
+                const token = tokens[i];
                 if (!validLineRanges.some(([s, e]) => token.line >= s && token.line <= e)) continue;
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
@@ -1739,6 +1901,18 @@ export class ReferencesProvider {
                 }
 
                 if (!includeDeclaration && fileUri === declarationUri && token.line === declarationLine) continue;
+
+                // OverloadFilter: skip wrong-overload decl/impl matches via type-aware
+                // signaturesMatch (fe254d6f). Bare references with no parens AND
+                // call-site matches pass through (call-site type-aware filtering is
+                // P2b out-of-scope; arity-only filtering on call sites kept as best-effort).
+                if (overloadFilter && overloadFilter.declSignature && procedureDeclLines.has(token.line)) {
+                    const lines = getCandidateFileLines();
+                    const candidateSig = lines?.[token.line]?.trim();
+                    if (!candidateSig || !this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig)) {
+                        continue;
+                    }
+                }
 
                 locations.push(Location.create(
                     fileUri,
@@ -2065,9 +2239,13 @@ export class ReferencesProvider {
         }
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for procedure "${word}"`);
 
+        // Build OverloadFilter from the resolved declaration so siblings of the same
+        // name with different signatures are filtered via signaturesMatch (fe254d6f).
+        const overloadFilter = this.buildPlainSymbolOverloadFilter(syntheticInfo, document);
+
         const locations: Location[] = [];
         for (const fileUri of filesToSearch) {
-            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
+            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 
         logger.info(`✅ Found ${locations.length} reference(s) to procedure "${word}"`);
