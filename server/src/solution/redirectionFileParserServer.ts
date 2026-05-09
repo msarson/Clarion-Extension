@@ -234,13 +234,10 @@ export class RedirectionFileParserServer {
       // For include files, we'll collect their entries separately to cache them
       const includeEntries: RedirectionEntry[] = [];
 
-      if (isFirst) {
-        // Synthetic catch-all: store '.' (resolved against project dir at
-        // lookup time) rather than the .red dir, so global-fallback reds
-        // don't anchor lookups in %ClarionRoot%\bin (01d635ef).
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
-        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
-      }
+      // Compiler-truth (3161ea89): no synthetic *.* catch-all is injected.
+      // RED entries reflect what the user / global red declares; nothing
+      // implicit. The bare-filename Tier 2 in `findFile` provides the explicit
+      // project-root fallback that was previously emergent from the synthetic.
 
       // Use a more efficient approach to process the file
       const lines = content.split("\n");
@@ -351,13 +348,11 @@ export class RedirectionFileParserServer {
       // For include files, we'll collect their entries separately to cache them
       const includeEntries: RedirectionEntry[] = [];
 
-      if (isFirst) {
-        // Synthetic catch-all: store '.' (resolved against project dir at
-        // lookup time) rather than the .red dir, so global-fallback reds
-        // don't anchor lookups in %ClarionRoot%\bin (01d635ef).
-        entries.push({ redFile: redFileToParse, section: "Common", extension: "*.*", paths: ["."] });
-        logger.info(`Added default *.* = '.' entry for ${redFileToParse}`);
-      }
+      // Compiler-truth (3161ea89): no synthetic *.* catch-all is injected.
+      // RED entries reflect what the user / global red declares; nothing
+      // implicit. The bare-filename Tier 2 in `findFileAsync` provides the
+      // explicit project-root fallback that was previously emergent from
+      // the synthetic.
 
       // Process the file line by line
       const lines = content.split("\n");
@@ -475,9 +470,20 @@ export class RedirectionFileParserServer {
   }
 
   /**
-   * Finds a file in the redirection paths
+   * Finds a file in the redirection paths.
+   *
+   * Strict compiler-truth resolution (3161ea89):
+   *   1. Absolute filename → existsSync direct.
+   *   2. Pathed (filename contains `/` or `\`) → `path.join(projectPath, filename)` direct,
+   *      SKIP the entries walk entirely (compiler doesn't consult redirection for pathed includes).
+   *   3. Bare filename → 3-tier:
+   *      Tier 1: walk RED entries (user-declared only, build-config-filtered).
+   *      Tier 2: explicit `<projectPath>/<filename>` probe.
+   *      Tier 3: walk `serverSettings.libsrcPaths` sequentially.
+   *
    * @param filename The filename to find
-   * @param sourceFilePath Optional path to the file that is including/referencing this file (for local path resolution)
+   * @param sourceFilePath Unused under the strict architecture (3161ea89). Param retained for
+   *                       Phase A backward compat; Phase B (`2a2656b1`) drops it from the signature.
    * @returns The resolved file path info if found, null otherwise
    */
   public findFile(filename: string, sourceFilePath?: string): ResolvedFilePath | null {
@@ -486,6 +492,35 @@ export class RedirectionFileParserServer {
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId} source="${sourceFilePath || 'none'}"`);
 
+    // 1. Absolute filename — existsSync direct.
+    if (path.isAbsolute(filename)) {
+      const result = fs.existsSync(filename)
+        ? { path: filename, source: FilePathSource.Project, entry: undefined }
+        : null;
+      const duration = Date.now() - t0;
+      logger.debug(`[RED][resolve:end] name="${filename}" → ${result?.path ?? 'NOT_FOUND'} (absolute) durMs=${duration}`);
+      return result;
+    }
+
+    // 2. Pathed (contains `/` or `\`) — direct project-root join, SKIP RED entirely.
+    if (filename.includes('/') || filename.includes('\\')) {
+      if (!this.projectPath) {
+        const duration = Date.now() - t0;
+        logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pathed, no projectPath) durMs=${duration}`);
+        return null;
+      }
+      const candidate = path.normalize(path.join(this.projectPath, filename));
+      if (fs.existsSync(candidate)) {
+        const duration = Date.now() - t0;
+        logger.debug(`[RED][resolve:end] name="${filename}" → ${candidate} (pathed) durMs=${duration}`);
+        return { path: candidate, source: FilePathSource.Project, entry: undefined };
+      }
+      const duration = Date.now() - t0;
+      logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pathed) durMs=${duration}`);
+      return null;
+    }
+
+    // 3. Bare filename — canonical 3-tier chain.
     // Create a map to track which paths we've already checked to avoid duplicates
     const checkedPaths = new Set<string>();
     
@@ -546,28 +581,28 @@ export class RedirectionFileParserServer {
       }
     }
     
-    // If no redirection entries are available (no solution open) or file not found in redirection paths,
-    // try to find the file in the same directory as the source file
-    if (sourceFilePath) {
-      const sourceDir = path.dirname(sourceFilePath);
-      const localCandidate = path.join(sourceDir, filename);
-      const normalizedLocal = path.normalize(localCandidate);
-      
-      if (!checkedPaths.has(normalizedLocal) && fs.existsSync(normalizedLocal)) {
-        const result = {
-          path: normalizedLocal,
-          source: FilePathSource.Project, // Use Project source to indicate it's a local file
-          entry: undefined
-        };
-        
-        const duration = Date.now() - t0;
-        logger.debug(`[RED][resolve:end] name="${filename}" → ${normalizedLocal} (local) durMs=${duration}`);
-        return result;
+    // Tier 2: explicit project-root probe (3161ea89). Replaces the implicit
+    // behavior previously emergent from the synthetic *.* catch-all. Returns
+    // FilePathSource.Project (not Redirected) since this is a direct probe,
+    // not a redirection-entries hit.
+    if (this.projectPath) {
+      const projectCandidate = path.normalize(path.join(this.projectPath, filename));
+      if (!checkedPaths.has(projectCandidate)) {
+        checkedPaths.add(projectCandidate);
+        if (fs.existsSync(projectCandidate)) {
+          const duration = Date.now() - t0;
+          logger.debug(`[RED][resolve:end] name="${filename}" → ${projectCandidate} (Tier 2 projRoot) durMs=${duration}`);
+          return {
+            path: projectCandidate,
+            source: FilePathSource.Project,
+            entry: undefined
+          };
+        }
       }
     }
 
-    // Tier 3: libsrc fallback (b8b2d748). When RED entries + sibling probe
-    // both miss, walk serverSettings.libsrcPaths in declared order and
+    // Tier 3: libsrc fallback (b8b2d748). When Tier 1 entries + Tier 2 project
+    // root both miss, walk serverSettings.libsrcPaths in declared order and
     // return the first existing match. No-op when libsrcPaths is empty.
     if (serverSettings.libsrcPaths?.length) {
       for (const libDir of serverSettings.libsrcPaths) {
@@ -593,7 +628,10 @@ export class RedirectionFileParserServer {
     return null;
   }
 
-  // Async version of findFile
+  // Async version of findFile — see `findFile` JSDoc for the strict
+  // compiler-truth resolution chain (3161ea89). `sourceFilePath` is unused;
+  // retained on the signature for Phase A backward compat (Phase B `2a2656b1`
+  // drops it).
   public async findFileAsync(filename: string, sourceFilePath?: string): Promise<ResolvedFilePath | null> {
     // Add instrumentation
     const t0 = Date.now();
@@ -609,7 +647,37 @@ export class RedirectionFileParserServer {
         return false;
       }
     };
-    
+
+    // 1. Absolute filename — existsSync direct.
+    if (path.isAbsolute(filename)) {
+      const exists = await fileExists(filename);
+      const result = exists
+        ? { path: filename, source: FilePathSource.Project, entry: undefined }
+        : null;
+      const duration = Date.now() - t0;
+      logger.debug(`[RED][resolve:end] name="${filename}" → ${result?.path ?? 'NOT_FOUND'} (absolute) durMs=${duration}`);
+      return result;
+    }
+
+    // 2. Pathed (contains `/` or `\`) — direct project-root join, SKIP RED entirely.
+    if (filename.includes('/') || filename.includes('\\')) {
+      if (!this.projectPath) {
+        const duration = Date.now() - t0;
+        logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pathed, no projectPath) durMs=${duration}`);
+        return null;
+      }
+      const candidate = path.normalize(path.join(this.projectPath, filename));
+      if (await fileExists(candidate)) {
+        const duration = Date.now() - t0;
+        logger.debug(`[RED][resolve:end] name="${filename}" → ${candidate} (pathed) durMs=${duration}`);
+        return { path: candidate, source: FilePathSource.Project, entry: undefined };
+      }
+      const duration = Date.now() - t0;
+      logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pathed) durMs=${duration}`);
+      return null;
+    }
+
+    // 3. Bare filename — canonical 3-tier chain.
     // Create a map to track which paths we've already checked to avoid duplicates
     const checkedPaths = new Set<string>();
     
@@ -678,24 +746,27 @@ export class RedirectionFileParserServer {
     // Wait for all checks to complete and find the first successful result
     const results = await Promise.all(checkPromises);
     let result = results.find(result => result !== null) || null;
-    
-    // If no result found and we have a source file path, try local directory
-    if (!result && sourceFilePath) {
-      const sourceDir = path.dirname(sourceFilePath);
-      const localCandidate = path.join(sourceDir, filename);
-      const normalizedLocal = path.normalize(localCandidate);
 
-      if (!checkedPaths.has(normalizedLocal) && await fileExists(normalizedLocal)) {
-        result = {
-          path: normalizedLocal,
-          source: FilePathSource.Project, // Use Project source to indicate it's a local file
-          entry: undefined
-        };
+    // Tier 2: explicit project-root probe (3161ea89). Replaces the implicit
+    // behavior previously emergent from the synthetic *.* catch-all. Returns
+    // FilePathSource.Project (not Redirected) since this is a direct probe,
+    // not a redirection-entries hit.
+    if (!result && this.projectPath) {
+      const projectCandidate = path.normalize(path.join(this.projectPath, filename));
+      if (!checkedPaths.has(projectCandidate)) {
+        checkedPaths.add(projectCandidate);
+        if (await fileExists(projectCandidate)) {
+          result = {
+            path: projectCandidate,
+            source: FilePathSource.Project,
+            entry: undefined
+          };
+        }
       }
     }
 
-    // Tier 3: libsrc fallback (b8b2d748). When RED entries + sibling probe
-    // both miss, walk serverSettings.libsrcPaths in declared order and
+    // Tier 3: libsrc fallback (b8b2d748). When Tier 1 entries + Tier 2 project
+    // root both miss, walk serverSettings.libsrcPaths in declared order and
     // return the first existing match. Sequential rather than parallel —
     // declared-order priority matters and the fallback only fires after a
     // miss, so the cost is bounded.
