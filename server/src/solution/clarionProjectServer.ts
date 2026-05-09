@@ -397,18 +397,21 @@ export class ClarionProjectServer {
         for (const entry of matchingEntries) {
             if (entry.extension.toLowerCase() === normalizedExt || entry.extension === "*.*") {
                 logger.info(`📂 Processing entry: ${entry.extension} from section ${entry.section}`);
-                
-                // Relative paths in the .red file are relative to the .red file's directory, not the project path
-                const redFileDir = path.dirname(entry.redFile);
-                
+
+                // Relative paths in any .red — including {include}-d files — anchor on
+                // the OUTER project's directory per Clarion 11.1 docs, NOT on the dir
+                // of the .red file the entry textually lives in (ff28f45f; mirrors
+                // 01d635ef + cfaa7584 in the parser side). `this.path` is always set
+                // from the ClarionProjectServer constructor — no defensive fallback
+                // needed.
                 for (const p of entry.paths) {
-                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(redFileDir, p);
-                    
+                    const resolvedPath = path.isAbsolute(p) ? p : path.resolve(this.path, p);
+
                     // Debug logging for dot paths
                     if (p === '.' || p === '.\\' || p === './') {
-                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${redFileDir} → ${resolvedPath}`);
+                        logger.info(`🔍 Resolving '${p}' for project ${this.name}: ${this.path} → ${resolvedPath}`);
                     }
-                    
+
                     pathSet.add(resolvedPath);
                 }
             }
