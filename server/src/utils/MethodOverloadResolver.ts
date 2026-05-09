@@ -486,21 +486,42 @@ export class MethodOverloadResolver {
         if (implParams.length !== declParams.length) {
             return false;
         }
-        
+
         for (let i = 0; i < implParams.length; i++) {
             const implType = implParams[i];
             const declType = declParams[i];
-            
+
             // Normalize for comparison (remove extra spaces)
             const normalizedImpl = implType.replace(/\s+/g, ' ').trim();
             const normalizedDecl = declType.replace(/\s+/g, ' ').trim();
-            
+
             if (normalizedImpl !== normalizedDecl) {
                 return false;
             }
         }
-        
+
         return true;
+    }
+
+    /**
+     * Compares two `PROCEDURE(...)` signature strings for type-shape
+     * equivalence. Composes `extractParameterTypes` + `parametersMatch`
+     * (both private) so external callers (e.g. ReferencesProvider's
+     * plain-symbol path under fe254d6f) don't have to know about either.
+     *
+     * Inherits the transformation behaviors of `extractParameterType`:
+     * CONST/REF stripped, default values stripped, omittable angle brackets
+     * stripped, types upcased. Reference indicators like `*STRING` are
+     * preserved as part of the type — so `*STRING` and `STRING` remain
+     * distinct (the Mark-reported discriminator that 35019583 / fe254d6f
+     * depend on).
+     *
+     * Foundation for fe254d6f Phase A.
+     */
+    public signaturesMatch(sigA: string, sigB: string): boolean {
+        const typesA = this.extractParameterTypes(sigA);
+        const typesB = this.extractParameterTypes(sigB);
+        return this.parametersMatch(typesA, typesB);
     }
     
     /**
