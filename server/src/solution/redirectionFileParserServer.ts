@@ -492,6 +492,15 @@ export class RedirectionFileParserServer {
     // If we have redirection entries, search through them
     if (this.entries.length > 0) {
       for (const entry of this.entries) {
+        // Build-configuration filter (bd7e4a29). Mirrors
+        // clarionProjectServer.getSearchPaths:381-383: only Common entries
+        // and entries for the active configuration are consulted.
+        // Lookup-time (not parse-time) so a configuration switch on the
+        // same parser instance picks up the new active section without
+        // re-parsing.
+        if (entry.section !== "Common" && entry.section !== serverSettings.configuration) {
+          continue;
+        }
         if (this.matchesMask(entry.extension, filename)) {
           for (const dir of entry.paths) {
             // Resolve relative paths against the project dir per Clarion 11.1
@@ -610,6 +619,15 @@ export class RedirectionFileParserServer {
     // If we have redirection entries, search through them
     if (this.entries.length > 0) {
       for (const entry of this.entries) {
+        // Build-configuration filter (bd7e4a29). Mirrors
+        // clarionProjectServer.getSearchPaths:381-383: only Common entries
+        // and entries for the active configuration are consulted.
+        // Lookup-time (not parse-time) so a configuration switch on the
+        // same parser instance picks up the new active section without
+        // re-parsing.
+        if (entry.section !== "Common" && entry.section !== serverSettings.configuration) {
+          continue;
+        }
         if (this.matchesMask(entry.extension, filename)) {
           for (const dir of entry.paths) {
             // Resolve relative paths against the project dir per Clarion 11.1
