@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
+import { resolveMemberFile } from './memberResolution';
+import { isClientReady, getLanguageClient } from '../LanguageClientManager';
 
 interface AddIncludeArgs {
     includeFile: string;
@@ -85,17 +86,28 @@ async function addIncludeStatementToFile(args: AddIncludeArgs): Promise<void> {
         // Target is the current file (already a URI)
         targetUri = vscode.Uri.parse(targetFile);
     } else {
-        // Target is a MEMBER file - need to resolve it
+        // Target is a MEMBER file — route through LSP-backed resolver.
+        // Sibling fallback inside the helper preserves no-solution-open mode.
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor) {
             throw new Error('No active editor');
         }
 
-        const currentDir = path.dirname(activeEditor.document.uri.fsPath);
-        const memberPath = path.join(currentDir, targetFile);
-        
-        if (!fs.existsSync(memberPath)) {
-            throw new Error(`MEMBER file not found: ${memberPath}`);
+        const memberPath = await resolveMemberFile(
+            targetFile,
+            activeEditor.document.uri.fsPath,
+            {
+                lspIsReady: isClientReady,
+                lspSendRequest: async (method, params) => {
+                    const client = getLanguageClient();
+                    if (!client) return null;
+                    return client.sendRequest(method, params);
+                }
+            }
+        );
+
+        if (!memberPath) {
+            throw new Error(`MEMBER file not found: ${targetFile}`);
         }
 
         targetUri = vscode.Uri.file(memberPath);

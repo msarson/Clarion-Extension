@@ -17,23 +17,30 @@ export interface ResolveMemberFileDeps {
 /**
  * Resolves a MEMBER('parent.clw') target filename to an absolute path.
  *
- * STUB IMPLEMENTATION (task 7cbf07f7 — RED phase): currently mimics the
- * pre-existing inline behavior in `IncludeStatementCommands.ts:85-101` —
- * sibling-dir-only check. Alice replaces with the full resolution chain:
+ * Resolution chain (audit follow-up B from
+ * `docs/audits/file-finding-audit-2026-05-09.md`):
  *
- *   1. If LSP is ready, send `clarion/findFile` and use its path on hit.
+ *   1. If LSP is ready, send `clarion/findFile` and use its `path` on hit.
+ *      LSP errors are swallowed (transport failures fall through to sibling).
  *   2. Sibling fallback: `path.dirname(currentFileFsPath) / targetFile`.
+ *      Preserves single-file editing without a loaded solution.
  *   3. null if both miss.
- *
- * Audit follow-up B from `docs/audits/file-finding-audit-2026-05-09.md`.
  */
 export async function resolveMemberFile(
     targetFile: string,
     currentFileFsPath: string,
-    _deps: ResolveMemberFileDeps
+    deps: ResolveMemberFileDeps
 ): Promise<string | null> {
-    // Stub: mimics current sibling-only behavior. Tests 2-5 pass against this
-    // shape; test 1 (LSP routing) fails because deps are intentionally ignored.
+    if (deps.lspIsReady()) {
+        try {
+            const result = await deps.lspSendRequest('clarion/findFile', { filename: targetFile });
+            if (result?.path) {
+                return result.path;
+            }
+        } catch {
+            // Transport failure — fall through to sibling probe.
+        }
+    }
     const sibling = path.join(path.dirname(currentFileFsPath), targetFile);
     return fs.existsSync(sibling) ? sibling : null;
 }
