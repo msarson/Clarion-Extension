@@ -172,19 +172,17 @@ suite('FileRelationshipGraph.resolveFile (5cbb2f27)', () => {
         );
     });
 
-    // --- (3) red+sub, target only in sub → Tier 2 sourceFilePath hits ---
-    test("red+sub, target only in sub → Tier 2 sourceFilePath hits sub (the 'did findFile receive fromFile' pin)", () => {
-        const { fix } = setupRedCase([
-            path.join('sub', 'Target.clw'),
-            path.join('sub', 'Source.clw')
-        ]);
-        const result = callResolveFile('Target.clw', path.join(fix.subDir, 'Source.clw'));
-        assert.strictEqual(
-            result,
-            path.join(fix.subDir, 'Target.clw'),
-            'expected <sub>/Target.clw — pre-fix via line 490, post-fix via parser Tier 2'
-        );
-    });
+    // --- (3) DELETED under 3161ea89 ---
+    // Test 3 ("red+sub, target only in sub → Tier 2 sourceFilePath hits sub")
+    // was deleted as part of the strict compiler-truth resolution architecture.
+    // Per Mark: "I actually think we should be strict here, compiler is truth.
+    // I'm trying to make the extension work how the Clarion IDE would but
+    // better (Clarion IDE doesn't have many providers at all)."
+    // The sourceFilePath sibling probe is no longer part of the canonical
+    // resolution chain — the Clarion compiler doesn't do it, so the IDE
+    // shouldn't either. Under the new arch this scenario returns null.
+    // Remaining sibling-related coverage lives in clientside memberResolution
+    // (no-solution-loaded ad-hoc editing, where compiler-truth doesn't apply).
 
     // --- (4) no-red+root → Tier 2 hits projectPath ---
     test('no-red+root — no .red loaded, source at project root → Tier 2 probes projectPath (=dirname(fromFile))', () => {

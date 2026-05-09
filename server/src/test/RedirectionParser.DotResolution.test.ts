@@ -153,17 +153,19 @@ suite("RedirectionParser — explicit '.'/'..' under global fallback (01d635ef)"
     });
 });
 
-suite("RedirectionParser — synthetic '*.*' catch-all under global fallback (01d635ef)", () => {
+suite("RedirectionParser — Tier 2 project-root fallback when no entry mask matches (01d635ef, renamed under 3161ea89)", () => {
 
     let fix: Fixture | null = null;
     let savedRedirectionFile = '';
     let savedRedirectionPaths: string[] = [];
 
     setup(() => {
-        // Minimal red with NO `*.clw` entry — Other.clw can only be resolved
-        // via the synthetic `*.* = [redPath]` entry pushed at parse time
-        // (`redirectionFileParserServer.ts:231` sync / `:346` async).
-        // Currently that synthetic entry anchors on the .red dir → bug.
+        // Minimal red with NO `*.clw` entry — Other.clw cannot match any user-
+        // declared mask in Tier 1, so resolution falls through to Tier 2
+        // (explicit `<projectPath>/<filename>` probe added under 3161ea89).
+        // Pre-3161ea89: same result was achieved via the synthetic `*.* = ['.']`
+        // catch-all the parser pushed at parse time. Synthetic dropped under
+        // 3161ea89 (compiler-truth principle); Tier 2 explicit probe replaces it.
         fix = buildFixture('[Common]\n*.obj = .\n');
         savedRedirectionFile = serverSettings.redirectionFile;
         savedRedirectionPaths = serverSettings.redirectionPaths;
@@ -178,36 +180,36 @@ suite("RedirectionParser — synthetic '*.*' catch-all under global fallback (01
         fix = null;
     });
 
-    test("findFile (sync) — synthetic '*.*' catch-all should resolve to project dir, not .red dir", () => {
+    test("findFile (sync) — Tier 2 project-root fallback resolves to project dir when no entry mask matches", () => {
         const parser = new RedirectionFileParserServer();
         parser.parseRedFile(fix!.projectDir);
 
         const result = parser.findFile('Other.clw');
 
-        assert.ok(result, 'findFile should resolve Other.clw via the synthetic *.* catch-all');
+        assert.ok(result, 'findFile should resolve Other.clw via Tier 2 project-root fallback (no *.clw entry exists)');
         assert.strictEqual(
             path.normalize(result!.path),
             path.normalize(fix!.projectTarget),
             "expected resolution to project dir copy (" + fix!.projectTarget + "), " +
             "got " + (result && result.path) +
-            " — synthetic *.* catch-all is being anchored on the .red file's dir instead of the project dir"
+            " — Tier 2 project-root fallback should resolve unmasked extensions against the project dir, not the .red file's dir"
         );
         assert.strictEqual(result!.source, FilePathSource.Redirected);
     });
 
-    test("findFileAsync — synthetic '*.*' catch-all should resolve to project dir, not .red dir", async () => {
+    test("findFileAsync — Tier 2 project-root fallback resolves to project dir when no entry mask matches", async () => {
         const parser = new RedirectionFileParserServer();
         await parser.parseRedFileAsync(fix!.projectDir);
 
         const result = await parser.findFileAsync('Other.clw');
 
-        assert.ok(result, 'findFileAsync should resolve Other.clw via the synthetic *.* catch-all');
+        assert.ok(result, 'findFileAsync should resolve Other.clw via Tier 2 project-root fallback (no *.clw entry exists)');
         assert.strictEqual(
             path.normalize(result!.path),
             path.normalize(fix!.projectTarget),
             "expected resolution to project dir copy (" + fix!.projectTarget + "), " +
             "got " + (result && result.path) +
-            " — synthetic *.* catch-all is being anchored on the .red file's dir instead of the project dir"
+            " — Tier 2 project-root fallback should resolve unmasked extensions against the project dir, not the .red file's dir"
         );
         assert.strictEqual(result!.source, FilePathSource.Redirected);
     });
