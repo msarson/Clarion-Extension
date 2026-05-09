@@ -80,11 +80,11 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             '  CODE',                                  // line 6
             '  RETURN',                                // line 7
             '',                                        // line 8
-            'Foo PROCEDURE(s STRING)',                 // line 9 — STRING impl
+            'Foo PROCEDURE(STRING s)',                 // line 9 — STRING impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
             '',
-            'Foo PROCEDURE(n LONG)',                   // line 13 — LONG impl
+            'Foo PROCEDURE(LONG n)',                   // line 13 — LONG impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
         ].join('\n');
@@ -110,6 +110,14 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             !lines.includes(13),
             'expected line 13 (LONG impl) NOT in result; got lines=[' + lines.join(',') + ']'
         );
+        // Positive assertion (bidirectional-pin pattern lifted to assertion-shape):
+        // catches silent-exclusion failure mode where an over-eager filter drops
+        // the matching-signature impl too. Without this, the negative assertions
+        // would pass for the wrong reason.
+        assert.ok(
+            lines.includes(9),
+            'STRING impl line 9 should be in result; got lines=[' + lines.join(',') + ']'
+        );
     });
 
     // ─── (2) BUG PIN — different-arity, global PROCEDURE ────────────────────
@@ -131,11 +139,11 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             '  CODE',                                  // line 6
             '  RETURN',                                // line 7
             '',                                        // line 8
-            'Bar PROCEDURE(s STRING)',                 // line 9 — arity-1 impl
+            'Bar PROCEDURE(STRING s)',                 // line 9 — arity-1 impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
             '',
-            'Bar PROCEDURE(s STRING, n LONG)',         // line 13 — arity-2 impl
+            'Bar PROCEDURE(STRING s, LONG n)',         // line 13 — arity-2 impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
         ].join('\n');
@@ -157,6 +165,11 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             !lines.includes(13),
             'expected line 13 (arity-2 impl) NOT in result; got lines=[' + lines.join(',') + ']'
         );
+        // Positive assertion — silent-exclusion sentinel.
+        assert.ok(
+            lines.includes(9),
+            'arity-1 STRING impl line 9 should be in result; got lines=[' + lines.join(',') + ']'
+        );
     });
 
     // ─── (3) REGRESSION GUARD — no overloads ────────────────────────────────
@@ -175,7 +188,7 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             '  CODE',                                  // line 5
             '  RETURN',                                // line 6
             '',                                        // line 7
-            'Baz PROCEDURE(s STRING)',                 // line 8 — impl
+            'Baz PROCEDURE(STRING s)',                 // line 8 — impl
             '  CODE',
             '  RETURN',
         ].join('\n');
@@ -218,11 +231,11 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             'Append       PROCEDURE(LONG)',            // line 4 — LONG decl
             '           END',                          // line 5
             '',                                        // line 6
-            'MyClass.Append PROCEDURE(s STRING)',      // line 7 — STRING impl
+            'MyClass.Append PROCEDURE(STRING s)',      // line 7 — STRING impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
             '',
-            'MyClass.Append PROCEDURE(n LONG)',        // line 11 — LONG impl
+            'MyClass.Append PROCEDURE(LONG n)',        // line 11 — LONG impl (standard Clarion TYPE name order)
             '  CODE',
             '  RETURN',
         ].join('\n');
@@ -252,6 +265,11 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             !lines.includes(11),
             'expected line 11 (LONG impl) NOT in result; got lines=[' + lines.join(',') + ']'
         );
+        // Positive assertion — silent-exclusion sentinel for the matching impl.
+        assert.ok(
+            lines.includes(7),
+            'class-method STRING impl line 7 should be in result; got lines=[' + lines.join(',') + ']'
+        );
     });
 
     // ─── (5) REGRESSION GUARD — Definition unchanged ────────────────────────
@@ -277,7 +295,7 @@ suite('ReferencesProvider.OverloadDistinction (fe254d6f)', () => {
             "  Baz('hello')",                          // line 6 — caller; cursor here for definition
             '  RETURN',                                // line 7
             '',                                        // line 8
-            'Baz PROCEDURE(s STRING)',                 // line 9 — impl
+            'Baz PROCEDURE(STRING s)',                 // line 9 — impl
             '  CODE',
             '  RETURN',
         ].join('\n');
