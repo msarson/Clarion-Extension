@@ -467,30 +467,24 @@ export class FileRelationshipGraph {
 
     /**
      * Resolve a bare filename (from token.referencedFile) to an absolute path.
-     * Uses the solution's redirection parser as the canonical resolution chain;
-     * the per-project safety net handles the no-red-loaded degraded mode where
-     * the parser has no entries to consult.
+     * Delegates entirely to the redirection parser's canonical chain
+     * (3161ea89 + 2a2656b1): parser Tier 2 (project-root probe) covers the
+     * case the old per-project safety net used to handle.
+     *
+     * `fromFile` is preserved on the signature for the 6 token-walk callers
+     * but is no longer threaded into the parser call.
      */
-    private resolveFile(filename: string, fromFile: string): string | null {
+    private resolveFile(filename: string, _fromFile: string): string | null {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
 
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
             for (const project of solutionManager.solution.projects) {
-                // Pass fromFile as sourceFilePath so the parser's Tier 2
-                // sibling probe runs as part of the canonical chain
-                // (replaces the old post-loop relative-to-source fallback).
-                const resolved = project.getRedirectionParser().findFile(filename, fromFile);
+                const resolved = project.getRedirectionParser().findFile(filename);
                 if (resolved?.path && fs.existsSync(resolved.path)) {
                     return resolved.path;
                 }
-                // Safety net for projects with no redirection file loaded
-                // (parser entries empty → no Tier 1 synthetic catch-all hit
-                // for `<projectPath>/<filename>`). Dead code in the hot path
-                // where a red is loaded; cheap insurance otherwise.
-                const projPath = path.join(project.path, filename);
-                if (fs.existsSync(projPath)) return projPath;
             }
         }
 

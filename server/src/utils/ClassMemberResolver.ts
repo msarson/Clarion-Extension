@@ -1031,7 +1031,7 @@ export class ClassMemberResolver {
 
             if (sm?.solution) {
                 for (const project of sm.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(implFileName, currentPath);
+                    const resolved = project.getRedirectionParser().findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         const loc = this.findImplementationInFile(resolved.path, className, methodName, declarationSig);
                         if (loc) return loc;

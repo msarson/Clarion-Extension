@@ -532,7 +532,7 @@ export class ScopeAnalyzer {
             for (const project of solutionManager.solution.projects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(filename, sourceFilePath);
+                const resolved = redirectionParser.findFile(filename);
                 if (resolved && resolved.path) {
                     logger.info(`      ✅ Resolved via project redirection: ${resolved.path}`);
                     const tokens = this.loadTokensFromFile(resolved.path);
@@ -586,7 +586,7 @@ export class ScopeAnalyzer {
             for (const project of solutionManager.solution.projects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(filename, sourceFilePath);
+                const resolved = redirectionParser.findFile(filename);
                 if (resolved && resolved.path) {
                     logger.info(`      ✅ Resolved via project redirection: ${resolved.path}`);
                     return this.loadTokensFromFile(resolved.path);

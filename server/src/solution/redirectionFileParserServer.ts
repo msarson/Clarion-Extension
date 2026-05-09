@@ -472,7 +472,7 @@ export class RedirectionFileParserServer {
   /**
    * Finds a file in the redirection paths.
    *
-   * Strict compiler-truth resolution (3161ea89):
+   * Strict compiler-truth resolution (3161ea89 + 2a2656b1):
    *   1. Absolute filename → existsSync direct.
    *   2. Pathed (filename contains `/` or `\`) → `path.join(projectPath, filename)` direct,
    *      SKIP the entries walk entirely (compiler doesn't consult redirection for pathed includes).
@@ -482,15 +482,13 @@ export class RedirectionFileParserServer {
    *      Tier 3: walk `serverSettings.libsrcPaths` sequentially.
    *
    * @param filename The filename to find
-   * @param sourceFilePath Unused under the strict architecture (3161ea89). Param retained for
-   *                       Phase A backward compat; Phase B (`2a2656b1`) drops it from the signature.
    * @returns The resolved file path info if found, null otherwise
    */
-  public findFile(filename: string, sourceFilePath?: string): ResolvedFilePath | null {
+  public findFile(filename: string): ResolvedFilePath | null {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
-    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId} source="${sourceFilePath || 'none'}"`);
+    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {
@@ -629,14 +627,12 @@ export class RedirectionFileParserServer {
   }
 
   // Async version of findFile — see `findFile` JSDoc for the strict
-  // compiler-truth resolution chain (3161ea89). `sourceFilePath` is unused;
-  // retained on the signature for Phase A backward compat (Phase B `2a2656b1`
-  // drops it).
-  public async findFileAsync(filename: string, sourceFilePath?: string): Promise<ResolvedFilePath | null> {
+  // compiler-truth resolution chain (3161ea89 + 2a2656b1).
+  public async findFileAsync(filename: string): Promise<ResolvedFilePath | null> {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
-    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId} source="${sourceFilePath || 'none'}"`);
+    logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
 
     // Helper for async existence check
     const fileExists = async (filePath: string) => {

@@ -447,7 +447,7 @@ export class MethodHoverResolver {
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile, currentPath);
+                    const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);

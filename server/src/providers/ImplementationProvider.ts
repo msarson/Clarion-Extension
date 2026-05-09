@@ -731,7 +731,7 @@ export class ImplementationProvider {
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile, currentPath);
+                    const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLocation = this.searchFileForMethodImplementation(
@@ -853,7 +853,7 @@ export class ImplementationProvider {
             if (sm?.solution) {
                 for (const project of sm.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(implFileName, currentPath);
+                    const resolved = redirectionParser.findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         logger.info(`Redirection resolved ${implFileName} → ${resolved.path}`);
                         const implLocation = this.searchFileForMethodImplementation(
