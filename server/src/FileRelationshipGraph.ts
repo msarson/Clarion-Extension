@@ -467,7 +467,9 @@ export class FileRelationshipGraph {
 
     /**
      * Resolve a bare filename (from token.referencedFile) to an absolute path.
-     * Uses the solution's redirection parser, falls back to relative-to-source.
+     * Uses the solution's redirection parser as the canonical resolution chain;
+     * the per-project safety net handles the no-red-loaded degraded mode where
+     * the parser has no entries to consult.
      */
     private resolveFile(filename: string, fromFile: string): string | null {
         // Already absolute
@@ -476,19 +478,21 @@ export class FileRelationshipGraph {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
             for (const project of solutionManager.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(filename);
+                // Pass fromFile as sourceFilePath so the parser's Tier 2
+                // sibling probe runs as part of the canonical chain
+                // (replaces the old post-loop relative-to-source fallback).
+                const resolved = project.getRedirectionParser().findFile(filename, fromFile);
                 if (resolved?.path && fs.existsSync(resolved.path)) {
                     return resolved.path;
                 }
-                // Fallback: project directory
+                // Safety net for projects with no redirection file loaded
+                // (parser entries empty → no Tier 1 synthetic catch-all hit
+                // for `<projectPath>/<filename>`). Dead code in the hot path
+                // where a red is loaded; cheap insurance otherwise.
                 const projPath = path.join(project.path, filename);
                 if (fs.existsSync(projPath)) return projPath;
             }
         }
-
-        // Fallback: relative to the source file
-        const rel = path.join(path.dirname(fromFile), filename);
-        if (fs.existsSync(rel)) return path.resolve(rel);
 
         return null;
     }
