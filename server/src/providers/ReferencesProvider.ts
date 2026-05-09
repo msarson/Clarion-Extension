@@ -12,11 +12,11 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
-import { serverSettings } from '../serverSettings';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { buildIncDirsToScan } from './incDirsScope';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -347,15 +347,14 @@ export class ReferencesProvider {
             }
         }
 
-        // Scan LibSrc INC files for:
+        // Scan `.inc` files via the canonical 3-layer chain (sibling +
+        // RED-derived dirs from each project + libsrc) for:
         //   (a) classes that IMPLEMENTS(ifaceName) with a MODULE declaration → add those CLW files
         //   (b) the INC that DECLARES the interface itself (ifaceName INTERFACE) → add that INC
         // This covers both: starting from the interface declaration AND starting from an implementation.
+        // RED-derived layer added by 8f1965c3 (audit follow-up Q1).
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const dirsToScan = new Set<string>([path.dirname(currentFilePath).toLowerCase()]);
-        for (const lp of (serverSettings.libsrcPaths ?? [])) {
-            if (lp) dirsToScan.add(lp.toLowerCase());
-        }
+        const dirsToScan = buildIncDirsToScan(currentFilePath, sm);
         const implementsRe = new RegExp(`\\bIMPLEMENTS\\s*\\(\\s*${ifaceName}\\s*\\)`, 'i');
         const ifaceDeclRe  = new RegExp(`^[ \\t]*${ifaceName}[ \\t]+INTERFACE\\b`, 'im');
         for (const dir of dirsToScan) {
