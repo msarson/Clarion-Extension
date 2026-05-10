@@ -281,6 +281,96 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
         );
     });
 
+    // ─── (Tier 6 backfill) BUG PIN — cross-file PROGRAM-scope global receiver ───
+
+    /**
+     * Phase B+ Tier 6 backfill (`671d7cd8`, follows `10ea5a80`'s transparency disclosure).
+     *
+     * Cursor-on-decl path: cursor on `Append(STRING)` decl in PROGRAM file. Receiver
+     * `instGlobal MyClass` is declared at PROGRAM scope (col-0 Label outside any
+     * procedure). Caller `instGlobal.Append('x')` lives in a sibling MEMBER file.
+     *
+     * Without FRG seeding (`frg` opt omitted), `loadGlobalScopeForCursor` returns null
+     * and the matching loop never resolves `instGlobal` → MyClass for the call site
+     * in the MEMBER file → call dropped silently. Test asserts the cross-file caller
+     * URI IS in result — RED today via the fixture limitation that motivated the
+     * deferral; flips GREEN after the fixture extension lands.
+     *
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`: STRING caller IN +
+     * LONG caller NOT IN simultaneously.
+     */
+    test('Tier 6 BUG PIN — cross-file PROGRAM-scope global receiver — FAR finds caller in MEMBER file', async () => {
+        const fixture = buildMultiFileFixture({
+            files: {
+                'main.clw': [
+                    "  PROGRAM",                                  // line 0
+                    '',                                            // line 1
+                    'MyClass    CLASS,TYPE',                       // line 2
+                    'Append       PROCEDURE(STRING)',              // line 3 — FAR cursor (STRING)
+                    'Append       PROCEDURE(LONG)',                // line 4 — LONG overload
+                    '           END',                              // line 5
+                    '',                                            // line 6
+                    'instGlobal MyClass',                          // line 7 — PROGRAM-scope global
+                    '',                                            // line 8
+                    '  CODE',                                      // line 9
+                    '  RETURN',                                    // line 10
+                    '',                                            // line 11
+                    'MyClass.Append PROCEDURE(STRING s)',          // line 12 — STRING impl
+                    '  CODE',
+                    '  RETURN',
+                    '',
+                    'MyClass.Append PROCEDURE(LONG n)',            // line 16 — LONG impl
+                    '  CODE',
+                    '  RETURN',
+                ].join('\n'),
+                'caller.clw': [
+                    "  MEMBER('main.clw')",                        // line 0
+                    '',                                            // line 1
+                    'CallerProc PROCEDURE',                        // line 2
+                    '  CODE',                                      // line 3
+                    "  instGlobal.Append('cross-file-global')",    // line 4 — STRING caller
+                    '  instGlobal.Append(42)',                     // line 5 — LONG caller
+                    '  RETURN',                                    // line 6
+                ].join('\n'),
+            },
+            frg: {
+                programFile: 'main.clw',
+                memberFiles: ['caller.clw']
+            }
+        });
+
+        const docMain = fixture.documents['main.clw'];
+        const callerUri = fixture.uris['caller.clw'];
+
+        // Cursor on `Append(STRING)` decl in main.clw (line 3, col 0).
+        const refs = await provider.provideReferences(docMain, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        assert.ok(refs, 'FAR should return references for Tier 6 cross-file global receiver');
+
+        const refUris = refs!.map(r => r.uri.toLowerCase());
+        const callerUriLower = callerUri.toLowerCase();
+        const callerHits = refs!.filter(r => r.uri.toLowerCase() === callerUriLower)
+            .map(r => r.range.start.line)
+            .sort((a, b) => a - b);
+
+        assert.ok(
+            refUris.some(u => u === callerUriLower),
+            'expected caller.clw URI in result; got URIs=[' + refUris.join(', ') + '] — ' +
+            'Tier 6 PROGRAM-scope global receiver not resolved (FRG seeding missing OR loadGlobalScopeForCursor regression)'
+        );
+        assert.ok(
+            callerHits.includes(4),
+            'expected caller.clw line 4 (STRING caller) IN result; got lines=[' + callerHits.join(',') + '] — ' +
+            'Tier 6 lookup chain failed to match `instGlobal` → MyClass at the cross-file call site'
+        );
+        assert.ok(
+            !callerHits.includes(5),
+            'expected caller.clw line 5 (LONG caller) NOT in STRING-cursor result; got lines=[' + callerHits.join(',') + '] — ' +
+            'overload disambiguation must drop the wrong-overload caller'
+        );
+    });
+
     /**
      * Multi-overload class-method with cross-procedure callers; FAR returns
      * only matching-overload's caller. Verifies caller-scope expansion

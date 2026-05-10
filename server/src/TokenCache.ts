@@ -238,6 +238,48 @@ export class TokenCache {
     }
 
     /**
+     * Case-insensitive variant of `getTokensByUri`. Walks cached keys when an
+     * exact-match lookup misses and returns the first entry whose URI matches
+     * case-insensitively. Bridges callers that build URIs from sources with
+     * different case-normalisation conventions (e.g. `FileRelationshipGraph`
+     * lowercases all paths via `normalizePath`, while `MultiFileFARFixture` /
+     * VS Code preserve original case). Used by FAR's Tier 6 globalScope load
+     * path (`671d7cd8`) where FRG-derived program-file URIs may not match
+     * TokenCache's original-case keys.
+     *
+     * O(1) on exact-hit; O(n) cache-walk on miss. Callers should prefer the
+     * exact `getTokensByUri` when case alignment is guaranteed.
+     */
+    public getTokensByUriCaseInsensitive(uri: string): Token[] | null {
+        const exact = this.cache.get(uri);
+        if (exact) return exact.tokens;
+        const lower = uri.toLowerCase();
+        for (const [k, v] of this.cache) {
+            if (k.toLowerCase() === lower) return v.tokens;
+        }
+        return null;
+    }
+
+    /**
+     * Look up a cached document's full source text by URI (case-insensitive).
+     * Same lookup discipline as `getTokensByUriCaseInsensitive`. Used by FAR's
+     * cross-file overloadFilter resolution path (`671d7cd8`) where the cursor's
+     * document and the declaration file may differ — the matching loop's
+     * declaration-line text needs the declaring file's in-memory text rather
+     * than a disk read (which fails for in-memory test fixtures + open-but-
+     * unsaved buffers in production).
+     */
+    public getDocumentTextByUriCaseInsensitive(uri: string): string | null {
+        const exact = this.cache.get(uri);
+        if (exact) return exact.documentText;
+        const lower = uri.toLowerCase();
+        for (const [k, v] of this.cache) {
+            if (k.toLowerCase() === lower) return v.documentText;
+        }
+        return null;
+    }
+
+    /**
      * Get the cached DocumentStructure for a URI without a TextDocument.
      * Returns null when the URI has no cache entry or the structure has not
      * been built yet. Callers that need a guaranteed structure should use

@@ -774,15 +774,36 @@ export class ReferencesProvider {
             filterDeclLine = position.line;
         }
         if (filterDeclFile && filterDeclLine >= 0) {
-            // Try in-memory document text first if cursor file matches; fall back to disk.
+            // filterDeclFile may arrive as FS-path (legacy paths) OR URI form (synthesized
+            // info from `findMemberInDocumentTokens`). Normalize once for comparisons.
+            const declHasUriPrefix = /^file:\/\/\//i.test(filterDeclFile);
+            const filterDeclFsPath = declHasUriPrefix
+                ? decodeURIComponent(filterDeclFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+                : filterDeclFile;
+            const filterDeclUri = declHasUriPrefix
+                ? filterDeclFile
+                : 'file:///' + filterDeclFile.replace(/\\/g, '/');
+            const declFileNorm = filterDeclFsPath.replace(/\\/g, '/').toLowerCase();
+
+            // Try in-memory document text first if cursor file matches; then check TokenCache
+            // for cross-file in-memory documents (cursor in MEMBER, decl in PROGRAM file —
+            // 671d7cd8 cross-file path); fall back to disk for production-loaded files.
             let declLineText: string | null = null;
-            const declFileNorm = filterDeclFile.replace(/\\/g, '/').toLowerCase();
             const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''));
             if (docFsPath.replace(/\\/g, '/').toLowerCase() === declFileNorm) {
                 declLineText = document.getText().split(/\r?\n/)[filterDeclLine] ?? null;
             }
             if (!declLineText) {
-                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFile, filterDeclLine);
+                // Cross-file in-memory case (e.g. caller-cursor in MEMBER, decl in PROGRAM).
+                // TokenCache caches documentText for any open buffer; case-insensitive lookup
+                // bridges FRG-lowercased vs original-case URIs.
+                const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(filterDeclUri);
+                if (cachedText) {
+                    declLineText = cachedText.split(/\r?\n/)[filterDeclLine] ?? null;
+                }
+            }
+            if (!declLineText) {
+                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFsPath, filterDeclLine);
             }
             if (declLineText && /\bPROCEDURE\b/i.test(declLineText)) {
                 const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
@@ -837,7 +858,18 @@ export class ReferencesProvider {
                 Range.create(declarationLine, col, declarationLine, col + memberLen)));
         }
 
-        for (const fileUri of filesToSearch) {
+        // Dedup filesToSearch case-insensitively — multiple sources may contribute the same
+        // file with different case (FRG-lowercased + project-scan original-case). Prefer the
+        // first occurrence so cursor's-document URI wins when present.
+        const filesToSearchDeduped: string[] = [];
+        const seenLowerUris = new Set<string>();
+        for (const f of filesToSearch) {
+            const lower = f.toLowerCase();
+            if (seenLowerUris.has(lower)) continue;
+            seenLowerUris.add(lower);
+            filesToSearchDeduped.push(f);
+        }
+        for (const fileUri of filesToSearchDeduped) {
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
@@ -851,10 +883,11 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
-        // Deduplicate by uri+line (declaration may be found both by direct injection and scanner)
+        // Deduplicate by uri+line (case-insensitive on uri — same file in different case
+        // shapes from FRG-derived vs project-scan-derived URI sources should collapse).
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = `${loc.uri}:${loc.range.start.line}`;
+            const key = `${loc.uri.toLowerCase()}:${loc.range.start.line}`;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -913,14 +946,50 @@ export class ReferencesProvider {
      * In-document fallback for `resolveViaVariableType` when the
      * `StructureDeclarationIndexer` lookup misses (test fixtures without
      * SolutionManager, or classes declared in the cursor's own file before
-     * the project index has rebuilt). Scans the cursor's tokens for the
-     * named CLASS structure and returns a synthesized `ChainedMemberInfo`
-     * pointing at the matching member declaration.
+     * the project index has rebuilt). Scans the cursor's tokens first; if
+     * the class isn't there, walks the FRG MEMBER edge to the PROGRAM file
+     * and tries its tokens (cross-file case — cursor in MEMBER calling a
+     * class declared at PROGRAM scope).
      */
     private findMemberInDocumentTokens(
         memberName: string,
         typeName: string,
         document: TextDocument,
+        tokens: Token[]
+    ): ChainedMemberInfo | null {
+        // Try cursor's own document first.
+        const local = this.scanTokensForClassMember(memberName, typeName, document.uri, tokens);
+        if (local) return local;
+
+        // Try the PROGRAM file (cross-file: cursor in MEMBER, class declared in PROGRAM).
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+                .replace(/\//g, '\\');
+            const programFsPath = graph.getProgramFile(docFsPath);
+            if (programFsPath) {
+                const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+                const programTokens = this.getTokensForUri(programUri);
+                if (programTokens && programTokens.length > 0) {
+                    return this.scanTokensForClassMember(memberName, typeName, programUri, programTokens);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Helper for `findMemberInDocumentTokens` — scan a single token stream for the
+     * named CLASS structure and return a synthesized `ChainedMemberInfo` for the
+     * matching member declaration. Returns null when the class or member isn't
+     * present in those tokens. `info.file` is URI form (file:///) — `Location.create`
+     * downstream consumes URIs; the overloadFilter setup's in-memory-text check
+     * tolerates URI-form via the TokenCache fallback added for `671d7cd8`.
+     */
+    private scanTokensForClassMember(
+        memberName: string,
+        typeName: string,
+        fileUri: string,
         tokens: Token[]
     ): ChainedMemberInfo | null {
         const typeNameLower = typeName.toLowerCase();
@@ -940,18 +1009,11 @@ export class ReferencesProvider {
             t.line < (classToken.finishesAt ?? Infinity));
         if (!methodToken) return null;
 
-        // Use FS-path form (not file:///) so the downstream overloadFilter setup's
-        // in-memory-text check (`provideMemberReferences:772-776`) matches the
-        // cursor's document and reads the decl signature from in-memory text rather
-        // than failing the disk read.
-        const fsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
-            .replace(/\//g, '\\');
-
         return {
             type: 'method',
             className: typeName,
             line: methodToken.line,
-            file: fsPath
+            file: fileUri
         };
     }
 
@@ -1182,23 +1244,48 @@ export class ReferencesProvider {
 
     /**
      * Tier 6 entry point — resolve the PROGRAM file for the cursor's MEMBER (via FRG)
-     * and load its module-scope vars. Returns null when the cursor file IS the PROGRAM,
-     * when FRG isn't built, or when the PROGRAM file can't be located. Callers treat
-     * null as "no global scope to consult" — module scope of the cursor file already
-     * covers anything that would have been caught by global lookup in those cases.
+     * and load its module-scope vars. Returns null when FRG isn't built or when no
+     * PROGRAM-scope data is reachable.
+     *
+     * Symmetric handling of cursor-in-PROGRAM vs cursor-in-MEMBER:
+     * - Cursor-in-MEMBER: walk the FRG forward-MEMBER edge from the cursor's file to
+     *   find the PROGRAM file; load its moduleScope as globalScope.
+     * - Cursor-in-PROGRAM: cursor's file IS the program (no outgoing MEMBER edge).
+     *   For cursor-own-file scans, the matching loop's own moduleScope already covers
+     *   PROGRAM-level vars via Tier 5 — but the matching loop ALSO scans MEMBER files
+     *   reachable via reverse-MEMBER edges, and those scans need globalScope to resolve
+     *   PROGRAM-level vars. So when the cursor IS a PROGRAM (detected via reverse-MEMBER
+     *   edge presence), return the cursor file's own moduleScope as globalScope so
+     *   MEMBER-file scans can see it. Closes the cursor-in-PROGRAM silent-asymmetry bug
+     *   (`671d7cd8` discovery — symmetric to `0c289e16`'s decl-vs-call cursor-side
+     *   asymmetry, different axis).
      */
     private loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
         const graph = FileRelationshipGraph.getInstance();
         if (!graph.isBuilt) return null;
         const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
             .replace(/\//g, '\\');
+
         const programFsPath = graph.getProgramFile(docFsPath);
-        if (!programFsPath) return null;
-        // FRG normalizes paths to lowercase forward-slash; rebuild URI accordingly.
-        const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
-        // Skip if cursor IS the PROGRAM — module scope of cursor file already covers it.
-        if (programUri.toLowerCase() === document.uri.toLowerCase()) return null;
-        return this.loadGlobalScopeFromProgramFile(programUri);
+        if (programFsPath) {
+            const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+            // Self-MEMBER edge case (cursor file MEMBERs itself) — fall back to
+            // cursor's own moduleScope.
+            if (programUri.toLowerCase() === document.uri.toLowerCase()) {
+                return this.buildFileVarTypeIndex(this.tokenCache.getTokens(document)).moduleScope;
+            }
+            return this.loadGlobalScopeFromProgramFile(programUri);
+        }
+
+        // No outgoing MEMBER edge — cursor file might BE a PROGRAM. Check incoming
+        // MEMBER edges: if any sibling files reference this one as their PROGRAM,
+        // cursor IS the program. Return cursor's moduleScope so reverse-MEMBER scans
+        // (MEMBER files reached via filesToSearch widening) can resolve PROGRAM-level
+        // vars via the global tier.
+        if (graph.getMemberFiles(docFsPath).length > 0) {
+            return this.buildFileVarTypeIndex(this.tokenCache.getTokens(document)).moduleScope;
+        }
+        return null;
     }
 
     /**
@@ -1266,23 +1353,40 @@ export class ReferencesProvider {
     private gatherClassMemberOverloads(
         className: string,
         memberName: string,
-        declFileNorm: string,
+        declFile: string,
         document: TextDocument
     ): Array<{ signature: string; declarationLine: number }> {
         const result: Array<{ signature: string; declarationLine: number }> = [];
+
+        // declFile may arrive as FS-path (legacy) or URI form (synthesized info from
+        // findMemberInDocumentTokens). Normalize once.
+        const hasUriPrefix = /^file:\/\/\//i.test(declFile);
+        const declFsPath = hasUriPrefix
+            ? decodeURIComponent(declFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+            : declFile;
+        const declUri = hasUriPrefix
+            ? declFile
+            : 'file:///' + declFile.replace(/\\/g, '/');
+        const declFsNorm = declFsPath.replace(/\\/g, '/').toLowerCase();
         const docFsNorm = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
-            .replace(/\//g, '\\').toLowerCase();
+            .replace(/\//g, '\\').replace(/\\/g, '/').toLowerCase();
 
         let lookupTokens: Token[] | null = null;
         let getLineText: (line: number) => string;
-        if (declFileNorm === docFsNorm) {
+        if (declFsNorm === docFsNorm) {
             lookupTokens = this.tokenCache.getTokens(document);
             const docLines = document.getText().split(/\r?\n/);
             getLineText = (line) => docLines[line] ?? '';
         } else {
-            const declUri = 'file:///' + declFileNorm.replace(/\\/g, '/');
             lookupTokens = this.getTokensForUri(declUri);
-            getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFileNorm, line) ?? '';
+            // Try TokenCache for in-memory documents first; fall back to disk for production-loaded files.
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(declUri);
+            if (cachedText) {
+                const declLines = cachedText.split(/\r?\n/);
+                getLineText = (line) => declLines[line] ?? '';
+            } else {
+                getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFsPath, line) ?? '';
+            }
         }
         if (!lookupTokens || lookupTokens.length === 0) return result;
 
@@ -1753,14 +1857,22 @@ export class ReferencesProvider {
         };
 
         // Read file lines once for overload-filtered MethodImplementation param checking.
-        // Use in-memory document text when fileUri matches currentDocument; otherwise
-        // fall back to disk read (fe254d6f Phase A B-extension — necessary for in-memory
-        // test fixtures + matches the plain-symbol path's findReferencesInFile pattern).
+        // Resolution order: (1) cursor's in-memory document if URIs match (case-insensitive);
+        // (2) TokenCache for any other in-memory buffer at this URI (cross-file FAR with
+        // open-but-unsaved files OR test-fixture files seeded via MultiFileFARFixture);
+        // (3) disk read for production-loaded files. The TokenCache step (added 671d7cd8)
+        // closes the silent-asymmetry where impl-discrimination skipped on cross-file scans
+        // because disk-read failed for in-memory buffers.
         let fileLines: string[] | null = null;
         if (overloadFilter) {
-            if (currentDocument && currentDocument.uri === fileUri) {
+            if (currentDocument && currentDocument.uri.toLowerCase() === fileUri.toLowerCase()) {
                 fileLines = currentDocument.getText().split(/\r?\n/);
-            } else {
+            }
+            if (!fileLines) {
+                const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(fileUri);
+                if (cachedText) fileLines = cachedText.split(/\r?\n/);
+            }
+            if (!fileLines) {
                 try {
                     const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
                     fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
@@ -2967,7 +3079,9 @@ export class ReferencesProvider {
      * falls back to reading and tokenizing from disk for closed files.
      */
     private getTokensForUri(uri: string): Token[] {
-        const cached = this.tokenCache.getTokensByUri(uri);
+        // Case-insensitive fallback bridges FRG-lowercased URIs (Tier 6 globalScope
+        // load path, etc.) with TokenCache's original-case keys (`671d7cd8`).
+        const cached = this.tokenCache.getTokensByUriCaseInsensitive(uri);
         if (cached) return cached;
 
         try {

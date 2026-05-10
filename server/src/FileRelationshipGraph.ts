@@ -173,6 +173,28 @@ export class FileRelationshipGraph {
         logger.debug(`🔄 [FRG] FileRelationshipGraph reset`);
     }
 
+    /**
+     * Test-only — seed the graph with hand-built edges and mark it as built.
+     * Used by `MultiFileFARFixture` (task `671d7cd8`) to enable cross-file Tier 6
+     * (PROGRAM-scope global receiver) test coverage without driving the full
+     * project-scan build pipeline. Each input edge's `fromFile` / `toFile` are
+     * normalised via the same `normalizePath` rule used by the production walk
+     * so test seeding produces identical key shapes.
+     *
+     * Callers should pair this with `reset()` in test teardown to restore the
+     * singleton's pre-test state.
+     */
+    public seedEdgesForTest(edges: FileEdge[]): void {
+        for (const e of edges) {
+            this.addEdge({
+                ...e,
+                fromFile: this.normalizePath(e.fromFile),
+                toFile: this.normalizePath(e.toFile)
+            });
+        }
+        this._built = true;
+    }
+
     // ── Core processor ─────────────────────────────────────────────────────────
 
     /**

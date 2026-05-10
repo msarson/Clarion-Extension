@@ -4,6 +4,7 @@ import { TokenCache } from '../TokenCache';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { setServerInitialized } from '../serverState';
+import { buildMultiFileFixture, teardownMultiFileFixture } from './helpers/MultiFileFARFixture';
 
 /**
  * Failing-pin + guardrail suite for task `0c289e16` Phase A — caller-cursor
@@ -58,6 +59,10 @@ suite('ReferencesProvider.CallerCursorDotAccess (0c289e16 Phase A Item 0)', () =
         TokenCache.getInstance().clearAllTokens();
         provider = new ReferencesProvider();
         definitionProvider = new DefinitionProvider();
+    });
+
+    teardown(() => {
+        teardownMultiFileFixture();
     });
 
     // ─── (1) BUG PIN — caller-cursor, literal arg ──────────────────────────
@@ -500,6 +505,121 @@ suite('ReferencesProvider.CallerCursorDotAccess (0c289e16 Phase A Item 0)', () =
         assert.ok(
             !lines.includes(20),
             'expected line 20 (LONG caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + '] — ' +
+            'overload disambiguation must drop the wrong-overload caller'
+        );
+    });
+
+    // ─── (7) Tier 6 Global Receiver Sentinel — TRUE cross-file global path ───
+
+    /**
+     * Phase B Tier 6 backfill (`671d7cd8`, follows `0c289e16`'s deferral disclosure).
+     *
+     * Cursor-on-call-site path: cursor on caller's `WriteLine` in `caller.clw`
+     * (a MEMBER file). Receiver `instGlobal MyClass` is declared at PROGRAM scope
+     * in `main.clw`. Without FRG seeding (`frg` opt omitted), `loadGlobalScopeForCursor`
+     * returns null → `lookupVarTypeAtLine` can't resolve `instGlobal` → MyClass via
+     * Tier 6 → caller-cursor path returns null. Test asserts the resolution succeeds
+     * with the FRG-seeded fixture — pinning the cross-file Tier 6 path that 0c289e16
+     * Phase B's Test 6 left on Tier 5 (module-scope receiver) per the deferral.
+     *
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`: STRING decl/impl/caller
+     * IN result; LONG decl/impl/wrong-overload-caller NOT IN result.
+     *
+     * Companion to test 6 (Tier 5 module-scope receiver) — both retained for
+     * non-redundant coverage: Tier 5 exercises the lookup-mechanism path; Tier 7
+     * specifically validates the FRG-seeded cross-file resolution path.
+     */
+    test('Tier 6 Global Receiver Sentinel — true cross-file PROGRAM-scope global receiver via FRG', async () => {
+        const fixture = buildMultiFileFixture({
+            files: {
+                'main.clw': [
+                    "  PROGRAM",                                  // line 0
+                    '',                                            // line 1
+                    'MyClass    CLASS,TYPE',                       // line 2
+                    'WriteLine    PROCEDURE(STRING)',              // line 3 — STRING decl
+                    'WriteLine    PROCEDURE(LONG)',                // line 4 — LONG decl
+                    '           END',                              // line 5
+                    '',                                            // line 6
+                    'instGlobal MyClass',                          // line 7 — PROGRAM-scope global
+                    '',                                            // line 8
+                    '  CODE',                                      // line 9
+                    '  RETURN',                                    // line 10
+                    '',                                            // line 11
+                    'MyClass.WriteLine PROCEDURE(STRING s)',       // line 12 — STRING impl
+                    '  CODE',
+                    '  RETURN',
+                    '',
+                    'MyClass.WriteLine PROCEDURE(LONG n)',         // line 16 — LONG impl
+                    '  CODE',
+                    '  RETURN',
+                ].join('\n'),
+                'caller.clw': [
+                    "  MEMBER('main.clw')",                        // line 0
+                    '',                                            // line 1
+                    'CallerProc PROCEDURE',                        // line 2
+                    '  CODE',                                      // line 3
+                    "  instGlobal.WriteLine('hello')",             // line 4 — STRING caller (cursor here)
+                    '  instGlobal.WriteLine(42)',                  // line 5 — LONG caller
+                    '  RETURN',                                    // line 6
+                ].join('\n'),
+            },
+            frg: {
+                programFile: 'main.clw',
+                memberFiles: ['caller.clw']
+            }
+        });
+
+        const docCaller = fixture.documents['caller.clw'];
+        const callerLineText = "  instGlobal.WriteLine('hello')";
+        const writeLineCol = callerLineText.indexOf('WriteLine') + 1;
+
+        const refs = await provider.provideReferences(docCaller, {
+            line: 4,
+            character: writeLineCol
+        }, { includeDeclaration: true });
+
+        assert.ok(
+            refs,
+            'FAR should NOT return null for caller-cursor on cross-file PROGRAM-scope global receiver — ' +
+            'true Tier 6 path via FRG.getProgramFile + loadGlobalScopeForCursor must resolve `instGlobal` → MyClass'
+        );
+
+        const callerUriLower = fixture.uris['caller.clw'].toLowerCase();
+        const mainUriLower = fixture.uris['main.clw'].toLowerCase();
+
+        const callerHits = refs!.filter(r => r.uri.toLowerCase() === callerUriLower)
+            .map(r => r.range.start.line)
+            .sort((a, b) => a - b);
+        const mainHits = refs!.filter(r => r.uri.toLowerCase() === mainUriLower)
+            .map(r => r.range.start.line)
+            .sort((a, b) => a - b);
+
+        // Positive: STRING decl in main + STRING impl in main + caller line 4 in caller.clw IN result.
+        assert.ok(
+            mainHits.includes(3),
+            'expected main.clw line 3 (STRING decl, matching overload) IN result; got mainHits=[' + mainHits.join(',') + ']'
+        );
+        assert.ok(
+            mainHits.includes(12),
+            'expected main.clw line 12 (STRING impl, matching overload) IN result; got mainHits=[' + mainHits.join(',') + ']'
+        );
+        assert.ok(
+            callerHits.includes(4),
+            'expected caller.clw line 4 (STRING caller, cursor line) IN result; got callerHits=[' + callerHits.join(',') + ']'
+        );
+
+        // Negative: LONG decl/impl in main + LONG caller line 5 NOT in STRING-cursor result.
+        assert.ok(
+            !mainHits.includes(4),
+            'expected main.clw line 4 (LONG decl, wrong overload) NOT in result; got mainHits=[' + mainHits.join(',') + ']'
+        );
+        assert.ok(
+            !mainHits.includes(16),
+            'expected main.clw line 16 (LONG impl, wrong overload) NOT in result; got mainHits=[' + mainHits.join(',') + ']'
+        );
+        assert.ok(
+            !callerHits.includes(5),
+            'expected caller.clw line 5 (LONG caller) NOT in STRING-cursor result; got callerHits=[' + callerHits.join(',') + '] — ' +
             'overload disambiguation must drop the wrong-overload caller'
         );
     });

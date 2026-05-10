@@ -2,6 +2,7 @@ import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
+import { FileRelationshipGraph } from '../../FileRelationshipGraph';
 
 /**
  * Multi-file FAR test scaffolding for the FAR family follow-ups
@@ -37,10 +38,32 @@ export interface MultiFileFixture {
 export interface BuildMultiFileFixtureOpts {
     files: { [relPath: string]: string };
     projectRoot?: string;
+    /**
+     * Optional FRG seeding — enables cross-file Tier 6 (PROGRAM-scope global receiver)
+     * test coverage by seeding `FileRelationshipGraph` with `MEMBER → PROGRAM` edges.
+     *
+     * - `programFile`: relative path of the file in `files` that is the PROGRAM (e.g. `'main.clw'`)
+     * - `memberFiles`: relative paths that are MEMBERs of the PROGRAM. When omitted, every
+     *   non-PROGRAM file in `files` is treated as a MEMBER. Each MEMBER's `MEMBER('main.clw')`
+     *   declaration is presumed to point at `programFile` — fixture authors are responsible
+     *   for keeping the `MEMBER(...)` text in their file content consistent.
+     *
+     * When `frg` is provided, `teardownMultiFileFixture` calls `FileRelationshipGraph.reset()`
+     * to restore the singleton's pre-test state. When omitted, FRG state is untouched
+     * (existing callers without the opt-in see no behaviour change).
+     *
+     * Added 2026-05-10 by task `671d7cd8` to backfill the deferred Tier 6 cross-file
+     * test coverage from `10ea5a80` + `9142af9f` + `0c289e16`.
+     */
+    frg?: {
+        programFile: string;
+        memberFiles?: string[];
+    };
 }
 
 let _savedSmInstance: SolutionManager | null = null;
 let _fixtureActive = false;
+let _frgSeeded = false;
 
 /** Constructs the canonical URI shape `getFilesToSearch` builds. */
 export function createTestUri(projectRoot: string, relPath: string): string {
@@ -125,14 +148,33 @@ export function buildMultiFileFixture(opts: BuildMultiFileFixtureOpts): MultiFil
         documents[relPath] = doc;
     }
 
+    // Optional FRG seeding for cross-file Tier 6 (PROGRAM-scope global receiver) coverage.
+    if (opts.frg) {
+        const programAbs = path.join(projectRoot, opts.frg.programFile);
+        const memberPaths = opts.frg.memberFiles
+            ?? Object.keys(opts.files).filter(p => p !== opts.frg!.programFile);
+        const edges = memberPaths.map(memberRel => ({
+            type: 'MEMBER' as const,
+            fromFile: path.join(projectRoot, memberRel),
+            toFile: programAbs,
+            fromLine: 0
+        }));
+        FileRelationshipGraph.getInstance().seedEdgesForTest(edges);
+        _frgSeeded = true;
+    }
+
     return { projectRoot, uris, documents };
 }
 
-/** Restore SolutionManager.instance + clear TokenCache. Idempotent. */
+/** Restore SolutionManager.instance + clear TokenCache + reset FRG (when seeded). Idempotent. */
 export function teardownMultiFileFixture(): void {
     if (!_fixtureActive) { return; }
     (SolutionManager as unknown as { instance: SolutionManager | null }).instance = _savedSmInstance;
     _savedSmInstance = null;
     TokenCache.getInstance().clearAllTokens();
+    if (_frgSeeded) {
+        FileRelationshipGraph.getInstance().reset();
+        _frgSeeded = false;
+    }
     _fixtureActive = false;
 }
