@@ -812,6 +812,14 @@ export class ReferencesProvider {
             ? this.buildClassFamily(className, filesToSearch)
             : undefined;
 
+        // Phase B+ Tier 6 — load global scope from PROGRAM file via FRG so the
+        // matching loop can resolve receivers declared at PROGRAM level. Loaded
+        // ONCE per match and shared across every file in `filesToSearch`. Empty
+        // map when there's no resolvable PROGRAM file (e.g. cursor file IS the
+        // PROGRAM, or FRG not built — module scope of cursor file then carries
+        // anything the global lookup would have caught anyway).
+        const globalScope = this.loadGlobalScopeForCursor(document) ?? undefined;
+
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
 
@@ -830,7 +838,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
 
@@ -886,68 +894,256 @@ export class ReferencesProvider {
      * Class members (SELF.Order) can be used in any implementation file in the project.
      */
     /**
-     * P2b track-(b) — build a per-procedure variable-type index from a token stream.
-     * Lookups via `lookupVarTypeAtLine` are O(scopes) for scope find + O(1) map get.
-     * Used by the matching loop to detect `var.member(...)` calls where `var`'s
-     * declared type is in the target class family.
+     * P2b track-(b) + Phase B+ — file-level variable-type index covering Clarion's
+     * scope tiers per `project_clarion_scope_model.md`:
      *
-     * Builds from sync token data only — no async, no TextDocument needed for
-     * scanned files (works equally for cursor-file and other-files).
+     *   Tier 2 (procedure parameters)        — folded into procScopes via Token.parameters
+     *   Tier 3 (procedure local data)        — col-0 Labels within proc finishesAt
+     *   Tier 4 (CLASS member data via SELF)  — when proc is a methodImpl, classFields populated
+     *   Tier 5 (module data)                 — col-0 Labels OUTSIDE any procedure scope
+     *
+     * Tier 1 (Routine Local data) is deferred to follow-up task 9142af9f — needs
+     * own-name-scope shadowing semantics that warrant separate test coverage.
+     *
+     * Tier 6 (global data) is built per-file too but loaded SEPARATELY via
+     * `loadGlobalScope(programFileUri)` — the PROGRAM file may differ from the
+     * cursor's MEMBER file, so the matching loop loads it once per match and
+     * passes it into `lookupVarTypeAtLine`.
      */
-    private buildProcVarTypeIndex(tokens: Token[]): Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> {
-        const scopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> = [];
-        // Cache line->lineTokens lookup to avoid O(n²) on large files.
+    private buildFileVarTypeIndex(tokens: Token[]): {
+        procScopes: Array<{
+            startLine: number;
+            endLine: number;
+            varTypes: Map<string, string>;
+            classFields?: Map<string, string>;
+            enclosingClassLower?: string;
+        }>;
+        moduleScope: Map<string, string>;
+    } {
+        const procScopes: Array<{
+            startLine: number;
+            endLine: number;
+            varTypes: Map<string, string>;
+            classFields?: Map<string, string>;
+            enclosingClassLower?: string;
+        }> = [];
+        const moduleScope = new Map<string, string>();
+
         const tokensByLine = new Map<number, Token[]>();
         for (const t of tokens) {
             const arr = tokensByLine.get(t.line);
             if (arr) arr.push(t); else tokensByLine.set(t.line, [t]);
         }
 
+        // Pre-compute procedure line ranges so we can identify "outside-any-procedure"
+        // lines for the module-scope walk (Tier 5).
+        const procRanges: Array<{ start: number; end: number }> = [];
         for (const procToken of tokens) {
             if (procToken.type === TokenType.Procedure &&
                 (procToken.subType === TokenType.GlobalProcedure ||
                  procToken.subType === TokenType.MethodImplementation) &&
                 procToken.finishesAt !== undefined && procToken.finishesAt > procToken.line) {
-                const startLine = procToken.line;
-                const endLine = procToken.finishesAt;
-                const varTypes = new Map<string, string>();
+                procRanges.push({ start: procToken.line, end: procToken.finishesAt });
+            }
+        }
+        const isInsideAnyProcedure = (line: number) =>
+            procRanges.some(r => line >= r.start && line <= r.end);
 
-                for (let line = startLine; line <= endLine; line++) {
+        // Tier 5 — Module scope: col-0 Labels OUTSIDE any procedure scope.
+        for (const t of tokens) {
+            if (t.type !== TokenType.Label || t.start !== 0 || !t.label) continue;
+            if (isInsideAnyProcedure(t.line)) continue;
+            const lineTokens = tokensByLine.get(t.line);
+            if (!lineTokens) continue;
+            this.captureLabelType(t, lineTokens, moduleScope);
+        }
+
+        // Per-procedure scope build (Tiers 2 + 3 + optional Tier 4 for methods).
+        for (const procToken of tokens) {
+            if (procToken.type !== TokenType.Procedure ||
+                (procToken.subType !== TokenType.GlobalProcedure &&
+                 procToken.subType !== TokenType.MethodImplementation) ||
+                procToken.finishesAt === undefined || procToken.finishesAt <= procToken.line) {
+                continue;
+            }
+            const startLine = procToken.line;
+            const endLine = procToken.finishesAt;
+            const varTypes = new Map<string, string>();
+
+            // Tier 2 — Procedure parameters from tokenizer's structured parameters list.
+            if (procToken.parameters) {
+                for (const p of procToken.parameters) {
+                    if (p.name) {
+                        // Strip pass-by-ref decoration from type for downstream comparisons.
+                        const cleanType = p.type ? p.type.replace(/^[*&]\s*/, '') : '';
+                        varTypes.set(p.name.toLowerCase(), cleanType);
+                    }
+                }
+            }
+
+            // Tier 3 — Procedure local data: col-0 Labels within (startLine, endLine).
+            for (let line = startLine + 1; line <= endLine; line++) {
+                const lineTokens = tokensByLine.get(line);
+                if (!lineTokens) continue;
+                for (let k = 0; k < lineTokens.length; k++) {
+                    const cand = lineTokens[k];
+                    if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                    this.captureLabelType(cand, lineTokens, varTypes);
+                }
+            }
+
+            // Tier 4 — CLASS member data via SELF (only for methodImpls).
+            // procToken.label for methodImpl is "ClassName.MethodName" → split on '.'
+            // → look up the CLASS structure → walk its data members.
+            let classFields: Map<string, string> | undefined;
+            let enclosingClassLower: string | undefined;
+            if (procToken.subType === TokenType.MethodImplementation && procToken.label) {
+                const dotIdx = procToken.label.indexOf('.');
+                if (dotIdx > 0) {
+                    enclosingClassLower = procToken.label.substring(0, dotIdx).toLowerCase();
+                    classFields = this.gatherClassDataMembers(enclosingClassLower, tokens, tokensByLine);
+                }
+            }
+
+            procScopes.push({ startLine, endLine, varTypes, classFields, enclosingClassLower });
+        }
+
+        return { procScopes, moduleScope };
+    }
+
+    /**
+     * Helper for `buildFileVarTypeIndex`: extract the declared-type of a column-0
+     * Label by inspecting the next significant token on the same line. Mutates
+     * `target` map.
+     */
+    private captureLabelType(label: Token, lineTokens: Token[], target: Map<string, string>): void {
+        const idx = lineTokens.indexOf(label);
+        if (idx < 0 || idx + 1 >= lineTokens.length) return;
+        const next = lineTokens[idx + 1];
+        if (!label.label) return;
+        const nameLower = label.label.toLowerCase();
+
+        // Class-typed (`inst MyClass`), Type-keyword (`count LONG`), Reference (`mgr &MyClass`).
+        if (next.type === TokenType.Type ||
+            next.type === TokenType.Variable ||
+            next.type === TokenType.Label) {
+            target.set(nameLower, next.value);
+        } else if (next.type === TokenType.ReferenceVariable) {
+            const stripped = next.value.startsWith('&') ? next.value.slice(1) : next.value;
+            target.set(nameLower, stripped);
+        } else if (label.dataType) {
+            target.set(nameLower, label.dataType);
+        }
+    }
+
+    /**
+     * Helper for `buildFileVarTypeIndex` Tier 4 — walks the named CLASS structure's
+     * data members (col-0 Labels inside the class body, EXCLUDING method declarations).
+     */
+    private gatherClassDataMembers(
+        classNameLower: string,
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>
+    ): Map<string, string> {
+        const fields = new Map<string, string>();
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
+                t.label?.toLowerCase() === classNameLower &&
+                t.finishesAt !== undefined && t.finishesAt > t.line) {
+                for (let line = t.line + 1; line < t.finishesAt; line++) {
                     const lineTokens = tokensByLine.get(line);
                     if (!lineTokens) continue;
                     for (let k = 0; k < lineTokens.length; k++) {
                         const cand = lineTokens[k];
                         if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                        // Skip method declarations — fields only.
                         const next = lineTokens[k + 1];
-                        if (!next) continue;
-                        // Class-typed: `inst MyClass` → next is Variable("MyClass").
-                        // Reference-typed: `mgr &MyClass` → next is ReferenceVariable.
-                        // Type-keyword: `count LONG` → next is Type or Variable("LONG").
-                        if (next.type === TokenType.Type ||
-                            next.type === TokenType.Variable ||
-                            next.type === TokenType.Label) {
-                            varTypes.set(cand.label.toLowerCase(), next.value);
-                        } else if (next.type === TokenType.ReferenceVariable) {
-                            const stripped = next.value.startsWith('&') ? next.value.slice(1) : next.value;
-                            varTypes.set(cand.label.toLowerCase(), stripped);
-                        } else if (cand.dataType) {
-                            varTypes.set(cand.label.toLowerCase(), cand.dataType);
-                        }
+                        if (next && next.type === TokenType.Procedure) continue;
+                        this.captureLabelType(cand, lineTokens, fields);
                     }
                 }
-                scopes.push({ startLine, endLine, varTypes });
             }
         }
-        return scopes;
+        return fields;
     }
 
+    /**
+     * Tier 6 — load module-level variables from a different file (typically the
+     * PROGRAM file, when the cursor's file is a MEMBER). Reuses the same module-scope
+     * walk as `buildFileVarTypeIndex`. Returns empty map if the file can't be loaded.
+     */
+    private loadGlobalScopeFromProgramFile(programFileUri: string): Map<string, string> {
+        const tokens = this.getTokensForUri(programFileUri);
+        if (!tokens || tokens.length === 0) return new Map();
+        return this.buildFileVarTypeIndex(tokens).moduleScope;
+    }
+
+    /**
+     * Tier 6 entry point — resolve the PROGRAM file for the cursor's MEMBER (via FRG)
+     * and load its module-scope vars. Returns null when the cursor file IS the PROGRAM,
+     * when FRG isn't built, or when the PROGRAM file can't be located. Callers treat
+     * null as "no global scope to consult" — module scope of the cursor file already
+     * covers anything that would have been caught by global lookup in those cases.
+     */
+    private loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return null;
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+            .replace(/\//g, '\\');
+        const programFsPath = graph.getProgramFile(docFsPath);
+        if (!programFsPath) return null;
+        // FRG normalizes paths to lowercase forward-slash; rebuild URI accordingly.
+        const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+        // Skip if cursor IS the PROGRAM — module scope of cursor file already covers it.
+        if (programUri.toLowerCase() === document.uri.toLowerCase()) return null;
+        return this.loadGlobalScopeFromProgramFile(programUri);
+    }
+
+    /**
+     * P2b track-(b) — variable-type lookup at a source line + key.
+     *
+     * Walks the tier chain in Clarion's resolution priority order:
+     *   1. (deferred — Routine Local data, task 9142af9f)
+     *   2. Procedure parameters + 3. Procedure Local data (both in `procScope.varTypes`)
+     *   4. CLASS member data via SELF (only consulted when `key` starts with "self.")
+     *   5. Module data (`moduleScope`)
+     *   6. Global data (`globalScope` from PROGRAM file)
+     *
+     * `key` is one of:
+     *   - plain identifier (`'inst'`) → searched against varTypes / moduleScope / globalScope
+     *   - SELF-prefixed (`'self.receiver'`) → searched against the procedure's classFields
+     */
     private lookupVarTypeAtLine(
-        scopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>,
+        index: {
+            procScopes: Array<{
+                startLine: number;
+                endLine: number;
+                varTypes: Map<string, string>;
+                classFields?: Map<string, string>;
+                enclosingClassLower?: string;
+            }>;
+            moduleScope: Map<string, string>;
+        },
+        globalScope: Map<string, string> | null,
         line: number,
-        varNameLower: string
+        key: string
     ): string | undefined {
-        const scope = scopes.find(s => line >= s.startLine && line <= s.endLine);
-        return scope?.varTypes.get(varNameLower);
+        const scope = index.procScopes.find(s => line >= s.startLine && line <= s.endLine);
+
+        // SELF.field path — Tier 4 only.
+        if (key.startsWith('self.')) {
+            const fieldNameLower = key.slice('self.'.length);
+            return scope?.classFields?.get(fieldNameLower);
+        }
+
+        // Plain identifier path — Tiers 2/3 → 5 → 6.
+        if (scope) {
+            const local = scope.varTypes.get(key);
+            if (local) return local;
+        }
+        const moduleHit = index.moduleScope.get(key);
+        if (moduleHit) return moduleHit;
+        return globalScope?.get(key);
     }
 
     /**
@@ -1392,20 +1588,24 @@ export class ReferencesProvider {
         overloadFilter?: OverloadFilter,
         includeDeclaration: boolean = true,
         currentDocument?: TextDocument,
-        candidateOverloads?: Array<{ signature: string; declarationLine: number }>
+        candidateOverloads?: Array<{ signature: string; declarationLine: number }>,
+        globalScope?: Map<string, string>
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
 
-        // P2b track-(b): per-procedure variable-type index for var.member call detection.
-        const varScopes = this.buildProcVarTypeIndex(tokens);
+        // P2b track-(b) + Phase B+: file-level variable-type index covering Tiers 2-5.
+        // Tier 6 (global) is loaded externally and passed as `globalScope`.
+        const fileVarIndex = this.buildFileVarTypeIndex(tokens);
+        const effectiveGlobalScope = globalScope ?? null;
 
         // P2b track-(b): classifier + resolver for type-aware overload filtering.
         // Only instantiated once per file; cheap stateless objects.
         const argClassifier = new CallSiteArgumentClassifier();
         const overloadResolver = new MethodOverloadResolver();
         const classifierCtx: ClassifierContext = {
-            resolveSymbolType: (name, line) => this.lookupVarTypeAtLine(varScopes, line, name.toLowerCase())
+            resolveSymbolType: (name, line) =>
+                this.lookupVarTypeAtLine(fileVarIndex, effectiveGlobalScope, line, name.toLowerCase())
         };
 
         const memberLower = memberName.toLowerCase();
@@ -1580,12 +1780,34 @@ export class ReferencesProvider {
                             // the class-body decl, not a call site). Recognize var.member
                             // calls where var's declared type is in the target class family.
                             // Resolves cross-procedure callers like `inst.Append('x')` where
-                            // `inst MyClass` is declared inside a non-method procedure.
+                            // `inst MyClass` is declared at any of: parameter / procedure-local /
+                            // module / global scope (Tiers 2/3/5/6).
                             const varNameLower = parts[0].toLowerCase();
-                            const varType = this.lookupVarTypeAtLine(varScopes, token.line, varNameLower);
+                            const varType = this.lookupVarTypeAtLine(
+                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
                             if (varType) {
                                 const varTypeBase = varType.toLowerCase().split('(')[0].trim();
                                 const matchesFamily = classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower;
+                                if (matchesFamily) {
+                                    if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                    if (isCompatibleCallSite(i)) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                         token.line, token.start + token.value.length)));
+                                    }
+                                }
+                            }
+                        } else if (parts.length === 3 && !chainPrefixLower && classLower &&
+                                   parts[0].toLowerCase() === 'self') {
+                            // Phase B+ Tier 4: SELF.field.method receiver (cursor on class-body decl,
+                            // call site is `SELF.someInst.Append(...)` from inside a method body).
+                            // Look up the field via the enclosing class's data members.
+                            const fieldKey = 'self.' + parts[1].toLowerCase();
+                            const fieldType = this.lookupVarTypeAtLine(
+                                fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
+                            if (fieldType) {
+                                const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                                const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
                                 if (matchesFamily) {
                                     if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
                                     if (isCompatibleCallSite(i)) {
@@ -1607,6 +1829,36 @@ export class ReferencesProvider {
                     }
                 }
                 continue;
+            }
+
+            // Phase B+ Tier 4 — SELF.field.method receiver tokenizes as
+            // StructureField("SELF.X") + Function("Method"). Catch the Function-token
+            // path here when no chainPrefix propagates from the cursor side. Look up
+            // X via the enclosing class's data members and confirm type matches family.
+            if ((token.type === TokenType.Function || token.type === TokenType.Variable) &&
+                token.value.toLowerCase() === memberLower &&
+                !chainPrefixLower && classLower) {
+                const prev = i > 0 ? tokens[i - 1] : null;
+                if (prev && prev.type === TokenType.StructureField && prev.line === token.line) {
+                    const prevParts = prev.value.split('.');
+                    if (prevParts.length === 2 && prevParts[0].toLowerCase() === 'self') {
+                        const fieldKey = 'self.' + prevParts[1].toLowerCase();
+                        const fieldType = this.lookupVarTypeAtLine(
+                            fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
+                        if (fieldType) {
+                            const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                            const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
+                            if (matchesFamily) {
+                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                if (isCompatibleCallSite(i)) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {

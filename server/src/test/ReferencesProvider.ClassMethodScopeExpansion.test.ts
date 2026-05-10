@@ -294,6 +294,176 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
      * missing) and GREEN post-fix (caller present + correctly filtered to
      * STRING overload only).
      */
+    // ─── (6) BUG PIN — procedure parameter receiver (Tier 2) ────────────────
+
+    /**
+     * Phase B+ extension (`10ea5a80` Tier 2 coverage). Receiver is a procedure
+     * parameter typed as MyClass — calls `param.Append('x')` inside that procedure
+     * must appear in FAR results. Pre-fix: `buildProcVarTypeIndex` walked col-0
+     * Labels only, missing parameters declared in the `PROCEDURE(...)` signature.
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`.
+     */
+    test('Phase B+ Tier 2 — parameter receiver — FAR returns param.Append() caller', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor (STRING)
+            'Append       PROCEDURE(LONG)',                      // line 4 — LONG overload
+            '           END',                                    // line 5
+            '',                                                  // line 6
+            'MyClass.Append PROCEDURE(STRING s)',                // line 7
+            '  CODE',
+            '  RETURN',
+            '',
+            'MyClass.Append PROCEDURE(LONG n)',                  // line 11
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 14
+            'DoStuff PROCEDURE(MyClass param, LONG flag)',       // line 15
+            '  CODE',                                            // line 16
+            "  param.Append('x')",                               // line 17 — STRING caller via param
+            '  param.Append(42)',                                // line 18 — LONG caller via param
+            '  RETURN',
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///3be2b68d-tier2.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        assert.ok(
+            lines.includes(17),
+            'expected line 17 (STRING param.Append caller) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            !lines.includes(18),
+            'expected line 18 (LONG param.Append caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + ']'
+        );
+    });
+
+    // ─── (7) BUG PIN — module-scope receiver (Tier 5) ───────────────────────
+
+    /**
+     * Phase B+ extension (Tier 5 coverage). Receiver is a MEMBER-scope variable
+     * declared OUTSIDE any procedure. Calls from procedures in the same module
+     * must appear in FAR results. Bidirectional pin: STRING caller IN, LONG NOT IN.
+     */
+    test('Phase B+ Tier 5 — module-scope receiver — FAR returns instModule.Append() caller', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor (STRING)
+            'Append       PROCEDURE(LONG)',                      // line 4 — LONG overload
+            '           END',                                    // line 5
+            '',                                                  // line 6
+            'instModule MyClass',                                // line 7 — module-scope receiver
+            '',                                                  // line 8
+            'MyClass.Append PROCEDURE(STRING s)',                // line 9
+            '  CODE',
+            '  RETURN',
+            '',
+            'MyClass.Append PROCEDURE(LONG n)',                  // line 13
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 16
+            'MainProc PROCEDURE',                                // line 17
+            '  CODE',                                            // line 18
+            "  instModule.Append('x')",                          // line 19 — STRING caller
+            '  instModule.Append(42)',                           // line 20 — LONG caller
+            '  RETURN',
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///3be2b68d-tier5.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        assert.ok(
+            lines.includes(19),
+            'expected line 19 (STRING instModule.Append caller) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            !lines.includes(20),
+            'expected line 20 (LONG instModule.Append caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + ']'
+        );
+    });
+
+    // ─── (8) BUG PIN — SELF.field receiver (Tier 4) ─────────────────────────
+
+    /**
+     * Phase B+ extension (Tier 4 coverage). Receiver is a CLASS member field accessed
+     * via `SELF.someInst`, called from inside another method body. Tokenizer produces
+     * `StructureField("SELF.someInst") + Function("Append")` — the new Function-token
+     * branch in the matching loop catches this shape.
+     */
+    test('Phase B+ Tier 4 — SELF.field receiver — FAR returns SELF.theInst.Append() caller', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor (STRING)
+            'Append       PROCEDURE(LONG)',                      // line 4 — LONG overload
+            '           END',                                    // line 5
+            '',                                                  // line 6
+            'Outer    CLASS,TYPE',                               // line 7
+            'theInst    MyClass',                                // line 8 — class-field receiver
+            'SomeMethod   PROCEDURE',                            // line 9
+            '           END',                                    // line 10
+            '',                                                  // line 11
+            'MyClass.Append PROCEDURE(STRING s)',                // line 12
+            '  CODE',
+            '  RETURN',
+            '',
+            'MyClass.Append PROCEDURE(LONG n)',                  // line 16
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 19
+            'Outer.SomeMethod PROCEDURE',                        // line 20
+            '  CODE',                                            // line 21
+            "  SELF.theInst.Append('x')",                        // line 22 — STRING caller via SELF.field
+            '  SELF.theInst.Append(42)',                         // line 23 — LONG caller via SELF.field
+            '  RETURN',
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///3be2b68d-tier4.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        assert.ok(
+            lines.includes(22),
+            'expected line 22 (STRING SELF.theInst.Append caller) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            !lines.includes(23),
+            'expected line 23 (LONG SELF.theInst.Append caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + ']'
+        );
+    });
+
+    // ─── (5) EQUIVALENCE GUARD — fe254d6f OverloadFilter integration ───────
+
+    /**
+     * Multi-overload class-method with cross-procedure callers; FAR returns
+     * only matching-overload's caller. Verifies caller-scope expansion
+     * cooperates with the fe254d6f Phase A signaturesMatch wire-up.
+     *
+     * Today: cross-procedure caller may be missed (3be2b68d bug pin shape);
+     * the equivalence aspect is whether the OverloadFilter still discriminates
+     * if the scope is widened. This test will likely be RED today (caller
+     * missing) and GREEN post-fix (caller present + correctly filtered to
+     * STRING overload only).
+     */
     test('EQUIVALENCE GUARD — multi-overload class-method, cross-procedure caller respects fe254d6f filter', async () => {
         const code = [
             "  MEMBER('test')",                       // line 0
