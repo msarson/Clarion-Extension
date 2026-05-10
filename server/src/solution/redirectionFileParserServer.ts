@@ -48,6 +48,18 @@ export interface RedirectionEntry {
  * filter site should reach for this helper rather than re-implementing the
  * comparison — that's the maintainability win over inline `.toLowerCase()`
  * at every callsite.
+ *
+ * **Section-merging semantics (Aspect 3 of `3f9f91c8` audit)** — sections
+ * are NOT merged at parse time across `{include}` chains. They are flat-list
+ * tags: each entry carries its source section name as a `section: string`
+ * field, case-preserved as-written. When a parent file declares `[Debug]`
+ * and an included file declares `[debug]`, both entries co-exist in the
+ * flat list with their as-written section values. Section equality is
+ * resolved at consumer time via this helper's case-insensitive comparison.
+ * Same-extension key conflicts within a section are resolved first-match-
+ * wins by iteration order — there is no parse-time concatenation or
+ * merging of paths. See `docs/audits/include-chaining-audit-3f9f91c8.md`
+ * Step 4 for the empirical verdict.
  */
 export function matchesActiveConfiguration(
   entry: RedirectionEntry,
@@ -70,6 +82,28 @@ export class RedirectionFileParserServer {
   // wrong for global-fallback reds (01d635ef).
   private projectPath: string | undefined;
 
+  /**
+   * Macro source semantics (Aspect 2 of `3f9f91c8` audit).
+   *
+   * `.red` files have NO syntax for defining macros at parse time. The parser
+   * only CONSUMES macros from two sources:
+   *   1. `serverSettings.macros` — config-driven, injected at constructor time
+   *      and constant for the parser instance's lifetime. Single global context
+   *      shared across the entire `{include}` chain.
+   *   2. Hardcoded fallbacks — `%bin%` (→ `serverSettings.primaryRedirectionPath`)
+   *      and `%redname%` (→ basename of the `.red` file currently being parsed).
+   *
+   * Macros are expanded at PARSE TIME (per-line, in `resolveMacro`). Lookup-time
+   * consumers see pre-resolved paths. The `includeCache` holds entries with
+   * macros pre-resolved at first-parse time — possible stale-cache concern if
+   * `serverSettings.macros` mutates after first parse, but bounded (config
+   * reloads typically invalidate caches).
+   *
+   * Cross-file macro DEFINITION is not a feature — the bare `name = value`
+   * shape is parsed as a redirection entry, not a macro definition. Earlier
+   * task plan-field framings of "cross-file macro reference" trapped this
+   * incorrectly; see `docs/audits/include-chaining-audit-3f9f91c8.md` Step 3.
+   */
   constructor() {
     this.macros = serverSettings.macros;
   }
@@ -278,6 +312,16 @@ export class RedirectionFileParserServer {
         if (!currentSection) currentSection = "Common";
 
         if (trimmed.startsWith("{include")) {
+          // Sync `{include}` ordering (Aspect 1 of `3f9f91c8` audit) —
+          // synchronous recursion shares the parent's `entries` array and
+          // pushes child entries at the include directive's position BEFORE
+          // the parent loop continues to the next iteration. Result:
+          // interleaved-at-include-position. The async counterpart at line
+          // ~407 mirrors this semantics deterministically via `await` per
+          // include (post-3f9f91c8 fix). DO NOT switch to a queue-then-
+          // Promise.all shape here — the async path's pre-fix bug was
+          // exactly that, and produced appended-after-parent ordering with
+          // multi-include non-determinism. See `docs/audits/include-chaining-audit-3f9f91c8.md`.
           const includeMatch = trimmed.match(/\{include\s+([^}]+)\}/i);
           if (includeMatch && includeMatch[1]) {
             let includePath = this.resolveMacro(includeMatch[1]);
@@ -379,10 +423,7 @@ export class RedirectionFileParserServer {
 
       // Process the file line by line
       const lines = content.split("\n");
-      
-      // Create an array to collect include promises
-      const includePromises: Promise<void>[] = [];
-      
+
       for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim();
         if (!trimmed || trimmed.startsWith("--")) continue;
@@ -402,11 +443,17 @@ export class RedirectionFileParserServer {
             let includePath = this.resolveMacro(includeMatch[1]);
             includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
             logger.info(`Processing include: ${includePath} from ${redFileToParse}`);
-            
-            // Create a promise for processing this include file
-            const includePromise = this.parseRedFileRecursiveAsync(includePath, entries, false)
-              .then(() => {}); // Convert to Promise<void> by ignoring the result
-            includePromises.push(includePromise);
+
+            // Serialise the recursive call: await each include at its position
+            // so child entries push into the shared array BEFORE the parent loop
+            // continues. Mirrors sync `parseRedFileRecursive`'s interleaved-at-
+            // include-position semantics deterministically. Pre-fix path queued
+            // promises onto includePromises[] and awaited Promise.all AFTER the
+            // parent loop, producing appended-after-parent shape with multi-include
+            // non-determinism (3f9f91c8 Phase A audit). Parallelism cost is
+            // negligible for typical .red sizes (<100 lines); OS file-cache
+            // warmth on serial sibling reads dominates anyway.
+            await this.parseRedFileRecursiveAsync(includePath, entries, false);
           }
           continue;
         }
@@ -445,10 +492,7 @@ export class RedirectionFileParserServer {
           }
         }
       }
-      
-      // Wait for all include files to be processed
-      await Promise.all(includePromises);
-      
+
       // Cache the include file entries if this is an include
       if (!isFirst && includeEntries.length > 0) {
         const includeCacheKey = this.createCacheKey(redFileToParse);
