@@ -34,6 +34,29 @@ export interface RedirectionEntry {
   paths: string[];
 }
 
+/**
+ * Returns true when the given redirection entry's section is either `Common`
+ * (always active regardless of build configuration) OR matches the active
+ * build configuration. Comparison is case-insensitive — real-world `.red`
+ * files are hand-edited and case drift on section names is plausible
+ * (`[debug]` vs `[Debug]` vs `[DEBUG]`). Defensive normalization centralised
+ * here per task `a3c341cf` (filed during `bd7e4a29` review).
+ *
+ * Section names captured at parse time preserve original case for display
+ * (logs / sectionLabel rendering); this helper is the single point where
+ * case is normalised for comparison. Future contributors who add a new
+ * filter site should reach for this helper rather than re-implementing the
+ * comparison — that's the maintainability win over inline `.toLowerCase()`
+ * at every callsite.
+ */
+export function matchesActiveConfiguration(
+  entry: RedirectionEntry,
+  configuration: string
+): boolean {
+  const sectionLower = entry.section.toLowerCase();
+  return sectionLower === 'common' || sectionLower === configuration.toLowerCase();
+}
+
 export class RedirectionFileParserServer {
   private readonly macros: Record<string, string>;
   private static redFileCache: Map<string, RedirectionEntry[]> = new Map();
@@ -531,7 +554,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (entry.section !== "Common" && entry.section !== serverSettings.configuration) {
+        if (!matchesActiveConfiguration(entry, serverSettings.configuration)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {
@@ -689,7 +712,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (entry.section !== "Common" && entry.section !== serverSettings.configuration) {
+        if (!matchesActiveConfiguration(entry, serverSettings.configuration)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {

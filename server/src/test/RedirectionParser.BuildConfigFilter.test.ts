@@ -426,4 +426,88 @@ suite('RedirectionParser.BuildConfigFilter (bd7e4a29)', () => {
             'expected null ([Profile] entry should be filtered out under Release config); got ' + JSON.stringify(result)
         );
     });
+
+    // ─── Case-insensitive section-name matching (a3c341cf) ────────────────────
+
+    /**
+     * Defensive fix (`a3c341cf`, filed by Alice during `bd7e4a29` review). Real-world
+     * `.red` files are hand-edited; section-name case drift is plausible (`[debug]`
+     * vs `[Debug]` vs `[DEBUG]`). Section-name comparisons in `redirectionFileParserServer`
+     * + `clarionProjectServer` were case-sensitive (`entry.section === "Common" || entry.section === serverSettings.configuration`)
+     * → hand-edited mixed-case section drops the entry silently.
+     *
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`:
+     * - POSITIVE: lowercase `[debug]` section IS resolved when active config = 'Debug'
+     * - NEGATIVE: lowercase `[debug]` section does NOT collide with an unrelated 'Release' config
+     */
+    test('a3c341cf — case-mismatched [debug] section matches active "Debug" config (positive)', () => {
+        serverSettings.configuration = 'Debug';
+        const fix = setupCase({
+            redContents:
+                '[debug]\n' +                          // lowercase section name (hand-edit drift)
+                '*.clw = .\\debug-only\n',
+            filesAtProj: [path.join('debug-only', 'Foo.clw')]
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.ok(
+            result,
+            'expected resolution of Foo.clw via [debug] section under Debug config; got null — ' +
+            'case-sensitive section comparison drops mixed-case entries silently'
+        );
+        assert.strictEqual(
+            path.normalize(result!.path),
+            path.normalize(path.join(fix.projDir, 'debug-only', 'Foo.clw')),
+            'expected <projDir>/debug-only/Foo.clw; got ' + (result && result.path)
+        );
+    });
+
+    test('a3c341cf — case-mismatched [debug] section does NOT match unrelated "Release" config (negative)', () => {
+        serverSettings.configuration = 'Release';
+        const fix = setupCase({
+            redContents:
+                '[debug]\n' +                          // lowercase section name (hand-edit drift)
+                '*.clw = .\\debug-only\n',
+            filesAtProj: [path.join('debug-only', 'Foo.clw')]
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.strictEqual(
+            result,
+            null,
+            'expected null ([debug] section should NOT match Release config — case-insensitivity must not ' +
+            'cause cross-config collision); got ' + JSON.stringify(result)
+        );
+    });
+
+    test('a3c341cf — case-mismatched [COMMON] section is treated as Common (always-on)', () => {
+        serverSettings.configuration = 'Release';
+        const fix = setupCase({
+            redContents:
+                '[COMMON]\n' +                         // uppercase Common (hand-edit drift)
+                '*.clw = .\\common-only\n',
+            filesAtProj: [path.join('common-only', 'Foo.clw')]
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.ok(
+            result,
+            'expected resolution of Foo.clw via [COMMON] section (Common is always active regardless of build config); got null — ' +
+            'case-sensitive Common-name comparison drops uppercase variant silently'
+        );
+        assert.strictEqual(
+            path.normalize(result!.path),
+            path.normalize(path.join(fix.projDir, 'common-only', 'Foo.clw')),
+            'expected <projDir>/common-only/Foo.clw; got ' + (result && result.path)
+        );
+    });
 });

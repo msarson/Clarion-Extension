@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as xml2js from 'xml2js';
 import LoggerManager from '../logger';
-import { RedirectionEntry, RedirectionFileParserServer } from './redirectionFileParserServer';
+import { RedirectionEntry, RedirectionFileParserServer, matchesActiveConfiguration } from './redirectionFileParserServer';
 import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -380,7 +380,7 @@ export class ClarionProjectServer {
 
         // Include both Common and configuration-specific entries
         const matchingEntries = this.redirectionEntries.filter(entry =>
-            entry.section === "Common" || entry.section === serverSettings.configuration
+            matchesActiveConfiguration(entry, serverSettings.configuration)
         );
 
         logger.info(`📂 Found ${matchingEntries.length} matching entries for section Common or ${serverSettings.configuration}`);
@@ -712,7 +712,7 @@ export class ClarionProjectServer {
             
             // Find specific entries for .clw files in the current configuration or Common section
             const clwEntries = redirectionEntries.filter(entry =>
-                (entry.section === "Common" || entry.section === serverSettings.configuration) &&
+                matchesActiveConfiguration(entry, serverSettings.configuration) &&
                 (entry.extension.toLowerCase() === "*.clw" || entry.extension === "*.*")
             );
             
