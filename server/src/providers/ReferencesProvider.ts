@@ -865,6 +865,17 @@ export class ReferencesProvider {
     /**
      * Tier 2: resolve `variableName.memberName` by looking up the variable's declared type.
      * e.g. `mgr &ViewManager` → type=ViewManager → find `memberName` in ViewManager.
+     *
+     * 0c289e16 Phase B — REWIRED to consume the substrate from `10ea5a80` + `9142af9f`.
+     * Pre-rewire, this used `symbolFinder.findSymbol` + `extractClassName` and returned
+     * null for procedure-local class instances (the Mark-reported caller-cursor null
+     * symptom for FAR + F2-rename). Post-rewire, it walks `lookupVarTypeAtLine`'s full
+     * 7-tier resolution chain (routine-local → params → proc-local → SELF.field →
+     * module → global) — single substrate serving BOTH cursor sides:
+     *   - cursor-on-decl path (provideMemberReferences matching loop) — wired by 10ea5a80
+     *   - cursor-on-call-site path (this entry point)                  — wired by this commit
+     * Eliminates the silent-asymmetry where F2 from a class-method decl found global-receiver
+     * callers but F2 from the call site returned null.
      */
     private async resolveViaVariableType(
         variableName: string,
@@ -876,15 +887,72 @@ export class ReferencesProvider {
         // Must be a plain identifier (no dots), not SELF/PARENT
         if (variableName.includes('.') || /^(self|parent)$/i.test(variableName)) return null;
 
-        const symbolInfo = await this.symbolFinder.findSymbol(variableName, document, position);
-        if (!symbolInfo) return null;
+        const tokens = this.tokenCache.getTokens(document);
+        const fileVarIndex = this.buildFileVarTypeIndex(tokens);
+        const globalScope = this.loadGlobalScopeForCursor(document);
+        const rawType = this.lookupVarTypeAtLine(
+            fileVarIndex, globalScope, position.line, variableName.toLowerCase());
+        if (!rawType) return null;
 
-        const typeName = ClassMemberResolver.extractClassName(symbolInfo.type);
+        const typeName = ClassMemberResolver.extractClassName(rawType);
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
         const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document, callArgCount);
-        return info ?? null;
+        if (info) return info;
+
+        // 0c289e16 Phase B fallback — when StructureDeclarationIndexer can't find the
+        // class (no SolutionManager-loaded project, or class is in-memory only and not
+        // yet on disk), scan the cursor's own document tokens directly. Production paths
+        // hit this only when the class is local to the cursor's file — same scenario the
+        // 10ea5a80 `getLocalClassSearchFiles` widening covers from the other direction.
+        return this.findMemberInDocumentTokens(memberName, typeName, document, tokens);
+    }
+
+    /**
+     * In-document fallback for `resolveViaVariableType` when the
+     * `StructureDeclarationIndexer` lookup misses (test fixtures without
+     * SolutionManager, or classes declared in the cursor's own file before
+     * the project index has rebuilt). Scans the cursor's tokens for the
+     * named CLASS structure and returns a synthesized `ChainedMemberInfo`
+     * pointing at the matching member declaration.
+     */
+    private findMemberInDocumentTokens(
+        memberName: string,
+        typeName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): ChainedMemberInfo | null {
+        const typeNameLower = typeName.toLowerCase();
+        const memberLower = memberName.toLowerCase();
+
+        const classToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            t.label?.toLowerCase() === typeNameLower &&
+            t.finishesAt !== undefined && t.finishesAt > t.line);
+        if (!classToken) return null;
+
+        const methodToken = tokens.find(t =>
+            t.subType === TokenType.MethodDeclaration &&
+            t.label?.toLowerCase() === memberLower &&
+            t.line > classToken.line &&
+            t.line < (classToken.finishesAt ?? Infinity));
+        if (!methodToken) return null;
+
+        // Use FS-path form (not file:///) so the downstream overloadFilter setup's
+        // in-memory-text check (`provideMemberReferences:772-776`) matches the
+        // cursor's document and reads the decl signature from in-memory text rather
+        // than failing the disk read.
+        const fsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+            .replace(/\//g, '\\');
+
+        return {
+            type: 'method',
+            className: typeName,
+            line: methodToken.line,
+            file: fsPath
+        };
     }
 
     /**

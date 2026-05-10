@@ -411,4 +411,97 @@ suite('ReferencesProvider.CallerCursorDotAccess (0c289e16 Phase A Item 0)', () =
         }
     });
 
+    // ─── (6) Phase B Global Receiver Sentinel — symmetry with cursor-on-decl ───
+
+    /**
+     * Phase B extension (`0c289e16` Phase B per Bob's "single substrate serving both
+     * cursor sides" framing). Receiver is declared at MEMBER (module) scope — a
+     * common Clarion shape (`G:Logger MyClass` style). Cursor on the call's `WriteLine`
+     * token must resolve via `lookupVarTypeAtLine`'s Tier 5 (module) walk. Without
+     * this rewire, the legacy `findSymbol` path would return null for module-scope
+     * receivers — the silent asymmetry where F2-from-decl works but F2-from-call
+     * returns null.
+     *
+     * Tier 6 (PROGRAM-scope global) coverage transparency note: production code
+     * resolves Tier 6 via `loadGlobalScopeForCursor` (FRG-driven). Test exercises
+     * Tier 5 (module-scope, same file as cursor) which uses the same lookupVarTypeAtLine
+     * chain — the only difference between Tiers 5 and 6 is data origin, not lookup
+     * mechanism. Cross-file Tier-6 test deferred to FRG-fixture upgrade follow-up.
+     *
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`: STRING decl/impl
+     * + call site IN result; LONG decl/impl NOT IN result.
+     */
+    test('Phase B Global Receiver Sentinel — module-scope receiver resolves via Tier 5', async () => {
+        const code = [
+            "  MEMBER('test')",                          // line 0
+            '',                                           // line 1
+            'MyClass    CLASS,TYPE',                      // line 2
+            'WriteLine    PROCEDURE(STRING)',             // line 3 — STRING decl
+            'WriteLine    PROCEDURE(LONG)',               // line 4 — LONG decl
+            '           END',                             // line 5
+            '',                                           // line 6
+            'instModule MyClass',                         // line 7 — MODULE-scope receiver
+            '',                                           // line 8
+            'MyClass.WriteLine PROCEDURE(STRING s)',      // line 9 — STRING impl
+            '  CODE',                                     // line 10
+            '  RETURN',                                   // line 11
+            '',                                           // line 12
+            'MyClass.WriteLine PROCEDURE(LONG n)',        // line 13 — LONG impl
+            '  CODE',                                     // line 14
+            '  RETURN',                                   // line 15
+            '',                                           // line 16
+            'MainProc PROCEDURE',                         // line 17
+            '  CODE',                                     // line 18
+            "  instModule.WriteLine('hello')",            // line 19 — CALLER (cursor on 'WriteLine')
+            '  instModule.WriteLine(42)',                 // line 20 — wrong-overload caller
+            '  RETURN',                                   // line 21
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///0c289e16-6.clw');
+        seedCache(doc);
+
+        const callerLine = "  instModule.WriteLine('hello')";
+        const writeLineCol = callerLine.indexOf('WriteLine') + 1;
+
+        const refs = await provider.provideReferences(doc, {
+            line: 19,
+            character: writeLineCol
+        }, { includeDeclaration: true });
+
+        assert.ok(
+            refs,
+            'FAR should NOT return null for caller-cursor on module-scope receiver — ' +
+            'Phase B rewire must walk Tier 5 module scope via lookupVarTypeAtLine'
+        );
+
+        const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(
+            lines.includes(19),
+            'expected line 19 (STRING caller) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            lines.includes(3),
+            'expected line 3 (STRING decl, matching overload) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            lines.includes(9),
+            'expected line 9 (STRING impl, matching overload) IN result; got lines=[' + lines.join(',') + ']'
+        );
+
+        assert.ok(
+            !lines.includes(4),
+            'expected line 4 (LONG decl, wrong overload) NOT in result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            !lines.includes(13),
+            'expected line 13 (LONG impl, wrong overload) NOT in result; got lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            !lines.includes(20),
+            'expected line 20 (LONG caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + '] — ' +
+            'overload disambiguation must drop the wrong-overload caller'
+        );
+    });
+
 });
