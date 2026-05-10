@@ -281,8 +281,6 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
         );
     });
 
-    // ─── (5) EQUIVALENCE GUARD — fe254d6f OverloadFilter integration ───────
-
     /**
      * Multi-overload class-method with cross-procedure callers; FAR returns
      * only matching-overload's caller. Verifies caller-scope expansion
