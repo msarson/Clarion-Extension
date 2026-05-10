@@ -2672,17 +2672,30 @@ LocalVar LONG
             assert.strictEqual(undeclaredDiags(code).length, 0);
         });
 
-        test('validateDocument fires the diagnostic at the default-on gate state', () => {
+        // Post #115 (6b40d7da): the undeclared-variable validator runs in the
+        // ASYNC pass (`DiagnosticProvider.validateUndeclaredVariables`) for
+        // cross-file scope resolution, NOT in `validateDocument`. Gate tests
+        // therefore drive the async surface directly. The sync re-entry-point
+        // `validateUndeclaredVariables(tokens, doc)` still ships single-file
+        // behavior un-gated for the v1+v2 contract — the gate lives in
+        // DiagnosticProvider's wrapper.
+        test('async validator fires the diagnostic at the default-on gate state', async () => {
+            const { TokenCache } = await import('../TokenCache');
+            const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
+            const { SymbolFinderService } = await import('../services/SymbolFinderService');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
   RETURN`;
             const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
             try {
                 serverSettings.undeclaredVariablesEnabled = true;
-                const diags = DiagnosticProvider.validateDocument(doc);
-                const undecl = diags.filter(d => d.code === 'undeclared-variable');
+                const tokenCache = TokenCache.getInstance();
+                const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
+                const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+                const undecl = await DiagnosticProvider.validateUndeclaredVariables(tokens, doc, symbolFinder);
                 assert.strictEqual(undecl.length, 1);
                 assert.ok(undecl[0].message.includes("'TyposVar'"));
             } finally {
@@ -2690,17 +2703,23 @@ LocalVar LONG
             }
         });
 
-        test('explicit gate=false silences the diagnostic', () => {
+        test('explicit gate=false silences the diagnostic', async () => {
+            const { TokenCache } = await import('../TokenCache');
+            const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
+            const { SymbolFinderService } = await import('../services/SymbolFinderService');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
   RETURN`;
             const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
             try {
                 serverSettings.undeclaredVariablesEnabled = false;
-                const diags = DiagnosticProvider.validateDocument(doc);
-                const undecl = diags.filter(d => d.code === 'undeclared-variable');
+                const tokenCache = TokenCache.getInstance();
+                const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
+                const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+                const undecl = await DiagnosticProvider.validateUndeclaredVariables(tokens, doc, symbolFinder);
                 assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;

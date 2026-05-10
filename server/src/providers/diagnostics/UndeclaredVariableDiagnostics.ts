@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { SymbolFinderService } from '../../services/SymbolFinderService';
 import LoggerManager from '../../logger';
 
 // Inherit the default log level (debug in dev, error in release per
@@ -69,18 +70,60 @@ interface ScopeRange {
     end: number;
 }
 
+/**
+ * Synchronous variant — single-file scope only (existing #62 v1+v2 surface).
+ * Used by:
+ *   - Existing test suite (`DiagnosticProvider.test.ts`) for v1+v2 behavior pinning
+ *   - Internal call from the async variant for the fast-path collection
+ *
+ * Production callers should prefer the async variant which adds cross-file
+ * Tier 5b/6/7 coverage via `SymbolFinderService` fallback. The sync entry
+ * point is preserved as an export so existing tests don't churn through
+ * an async migration just to pin single-file behavior.
+ */
 export function validateUndeclaredVariables(tokens: Token[], document: TextDocument): Diagnostic[] {
-    const diagnostics: Diagnostic[] = [];
-    if (tokens.length === 0) return diagnostics;
+    const ctx = buildScopeContext(tokens, document);
+    if (!ctx) return [];
+    return collectUndeclaredDiagnostics(ctx, document);
+}
 
-    // Searchable diagnostic breadcrumb for "is this firing?" reports — set
-    // Clarion log level to info to see it. Tag `[#62]` is intentional.
-    const startLen = tokens.length;
+/**
+ * Async variant — full canonical-scope-chain resolution via `SymbolFinderService`.
+ * Closes #115 (paired with task `6b40d7da`); follow-up to #62.
+ *
+ * Hybrid Option B per Eve's Phase A audit (`9d95e13`): preserves single-file
+ * fast-path (Tier 1 Routine Local + Tier 2/3 + same-file Tier 5a) and falls
+ * through to `SymbolFinder.findSymbol` on miss for Tier 5b/6/7 cross-file
+ * resolution. Memoization-upfront — each unique candidate name is resolved
+ * at most ONCE per validation cycle regardless of code-section reference
+ * count.
+ */
+export async function validateUndeclaredVariablesAsync(
+    tokens: Token[],
+    document: TextDocument,
+    symbolFinder: SymbolFinderService
+): Promise<Diagnostic[]> {
+    const ctx = buildScopeContext(tokens, document);
+    if (!ctx) return [];
+    await augmentDeclaredViaSymbolFinder(ctx, document, symbolFinder);
+    return collectUndeclaredDiagnostics(ctx, document);
+}
 
-    // Collect every procedure / method / routine that has a known code marker
-    // and end line. We only flag identifiers that sit strictly inside a code
-    // section, and we use the same ranges to decide whether a Variable token
-    // is "outside CODE" (treated as a declaration source).
+interface ScopeContext {
+    tokens: Token[];
+    codeRanges: ScopeRange[];
+    declaredNames: Set<string>;
+    isInsideCode: (line: number) => boolean;
+}
+
+/**
+ * Build the per-file scope context: code ranges + initial declared-name set
+ * (the v1+v2 single-file fast-path). Returns null when there's nothing to
+ * validate (no tokens, no code ranges, or no labels at all).
+ */
+function buildScopeContext(tokens: Token[], document: TextDocument): ScopeContext | null {
+    if (tokens.length === 0) return null;
+
     const codeRanges: ScopeRange[] = [];
     for (const t of tokens) {
         const isProc =
@@ -102,26 +145,74 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         // all-in-one PROGRAM layout where inline procedures sit AFTER the
         // PROGRAM's main CODE marker).
         logger.info(`[#62] early-exit: 0 code ranges in ${tokens.length} tokens — no procedure/function/routine impl with executionMarker+finishesAt — uri=${document.uri}`);
-        return diagnostics;
+        return null;
     }
 
     const isInsideCode = (line: number): boolean =>
         codeRanges.some(r => line > r.codeStart && line <= r.end);
 
-    // "Declared somewhere in the file" set — generous on purpose. Better to
-    // miss a real typo than to scream at a valid identifier.
     const declaredNames = new Set<string>();
     for (const t of tokens) {
         if (t.type === TokenType.Label && t.value) {
             declaredNames.add(t.value.toUpperCase());
         } else if (t.type === TokenType.Variable && t.value && !isInsideCode(t.line)) {
-            // Procedure parameters and structure-shape Variable references
-            // that live in the data section (e.g. inside PROCEDURE(...) or
-            // GROUP/QUEUE/RECORD declarations) — treat them as declarations.
             declaredNames.add(t.value.toUpperCase());
         }
     }
-    if (declaredNames.size === 0) return diagnostics;
+    if (declaredNames.size === 0) return null;
+
+    return { tokens, codeRanges, declaredNames, isInsideCode };
+}
+
+/**
+ * Phase B (#115) cross-file augmentation. Walks Variable tokens inside CODE
+ * sections, collects names that miss the single-file fast-path, and resolves
+ * each via `SymbolFinder.findSymbol` from a probe position at the first
+ * procedure's CODE marker. Resolved names are added back to declaredNames
+ * (memoization: at most one async lookup per unique name per cycle).
+ */
+async function augmentDeclaredViaSymbolFinder(
+    ctx: ScopeContext,
+    document: TextDocument,
+    symbolFinder: SymbolFinderService
+): Promise<void> {
+    const candidateNames = new Set<string>();
+    for (const t of ctx.tokens) {
+        if (t.type !== TokenType.Variable) continue;
+        if (!ctx.isInsideCode(t.line)) continue;
+        const candidate = detectCheckableName(t);
+        if (!candidate) continue;
+        const upper = candidate.name.toUpperCase();
+        if (ctx.declaredNames.has(upper)) continue;
+        if (BUILT_IN_IDENTIFIERS.has(upper)) continue;
+        candidateNames.add(upper);
+    }
+    if (candidateNames.size === 0) return;
+
+    // Probe inside the first procedure's CODE section so SymbolFinder's scope
+    // walk picks up parameters / locals / module / global / class-member tiers
+    // correctly. Clarion is case-insensitive — passing the upper-cased name
+    // resolves identically.
+    const probePos = { line: ctx.codeRanges[0].codeStart + 1, character: 0 };
+    for (const upperName of candidateNames) {
+        try {
+            const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
+            if (resolved) ctx.declaredNames.add(upperName);
+        } catch (err) {
+            logger.info(`[#115] symbolFinder.findSymbol error for "${upperName}": ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+}
+
+/**
+ * Walk every code-section line and emit diagnostics for undeclared names.
+ * Pure of async work — runs against the (possibly async-augmented) declared
+ * set in `ctx`.
+ */
+function collectUndeclaredDiagnostics(ctx: ScopeContext, document: TextDocument): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    const { tokens, declaredNames, isInsideCode } = ctx;
+    const startLen = tokens.length;
 
     // Group tokens by line for first-token-on-line lookups.
     const tokensByLine = new Map<number, Token[]>();
@@ -181,7 +272,7 @@ export function validateUndeclaredVariables(tokens: Token[], document: TextDocum
         }
     }
 
-    logger.info(`[#62] scanned ${startLen} tokens, ${codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
+    logger.info(`[#62] scanned ${startLen} tokens, ${ctx.codeRanges.length} code ranges, ${diagnostics.length} diagnostics`);
     return diagnostics;
 }
 

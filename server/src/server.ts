@@ -78,6 +78,8 @@ import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
 import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
+import { SymbolFinderService } from './services/SymbolFinderService';
+import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
@@ -337,12 +339,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             }
             return null;
         };
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags] = await Promise.all([
+        // 6b40d7da Phase B (#115): undeclared-variable validator runs in this async
+        // pass for cross-file scope resolution via SymbolFinderService.
+        const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
+        const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags] = await Promise.all([
             DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
             DiagnosticProvider.validateMissingIncludes(tokens, document),
             DiagnosticProvider.validateMissingConstants(tokens, document),
             DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
             DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
+            DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder),
         ]);
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -351,7 +358,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags];
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);

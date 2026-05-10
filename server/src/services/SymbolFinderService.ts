@@ -808,23 +808,33 @@ export class SymbolFinderService {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
         const resolvedPath = path.resolve(currentFileDir, parentFile);
-        
+        const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+
         logger.info(`Searching parent file: ${resolvedPath}`);
-        
-        if (!fs.existsSync(resolvedPath)) {
-            logger.warn(`Parent file not found: ${resolvedPath}`);
-            return null;
+
+        // Cache-first lookup — parent may be open in editor (with unsaved
+        // edits) or seeded by an in-memory test fixture. Disk read happens
+        // only when the cache misses; matches the FAR family's `671d7cd8`
+        // discipline.
+        let parentTokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+        let parentDoc: TextDocument | null = null;
+        if (parentTokens) {
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+            if (cachedText !== null) {
+                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+            }
         }
-        
+
         try {
-            const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-            const parentDoc = TextDocument.create(
-                `file:///${resolvedPath.replace(/\\/g, '/')}`,
-                'clarion',
-                1,
-                parentContents
-            );
-            const parentTokens = this.tokenCache.getTokens(parentDoc);
+            if (!parentTokens || !parentDoc) {
+                if (!fs.existsSync(resolvedPath)) {
+                    logger.warn(`Parent file not found: ${resolvedPath}`);
+                    return null;
+                }
+                const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
+                parentTokens = this.tokenCache.getTokens(parentDoc);
+            }
             
             const firstCodeToken = parentTokens.find(t => 
                 t.type === TokenType.Keyword && 

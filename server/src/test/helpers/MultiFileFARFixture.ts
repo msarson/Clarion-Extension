@@ -131,7 +131,13 @@ export function buildMultiFileFixture(opts: BuildMultiFileFixtureOpts): MultiFil
                 }
             }
             return path.dirname(filename);
-        }
+        },
+        // SymbolFinderService.findGlobalVariable consults equates.clw as the
+        // implicit Tier 6 floor. Tests don't ship an equates fixture — return
+        // null so the lookup falls through cleanly instead of throwing
+        // `solutionManager.getEquatesTokens is not a function`.
+        getEquatesTokens(): null { return null; },
+        getEquatesPath(): null { return null; }
     } as unknown as SolutionManager;
 
     _savedSmInstance = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;

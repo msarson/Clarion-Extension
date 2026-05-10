@@ -9,7 +9,8 @@ import { validateStructureTerminators, validateConditionalBlocks, validateFileSt
 import { validateClassInterfaceImplementation, validateClassProperties } from './diagnostics/ClassDiagnostics';
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
-import { validateUndeclaredVariables } from './diagnostics/UndeclaredVariableDiagnostics';
+import { validateUndeclaredVariablesAsync as _validateUndeclaredVariablesAsync } from './diagnostics/UndeclaredVariableDiagnostics';
+import { SymbolFinderService } from '../services/SymbolFinderService';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
@@ -46,7 +47,10 @@ export class DiagnosticProvider {
             ...validateClassProperties(tokens, document),
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
-            ...(serverSettings.undeclaredVariablesEnabled ? validateUndeclaredVariables(tokens, document) : []),
+            // 6b40d7da Phase B (#115): undeclared-variable validator moved to the
+            // async pass — needs SymbolFinderService for cross-file scope resolution
+            // (Tier 5b/6/7). See `DiagnosticProvider.validateUndeclaredVariables`
+            // and the await at server.ts:340+ next to `validateDiscardedReturnValues`.
             ...validateReservedKeywordLabels(tokens, document),
             ...validateUnicodeCharacters(document),
             ...validateAttributeApplicability(tokens, document),
@@ -102,5 +106,21 @@ export class DiagnosticProvider {
         document: TextDocument
     ): Promise<Diagnostic[]> {
         return validateMissingConstants(tokens, document);
+    }
+
+    /**
+     * Async pass: undeclared-variable diagnostic with full canonical-scope-chain
+     * resolution. Routes through `SymbolFinderService.findSymbol` for cross-file
+     * Tier 5b/6/7 coverage that single-file token walks miss. Gated by
+     * `serverSettings.undeclaredVariablesEnabled`. Closes #115 (paired with
+     * task `6b40d7da`); follow-up to #62.
+     */
+    public static async validateUndeclaredVariables(
+        tokens: Token[],
+        document: TextDocument,
+        symbolFinder: SymbolFinderService
+    ): Promise<Diagnostic[]> {
+        if (!serverSettings.undeclaredVariablesEnabled) return [];
+        return _validateUndeclaredVariablesAsync(tokens, document, symbolFinder);
     }
 }

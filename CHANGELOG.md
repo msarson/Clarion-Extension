@@ -47,6 +47,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🐛 **Undeclared-variable diagnostic — cross-file scope resolution** (#115): the diagnostic no longer false-positives on identifiers declared at PROGRAM-scope or in the parent file when used from a MEMBER. Single-file fast-path preserved; misses fall through to `SymbolFinderService.findSymbol` for canonical 7-tier resolution.
 - 🐛 `parseRedFileRecursiveAsync` now serialises `{include}` chains so the async parser produces interleaved-at-include-position flat-list ordering, matching sync semantics deterministically across multiple `{include}` directives (#98).
 - 🐛 Redirection parser section-name comparisons (e.g. `[Debug]` vs `[debug]`) are now case-insensitive — defensive against hand-edited `.red` case drift (#98).
 - 🐛 **FAR cross-file URI normalisation + cursor-in-PROGRAM globalScope asymmetry** (#97): closes a cluster of 4 silent-asymmetry bugs in cross-file FAR / F2-rename surfaced during the FRG-fixture-upgrade test backfill — `loadGlobalScopeForCursor` cursor-in-PROGRAM asymmetry, URI/FS-path normalisation in `gatherClassMemberOverloads`, cross-file `fileLines` for impl-discrimination, and case-insensitive `filesToSearch` / result dedup.
