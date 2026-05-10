@@ -13,6 +13,7 @@ import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedProp
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -731,16 +732,22 @@ export class ReferencesProvider {
         }
 
         // When a CLASS is declared in the current document with no MODULE attribute,
-        // all implementations are in the same file — searching the entire solution
-        // would scan thousands of files and hang indefinitely on large solutions.
+        // all implementations are in the same file — but cross-procedure callers
+        // can live in sibling MEMBER files. Restricting to `[document.uri]` blocks
+        // those callers (Eve test 2 RED). Widening to all project files would scan
+        // thousands of files and hang on large solutions.
+        //
+        // P2b track-(a) fix (task 10ea5a80): use FRG to widen to MEMBER siblings
+        // (and reverse-includes) when available; fall through to project scan only
+        // when FRG is empty (test fixtures without graph setup).
         const isLocalClass = !effectiveModuleFile && !!className &&
             this.isClassDeclaredInDocument(className, document);
         if (isLocalClass) {
-            logger.error(`📌 [FAR] "${className}" is a local class — restricting search to current file`);
+            logger.error(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
         }
 
         const filesToSearch = isLocalClass
-            ? [document.uri]
+            ? this.getLocalClassSearchFiles(document)
             : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
@@ -792,6 +799,13 @@ export class ReferencesProvider {
             }
         }
 
+        // P2b track-(b): gather all sibling overload signatures for type-aware
+        // call-site overload picking inside the matching loop. Empty / single-entry
+        // means no type-aware filtering needed (matching loop short-circuits).
+        const candidateOverloads = (className && filterDeclFile)
+            ? this.gatherClassMemberOverloads(className, memberName, filterDeclFile, document)
+            : [];
+
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const classFamily = className
@@ -816,7 +830,7 @@ export class ReferencesProvider {
         }
 
         for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads);
             locations.push(...hits);
         }
 
@@ -871,6 +885,171 @@ export class ReferencesProvider {
      * Also adds any MODULE('file.clw') referenced by the enclosing CLASS declaration.
      * Class members (SELF.Order) can be used in any implementation file in the project.
      */
+    /**
+     * P2b track-(b) — build a per-procedure variable-type index from a token stream.
+     * Lookups via `lookupVarTypeAtLine` are O(scopes) for scope find + O(1) map get.
+     * Used by the matching loop to detect `var.member(...)` calls where `var`'s
+     * declared type is in the target class family.
+     *
+     * Builds from sync token data only — no async, no TextDocument needed for
+     * scanned files (works equally for cursor-file and other-files).
+     */
+    private buildProcVarTypeIndex(tokens: Token[]): Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> {
+        const scopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> = [];
+        // Cache line->lineTokens lookup to avoid O(n²) on large files.
+        const tokensByLine = new Map<number, Token[]>();
+        for (const t of tokens) {
+            const arr = tokensByLine.get(t.line);
+            if (arr) arr.push(t); else tokensByLine.set(t.line, [t]);
+        }
+
+        for (const procToken of tokens) {
+            if (procToken.type === TokenType.Procedure &&
+                (procToken.subType === TokenType.GlobalProcedure ||
+                 procToken.subType === TokenType.MethodImplementation) &&
+                procToken.finishesAt !== undefined && procToken.finishesAt > procToken.line) {
+                const startLine = procToken.line;
+                const endLine = procToken.finishesAt;
+                const varTypes = new Map<string, string>();
+
+                for (let line = startLine; line <= endLine; line++) {
+                    const lineTokens = tokensByLine.get(line);
+                    if (!lineTokens) continue;
+                    for (let k = 0; k < lineTokens.length; k++) {
+                        const cand = lineTokens[k];
+                        if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                        const next = lineTokens[k + 1];
+                        if (!next) continue;
+                        // Class-typed: `inst MyClass` → next is Variable("MyClass").
+                        // Reference-typed: `mgr &MyClass` → next is ReferenceVariable.
+                        // Type-keyword: `count LONG` → next is Type or Variable("LONG").
+                        if (next.type === TokenType.Type ||
+                            next.type === TokenType.Variable ||
+                            next.type === TokenType.Label) {
+                            varTypes.set(cand.label.toLowerCase(), next.value);
+                        } else if (next.type === TokenType.ReferenceVariable) {
+                            const stripped = next.value.startsWith('&') ? next.value.slice(1) : next.value;
+                            varTypes.set(cand.label.toLowerCase(), stripped);
+                        } else if (cand.dataType) {
+                            varTypes.set(cand.label.toLowerCase(), cand.dataType);
+                        }
+                    }
+                }
+                scopes.push({ startLine, endLine, varTypes });
+            }
+        }
+        return scopes;
+    }
+
+    private lookupVarTypeAtLine(
+        scopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>,
+        line: number,
+        varNameLower: string
+    ): string | undefined {
+        const scope = scopes.find(s => line >= s.startLine && line <= s.endLine);
+        return scope?.varTypes.get(varNameLower);
+    }
+
+    /**
+     * P2b track-(b) — gather all overload declarations for `className.memberName`
+     * from the file containing the class declaration. Used by the matching loop
+     * to type-discriminate call sites against the cursor's decl line.
+     */
+    private gatherClassMemberOverloads(
+        className: string,
+        memberName: string,
+        declFileNorm: string,
+        document: TextDocument
+    ): Array<{ signature: string; declarationLine: number }> {
+        const result: Array<{ signature: string; declarationLine: number }> = [];
+        const docFsNorm = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+            .replace(/\//g, '\\').toLowerCase();
+
+        let lookupTokens: Token[] | null = null;
+        let getLineText: (line: number) => string;
+        if (declFileNorm === docFsNorm) {
+            lookupTokens = this.tokenCache.getTokens(document);
+            const docLines = document.getText().split(/\r?\n/);
+            getLineText = (line) => docLines[line] ?? '';
+        } else {
+            const declUri = 'file:///' + declFileNorm.replace(/\\/g, '/');
+            lookupTokens = this.getTokensForUri(declUri);
+            getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFileNorm, line) ?? '';
+        }
+        if (!lookupTokens || lookupTokens.length === 0) return result;
+
+        const classNameLower = className.toLowerCase();
+        const memberLower = memberName.toLowerCase();
+
+        for (const t of lookupTokens) {
+            if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
+                t.label?.toLowerCase() === classNameLower && t.children) {
+                for (const child of t.children) {
+                    if (child.subType === TokenType.MethodDeclaration &&
+                        child.label?.toLowerCase() === memberLower) {
+                        const sig = getLineText(child.line).trim();
+                        if (sig && /\bPROCEDURE\b/i.test(sig)) {
+                            result.push({ signature: sig, declarationLine: child.line });
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private getLocalClassSearchFiles(document: TextDocument): string[] {
+        const files = new Set<string>([document.uri]);
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            // (1) MEMBER siblings: files sharing the same PROGRAM('main') parent.
+            const programFile = graph.getProgramFile(docFsPath);
+            if (programFile) {
+                for (const memberFsPath of graph.getMemberFiles(programFile)) {
+                    files.add('file:///' + memberFsPath);
+                }
+            }
+            // (2) Reverse-includes: anyone explicitly INCLUDEing the cursor's file.
+            const visited = new Set<string>();
+            const queue: string[] = [docFsPath];
+            while (queue.length > 0) {
+                const current = queue.shift()!;
+                const norm = current.toLowerCase().replace(/\\/g, '/');
+                if (visited.has(norm)) continue;
+                visited.add(norm);
+                for (const edge of graph.getReverseIncludes(current)) {
+                    files.add('file:///' + edge.fromFile);
+                    queue.push(edge.fromFile);
+                }
+            }
+            if (files.size > 1) {
+                logger.info(`[FRG] getLocalClassSearchFiles: widened to ${files.size} file(s) via MEMBER siblings + reverse includes`);
+                return Array.from(files);
+            }
+            // FRG built but yielded nothing useful — fall through to project scan.
+        }
+
+        // Graph not ready or returned no widening — fall back to scanning all project files.
+        // This is the path test 2's MultiFileFARFixture exercises (FRG not seeded).
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager?.solution?.projects?.length) {
+            for (const project of solutionManager.solution.projects) {
+                for (const sourceFile of project.sourceFiles) {
+                    const fullPath = path.isAbsolute(sourceFile.relativePath)
+                        ? sourceFile.relativePath
+                        : path.join(project.path, sourceFile.relativePath);
+                    files.add(`file:///${fullPath.replace(/\\/g, '/')}`);
+                }
+            }
+        }
+
+        const result = Array.from(files);
+        logger.info(`📂 [local-class] search files: ${result.length}`);
+        return result;
+    }
+
     private getMemberSearchFiles(
         document: TextDocument,
         declarationFile: string | null,
@@ -1212,10 +1391,22 @@ export class ReferencesProvider {
         chainPrefix?: string,
         overloadFilter?: OverloadFilter,
         includeDeclaration: boolean = true,
-        currentDocument?: TextDocument
+        currentDocument?: TextDocument,
+        candidateOverloads?: Array<{ signature: string; declarationLine: number }>
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
+
+        // P2b track-(b): per-procedure variable-type index for var.member call detection.
+        const varScopes = this.buildProcVarTypeIndex(tokens);
+
+        // P2b track-(b): classifier + resolver for type-aware overload filtering.
+        // Only instantiated once per file; cheap stateless objects.
+        const argClassifier = new CallSiteArgumentClassifier();
+        const overloadResolver = new MethodOverloadResolver();
+        const classifierCtx: ClassifierContext = {
+            resolveSymbolType: (name, line) => this.lookupVarTypeAtLine(varScopes, line, name.toLowerCase())
+        };
 
         const memberLower = memberName.toLowerCase();
         const classLower = className?.toLowerCase();
@@ -1273,6 +1464,28 @@ export class ReferencesProvider {
             return argCount >= overloadFilter.minArgs && argCount <= overloadFilter.maxArgs;
         };
 
+        // P2b track-(b): type-aware call-site filter. Composes the existing arity check
+        // with the call-site argument classifier + overload-by-args resolver. Skips the
+        // type pick when there's only one candidate overload (nothing to disambiguate).
+        // Match-all fallback (silent-failure-pushback bias per Mark pick (b)) means an
+        // ambiguous call site is INCLUDED in results — false-positive over false-negative
+        // for F2-rename safety.
+        const isCompatibleCallSite = (callIdx: number): boolean => {
+            const argCount = this.countCallArgsFromTokens(tokens, callIdx);
+            if (!isCompatibleArgCount(argCount)) return false;
+            if (!candidateOverloads || candidateOverloads.length <= 1) return true;
+            if (argCount < 0) return true; // property access, no overload pick
+            const args = argClassifier.classifyArguments(tokens, callIdx, classifierCtx);
+            if (!args) return true;
+            const result = overloadResolver.findOverloadByArgClassifications(
+                args,
+                candidateOverloads.map(c => c.signature)
+            );
+            if (result.matchedAll || result.matchedIndex < 0) return true; // conservative
+            if (!overloadFilter) return true;
+            return candidateOverloads[result.matchedIndex].declarationLine === overloadFilter.declarationLine;
+        };
+
         /** Checks if a declaration line is the matched overload's declaration. */
         const isMatchedDeclaration = (line: number, fileNorm: string): boolean => {
             if (!overloadFilter) return true;
@@ -1311,7 +1524,7 @@ export class ReferencesProvider {
                             }
                         }
                         // 2-segment: SELF.Member — direct access, filter by enclosing method class
-                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                        if (isCompatibleCallSite(i)) {
                             locations.push(Location.create(fileUri,
                                 Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                              token.line, token.start + token.value.length)));
@@ -1323,7 +1536,7 @@ export class ReferencesProvider {
                         // 3+ segment all-in-one: SELF.X.Member (e.g. SELF.Sort.Thumb tokenized as one token)
                         const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
                         if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
@@ -1346,7 +1559,7 @@ export class ReferencesProvider {
                                 ? chainPrefixLower + '.' + memberLower
                                 : null;
                             if (!expectedChain || fullChain === expectedChain) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                      token.line, token.start + token.value.length)));
@@ -1357,10 +1570,30 @@ export class ReferencesProvider {
                             // Typed variable direct access: e.g. INIMgr.Init
                             // where chainPrefix is the variable name (INIMgr).
                             if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
+                            }
+                        } else if (parts.length === 2 && !chainPrefixLower && classLower) {
+                            // P2b track-(b): no chainPrefix from cursor side (cursor is on
+                            // the class-body decl, not a call site). Recognize var.member
+                            // calls where var's declared type is in the target class family.
+                            // Resolves cross-procedure callers like `inst.Append('x')` where
+                            // `inst MyClass` is declared inside a non-method procedure.
+                            const varNameLower = parts[0].toLowerCase();
+                            const varType = this.lookupVarTypeAtLine(varScopes, token.line, varNameLower);
+                            if (varType) {
+                                const varTypeBase = varType.toLowerCase().split('(')[0].trim();
+                                const matchesFamily = classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower;
+                                if (matchesFamily) {
+                                    if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                    if (isCompatibleCallSite(i)) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                         token.line, token.start + token.value.length)));
+                                    }
+                                }
                             }
                         }
                     }
@@ -1386,7 +1619,7 @@ export class ReferencesProvider {
                             const beforeDotToken = tokens[i - 2];
                             if (beforeDotToken && beforeDotToken.line === token.line &&
                                 beforeDotToken.value.toLowerCase() === chainPrefixLower) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
@@ -1397,12 +1630,12 @@ export class ReferencesProvider {
                                     // the declaring class itself (that would be a grandparent call).
                                     const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
                                     if (!scope || scope.classLower !== classLower) {
-                                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                        if (isCompatibleCallSite(i)) {
                                             locations.push(Location.create(fileUri,
                                                 Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                         }
                                     }
-                                } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                } else if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
@@ -1413,12 +1646,12 @@ export class ReferencesProvider {
                             if (preDot && /^parent$/i.test(preDot.value) && classLower) {
                                 const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
                                 if (!scope || scope.classLower !== classLower) {
-                                    if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                    if (isCompatibleCallSite(i)) {
                                         locations.push(Location.create(fileUri,
                                             Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                     }
                                 }
-                            } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            } else if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }
@@ -1431,7 +1664,7 @@ export class ReferencesProvider {
                         // (tokenizer splits SELF.Sort.Thumb into StructureField + Variable).
                         // If we know the exact chain prefix, verify the StructureField value matches it.
                         if (!chainPrefixLower || prev.value.toLowerCase() === chainPrefixLower) {
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }

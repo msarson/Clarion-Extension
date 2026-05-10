@@ -415,6 +415,18 @@ export class FileRelationshipGraph {
             ?.find(e => e.type === 'MEMBER')?.toFile;
     }
 
+    /**
+     * Returns all MEMBER file paths belonging to the given PROGRAM file.
+     * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
+     * files of the cursor's file may contain cross-procedure callers (P2b,
+     * task 10ea5a80 track-(a) widening).
+     */
+    public getMemberFiles(programFilePath: string): string[] {
+        return this.reverseEdges.get(this.normalizePath(programFilePath))
+            ?.filter(e => e.type === 'MEMBER')
+            .map(e => e.fromFile) ?? [];
+    }
+
     /** Returns all files that include the given file (reverse INCLUDE). */
     public getReverseIncludes(filePath: string): FileEdge[] {
         return this.reverseEdges.get(this.normalizePath(filePath))

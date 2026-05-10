@@ -3,6 +3,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
+import { ArgClassification } from './CallSiteArgumentClassifier';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -564,5 +565,206 @@ export class MethodOverloadResolver {
      */
     public countParametersInDeclaration(line: string): number {
         return ClarionPatterns.countParameters(line);
+    }
+
+    // ─── P2b — call-site → declaration overload resolution (10ea5a80) ─────
+    //
+    // The seam between `CallSiteArgumentClassifier` (call-site shape inference)
+    // and `MethodOverloadResolver` (decl-side overload picking). The classifier
+    // produces `ArgClassification[]`; this method consumes them against
+    // candidate declaration signatures and applies Mark's locked overload-
+    // resolution rule (see project_clarion_overload_resolution_rule).
+    //
+    // Mark's three picks (locked 2026-05-10) are honoured here:
+    //   (a) Standalone classifier — this method is the documented seam.
+    //   (b) Match-all fallback — when no candidate type-matches, return
+    //       `matchedAll=true` so the consumer keeps the call site (silent-
+    //       failure-pushback bias for F2-rename safety).
+    //   (c) Strict-mode flag — `options.strictRefMatching` (default `false`)
+    //       toggles whether un-inferable args are allowed to match a `*TYPE`
+    //       parameter. Default: allow (match-all). Strict: drop.
+
+    /**
+     * Outcome of `findOverloadByArgClassifications`.
+     *
+     * - `matchedIndex >= 0` and `matchedAll === false`: a single overload was
+     *   uniquely selected; the index points into the input `candidateSignatures`
+     *   array. Caller should keep the call site iff the selected index equals
+     *   the cursor's overload index.
+     * - `matchedIndex === -1` and `matchedAll === true`: no candidate could be
+     *   uniquely selected (zero compatible candidates after type filtering, OR
+     *   the classifier had no inferable types to disambiguate with). Caller
+     *   should INCLUDE the call site (conservative — false-positive over
+     *   false-negative for silent F2-rename safety).
+     */
+    public findOverloadByArgClassifications(
+        argClassifications: ArgClassification[],
+        candidateSignatures: string[],
+        options?: { strictRefMatching?: boolean }
+    ): { matchedIndex: number; matchedAll: boolean } {
+        const strict = options?.strictRefMatching ?? false;
+
+        if (candidateSignatures.length === 0) {
+            return { matchedIndex: -1, matchedAll: true };
+        }
+
+        // Step 1: arity filter.
+        const arityCompatible = candidateSignatures
+            .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
+            .filter(c => c.paramTypes.length === argClassifications.length);
+
+        if (arityCompatible.length === 0) {
+            return { matchedIndex: -1, matchedAll: true };
+        }
+
+        // Step 2: per-position type compatibility filter (Mark's locked rule + strict mode).
+        // Run on EVERY candidate — including single-candidate paths — so strict-mode
+        // and literal-vs-*TYPE rules are not silently bypassed.
+        const typeCompatible = arityCompatible.filter(c =>
+            c.paramTypes.every((paramType, i) =>
+                this.argMatchesParam(argClassifications[i], paramType, strict))
+        );
+
+        if (typeCompatible.length === 0) {
+            // All candidates dropped by type filter → match-all fallback (Mark pick (b)).
+            return { matchedIndex: -1, matchedAll: true };
+        }
+        if (typeCompatible.length === 1) {
+            return { matchedIndex: typeCompatible[0].idx, matchedAll: false };
+        }
+
+        // Step 3: rank surviving candidates by specificity (most-specific wins).
+        const scored = typeCompatible.map(c => ({
+            ...c,
+            score: c.paramTypes.reduce((acc, paramType, i) =>
+                acc + this.scoreArgParam(argClassifications[i], paramType), 0)
+        }));
+        scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+
+        // If top two tied, no unique winner → match-all fallback (consistent with pick (b)).
+        if (scored.length >= 2 && scored[0].score === scored[1].score) {
+            return { matchedIndex: -1, matchedAll: true };
+        }
+        return { matchedIndex: scored[0].idx, matchedAll: false };
+    }
+
+    /**
+     * Per-position compatibility check between one classified call-site arg and
+     * one declaration parameter type. Implements Mark's locked overload-resolution
+     * rule (project_clarion_overload_resolution_rule).
+     */
+    private argMatchesParam(arg: ArgClassification, paramType: string, strict: boolean): boolean {
+        const paramIsRef = paramType.startsWith('*');
+        const paramBase = paramIsRef ? paramType.slice(1).trim() : paramType;
+
+        switch (arg.kind) {
+            case 'literal_string':
+            case 'literal_picture':
+                // Literal has no address — cannot match `*TYPE`. Must be a string-compatible base type.
+                if (paramIsRef) return false;
+                return this.isStringType(paramBase);
+
+            case 'literal_numeric':
+                if (paramIsRef) return false;
+                return this.isNumericType(paramBase);
+
+            case 'variable':
+            case 'dotted_var':
+            case 'prefixed_var':
+            case 'control_equate': {
+                if (!arg.inferredType) {
+                    // Type unknown — default match-all; strict drops `*TYPE`.
+                    return strict ? !paramIsRef : true;
+                }
+                const argBase = this.normalizeBaseType(arg.inferredType);
+                // Variable can match either base or ref form of the same type.
+                return this.typesMatch(argBase, paramBase);
+            }
+
+            case 'call_result':
+                // Call result is not addressable (no inferable type yet in v1).
+                // Default mode: match-all. Strict: drop `*TYPE` because result has no address.
+                return strict ? !paramIsRef : true;
+
+            case 'expression':
+            case 'unknown':
+                // Default mode: match-all. Strict: drop `*TYPE` (cannot prove addressable).
+                return strict ? !paramIsRef : true;
+        }
+    }
+
+    /**
+     * Specificity score for a (arg, param) pairing. Higher = more specific.
+     * Used as a tiebreaker when multiple candidates pass the compatibility filter.
+     *
+     * Scoring matrix (variable arg with inferredType):
+     *   exact-base non-ref   = 3   (e.g. STRING var → STRING param — most specific)
+     *   exact-base ref       = 2   (e.g. STRING var → *STRING param — addressable, less specific)
+     *   compatible non-ref   = 1   (e.g. STRING(20) var → CSTRING param)
+     *   compatible ref       = 0   (e.g. STRING(20) var → *CSTRING param)
+     *
+     * Literals: non-ref = 2 (only valid path), ref = 0 (filtered out, defensive).
+     * Un-inferable kinds: 1 (neutral).
+     */
+    private scoreArgParam(arg: ArgClassification, paramType: string): number {
+        const paramIsRef = paramType.startsWith('*');
+        const paramBase = paramIsRef ? paramType.slice(1).trim() : paramType;
+
+        switch (arg.kind) {
+            case 'literal_string':
+            case 'literal_picture':
+            case 'literal_numeric':
+                return paramIsRef ? 0 : 2;
+
+            case 'variable':
+            case 'dotted_var':
+            case 'prefixed_var':
+            case 'control_equate': {
+                if (!arg.inferredType) return 1;
+                const argBase = this.normalizeBaseType(arg.inferredType);
+                const exactMatch = argBase === this.normalizeBaseType(paramBase);
+                if (exactMatch) return paramIsRef ? 2 : 3;
+                if (this.typesMatch(argBase, paramBase)) return paramIsRef ? 0 : 1;
+                return 0;
+            }
+
+            default:
+                return 1; // call_result / expression / unknown — neutral
+        }
+    }
+
+    /**
+     * Strip parameterized-type decoration (`STRING(20)` → `STRING`) and uppercase.
+     * Keeps reference markers off (this method receives base types only).
+     */
+    private normalizeBaseType(t: string): string {
+        const s = t.trim().toUpperCase();
+        const parenIdx = s.indexOf('(');
+        return (parenIdx > 0 ? s.slice(0, parenIdx) : s).trim();
+    }
+
+    /**
+     * Compatible-class match for Clarion base types. Same-name match always
+     * wins; numeric and string families are compatible within their family.
+     */
+    private typesMatch(argBase: string, paramBase: string): boolean {
+        const a = this.normalizeBaseType(argBase);
+        const p = this.normalizeBaseType(paramBase);
+        if (a === p) return true;
+        if (this.isStringType(a) && this.isStringType(p)) return true;
+        if (this.isNumericType(a) && this.isNumericType(p)) return true;
+        return false;
+    }
+
+    private isStringType(t: string): boolean {
+        const s = this.normalizeBaseType(t);
+        return s === 'STRING' || s === 'CSTRING' || s === 'PSTRING' || s === 'ASTRING';
+    }
+
+    private isNumericType(t: string): boolean {
+        const s = this.normalizeBaseType(t);
+        return s === 'LONG' || s === 'SHORT' || s === 'BYTE' || s === 'ULONG' || s === 'USHORT' ||
+               s === 'SIGNED' || s === 'UNSIGNED' || s === 'REAL' || s === 'SREAL' ||
+               s === 'DECIMAL' || s === 'PDECIMAL' || s === 'DATE' || s === 'TIME';
     }
 }
