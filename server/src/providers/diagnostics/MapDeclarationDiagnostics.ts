@@ -142,7 +142,13 @@ export async function validateMissingMapDeclarations(
             (mapEnd === undefined || t.line <= mapEnd)
         );
         for (const inclToken of includesInMap) {
-            // Try same directory as current CLW first (most common), then redirection
+            // ─── Sibling-dir fallback (cluster site 3 of 4, task 6253f9d5) ─────
+            // Try same directory as current CLW first (most common), then redirection.
+            // Load-bearing for no-solution-open mode + cross-directory siblings
+            // outside the project's .red search paths. Move in unison with the
+            // cluster-canonical site at `ClassMemberResolver.ts:~1041` +
+            // `ImplementationProvider.ts:867` + `MapDeclarationCodeActionProvider.ts:resolveClwPath`.
+            // Phase A audit: `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
             const sameDirPath = nodePath.join(currentClwDir, inclToken.referencedFile!);
             const incPath = fs.existsSync(sameDirPath)
                 ? sameDirPath
