@@ -515,4 +515,184 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
             'expected line 11 (LONG impl) NOT in result; got lines=[' + lines.join(',') + ']'
         );
     });
+
+    // ─── (9) BUG PIN — Tier 1 routine-DATA shadowing breaks proc-local lookup ───
+
+    /**
+     * Phase B Tier 1 bug pin (`9142af9f`). When a procedure has a local var `inst MyClass`
+     * AND a ROUTINE inside it declares `inst LONG` in DATA, today's `buildFileVarTypeIndex`
+     * walks ALL col-0 Labels in the procedure scope including the routine's — last-write-wins
+     * makes `inst LONG` overwrite `inst MyClass` in the procedure-local map. Procedure-body
+     * callers then resolve to LONG (not MyClass), silently dropping the FAR match.
+     *
+     * Bidirectional pin per `feedback_bidirectional_pin_assertion`:
+     *   - proc-body STRING caller `inst.Append('x')` IS in result (resolves via proc-local MyClass)
+     *   - proc-body LONG caller `inst.Append(42)` NOT in STRING-cursor result (LONG decl is different overload)
+     *
+     * Pre-fix: both calls drop because lookup returns LONG → not in MyClass family. RED.
+     * Post-fix: routine-bounded lines excluded from proc-local walk → proc-local correctly = MyClass.
+     */
+    test('Phase B Tier 1 BUG PIN — routine DATA shadowing must NOT pollute procedure-local lookup', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor (STRING)
+            'Append       PROCEDURE(LONG)',                      // line 4 — LONG overload
+            '           END',                                    // line 5
+            '',                                                  // line 6
+            'MyClass.Append PROCEDURE(STRING s)',                // line 7
+            '  CODE',
+            '  RETURN',
+            '',
+            'MyClass.Append PROCEDURE(LONG n)',                  // line 11
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 14
+            'MainProc PROCEDURE',                                // line 15
+            'inst       MyClass',                                // line 16 — proc-local MyClass
+            '  CODE',                                            // line 17
+            "  inst.Append('a')",                                // line 18 — proc-body STRING caller
+            '  inst.Append(42)',                                 // line 19 — proc-body LONG caller
+            '  DO MyRoutine',                                    // line 20
+            '  RETURN',                                          // line 21
+            '',                                                  // line 22
+            'MyRoutine ROUTINE',                                 // line 23
+            '  DATA',                                            // line 24
+            'inst       LONG',                                   // line 25 — routine-local SHADOWS
+            '  CODE',                                            // line 26
+            '  inst = 99',                                       // line 27 — routine-body uses routine-local LONG (no method call)
+            '  RETURN',                                          // line 28
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///9142af9f-tier1-shadow.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        // Positive: proc-body STRING caller IS resolved via proc-local MyClass.
+        assert.ok(
+            lines.includes(18),
+            'expected line 18 (proc-body STRING caller) IN result; got lines=[' + lines.join(',') + '] — ' +
+            'routine DATA shadowing polluted proc-local lookup; proc-local should still resolve to MyClass'
+        );
+        // Negative: proc-body LONG caller NOT in STRING-cursor result (routes to LONG decl).
+        assert.ok(
+            !lines.includes(19),
+            'expected line 19 (proc-body LONG caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + ']'
+        );
+    });
+
+    // ─── (10) REGRESSION GUARD — routine WITHOUT DATA doesn't break proc-local ───
+
+    /**
+     * Phase B Tier 1 regression guard. The Tier 1 walk must not break the common
+     * case: procedure with a routine that has NO DATA section (just CODE). Proc-local
+     * `inst MyClass` should resolve normally for proc-body callers; routine has no
+     * shadowing names to worry about.
+     */
+    test('Phase B Tier 1 REGRESSION — routine without DATA section preserves proc-local resolution', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor
+            '           END',                                    // line 4
+            '',                                                  // line 5
+            'MyClass.Append PROCEDURE(STRING s)',                // line 6
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 9
+            'MainProc PROCEDURE',                                // line 10
+            'inst       MyClass',                                // line 11 — proc-local
+            '  CODE',                                            // line 12
+            "  inst.Append('a')",                                // line 13 — proc-body caller
+            '  DO MyRoutine',                                    // line 14
+            '  RETURN',                                          // line 15
+            '',                                                  // line 16
+            'MyRoutine ROUTINE',                                 // line 17
+            '  CODE',                                            // line 18 — no DATA, code-only routine
+            '  ! comment',                                       // line 19
+            '  RETURN',                                          // line 20
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///9142af9f-tier1-nodata.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        assert.ok(
+            lines.includes(13),
+            'expected line 13 (proc-body inst.Append caller) IN result; got lines=[' + lines.join(',') + '] — ' +
+            'routine without DATA must not break proc-local lookup'
+        );
+    });
+
+    // ─── (11) Tier 1 — routine body resolves via routine-local class instance ───
+
+    /**
+     * Phase B Tier 1 positive coverage. Symmetric shape to test 9: proc-local is now
+     * a non-class type (LONG); routine DATA declares `inst MyClass` (no shadowing
+     * conflict on lookup result, but exercises the routine-scope-first lookup path
+     * directly). Routine body's `inst.Append('x')` must resolve via routine-local
+     * MyClass and appear in FAR results.
+     */
+    test('Phase B Tier 1 — routine body resolves receiver via routine-local class instance', async () => {
+        const code = [
+            "  MEMBER('test')",                                 // line 0
+            '',                                                  // line 1
+            'MyClass    CLASS,TYPE',                             // line 2
+            'Append       PROCEDURE(STRING)',                    // line 3 — FAR cursor (STRING)
+            'Append       PROCEDURE(LONG)',                      // line 4 — LONG overload
+            '           END',                                    // line 5
+            '',                                                  // line 6
+            'MyClass.Append PROCEDURE(STRING s)',                // line 7
+            '  CODE',
+            '  RETURN',
+            '',
+            'MyClass.Append PROCEDURE(LONG n)',                  // line 11
+            '  CODE',
+            '  RETURN',
+            '',                                                  // line 14
+            'MainProc PROCEDURE',                                // line 15
+            'inst       LONG',                                   // line 16 — proc-local LONG (no class methods)
+            '  CODE',                                            // line 17
+            '  inst = 0',                                        // line 18 — proc-body LONG usage
+            '  DO MyRoutine',                                    // line 19
+            '  RETURN',                                          // line 20
+            '',                                                  // line 21
+            'MyRoutine ROUTINE',                                 // line 22
+            '  DATA',                                            // line 23
+            'inst       MyClass',                                // line 24 — routine-local MyClass
+            '  CODE',                                            // line 25
+            "  inst.Append('routine-local')",                    // line 26 — routine-body STRING caller
+            '  inst.Append(7)',                                  // line 27 — routine-body LONG caller
+            '  RETURN',                                          // line 28
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///9142af9f-tier1-positive.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 3, character: 0 },
+            { includeDeclaration: true });
+
+        const lines = refs ? refs.map(r => r.range.start.line).sort((a, b) => a - b) : [];
+
+        // Positive: routine-body STRING caller IS in result via routine-local MyClass.
+        assert.ok(
+            lines.includes(26),
+            'expected line 26 (routine-body STRING caller) IN result; got lines=[' + lines.join(',') + ']'
+        );
+        // Negative: routine-body LONG caller NOT in STRING-cursor result.
+        assert.ok(
+            !lines.includes(27),
+            'expected line 27 (routine-body LONG caller) NOT in STRING-cursor result; got lines=[' + lines.join(',') + ']'
+        );
+    });
 });

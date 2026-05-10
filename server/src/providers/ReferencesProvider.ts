@@ -894,16 +894,18 @@ export class ReferencesProvider {
      * Class members (SELF.Order) can be used in any implementation file in the project.
      */
     /**
-     * P2b track-(b) + Phase B+ — file-level variable-type index covering Clarion's
-     * scope tiers per `project_clarion_scope_model.md`:
+     * P2b track-(b) + Phase B+ + Tier 1 — file-level variable-type index covering
+     * Clarion's full scope model per `project_clarion_scope_model.md`:
      *
+     *   Tier 1 (routine local data)          — DATA-section vars inside a ROUTINE,
+     *                                          own-name-scope shadowing per spec
      *   Tier 2 (procedure parameters)        — folded into procScopes via Token.parameters
-     *   Tier 3 (procedure local data)        — col-0 Labels within proc finishesAt
+     *   Tier 3 (procedure local data)        — col-0 Labels within proc finishesAt,
+     *                                          EXCLUDING routine-bounded lines (regression
+     *                                          fix uncovered by Tier 1 investigation —
+     *                                          routine vars must not pollute proc-local map)
      *   Tier 4 (CLASS member data via SELF)  — when proc is a methodImpl, classFields populated
      *   Tier 5 (module data)                 — col-0 Labels OUTSIDE any procedure scope
-     *
-     * Tier 1 (Routine Local data) is deferred to follow-up task 9142af9f — needs
-     * own-name-scope shadowing semantics that warrant separate test coverage.
      *
      * Tier 6 (global data) is built per-file too but loaded SEPARATELY via
      * `loadGlobalScope(programFileUri)` — the PROGRAM file may differ from the
@@ -917,6 +919,7 @@ export class ReferencesProvider {
             varTypes: Map<string, string>;
             classFields?: Map<string, string>;
             enclosingClassLower?: string;
+            routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
         }>;
         moduleScope: Map<string, string>;
     } {
@@ -926,6 +929,7 @@ export class ReferencesProvider {
             varTypes: Map<string, string>;
             classFields?: Map<string, string>;
             enclosingClassLower?: string;
+            routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
         }> = [];
         const moduleScope = new Map<string, string>();
 
@@ -981,8 +985,35 @@ export class ReferencesProvider {
                 }
             }
 
-            // Tier 3 — Procedure local data: col-0 Labels within (startLine, endLine).
+            // Tier 1 — Routine local data: find Routine tokens with hasLocalData
+            // inside this procedure's scope. Build per-routine var-type sub-maps and
+            // collect their line ranges so the Tier 3 walk can EXCLUDE them.
+            const routineScopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> = [];
+            for (const t of tokens) {
+                if (t.type === TokenType.Keyword &&
+                    t.subType === TokenType.Routine &&
+                    t.hasLocalData === true &&
+                    t.finishesAt !== undefined && t.finishesAt > t.line &&
+                    t.line >= startLine && t.finishesAt <= endLine) {
+                    const routineVarTypes = new Map<string, string>();
+                    for (let line = t.line + 1; line <= t.finishesAt; line++) {
+                        const lineTokens = tokensByLine.get(line);
+                        if (!lineTokens) continue;
+                        for (let k = 0; k < lineTokens.length; k++) {
+                            const cand = lineTokens[k];
+                            if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                            this.captureLabelType(cand, lineTokens, routineVarTypes);
+                        }
+                    }
+                    routineScopes.push({ startLine: t.line, endLine: t.finishesAt, varTypes: routineVarTypes });
+                }
+            }
+
+            // Tier 3 — Procedure local data: col-0 Labels within (startLine, endLine),
+            // EXCLUDING lines bounded by any routine in this procedure (regression fix —
+            // otherwise routine vars last-write-overwrite proc-local vars in the map).
             for (let line = startLine + 1; line <= endLine; line++) {
+                if (routineScopes.some(r => line >= r.startLine && line <= r.endLine)) continue;
                 const lineTokens = tokensByLine.get(line);
                 if (!lineTokens) continue;
                 for (let k = 0; k < lineTokens.length; k++) {
@@ -1005,7 +1036,10 @@ export class ReferencesProvider {
                 }
             }
 
-            procScopes.push({ startLine, endLine, varTypes, classFields, enclosingClassLower });
+            procScopes.push({
+                startLine, endLine, varTypes, classFields, enclosingClassLower,
+                routineScopes: routineScopes.length > 0 ? routineScopes : undefined
+            });
         }
 
         return { procScopes, moduleScope };
@@ -1121,6 +1155,7 @@ export class ReferencesProvider {
                 varTypes: Map<string, string>;
                 classFields?: Map<string, string>;
                 enclosingClassLower?: string;
+                routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
             }>;
             moduleScope: Map<string, string>;
         },
@@ -1136,7 +1171,16 @@ export class ReferencesProvider {
             return scope?.classFields?.get(fieldNameLower);
         }
 
-        // Plain identifier path — Tiers 2/3 → 5 → 6.
+        // Plain identifier path — full Clarion resolution priority order:
+        //   Tier 1 (routine local) → Tier 2/3 (proc params + locals) → Tier 5 (module) → Tier 6 (global)
+        // Routine-local wins over proc-local per the spec (own-name-scope shadowing).
+        if (scope?.routineScopes) {
+            const routine = scope.routineScopes.find(r => line >= r.startLine && line <= r.endLine);
+            if (routine) {
+                const routineHit = routine.varTypes.get(key);
+                if (routineHit) return routineHit;
+            }
+        }
         if (scope) {
             const local = scope.varTypes.get(key);
             if (local) return local;
