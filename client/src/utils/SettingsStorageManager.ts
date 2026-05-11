@@ -8,6 +8,28 @@ logger.setLevel("error"); // Production: Only log errors
 
 export class SettingsStorageManager {
     /**
+     * #132 / dd87633f B1 — persist the active Clarion version to User-scope
+     * (global) settings. Solution-free; safe to call before any workspace
+     * folder is open. Sister to `saveSolutionSettings` (WorkspaceFolder scope
+     * for the solution-tuple) — together they replace the legacy bundled write
+     * that was gated on `solutionFile` being non-empty.
+     */
+    static async saveActiveVersion(version: string, propertiesFile: string): Promise<boolean> {
+        try {
+            const config = workspace.getConfiguration('clarion');
+            await config.update('activeVersion', version, ConfigurationTarget.Global);
+            await config.update('activePropertiesFile', propertiesFile, ConfigurationTarget.Global);
+            logger.info(`✅ Saved active Clarion version (User scope): ${version} → ${propertiesFile}`);
+            return true;
+        } catch (error) {
+            logger.error("❌ Error saving active version:", error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            window.showErrorMessage(`Failed to save active Clarion version: ${errorMsg}`);
+            return false;
+        }
+    }
+
+    /**
      * Saves Clarion solution settings to folder-level settings (.vscode/settings.json)
      */
     static async saveSolutionSettings(

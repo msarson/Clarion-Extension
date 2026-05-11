@@ -1275,6 +1275,24 @@
           "type": "boolean",
           "default": true,
           "description": "Enabled by default. Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. Toggling requires reloading the VS Code window (issue #121)."
+        },
+        "clarion.activeVersion": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Active Clarion version (e.g. 'Clarion 11.1'). User-scoped (global) so version-derived state (libsrcPaths, redirectionPath, macros) is populated independently of any open solution. Set via the Clarion version status-bar item or the picker in the Clarion Tools pane. See #132."
+        },
+        "clarion.activePropertiesFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Path to the ClarionProperties.xml file that backs `clarion.activeVersion`. User-scoped (global). Persists across VS Code restarts. See #132."
+        },
+        "clarion.versionMigrated": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Internal one-shot flag: true after the first-run migration auto-promotes a legacy `solutions[].version` to `clarion.activeVersion`. Prevents re-running the migration. Do not edit manually. See #132."
         }
       }
     }

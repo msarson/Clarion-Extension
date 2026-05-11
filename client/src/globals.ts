@@ -37,6 +37,44 @@ let _globalClarionConfiguration: string = "Release";
 // ✅ Ensure these settings are available globally
 const DEFAULT_EXTENSIONS = [".clw", ".inc", ".equ", ".eq", ".int"];
 
+/**
+ * #132 / dd87633f B1 — solution-free entry point for selecting a Clarion
+ * version. Populates `globalSettings.{libsrcPaths, redirectionPath, macros,
+ * redirectionFile}` from the parsed version's properties and persists the
+ * version + properties-file path to User-scope (`clarion.activeVersion` +
+ * `clarion.activePropertiesFile`). Callable before any solution / workspace
+ * folder is open.
+ *
+ * Wired from the new status-bar item + Clarion Tools pane picker (B2) and
+ * from the first-run migration check + solution-open guard (B3).
+ *
+ * Returns true when the version was found in `propertiesFile` and applied.
+ */
+export async function setActiveClarionVersion(
+    version: string,
+    propertiesFile: string
+): Promise<boolean> {
+    logger.info(`🔄 Setting active Clarion version (solution-free): ${version} → ${propertiesFile}`);
+
+    // Update module-level state — these are the same vars solution-open writes,
+    // so subsequent solution-open flows see a non-empty version+propertiesFile.
+    globalClarionVersion = version;
+    globalClarionPropertiesFile = propertiesFile;
+
+    // Populate `globalSettings.*` (libsrcPaths / redirectionPath / macros /
+    // redirectionFile) from the parsed version's properties.
+    const applied = await ClarionExtensionCommands.loadVersionGlobalSettings(propertiesFile, version);
+    if (!applied) {
+        logger.warn(`⚠️ Version "${version}" not found in ${propertiesFile}; globalSettings unchanged`);
+    }
+
+    // Persist to User scope so the choice survives VS Code restarts + is
+    // available before any solution is loaded.
+    await SettingsStorageManager.saveActiveVersion(version, propertiesFile);
+
+    return applied;
+}
+
 export async function setGlobalClarionSelection(
     solutionFile: string,
     clarionPropertiesFile: string,
@@ -71,9 +109,17 @@ export async function setGlobalClarionSelection(
         return;
     }
     
+    // #132 / dd87633f B1 — Persist active version to User scope (global)
+    // independently of solution-open. This is the load-bearing decoupling:
+    // version-derived state (libsrcPaths / redirectionPath / macros) is now
+    // available even when no solution is loaded.
+    if (clarionVersion && clarionPropertiesFile) {
+        await SettingsStorageManager.saveActiveVersion(clarionVersion, clarionPropertiesFile);
+    }
+
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
         logger.info("✅ All required settings are set. Saving using smart storage manager...");
-        
+
         // Use the smart storage manager (handles workspace vs folder storage)
         await SettingsStorageManager.saveSolutionSettings(
             solutionFile,

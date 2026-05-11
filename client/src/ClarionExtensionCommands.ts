@@ -109,6 +109,29 @@ export class ClarionExtensionCommands {
 
 
   /**
+   * #132 / dd87633f B1 — public, composed entry point that parses a
+   * ClarionProperties.xml + applies the matching version's properties to
+   * `globalSettings.*`. Solution-free. Callable from `setActiveClarionVersion`
+   * in `globals.ts` so version-derived state (libsrcPaths / redirectionPath /
+   * macros / redirectionFile) can be populated without any solution context.
+   *
+   * Returns true when the named version was found in the properties file.
+   */
+  public static async loadVersionGlobalSettings(propertiesFile: string, version: string): Promise<boolean> {
+    try {
+      const versions = await this.parseAvailableVersions(propertiesFile);
+      const selectedVersionProps = versions.find(v => v.clarionVersion === version);
+      if (!selectedVersionProps) {
+        return false;
+      }
+      this.updateGlobalSettings(selectedVersionProps);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Updates the global Clarion settings to reflect the specified version properties.
    *
    * @param selectedVersionProps - The Clarion version properties that will be used
