@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
@@ -200,6 +201,19 @@ export class DefinitionProvider {
                             const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
                             if (classType) {
                                 logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
+                                // #125 — arg-classification overlay: when the typed-var call has
+                                // overloaded candidates in the current file, classify the args and
+                                // pick the matching overload. Falls through to paramCount-only on
+                                // empty candidates or matchedAll fallback (preserves UX for cross-
+                                // file classes / un-disambiguatable calls).
+                                if (hasParentheses) {
+                                    const argClassifyResult = this.tryArgClassifyResolve(
+                                        tokens, document, classType, methodName, position.line);
+                                    if (argClassifyResult) {
+                                        logger.info(`✅ Arg-classify resolved typed-var "${methodName}" in "${classType}" to line ${argClassifyResult.range.start.line}`);
+                                        return argClassifyResult;
+                                    }
+                                }
                                 const paramCount = hasParentheses
                                     ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
@@ -1961,6 +1975,51 @@ export class DefinitionProvider {
     /**
      * Finds a class member in a specific class type
      */
+    /**
+     * #125 — when a typed-variable dot-access call has overloaded candidates in
+     * the current file, classify the call's args and pick the matching overload
+     * via `MethodOverloadResolver.findOverloadByArgClassifications`. Returns
+     * `null` to signal "fall through to existing paramCount-only path" when:
+     *   - the classifier can't find the call's `(...)` on this line,
+     *   - the class has fewer than 2 candidates locally (single overload — no
+     *     disambiguation needed; or zero — cross-file lookup needed),
+     *   - the resolver returns `matchedAll=true` (un-disambiguatable; conservative
+     *     fallback preserves UX per `feedback_silent_regression_pushback`).
+     */
+    private tryArgClassifyResolve(
+        tokens: Token[],
+        document: TextDocument,
+        className: string,
+        methodName: string,
+        callLine: number
+    ): Location | null {
+        // The call site's name token is either:
+        //   - a bare identifier matching methodName (`Foo(...)`)
+        //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
+        //     shape for `prefix.method` style calls). Either way, the classifier just
+        //     needs the token immediately before `(`.
+        const lowerMethod = methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.overloadResolver.findAllMethodDeclarations(className, methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        const picked = candidates[matchedIndex];
+        return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
+    }
+
     private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
         logger.info(`Looking for member ${memberName} in class/structure ${className}`);
 

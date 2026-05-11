@@ -46,24 +46,52 @@ export class MethodOverloadResolver {
         implementationSignature?: string
     ): MethodDeclarationInfo | null {
         logger.info(`Finding method declaration: ${className}.${methodName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
-        
-        // Search in current file first
+
+        const candidates = this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens);
+
+        // Select best match from current file
+        const bestMatch = this.selectBestOverload(candidates, paramCount, implementationSignature);
+        if (bestMatch) {
+            return bestMatch;
+        }
+
+        // If not found in current file, search INCLUDE files
+        logger.info(`Method not found in current file, searching INCLUDEs`);
+        return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount, implementationSignature);
+    }
+
+    /**
+     * #125 — return all current-file `className.methodName` declaration
+     * candidates (no overload picking). Consumers do their own filtering
+     * (e.g. providers layer `CallSiteArgumentClassifier` +
+     * `findOverloadByArgClassifications` on top per the Pattern A
+     * "providers filter above the substrate" design).
+     *
+     * Current-file scope only. Cross-file INCLUDE walking stays on
+     * `findMethodDeclaration`'s INCLUDE path for now; providers fall back
+     * to `findMethodDeclaration` when this returns empty.
+     */
+    public findAllMethodDeclarations(
+        className: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): MethodDeclarationInfo[] {
+        return this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens);
+    }
+
+    private gatherCurrentFileMethodDeclarations(
+        className: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): MethodDeclarationInfo[] {
         const candidates: MethodDeclarationInfo[] = [];
-        
         const classTokens = TokenHelper.findClassStructures(tokens);
-        
+
         for (const classToken of classTokens) {
-            if (classToken.label?.toLowerCase() !== className.toLowerCase()) {
-                continue;
-            }
-
-            logger.info(`Found class ${className} at line ${classToken.line}`);
-
-            const content = document.getText();
-            const lines = content.split('\n');
-
-            // Use classToken.children (populated by DocumentStructure) for O(1) scope access.
-            // Class member methods are tokenized as Procedure/MethodDeclaration with label = method name.
+            if (classToken.label?.toLowerCase() !== className.toLowerCase()) continue;
+            const lines = document.getText().split('\n');
             const children = classToken.children ?? [];
             for (const childToken of children) {
                 if (TokenHelper.isProcedureOrFunction(childToken) &&
@@ -77,23 +105,12 @@ export class MethodOverloadResolver {
                         signature,
                         file: document.uri,
                         line: childToken.line,
-                        paramCount: declParamCount
+                        paramCount: declParamCount,
                     });
-
-                    logger.info(`Found method candidate at line ${childToken.line} with ${declParamCount} parameters`);
                 }
             }
         }
-        
-        // Select best match from current file
-        const bestMatch = this.selectBestOverload(candidates, paramCount, implementationSignature);
-        if (bestMatch) {
-            return bestMatch;
-        }
-        
-        // If not found in current file, search INCLUDE files
-        logger.info(`Method not found in current file, searching INCLUDEs`);
-        return this.findMethodDeclarationInIncludes(className, methodName, document, paramCount, implementationSignature);
+        return candidates;
     }
 
     /**
