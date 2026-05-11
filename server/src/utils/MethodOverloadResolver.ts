@@ -588,6 +588,36 @@ export class MethodOverloadResolver {
         return !this.parametersMatch(rawA, rawB);
     }
 
+    /**
+     * #123 — true when sigA and sigB have the same arity AND every position
+     * pair is scalar (string or numeric family) on BOTH sides. Used by the
+     * indistinguishable-prototype walker's rule-4 dispatch: scalar value-
+     * parameters are interchangeable per Mark's 2026-05-11 empirical verdict
+     * on the Clarion compiler — both same-family pairs (LONG + SHORT) and
+     * cross-family pairs (LONG + STRING) produce compile errors.
+     *
+     * Returns false when:
+     *   - Arities differ (handled by absence of rule-2 match upstream).
+     *   - Either side is empty (handled by rule 1).
+     *   - Any position pair has a non-scalar type (complex types like
+     *     classes/groups/queues are distinguishable per rule 6 + Mark's
+     *     `SetValue(StringTheory)` distinguisher).
+     *   - Any position pair has a reference marker (`*LONG`, `*STRING`) —
+     *     the fe254d6f scalar by-ref discriminator distinguishes those.
+     */
+    public areScalarPair(sigA: string, sigB: string): boolean {
+        const typesA = this.extractParameterTypes(sigA);
+        const typesB = this.extractParameterTypes(sigB);
+        if (typesA.length === 0 || typesA.length !== typesB.length) return false;
+        for (let i = 0; i < typesA.length; i++) {
+            const a = typesA[i];
+            const b = typesB[i];
+            if (!(this.isStringType(a) || this.isNumericType(a))) return false;
+            if (!(this.isStringType(b) || this.isNumericType(b))) return false;
+        }
+        return true;
+    }
+
 
     /**
      * Counts parameters in a method declaration

@@ -15,9 +15,13 @@ import { serverSettings } from '../../serverSettings';
  *   2. Structural identity — same param shape (documentary labels ignored).
  *   3. `*COMPLEX` ≡ `COMPLEX` — `*` is implicit for complex types (project rule 6).
  *
- * Tier-2 (same-family / cross-family scalar pair detection) filed as #123,
- * blocked on this walker shipping. Mark's 2026-05-11 empirical verdict
- * confirms scalar-pair indistinguishability — canonical docs were wrong.
+ * Tier-2 rule (#123 Phase B' — Mark's 2026-05-11 empirical verdict):
+ *   4. Scalar-pair indistinguishability — same arity AND every position pair
+ *      is scalar (string or numeric family) on both sides. Covers same-family
+ *      (LONG + SHORT) AND cross-family (LONG + STRING) since Clarion's
+ *      bidirectional implicit conversion makes scalar literals interchangeable.
+ *      Fires AFTER rules 1/2/3 so more-specific cases (complex-type `*`
+ *      redundancy, structural identity) get the more-specific message.
  *
  * Scope traversal: CLASS / INTERFACE / MAP (module-level + procedure-local).
  * Decls are grouped per scope container; cross-scope same-name pairs are NOT
@@ -36,6 +40,7 @@ const MESSAGES = {
     rule1: 'Indistinguishable prototype: both declarations are callable with zero arguments.',
     rule2: 'Duplicate prototype: identical parameter shape as a previous declaration.',
     rule3: 'Duplicate prototype: `*` is implicit for complex types.',
+    rule4: 'Indistinguishable prototype: scalar value-parameters are interchangeable in Clarion (cross-family conversion).',
 };
 
 const CONTAINER_VALUES = new Set(['CLASS', 'INTERFACE', 'MAP']);
@@ -100,6 +105,8 @@ export function validateIndistinguishablePrototypes(
                         message = resolver.isComplexRefDuplicate(sigA, sigB)
                             ? MESSAGES.rule3
                             : MESSAGES.rule2;
+                    } else if (resolver.areScalarPair(sigA, sigB)) {
+                        message = MESSAGES.rule4;
                     }
 
                     if (message) {
