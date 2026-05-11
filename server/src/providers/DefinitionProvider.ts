@@ -25,7 +25,7 @@ import { MemberLocatorService } from '../services/MemberLocatorService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("info"); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11); restore to "error" after Mark's log capture
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -1993,6 +1993,7 @@ export class DefinitionProvider {
         methodName: string,
         callLine: number
     ): Location | null {
+        logger.info(`[#127-trace] tryArgClassifyResolve ENTRY className=${className} methodName=${methodName} callLine=${callLine}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         // The call site's name token is either:
         //   - a bare identifier matching methodName (`Foo(...)`)
         //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
@@ -2004,19 +2005,36 @@ export class DefinitionProvider {
                 t.value.toLowerCase() === lowerMethod ||
                 t.value.toLowerCase().endsWith('.' + lowerMethod)
             ));
-        if (callNameIdx < 0) return null;
+        if (callNameIdx < 0) {
+            logger.warn(`[#127-trace] tryArgClassifyResolve RETURN null: call-site name token NOT FOUND on line ${callLine} for methodName=${methodName}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+            return null;
+        }
+        logger.info(`[#127-trace]   call-site name token found at index ${callNameIdx}, value="${tokens[callNameIdx].value}"`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
 
         const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
-        if (!args) return null;
+        if (!args) {
+            logger.warn(`[#127-trace] tryArgClassifyResolve RETURN null: classifyArguments returned null (no '(' after name token — property access, no overload pick)`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+            return null;
+        }
+        logger.info(`[#127-trace]   args classified: ${args.length} arg(s) — kinds=${JSON.stringify(args.map(a => ({ kind: a.kind, inferredType: a.inferredType, rawText: a.rawText })))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
 
         const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
-        if (candidates.length < 2) return null;
+        logger.info(`[#127-trace]   candidates=${candidates.length} (from findAllMethodDeclarationsIncludingIncludes)`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+        if (candidates.length < 2) {
+            logger.warn(`[#127-trace] tryArgClassifyResolve RETURN null: <2 candidates (=${candidates.length}). Provider WILL FALL BACK to legacy findMethodDeclaration paramCount-only path → BUG SHAPE if real class has ≥2 overloads we didn't see.`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+            return null;
+        }
 
         const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
             args, candidates.map(c => c.signature));
-        if (matchedAll || matchedIndex < 0) return null;
+        logger.info(`[#127-trace]   findOverloadByArgClassifications result: matchedIndex=${matchedIndex} matchedAll=${matchedAll}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+        if (matchedAll || matchedIndex < 0) {
+            logger.warn(`[#127-trace] tryArgClassifyResolve RETURN null: matchedAll=${matchedAll} matchedIndex=${matchedIndex}. Provider WILL FALL BACK to legacy paramCount-only path.`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+            return null;
+        }
 
         const picked = candidates[matchedIndex];
+        logger.info(`[#127-trace] tryArgClassifyResolve RETURN Location ${picked.file}:${picked.line} → "${picked.signature}"`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
     }
 
