@@ -1,4 +1,5 @@
 import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
+import * as path from 'path';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
@@ -52,20 +53,25 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
  * Click opens the `clarion.setActiveVersion` quick-pick handler defined in
  * `ClarionExtensionCommands.setActiveVersionCommand`.
  *
- * Pass empty string / undefined to HIDE the item (e.g. when version unknown);
- * pass a non-empty version to show + refresh.
+ * #133 / a09de932 — label reads as compile-target intent ("Compile: …") with
+ * the IDE folder name (parent dir of the active ClarionProperties.xml) so the
+ * "running Clarion 11, compiling as Clarion 6" case is unambiguous. Tooltip
+ * carries the full properties-file path for trust/debugging.
+ *
+ * Pass undefined/empty for either arg to HIDE the item; pass both to show.
  */
-export function updateVersionStatusBar(version: string | undefined): void {
+export function updateVersionStatusBar(version: string | undefined, propertiesFile: string | undefined): void {
     if (!versionStatusBarItem) {
         versionStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 101);
         versionStatusBarItem.command = 'clarion.setActiveVersion';
     }
-    if (!version) {
+    if (!version || !propertiesFile) {
         versionStatusBarItem.hide();
         return;
     }
-    versionStatusBarItem.text = `$(symbol-package) ${version}`;
-    versionStatusBarItem.tooltip = `Active Clarion version: ${version}\nClick to change`;
+    const ideDir = path.basename(path.dirname(propertiesFile));
+    versionStatusBarItem.text = `$(symbol-package) Compile: ${version} (from ${ideDir})`;
+    versionStatusBarItem.tooltip = `Compile target: ${version}\nFrom: ${propertiesFile}\nClick to change`;
     versionStatusBarItem.show();
 }
 

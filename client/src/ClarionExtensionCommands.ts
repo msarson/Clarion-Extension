@@ -185,7 +185,7 @@ export class ClarionExtensionCommands {
         return;
       }
 
-      updateVersionStatusBar(versionSelection);
+      updateVersionStatusBar(versionSelection, selectedFilePath);
       window.showInformationMessage(`Active Clarion version set to '${versionSelection}'.`);
     } catch (error) {
       window.showErrorMessage(`Error setting active Clarion version: ${error instanceof Error ? error.message : String(error)}`);

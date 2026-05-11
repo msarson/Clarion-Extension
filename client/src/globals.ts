@@ -75,7 +75,7 @@ export async function setActiveClarionVersion(
     // Refresh the version status-bar item (B2). Lazy import to avoid circular dep.
     try {
         const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
-        updateVersionStatusBar(version);
+        updateVersionStatusBar(version, propertiesFile);
     } catch {
         // Status bar not initialised yet — fine; activation will paint it later.
     }
@@ -135,7 +135,7 @@ export async function activateClarionVersionState(): Promise<void> {
         // No version configured — hide the status bar item.
         try {
             const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
-            updateVersionStatusBar(undefined);
+            updateVersionStatusBar(undefined, undefined);
         } catch {
             // Activation-time error — not blocking.
         }
