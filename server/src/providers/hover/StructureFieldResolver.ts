@@ -8,6 +8,8 @@ import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -23,6 +25,7 @@ export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
     private chainedResolver = new ChainedPropertyResolver();
     private memberLocator = new MemberLocatorService();
+    private overloadResolver = new MethodOverloadResolver();
     
     constructor(
         private formatter: HoverFormatter,
@@ -204,6 +207,15 @@ export class StructureFieldResolver {
                         }
                     }
                     if (isClass) {
+                        // #125 — arg-classify overlay for typed-var dot-access call hovers.
+                        // Pick the matching overload before falling through to paramCount-only.
+                        if (hasParentheses) {
+                            const picked = this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
+                            if (picked) {
+                                logger.info(`✅ Arg-classify resolved typed-var hover "${fieldName}" in "${varType}" to line ${picked.line}`);
+                                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount);
+                            }
+                        }
                         // CLASS member resolver (methods, properties)
                         const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
                         if (memberInfo) {
@@ -220,6 +232,43 @@ export class StructureFieldResolver {
         
         return null;
     }
+    /**
+     * #125 — when a typed-variable dot-access hover targets an overloaded method,
+     * classify the call's args and pick the matching overload so the hover shows
+     * the right signature (not the first-found or paramCount-picked variant).
+     * Returns the picked decl as a ClassMemberInfo-shape suitable for passing to
+     * `MethodHoverResolver.resolveChainedMethodCall`; returns null to signal
+     * "fall through to existing paramCount-only path".
+     */
+    private tryArgClassifyResolve(
+        tokens: Token[],
+        document: TextDocument,
+        className: string,
+        methodName: string,
+        callLine: number
+    ): { type: string; className: string; line: number; file: string } | null {
+        const lowerMethod = methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.overloadResolver.findAllMethodDeclarations(className, methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        const picked = candidates[matchedIndex];
+        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file };
+    }
+
     /**
      * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files)
      * and return hover info showing the field declaration.

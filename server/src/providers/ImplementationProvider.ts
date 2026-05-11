@@ -15,6 +15,7 @@ import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { TokenHelper } from '../utils/TokenHelper';
@@ -320,6 +321,50 @@ export class ImplementationProvider {
     /**
      * Find method implementation (class methods or method calls)
      */
+    /**
+     * #125 — when a typed-variable dot-access call→impl lookup targets an
+     * overloaded method, classify the call's args and pick the matching
+     * overload before falling through to paramCount-only `resolveDotAccess`.
+     * Returns the picked decl as a ClassMemberInfo-shape for downstream
+     * `findImplementationCrossFile` lookup; returns null to signal
+     * "fall through to existing paramCount-only path" when:
+     *   - the variable type can't be resolved to a class,
+     *   - the classifier can't find the call's `(...)`,
+     *   - fewer than 2 candidates locally,
+     *   - `matchedAll=true` (un-disambiguatable).
+     */
+    private async tryArgClassifyResolve(
+        document: TextDocument,
+        callInfo: { objectName: string; methodName: string; paramCount: number },
+        callLine: number
+    ): Promise<{ type: string; className: string; line: number; file: string } | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document);
+        if (!varTypeInfo?.isClass) return null;
+        const className = varTypeInfo.typeName;
+
+        const lowerMethod = callInfo.methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.overloadResolver.findAllMethodDeclarations(className, callInfo.methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        const picked = candidates[matchedIndex];
+        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file };
+    }
+
     private async findMethodImplementation(
         document: TextDocument,
         position: Position,
@@ -436,6 +481,20 @@ export class ImplementationProvider {
 
                 // Typed variable: st.GetValue() where st is declared as "st StringTheory"
                 {
+                    // #125 — arg-classify overlay for typed-var dot-access call→impl resolution.
+                    const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
+                    if (argClassifyInfo) {
+                        if (argClassifyInfo.type.toUpperCase().includes('PROCEDURE')) {
+                            const impl = await this.memberResolver.findImplementationCrossFile(
+                                argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document
+                            );
+                            if (impl) {
+                                logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
+                                return impl;
+                            }
+                        }
+                        return Location.create(argClassifyInfo.file, Range.create(argClassifyInfo.line, 0, argClassifyInfo.line, 0));
+                    }
                     const memberInfo = await this.memberLocator.resolveDotAccess(
                         callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
                     );

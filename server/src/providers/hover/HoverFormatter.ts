@@ -2,8 +2,23 @@ import { Hover, Location } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { TokenCache } from '../../TokenCache';
 import * as path from 'path';
 import * as fs from 'fs';
+
+/**
+ * #125 — read a file's text, preferring in-memory cache over disk. Used to
+ * render hover content for documents that haven't been written to disk yet
+ * (test fixtures, unsaved buffers). Falls through to `fs.readFileSync` on
+ * cache miss for production hover from on-disk files.
+ */
+function readCachedOrDiskFile(fileUri: string): string {
+    const cached = TokenCache.getInstance().getDocumentText(fileUri)
+        ?? TokenCache.getInstance().getDocumentTextByUriCaseInsensitive(fileUri);
+    if (cached !== null && cached !== undefined) return cached;
+    const diskPath = decodeURIComponent(fileUri.replace('file:///', ''));
+    return fs.readFileSync(diskPath, 'utf-8');
+}
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 import { PropEntry } from '../../utils/PropertyService';
@@ -158,8 +173,7 @@ export class HoverFormatter {
 
         let declSnippet: string | null = null;
         try {
-            const declUri = decodeURIComponent(info.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declContent = readCachedOrDiskFile(info.file);
             const declLine = declContent.split('\n')[info.line];
             if (declLine) declSnippet = declLine.trim();
         } catch {
