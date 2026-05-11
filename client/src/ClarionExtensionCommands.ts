@@ -132,6 +132,67 @@ export class ClarionExtensionCommands {
   }
 
   /**
+   * #132 / dd87633f B2 — solution-free command handler for `clarion.setActiveVersion`.
+   *
+   * Picks a ClarionProperties.xml (defaulting to the current
+   * `globalClarionPropertiesFile` when set, else the SoftVelocity AppData dir),
+   * lists its available versions, and applies the chosen one via the B1
+   * `setActiveClarionVersion` entry point (User-scope persist + globalSettings.*
+   * populate). Does NOT touch solution-bound state. Triggers the version
+   * status-bar refresh on success.
+   */
+  static async setActiveVersionCommand(): Promise<void> {
+    try {
+      // Lazy imports to avoid circular-import pitfalls with globals.ts.
+      const globals = await import('./globals');
+      const { setActiveClarionVersion, globalClarionPropertiesFile } = globals;
+      const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+
+      const appDataPath = process.env.APPDATA;
+      const defaultDir = globalClarionPropertiesFile
+        ? Uri.file(path.dirname(globalClarionPropertiesFile))
+        : (appDataPath ? Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion")) : undefined);
+
+      const selectedFileUri = await window.showOpenDialog({
+        defaultUri: defaultDir,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        openLabel: "Select ClarionProperties.xml",
+        filters: { XML: ["xml"] },
+      });
+      if (!selectedFileUri || selectedFileUri.length === 0) {
+        window.showWarningMessage("No ClarionProperties.xml file selected.");
+        return;
+      }
+      const selectedFilePath = selectedFileUri[0].fsPath;
+
+      const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
+      if (versionProperties.length === 0) {
+        window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
+        return;
+      }
+      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
+        placeHolder: "Select a Clarion version",
+      });
+      if (!versionSelection) {
+        window.showWarningMessage("No Clarion version selected. Keeping previous version.");
+        return;
+      }
+
+      const applied = await setActiveClarionVersion(versionSelection, selectedFilePath);
+      if (!applied) {
+        window.showErrorMessage(`Clarion version '${versionSelection}' could not be applied (not found in properties file).`);
+        return;
+      }
+
+      updateVersionStatusBar(versionSelection);
+      window.showInformationMessage(`Active Clarion version set to '${versionSelection}'.`);
+    } catch (error) {
+      window.showErrorMessage(`Error setting active Clarion version: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
    * Updates the global Clarion settings to reflect the specified version properties.
    *
    * @param selectedVersionProps - The Clarion version properties that will be used

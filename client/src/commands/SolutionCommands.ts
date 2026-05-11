@@ -1,5 +1,6 @@
 import { commands, window as vscodeWindow, workspace, Uri, Disposable, ExtensionContext } from 'vscode';
 import { globalSolutionFile } from '../globals';
+import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
@@ -202,6 +203,8 @@ export function registerMiscSolutionCommands(
     // Register commands that work without folder
     const commandsAlwaysAvailable = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+        // #132 / dd87633f B2 — solution-free version-selector command.
+        { id: "clarion.setActiveVersion", handler: async () => ClarionExtensionCommands.setActiveVersionCommand() },
         { id: "clarion.debugSolutionHistory", handler: async () => {
             const refs = await GlobalSolutionHistory.getReferences();
             const valid = await GlobalSolutionHistory.getValidReferences();

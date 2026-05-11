@@ -12,6 +12,10 @@ logger.setLevel("error");
  */
 let configStatusBarItem: StatusBarItem;
 let buildProjectStatusBarItem: StatusBarItem;
+// #132 / dd87633f B2 — version status bar item at priority 101 (one slot LEFT
+// of the build-config item at priority 100, since higher priority sits further
+// left on Left-aligned status bars).
+let versionStatusBarItem: StatusBarItem;
 
 /**
  * Updates the configuration status bar with the current Clarion configuration
@@ -37,6 +41,32 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
         logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
         await SettingsStorageManager.updateActiveConfiguration(configuration);
     }
+}
+
+/**
+ * #132 / dd87633f B2 — render the active Clarion version on the status bar
+ * (priority 101, one slot left of the build-config item at 100). Solution-free:
+ * shows whatever the User-scope `clarion.activeVersion` is, regardless of
+ * whether any solution is loaded.
+ *
+ * Click opens the `clarion.setActiveVersion` quick-pick handler defined in
+ * `ClarionExtensionCommands.setActiveVersionCommand`.
+ *
+ * Pass empty string / undefined to HIDE the item (e.g. when version unknown);
+ * pass a non-empty version to show + refresh.
+ */
+export function updateVersionStatusBar(version: string | undefined): void {
+    if (!versionStatusBarItem) {
+        versionStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 101);
+        versionStatusBarItem.command = 'clarion.setActiveVersion';
+    }
+    if (!version) {
+        versionStatusBarItem.hide();
+        return;
+    }
+    versionStatusBarItem.text = `$(symbol-package) ${version}`;
+    versionStatusBarItem.tooltip = `Active Clarion version: ${version}\nClick to change`;
+    versionStatusBarItem.show();
 }
 
 /**

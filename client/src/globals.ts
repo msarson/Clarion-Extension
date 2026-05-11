@@ -72,6 +72,14 @@ export async function setActiveClarionVersion(
     // available before any solution is loaded.
     await SettingsStorageManager.saveActiveVersion(version, propertiesFile);
 
+    // Refresh the version status-bar item (B2). Lazy import to avoid circular dep.
+    try {
+        const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+        updateVersionStatusBar(version);
+    } catch {
+        // Status bar not initialised yet — fine; activation will paint it later.
+    }
+
     return applied;
 }
 
