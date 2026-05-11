@@ -10,7 +10,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
-logger.setLevel("info"); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+logger.setLevel("error");
 
 /**
  * Information about a method declaration with location details
@@ -95,14 +95,10 @@ export class MethodOverloadResolver {
         document: TextDocument,
         tokens: Token[]
     ): MethodDeclarationInfo[] {
-        logger.info(`[#127-trace] findAllMethodDeclarationsIncludingIncludes ENTRY className=${className} methodName=${methodName} docUri=${document.uri}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        const currentFile = this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens);
-        logger.info(`[#127-trace] gatherCurrentFileMethodDeclarations EXIT count=${currentFile.length} signatures=${JSON.stringify(currentFile.map(c => c.signature))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        const scope = this.gatherScopeMethodDeclarations(className, methodName, document);
-        logger.info(`[#127-trace] gatherScopeMethodDeclarations EXIT count=${scope.length} signatures=${JSON.stringify(scope.map(c => `${c.file}:${c.line} → ${c.signature}`))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        const all = [...currentFile, ...scope];
-        logger.info(`[#127-trace] findAllMethodDeclarationsIncludingIncludes EXIT totalCandidates=${all.length}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        return all;
+        return [
+            ...this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens),
+            ...this.gatherScopeMethodDeclarations(className, methodName, document),
+        ];
     }
 
     /**
@@ -414,21 +410,17 @@ export class MethodOverloadResolver {
         document: TextDocument
     ): MethodDeclarationInfo[] {
         const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
-        logger.info(`[#127-trace] gatherIncludeMethodDeclarations ENTRY filePath=${filePath} className=${className} methodName=${methodName}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         const content = document.getText();
         const lines = content.split('\n');
 
         const candidates: MethodDeclarationInfo[] = [];
-        let includeStmtCount = 0; // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (!includeMatch) continue;
-            includeStmtCount++; // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
 
             const includeFileName = includeMatch[1];
-            logger.info(`[#127-trace]   walking INCLUDE #${includeStmtCount} on line ${i}: "${includeFileName}"`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
             let resolvedPath: string | null = null;
 
             // Try solution-wide redirection
@@ -458,23 +450,14 @@ export class MethodOverloadResolver {
                 resolvedPath = path.resolve(currentDir, resolvedPath);
             }
 
-            if (!resolvedPath) {
-                logger.warn(`[#127-trace]   INCLUDE "${includeFileName}" NOT RESOLVED (neither SolutionManager redirection nor relative-path disk fallback found it) — SKIPPING`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-                continue;
-            }
-            logger.info(`[#127-trace]   resolved INCLUDE "${includeFileName}" → ${resolvedPath}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+            if (!resolvedPath) continue;
 
             const includeContent = fs.readFileSync(resolvedPath, 'utf8');
             const includeLines = includeContent.split('\n');
 
-            // Per-INCLUDE outcome tracking. TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-            const beforeCount = candidates.length;
-            let foundClassInThisInclude = false;
             for (let j = 0; j < includeLines.length; j++) {
                 const classMatch = includeLines[j].match(new RegExp(`^${className}\\s+CLASS`, 'i'));
                 if (!classMatch) continue;
-                foundClassInThisInclude = true; // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-                logger.info(`[#127-trace]     found CLASS ${className} at ${path.basename(resolvedPath)}:${j}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
 
                 for (let k = j + 1; k < includeLines.length; k++) {
                     const methodLine = includeLines[k];
@@ -482,7 +465,6 @@ export class MethodOverloadResolver {
 
                     const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
                     if (methodMatch) {
-                        logger.info(`[#127-trace]       matched ${methodName} at ${path.basename(resolvedPath)}:${k} → "${methodLine.trim()}"`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
                         const signature = methodLine.trim();
                         const declParamCount = ClarionPatterns.countParameters(signature);
                         const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
@@ -495,15 +477,6 @@ export class MethodOverloadResolver {
                     }
                 }
             }
-            if (!foundClassInThisInclude) {
-                logger.warn(`[#127-trace]   INCLUDE "${includeFileName}" resolved + read but CLASS ${className} NOT FOUND in it`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-            } else {
-                logger.info(`[#127-trace]   INCLUDE "${includeFileName}" added ${candidates.length - beforeCount} candidate(s)`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-            }
-        }
-
-        if (includeStmtCount === 0) {
-            logger.warn(`[#127-trace] gatherIncludeMethodDeclarations: ${path.basename(filePath)} has NO INCLUDE statements — cross-file walker has nothing to walk`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         }
 
         return candidates;
