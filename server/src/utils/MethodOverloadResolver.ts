@@ -80,6 +80,26 @@ export class MethodOverloadResolver {
         return this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens);
     }
 
+    /**
+     * #127 — return all `className.methodName` declaration candidates from
+     * BOTH the current file AND INCLUDE'd files (cross-file). Same shape as
+     * `findAllMethodDeclarations` but covers Mark's real-world repro where
+     * the CLASS is declared in an INCLUDE'd `.inc` (StringTheory in libsrc).
+     * Used by Def/Hover/Impl arg-classify overlays for cross-file overload
+     * resolution.
+     */
+    public findAllMethodDeclarationsIncludingIncludes(
+        className: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): MethodDeclarationInfo[] {
+        return [
+            ...this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens),
+            ...this.gatherIncludeMethodDeclarations(className, methodName, document),
+        ];
+    }
+
     private gatherCurrentFileMethodDeclarations(
         className: string,
         methodName: string,
@@ -254,21 +274,38 @@ export class MethodOverloadResolver {
         paramCount?: number,
         implementationSignature?: string
     ): MethodDeclarationInfo | null {
+        const candidates = this.gatherIncludeMethodDeclarations(className, methodName, document);
+        return this.selectBestOverload(candidates, paramCount, implementationSignature);
+    }
+
+    /**
+     * #127 — gather all `className.methodName` declaration candidates from
+     * INCLUDE'd files. Reads via `fs.readFileSync` (cross-file disk I/O —
+     * see `feedback_red_fixture_matches_user_repro.md` for the Mark-reported
+     * gap that drove this primitive's extraction). Used by both legacy
+     * `findMethodDeclarationInIncludes` (auto-picks via selectBestOverload)
+     * and `findAllMethodDeclarationsIncludingIncludes` (no auto-pick;
+     * providers do their own arg-classify filtering on top).
+     */
+    private gatherIncludeMethodDeclarations(
+        className: string,
+        methodName: string,
+        document: TextDocument
+    ): MethodDeclarationInfo[] {
         const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
         const content = document.getText();
         const lines = content.split('\n');
-        
+
         const candidates: MethodDeclarationInfo[] = [];
-        
-        // Find INCLUDE statements
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (!includeMatch) continue;
-            
+
             const includeFileName = includeMatch[1];
             let resolvedPath: string | null = null;
-            
+
             // Try solution-wide redirection
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager && solutionManager.solution) {
@@ -281,64 +318,51 @@ export class MethodOverloadResolver {
                     }
                 }
             }
-            
+
             // Fallback to relative path
             if (!resolvedPath) {
                 const currentDir = path.dirname(filePath);
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
-                    resolvedPath = path.resolve(relativePath); // Ensure absolute path
+                    resolvedPath = path.resolve(relativePath);
                 }
             }
-            
-            // Ensure resolvedPath is absolute
+
             if (resolvedPath && !path.isAbsolute(resolvedPath)) {
                 const currentDir = path.dirname(filePath);
                 resolvedPath = path.resolve(currentDir, resolvedPath);
             }
-            
-            if (resolvedPath) {
-                logger.info(`📁 Resolved INCLUDE path: ${resolvedPath}`);
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-                
-                // Find the class
-                for (let j = 0; j < includeLines.length; j++) {
-                    const includeLine = includeLines[j];
-                    const classMatch = includeLine.match(new RegExp(`^${className}\\s+CLASS`, 'i'));
-                    if (classMatch) {
-                        logger.info(`Found class ${className} in INCLUDE at line ${j}`);
-                        
-                        // Find all method overloads
-                        for (let k = j + 1; k < includeLines.length; k++) {
-                            const methodLine = includeLines[k];
-                            if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) {
-                                break;
-                            }
-                            
-                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
-                            if (methodMatch) {
-                                const signature = methodLine.trim();
-                                const declParamCount = ClarionPatterns.countParameters(signature);
-                                const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
-                                
-                                candidates.push({
-                                    signature,
-                                    file: fileUri,
-                                    line: k,
-                                    paramCount: declParamCount
-                                });
-                                
-                                logger.info(`Found method candidate in INCLUDE at line ${k} with ${declParamCount} parameters`);
-                            }
-                        }
+
+            if (!resolvedPath) continue;
+
+            const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+            const includeLines = includeContent.split('\n');
+
+            for (let j = 0; j < includeLines.length; j++) {
+                const classMatch = includeLines[j].match(new RegExp(`^${className}\\s+CLASS`, 'i'));
+                if (!classMatch) continue;
+
+                for (let k = j + 1; k < includeLines.length; k++) {
+                    const methodLine = includeLines[k];
+                    if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) break;
+
+                    const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
+                    if (methodMatch) {
+                        const signature = methodLine.trim();
+                        const declParamCount = ClarionPatterns.countParameters(signature);
+                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        candidates.push({
+                            signature,
+                            file: fileUri,
+                            line: k,
+                            paramCount: declParamCount,
+                        });
                     }
                 }
             }
         }
-        
-        // Select best match from INCLUDE files
-        return this.selectBestOverload(candidates, paramCount, implementationSignature);
+
+        return candidates;
     }
     
     /**

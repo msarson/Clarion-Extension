@@ -258,7 +258,7 @@ export class StructureFieldResolver {
         const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
         if (!args) return null;
 
-        const candidates = this.overloadResolver.findAllMethodDeclarations(className, methodName, document, tokens);
+        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
         if (candidates.length < 2) return null;
 
         const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
