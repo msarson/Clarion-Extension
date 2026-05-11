@@ -15,12 +15,13 @@ StringTheory.clw
 dev/
 ai/
 
-# Claude Code per-machine settings (project shared settings live in .claude/settings.json)
-.claude/settings.local.json
+# Claude Code / MultiTerminal harness — kept per-machine, never tracked
+.claude/
+.mcp.json
+.mcp.json.bak
 
-# PowerShell scripts (except project-level Claude Code hooks, which travel with the repo)
+# PowerShell scripts
 *.ps1
-!.claude/hooks/*.ps1
 
 # ANTLR generated files (exploratory)
 antlr-grammar/.antlr/
