@@ -65,8 +65,14 @@ export class WordCompletionProvider {
             }
 
             // Accumulated candidates: key = uppercase label, value = CompletionItem.
-            // Keeping one item per label; for overloaded procedures the first found wins.
+            // One item per label; for overloaded procedures/methods the detail field
+            // accumulates all signatures so users see every variant at completion
+            // time (#125 — Mark's "present all" framing; no args typed yet so no
+            // arg-classification possible).
             const seen = new Map<string, CompletionItem>();
+
+            const isOverloadable = (k?: CompletionItemKind): boolean =>
+                k === CompletionItemKind.Function || k === CompletionItemKind.Method;
 
             const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => {
                 const key = label.toUpperCase();
@@ -75,11 +81,16 @@ export class WordCompletionProvider {
                     if (detail) item.detail = detail;
                     if (documentation) item.documentation = documentation;
                     seen.set(key, item);
-                } else {
-                    const existing = seen.get(key)!;
-                    if (detail && !existing.detail) existing.detail = detail;
-                    if (documentation && !existing.documentation) existing.documentation = documentation;
+                    return;
                 }
+                const existing = seen.get(key)!;
+                if (detail && existing.detail && isOverloadable(kind) && isOverloadable(existing.kind)
+                    && !existing.detail.split('\n').includes(detail)) {
+                    existing.detail = `${existing.detail}\n${detail}`;
+                } else if (detail && !existing.detail) {
+                    existing.detail = detail;
+                }
+                if (documentation && !existing.documentation) existing.documentation = documentation;
             };
 
             // ----------------------------------------------------------------
@@ -250,6 +261,16 @@ export class WordCompletionProvider {
             if (t.subType === TokenType.GlobalProcedure && t.label) {
                 const info = this.extractProcedureInfo(t, sourceDoc);
                 add(t.label, CompletionItemKind.Function, info.detail, info.documentation);
+            }
+        }
+
+        // Class member methods (MethodDeclaration subType) — surfaces class methods
+        // for completion alongside MAP procedures + globals. Detail field accumulates
+        // overload signatures via the `add` lambda's overload-aware merge (#125).
+        for (const t of tokens) {
+            if (t.subType === TokenType.MethodDeclaration && t.label) {
+                const info = this.extractProcedureInfo(t, sourceDoc);
+                add(t.label, CompletionItemKind.Method, info.detail, info.documentation);
             }
         }
     }
