@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { KeywordService } from '../../utils/KeywordService';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import LoggerManager from '../../logger';
 
@@ -185,6 +186,10 @@ async function augmentDeclaredViaSymbolFinder(
         const upper = candidate.name.toUpperCase();
         if (ctx.declaredNames.has(upper)) continue;
         if (BUILT_IN_IDENTIFIERS.has(upper)) continue;
+        // #124 — skip Clarion language keywords (AND/OR/XOR/NOT/TO/BY/BAND/...). The
+        // tokenizer emits these as TokenType.Variable; without this filter they trip
+        // the SymbolFinder cross-file lookup AND fire false-positive diagnostics.
+        if (KeywordService.getInstance().isKeyword(candidate.name)) continue;
         candidateNames.add(upper);
     }
     if (candidateNames.size === 0) return;
@@ -338,6 +343,10 @@ function detectCheckableName(token: Token): CheckableName | null {
     if (token.type === TokenType.Variable) {
         if (!containsSpecialChars(token.value)) {
             if (BUILT_IN_IDENTIFIERS.has(token.value.toUpperCase())) return null;
+            // #124 — Clarion operator/control-flow keywords (AND/OR/XOR/NOT/TO/BY/...)
+            // tokenize as TokenType.Variable. Suppress them here so the walker doesn't
+            // false-positive on `IF a AND b` or `a = b TO 10`.
+            if (KeywordService.getInstance().isKeyword(token.value)) return null;
             return { name: token.value, length: token.value.length };
         }
     }
@@ -357,6 +366,8 @@ function detectCheckableName(token: Token): CheckableName | null {
     if (!dottedMatch) return null;
     const scope = dottedMatch[1];
     if (BUILT_IN_IDENTIFIERS.has(scope.toUpperCase())) return null;
+    // #124 — same keyword filter as bare-identifier branch (parallel symmetry).
+    if (KeywordService.getInstance().isKeyword(scope)) return null;
     return { name: scope, length: scope.length };
 }
 
