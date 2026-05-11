@@ -267,4 +267,62 @@ suite("SignatureHelpProvider — partial-arg classification (#126 Phase A)", () 
         assert.strictEqual(result.signatures.length, 1, 'single overload — exactly one signature enumerated');
         assert.strictEqual(result.activeSignature, 0, 'activeSignature must = 0 for single-overload case');
     });
+
+    // ─── Pin 6: Ordering-agnostic activeSignature (#126 B2 RED pin) ─────────
+    //
+    // Bob's PM directive 2026-05-11 — Fold A's GREEN on the 5 original tests
+    // passes via candidate-ordering luck (STRING overload at file index 0 +
+    // selectActiveSignature defaulting to 0). Flip the stub so StringTheory
+    // is declared FIRST and STRING+pClip SECOND; pin activeSignature === 1
+    // (the STRING decl's new file index), bidirectional-pinned with !== 0.
+    //
+    // RED today (Fold A only): selectActiveSignature defaults to 0 (=
+    // StringTheory in this ordering), so activeSignature === 0 ≠ 1.
+    // GREEN after Fold B: findActiveOverloadByPartialArgs classifies the
+    // 'Hello' literal as literal_string → picks the STRING decl regardless
+    // of file ordering.
+
+    test("Ordering-agnostic: stub with StringTheory FIRST + STRING SECOND — activeSignature must still pick STRING via partial-arg classification (#126 B2)", async () => {
+        const STUB_ORDERING_FLIPPED = [
+            "StringTheory CLASS,TYPE",                                          // line 0
+            "SetValue PROCEDURE(StringTheory newValue),VIRTUAL",                // line 1 — StringTheory overload (FIRST now)
+            "SetValue PROCEDURE(STRING newValue, LONG pClip=0),VIRTUAL",        // line 2 — STRING overload (SECOND now)
+            "        END",                                                      // line 3
+        ].join('\n');
+
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eve-126-b2-'));
+        const stubPath = path.join(tmpDir, 'StringTheoryStub.inc');
+        const programPath = path.join(tmpDir, 'SimpleNewSln.clw');
+        const callerPath = path.join(tmpDir, 'Caller.clw');
+        fs.writeFileSync(stubPath, STUB_ORDERING_FLIPPED, 'utf8');
+        fs.writeFileSync(programPath, SIMPLE_NEW_SLN_CLW, 'utf8');
+        const callerContent = makeCaller("st.SetValue('Hello'");
+        fs.writeFileSync(callerPath, callerContent, 'utf8');
+        const callerUri = 'file:///' + callerPath.replace(/\\/g, '/');
+        const callerDoc = TextDocument.create(callerUri, 'clarion', 1, callerContent);
+        TokenCache.getInstance().getTokens(callerDoc);
+        FileRelationshipGraph.getInstance().seedEdgesForTest([
+            { type: 'MEMBER',  fromFile: callerPath,   toFile: programPath, fromLine: 0 },
+            { type: 'INCLUDE', fromFile: programPath,  toFile: stubPath,    fromLine: 1 },
+        ]);
+        fx = { tmpDir, files: { stub: stubPath, prog: programPath, caller: callerPath }, callerUri, callerDoc };
+
+        const provider = new SignatureHelpProvider();
+        // Cursor at char 21 (right after 'Hello' closing quote) mid-first-arg
+        const result = await provider.provideSignatureHelp(fx.callerDoc, { line: 6, character: 21 });
+
+        assert.ok(result, 'signature help must return a result');
+        assert.ok(result.signatures.length >= 2, `must enumerate both overloads; got ${result.signatures.length}`);
+
+        const stringSigIdx = result.signatures.findIndex(s =>
+            typeof s.label === 'string' && /STRING\b/.test(s.label) && /LONG\s+pClip|pClip\s*=/.test(s.label));
+        assert.ok(stringSigIdx >= 0,
+            `STRING+default overload must appear in signatures list; got: ${result.signatures.map(s => s.label).join(' | ')}`);
+        // With the flipped stub, stringSigIdx should be 1 (StringTheory at 0).
+        assert.notStrictEqual(result.activeSignature, 0,
+            `activeSignature must NOT default to 0 (StringTheory overload) just because it's first — partial-arg classification must override ordering`);
+        assert.strictEqual(result.activeSignature, stringSigIdx,
+            `activeSignature must = STRING+default overload index (${stringSigIdx}) regardless of file ordering; got ${result.activeSignature}. ` +
+            `Fold A only path defaults to file-index 0 (StringTheory); Fold B's findActiveOverloadByPartialArgs classifies 'Hello' → literal_string → picks STRING overload independent of ordering.`);
+    });
 });

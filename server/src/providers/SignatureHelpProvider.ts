@@ -6,6 +6,7 @@ import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ArgClassification } from '../utils/CallSiteArgumentClassifier';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
@@ -56,7 +57,7 @@ export class SignatureHelpProvider {
                 return null;
             }
 
-            const { methodName, prefix, parameterIndex, isClassMethod } = methodCallInfo;
+            const { methodName, prefix, parameterIndex, isClassMethod, argSegments } = methodCallInfo;
             logger.info(`Method call detected: ${prefix ? prefix + '.' : ''}${methodName}, parameter index: ${parameterIndex}`);
 
             // 🚀 FAST PATH: Get cached tokens for instant signature help
@@ -108,9 +109,30 @@ export class SignatureHelpProvider {
                 logger.info(`  [${idx}] ${sig.label}`);
             });
 
-            // Select the best signature based on current parameter count
-            const activeSignature = this.selectActiveSignature(signatures, parameterIndex);
-            logger.info(`Selected signature ${activeSignature} as active`);
+            // #126 — partial-arg classification path: pick activeSignature by typing
+            // the partial args against each candidate's param shape. Falls back to
+            // legacy paramCount-only `selectActiveSignature` when no segments classify
+            // (empty call shape, etc.).
+            let activeSignature: number;
+            const partialArgs = argSegments.map(s => this.classifyArgText(s));
+            const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
+            if (hasClassifiableArgs) {
+                // Reshape each SignatureInformation.label (`methodName(...)`) into a
+                // synthetic `PROCEDURE(...)` so `findActiveOverloadByPartialArgs`'s
+                // `extractParameterTypes` (which expects PROCEDURE/FUNCTION) accepts it.
+                const procShapedSigs = signatures.map(s => {
+                    const label = typeof s.label === 'string' ? s.label : '';
+                    const parenIdx = label.indexOf('(');
+                    return parenIdx >= 0 ? `PROCEDURE${label.slice(parenIdx)}` : label;
+                });
+                const { activeIndex } = this.overloadResolver.findActiveOverloadByPartialArgs(
+                    partialArgs, procShapedSigs);
+                activeSignature = activeIndex;
+                logger.info(`Partial-arg classification picked active ${activeSignature} (from ${partialArgs.length} arg(s))`);
+            } else {
+                activeSignature = this.selectActiveSignature(signatures, parameterIndex);
+                logger.info(`Selected signature ${activeSignature} as active (paramCount-only fallback)`);
+            }
 
             return {
                 signatures,
@@ -132,6 +154,7 @@ export class SignatureHelpProvider {
         prefix: string | null;
         parameterIndex: number;
         isClassMethod: boolean;
+        argSegments: string[];
     } | null {
         // Find the last unclosed opening parenthesis
         let parenDepth = 0;
@@ -170,13 +193,67 @@ export class SignatureHelpProvider {
         // Count parameters (commas at depth 0)
         const afterParen = line.substring(lastOpenParen + 1);
         const parameterIndex = this.countParameters(afterParen);
+        const argSegments = this.splitArgSegments(afterParen);
 
         return {
             methodName,
             prefix,
             parameterIndex,
-            isClassMethod
+            isClassMethod,
+            argSegments,
         };
+    }
+
+    /**
+     * #126 — split the inside-paren text into per-position arg segments
+     * (split-on-comma-at-depth-0). Trailing empty segment is preserved when
+     * the user just typed a comma so `findActiveOverloadByPartialArgs` sees
+     * the right paramCount filter (e.g. `Foo('Hello',` → ["'Hello'", ""]).
+     */
+    private splitArgSegments(text: string): string[] {
+        const segments: string[] = [];
+        let current = '';
+        let depth = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '(' || char === '<') {
+                depth++;
+                current += char;
+            } else if (char === ')' || char === '>') {
+                depth--;
+                current += char;
+            } else if (char === ',' && depth === 0) {
+                segments.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        if (segments.length > 0 || current.trim() !== '') {
+            segments.push(current);
+        }
+        return segments;
+    }
+
+    /**
+     * #126 — text-based arg classifier for partial-arg shapes the user is
+     * mid-typing. The CallSiteArgumentClassifier's token-based pipeline
+     * needs a closed `(...)` shape; signature help fires while the user is
+     * typing, so we classify the raw segment text via simple heuristics
+     * sufficient for picking the active overload.
+     */
+    private classifyArgText(text: string): ArgClassification {
+        const trimmed = text.trim();
+        if (trimmed === '') {
+            return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
+        }
+        if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
+            return { kind: 'literal_string', rawText: trimmed, line: 0, character: 0 };
+        }
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            return { kind: 'literal_numeric', rawText: trimmed, line: 0, character: 0 };
+        }
+        return { kind: 'variable', rawText: trimmed, line: 0, character: 0 };
     }
 
     /**

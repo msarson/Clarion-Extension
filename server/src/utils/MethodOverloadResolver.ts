@@ -102,6 +102,48 @@ export class MethodOverloadResolver {
     }
 
     /**
+     * #126 — pick the active overload for `SignatureHelp` from partial-arg
+     * classifications (the user is mid-typing — `partialArgs` may be shorter
+     * than any candidate's full signature). Score each candidate by per-
+     * position `scoreArgParam` over the prefix; skip candidates whose
+     * `paramTypes.length < partialArgs.length` (can't accept this many args).
+     *
+     * Returns `{ activeIndex: 0, ambiguous: true }` when:
+     *   - no candidates,
+     *   - partialArgs is empty (no signal to disambiguate),
+     *   - no candidate has enough param slots,
+     *   - top two scored candidates tie (caller falls back to 0).
+     *
+     * Otherwise returns `{ activeIndex: <best>, ambiguous: false }`. Pure
+     * composition over `extractParameterTypes` + `scoreArgParam` — no new
+     * primitive logic.
+     */
+    public findActiveOverloadByPartialArgs(
+        partialArgs: ArgClassification[],
+        candidateSignatures: string[]
+    ): { activeIndex: number; ambiguous: boolean } {
+        if (candidateSignatures.length === 0) return { activeIndex: 0, ambiguous: true };
+        if (partialArgs.length === 0) return { activeIndex: 0, ambiguous: true };
+
+        const scored = candidateSignatures
+            .map((sig, idx) => ({ idx, paramTypes: this.extractParameterTypes(sig) }))
+            .filter(c => c.paramTypes.length >= partialArgs.length)
+            .map(c => ({
+                idx: c.idx,
+                score: partialArgs.reduce((acc, arg, k) =>
+                    acc + this.scoreArgParam(arg, c.paramTypes[k]), 0),
+            }));
+
+        if (scored.length === 0) return { activeIndex: 0, ambiguous: true };
+
+        scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+        if (scored.length >= 2 && scored[0].score === scored[1].score) {
+            return { activeIndex: 0, ambiguous: true };
+        }
+        return { activeIndex: scored[0].idx, ambiguous: false };
+    }
+
+    /**
      * #128 — gather all `className.methodName` candidates by walking Clarion's
      * compilation-model file graph: MEMBER → PROGRAM → recursive INCLUDE BFS.
      *
