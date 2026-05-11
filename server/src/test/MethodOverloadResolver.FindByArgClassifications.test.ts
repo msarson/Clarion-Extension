@@ -307,4 +307,91 @@ suite('MethodOverloadResolver — findOverloadByArgClassifications (10ea5a80 Pha
                 'LONG literal must pick LONG overload (Eve test 5 LONG caller — must NOT match STRING decl)');
         });
     });
+
+    // ─── (8) #120 — overload resolution gap fixes (Phase A RED-pin contract) ─
+    //
+    // Bidirectional-pin shape per `feedback_bidirectional_pin_assertion`: every
+    // test asserts BOTH "wrong NOT picked" AND "right IS picked". These pins were
+    // authored during the #120 Phase A audit (Eve, 2026-05-11) and document the
+    // contract Phase B (Alice) must drive to GREEN.
+    //
+    // - Test 1 (Gap 1 default-aware arity) — RED today; GREEN when Alice mirrors
+    //   `selectBestOverload`'s `countDefaultParams` range into the arg-classification
+    //   path's arity filter at `:611-614`.
+    // - Test 2 (Gap 2 cross-family literal) — RED today; GREEN when Alice relaxes
+    //   `argMatchesParam:660-669` to allow scalar paramBase for scalar literals,
+    //   paired with a natural-family scoring bias in `scoreArgParam:712-718`
+    //   (natural=3, cross-family=1) so existing pins at line 290-298/301-308 stay GREEN.
+    // - Test 3 (Gap 3 signaturesMatch complex-type) — `test.skip` today; un-skip
+    //   when #121's Phase B lands the `*COMPLEX` ≡ `COMPLEX` equivalence in
+    //   `parametersMatch` / `extractParameterType`. Pre-pins #121's substrate.
+    // - Test 4 (Gap 4 &Type variable inference) — GREEN today as a synthetic
+    //   resolver-boundary pin; serves as hypothesis-validation gate per
+    //   `feedback_non_x_regression_sentinel`. Real upstream coverage of
+    //   `captureLabelType:1195-1197` lives in a ReferencesProvider integration
+    //   test (Phase B/C if Alice deems necessary; current code-read suggests the
+    //   `&`-strip already works for `ReferenceVariable` token shape).
+
+    suite('#120 — overload resolution gap fixes', () => {
+
+        // Test 1 — Gap 1: default-aware arity. Mark's exact repro shape.
+        test("Mark's SetValue repro: [literal_string] + [(STRING, LONG=default), (StringTheory)] → picks default-aware overload", () => {
+            const r = resolver.findOverloadByArgClassifications(
+                [arg('literal_string', 'STRING')],
+                ['PROCEDURE(STRING newValue, LONG pClip=st:NoClip)', 'PROCEDURE(StringTheory newValue)']
+            );
+            assert.strictEqual(r.matchedIndex, 0,
+                'STRING+default overload IS picked (default-aware arity admits the 1-arg call)');
+            assert.notStrictEqual(r.matchedIndex, 1,
+                'StringTheory overload is NOT picked (string literal cannot match class-type param)');
+            assert.strictEqual(r.matchedAll, false,
+                'no match-all fallback — arity-with-defaults disambiguates uniquely');
+        });
+
+        // Test 2 — Gap 2: cross-family literal on a single legal-Clarion overload.
+        // Rule 3 (any-two-scalar-overloads-illegal) means this fixture represents
+        // the only legal way cross-family conversion surfaces: a single scalar overload.
+        test('cross-family single overload: [literal_numeric] + [(STRING)] only → matched (implicit conversion legal)', () => {
+            const r = resolver.findOverloadByArgClassifications(
+                [arg('literal_numeric', 'LONG')],
+                ['PROCEDURE(STRING s)']
+            );
+            assert.strictEqual(r.matchedIndex, 0,
+                'STRING overload IS picked despite numeric literal (Clarion permits implicit conversion)');
+            assert.notStrictEqual(r.matchedAll, true,
+                'NOT match-all — cross-family literal should resolve uniquely against the single legal overload');
+        });
+
+        // Test 3 — Gap 3: signaturesMatch complex-type equivalence (#121 substrate pin).
+        // SKIPPED: GREEN when #121 lands.
+        test.skip('signaturesMatch treats (StringTheory) ≡ (*StringTheory) per rule 6 (complex-type * implicit) — #121', () => {
+            assert.strictEqual(
+                resolver.signaturesMatch('PROCEDURE(StringTheory)', 'PROCEDURE(*StringTheory)'),
+                true,
+                '(StringTheory) IS recognised as same prototype as (*StringTheory) — complex type * is implicit'
+            );
+            assert.notStrictEqual(
+                resolver.signaturesMatch('PROCEDURE(STRING)', 'PROCEDURE(*STRING)'),
+                true,
+                '(STRING) is NOT same prototype as (*STRING) — scalar * discriminator preserved'
+            );
+        });
+
+        // Test 4 — Gap 4: &Type variable inference (hypothesis-validation gate).
+        // Synthetic resolver-boundary pin: GIVEN the upstream type-index strips `&`
+        // from `st &StringTheory` declarations (hypothesis), the resolver picks the
+        // matching complex-type overload. Code-read of `captureLabelType:1195-1197`
+        // supports the hypothesis. If this test goes RED unexpectedly, escalate
+        // upstream (tokenizer or buildFileVarTypeIndex).
+        test('&Type variable inference (sentinel): [variable StringTheory] + [(StringTheory)] → matched', () => {
+            const r = resolver.findOverloadByArgClassifications(
+                [arg('variable', 'StringTheory')],
+                ['PROCEDURE(StringTheory s)']
+            );
+            assert.strictEqual(r.matchedIndex, 0,
+                'StringTheory variable IS matched to StringTheory param (post-& strip contract honoured)');
+            assert.strictEqual(r.matchedAll, false,
+                'no match-all fallback — type inference resolves uniquely');
+        });
+    });
 });
