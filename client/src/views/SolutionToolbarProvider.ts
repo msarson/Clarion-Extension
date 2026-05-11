@@ -70,6 +70,10 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'buildAndDebug':
                     vscode.commands.executeCommand('clarion.startDebugging', true);
                     break;
+                case 'setActiveVersion':
+                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point.
+                    vscode.commands.executeCommand('clarion.setActiveVersion');
+                    break;
             }
         });
 
@@ -84,18 +88,21 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     }
 
     private _getSummaryRows(): { label: string; value: string }[] {
-        if (!globalSolutionFile) {
-            return [{ label: 'Solution', value: 'No solution open' }];
-        }
-
         const rows: { label: string; value: string }[] = [];
+
+        // #132 / dd87633f B3 — Clarion version row always shows (even without
+        // a solution open). Falls back to "Not set — click to choose" when
+        // empty so the user has a discoverable entry point.
+        const versionLabel = globalClarionVersion || 'Not set — use Set Version';
+        rows.push({ label: 'Clarion', value: versionLabel });
+
+        if (!globalSolutionFile) {
+            rows.push({ label: 'Solution', value: 'No solution open' });
+            return rows;
+        }
 
         const slnName = path.basename(globalSolutionFile, '.sln');
         rows.push({ label: 'Solution', value: slnName });
-
-        if (globalClarionVersion) {
-            rows.push({ label: 'Clarion', value: globalClarionVersion });
-        }
 
         const config = globalSettings.configuration;
         if (config) {
@@ -218,6 +225,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
     <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
     <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
+    <div class="sep"></div>
+    <button title="Set Active Clarion Version" onclick="send('setActiveVersion')">⚙&#xFE0E;</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>

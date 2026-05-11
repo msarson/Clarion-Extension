@@ -5,7 +5,7 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalSolutionFile } from './globals';
+import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
@@ -69,6 +69,18 @@ export async function activate(context: ExtensionContext): Promise<void> {
     logger.info(`⏱️ [STARTUP] Client activation started at ${new Date().toISOString()}`);
     logger.info("🚀 ========== ACTIVATION START ==========");
     
+    // #132 / dd87633f B3 — first-run version migration + on-activation
+    // status-bar paint. Solution-free; runs once per activation. Auto-promotes
+    // a legacy `solutions[].version` to User-scope `clarion.activeVersion`
+    // (gated by `clarion.versionMigrated`) and refreshes the version status
+    // bar item from the User-scope value.
+    try {
+        await activateClarionVersionState();
+    } catch (err) {
+        logger.warn(`⚠️ Clarion-version activation failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Non-fatal — extension continues activating.
+    }
+
     // Phase 1-5: Core initialization
     await ActivationManager.initializeGlobalState(context);
     await ActivationManager.checkConflictingExtensions(context);

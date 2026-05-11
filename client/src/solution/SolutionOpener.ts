@@ -1,5 +1,5 @@
 import { commands, Uri, window, ExtensionContext, workspace, window as vscodeWindow } from 'vscode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget } from '../globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion } from '../globals';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
@@ -179,6 +179,16 @@ export async function openClarionSolution(
     initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>
 ) {
     try {
+        // #132 / dd87633f B3 — solution-open guard. Require a Clarion version
+        // before proceeding (so `globalSettings.libsrcPaths`, redirectionPath,
+        // macros are populated by the time the solution tries to use them).
+        // Fires the `clarion.setActiveVersion` picker if version is empty.
+        const hasVersion = await ensureActiveClarionVersion();
+        if (!hasVersion) {
+            window.showWarningMessage("Clarion version is required to open a solution. Solution open cancelled.");
+            return;
+        }
+
         // ✅ If no folder is open, let user pick solution and we'll open its folder
         if (!workspace.workspaceFolders) {
             const solutionUris = await window.showOpenDialog({

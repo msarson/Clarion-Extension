@@ -83,6 +83,91 @@ export async function setActiveClarionVersion(
     return applied;
 }
 
+/**
+ * #132 / dd87633f B3 — on-activation entry point: run first-run version
+ * migration + paint the version status bar from User-scope settings.
+ *
+ * Migration: if `clarion.activeVersion` is empty AND any
+ * `solutions[].version` exists in workspace settings, auto-promote the first
+ * legacy entry to User scope. Gated by `clarion.versionMigrated` (one-shot
+ * flag) so it never re-fires. Set the flag even when nothing to migrate IF
+ * the User-scope value is already populated — preserves "first run after
+ * install vs first run after upgrade" semantics.
+ *
+ * Status-bar paint: read `clarion.activeVersion` from User scope; if non-
+ * empty, call `setActiveClarionVersion` to populate `globalSettings.*` +
+ * refresh the status bar item. Solution-free.
+ */
+export async function activateClarionVersionState(): Promise<void> {
+    const config = workspace.getConfiguration('clarion');
+    const migrated = config.get<boolean>('versionMigrated', false);
+    let activeVersion = config.get<string>('activeVersion', '');
+    let activePropertiesFile = config.get<string>('activePropertiesFile', '');
+
+    if (!migrated) {
+        if (activeVersion && activePropertiesFile) {
+            // User-scope value already populated (e.g. set via picker before
+            // migration flag existed). Mark migrated; no auto-promote needed.
+            await config.update('versionMigrated', true, ConfigurationTarget.Global);
+        } else {
+            // Look for a legacy solutions[].version to auto-promote.
+            const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+            const legacy = solutions.find(s => s.version && s.propertiesFile);
+            if (legacy) {
+                logger.info(`🔄 Migrating legacy version from solutions[]: ${legacy.version} → User scope`);
+                await setActiveClarionVersion(legacy.version, legacy.propertiesFile);
+                await config.update('versionMigrated', true, ConfigurationTarget.Global);
+                activeVersion = legacy.version;
+                activePropertiesFile = legacy.propertiesFile;
+            }
+            // If no legacy entry exists, leave the flag false — first-run user
+            // hasn't set up Clarion yet; they'll set it via the picker.
+        }
+    }
+
+    // Paint the status bar from the (now-current) User-scope value.
+    if (activeVersion && activePropertiesFile) {
+        // Re-apply via setActiveClarionVersion to populate globalSettings.*
+        // even when migration was a no-op (e.g. fresh VS Code launch after the
+        // settings were already migrated previously).
+        await setActiveClarionVersion(activeVersion, activePropertiesFile);
+    } else {
+        // No version configured — hide the status bar item.
+        try {
+            const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+            updateVersionStatusBar(undefined);
+        } catch {
+            // Activation-time error — not blocking.
+        }
+    }
+}
+
+/**
+ * #132 / dd87633f B3 — solution-open guard.
+ *
+ * Returns true when a Clarion version is configured (in `globalClarionVersion`
+ * or via User-scope `clarion.activeVersion`). When false, fires the
+ * `clarion.setActiveVersion` picker and returns whatever the user picked
+ * (true if they completed selection, false if they cancelled). Callers
+ * should NOT proceed with solution-open when this returns false.
+ */
+export async function ensureActiveClarionVersion(): Promise<boolean> {
+    if (globalClarionVersion) return true;
+
+    const config = workspace.getConfiguration('clarion');
+    const activeVersion = config.get<string>('activeVersion', '');
+    const activePropertiesFile = config.get<string>('activePropertiesFile', '');
+    if (activeVersion && activePropertiesFile) {
+        await setActiveClarionVersion(activeVersion, activePropertiesFile);
+        return true;
+    }
+
+    // Fire the picker via the registered command + check result.
+    const { commands } = await import('vscode');
+    await commands.executeCommand('clarion.setActiveVersion');
+    return !!globalClarionVersion;
+}
+
 export async function setGlobalClarionSelection(
     solutionFile: string,
     clarionPropertiesFile: string,
