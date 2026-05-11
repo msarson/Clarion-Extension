@@ -264,14 +264,29 @@ export class SignatureHelpProvider {
 
         logger.info(`Resolved class name: ${className}`);
 
-        // Use MemberLocatorService — handles inheritance, current-file classes, and INC files
-        const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
-        const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
+        // #126 — use the MEMBER → PROGRAM → recursive-INCLUDE walker (#128 substrate)
+        // for cross-file overload enumeration. Prior `enumerateMembersInClass` missed
+        // MEMBER files where the class reached scope only via PROGRAM's INCLUDE chain.
+        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(
+            className, methodName, document, tokens
+        );
 
-        logger.info(`Found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+        // Fallback for legacy paths (e.g. SELF inside a class where the substrate
+        // returns empty because the class is in the same file but accessed differently):
+        // if the substrate finds nothing, keep the pre-#126 behaviour so we don't
+        // regress SELF-in-class hover/signature for files the substrate doesn't cover.
+        if (candidates.length === 0) {
+            const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
+            const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
+            logger.info(`Fallback enumeration: found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+            return matchingMembers.map(m =>
+                this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+            );
+        }
 
-        return matchingMembers.map(m =>
-            this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+        logger.info(`Found ${candidates.length} overload(s) for ${className}.${methodName} via substrate walker`);
+        return candidates.map(c =>
+            this.createSignatureInformation(methodName, c.signature, this.overloadResolver.countParametersInDeclaration(c.signature))
         );
     }
 
