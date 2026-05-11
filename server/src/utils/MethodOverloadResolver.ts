@@ -299,7 +299,7 @@ export class MethodOverloadResolver {
                                 break;
                             }
                             
-                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+PROCEDURE`, 'i'));
+                            const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
                             if (methodMatch) {
                                 const signature = methodLine.trim();
                                 const declParamCount = ClarionPatterns.countParameters(signature);
@@ -397,7 +397,7 @@ export class MethodOverloadResolver {
      * Returns array of normalized parameter types (e.g., ['STRING', '*STRING', 'LONG'])
      */
     private extractParameterTypes(signature: string): string[] {
-        const match = signature.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
         if (!match) return [];
         
         const paramList = match[1].trim();
@@ -608,21 +608,26 @@ export class MethodOverloadResolver {
             return { matchedIndex: -1, matchedAll: true };
         }
 
-        // Step 1: arity filter.
+        // Step 1: arity filter (default-aware — mirror selectBestOverload:367-372).
+        // Strict equality misses N-arg calls against (N+defaults)-param decls — #120 root cause.
         const arityCompatible = candidateSignatures
             .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
-            .filter(c => c.paramTypes.length === argClassifications.length);
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.sig);
+                return argClassifications.length >= (c.paramTypes.length - defaults)
+                    && argClassifications.length <= c.paramTypes.length;
+            });
 
         if (arityCompatible.length === 0) {
             return { matchedIndex: -1, matchedAll: true };
         }
 
         // Step 2: per-position type compatibility filter (Mark's locked rule + strict mode).
-        // Run on EVERY candidate — including single-candidate paths — so strict-mode
-        // and literal-vs-*TYPE rules are not silently bypassed.
+        // Iterate over argClassifications (not paramTypes) — trailing default-omitted positions
+        // are unconstrained when defaults take effect.
         const typeCompatible = arityCompatible.filter(c =>
-            c.paramTypes.every((paramType, i) =>
-                this.argMatchesParam(argClassifications[i], paramType, strict))
+            argClassifications.every((argClass, i) =>
+                this.argMatchesParam(argClass, c.paramTypes[i], strict))
         );
 
         if (typeCompatible.length === 0) {
@@ -634,10 +639,11 @@ export class MethodOverloadResolver {
         }
 
         // Step 3: rank surviving candidates by specificity (most-specific wins).
+        // Iterate over argClassifications to bound by call-arg count under default-aware arity.
         const scored = typeCompatible.map(c => ({
             ...c,
-            score: c.paramTypes.reduce((acc, paramType, i) =>
-                acc + this.scoreArgParam(argClassifications[i], paramType), 0)
+            score: argClassifications.reduce((acc, argClass, i) =>
+                acc + this.scoreArgParam(argClass, c.paramTypes[i]), 0)
         }));
         scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
 
@@ -660,13 +666,14 @@ export class MethodOverloadResolver {
         switch (arg.kind) {
             case 'literal_string':
             case 'literal_picture':
-                // Literal has no address — cannot match `*TYPE`. Must be a string-compatible base type.
+                // Cross-family permitted per Clarion's bidirectional implicit conversion;
+                // natural-family preference is enforced via scoreArgParam bias.
                 if (paramIsRef) return false;
-                return this.isStringType(paramBase);
+                return this.isStringType(paramBase) || this.isNumericType(paramBase);
 
             case 'literal_numeric':
                 if (paramIsRef) return false;
-                return this.isNumericType(paramBase);
+                return this.isNumericType(paramBase) || this.isStringType(paramBase);
 
             case 'variable':
             case 'dotted_var':
@@ -713,8 +720,14 @@ export class MethodOverloadResolver {
         switch (arg.kind) {
             case 'literal_string':
             case 'literal_picture':
+                // Natural=3, cross-family=1: bias preserves rule-1 natural-family preference
+                // while permitting cross-family matches per argMatchesParam relaxation.
+                if (paramIsRef) return 0;
+                return this.isStringType(paramBase) ? 3 : 1;
+
             case 'literal_numeric':
-                return paramIsRef ? 0 : 2;
+                if (paramIsRef) return 0;
+                return this.isNumericType(paramBase) ? 3 : 1;
 
             case 'variable':
             case 'dotted_var':

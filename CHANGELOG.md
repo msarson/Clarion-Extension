@@ -47,6 +47,8 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🐛 **Overload resolution honours default parameters + permits cross-family literal conversion** (#120): `findOverloadByArgClassifications` arity filter is now default-aware (mirrors `selectBestOverload`), letting N-arg calls match (N+defaults)-param decls — fixes Mark's `StringTheory.SetValue('x')` repro where FAR / Goto-Def / Goto-Impl resolved to the wrong overload. `argMatchesParam` relaxed for cross-family literals with `scoreArgParam` natural-family-preference bias (natural=3, cross=1) so existing multi-overload pins stay GREEN.
+- 🐛 **`MethodOverloadResolver` regex sites accept FUNCTION-shape signatures** (#122): the INCLUDE-file method-lookup regex (`:302`) and `extractParameterTypes` regex (`:400`) extended `PROCEDURE` → `(?:PROCEDURE|FUNCTION)`, completing the PROCEDURE/FUNCTION-equivalence sweep that landed in `55c0e4be`.
 - 🐛 **Undeclared-variable diagnostic — cross-file scope resolution** (#115): the diagnostic no longer false-positives on identifiers declared at PROGRAM-scope or in the parent file when used from a MEMBER. Single-file fast-path preserved; misses fall through to `SymbolFinderService.findSymbol` for canonical 7-tier resolution.
 - 🐛 `parseRedFileRecursiveAsync` now serialises `{include}` chains so the async parser produces interleaved-at-include-position flat-list ordering, matching sync semantics deterministically across multiple `{include}` directives (#98).
 - 🐛 Redirection parser section-name comparisons (e.g. `[Debug]` vs `[debug]`) are now case-insensitive — defensive against hand-edited `.red` case drift (#98).

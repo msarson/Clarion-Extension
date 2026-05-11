@@ -69,10 +69,11 @@ suite('MethodOverloadResolver — findOverloadByArgClassifications (10ea5a80 Pha
         test('literal_string + [*STRING] only → matchedAll fallback (cannot bind)', () => {
             const r = resolver.findOverloadByArgClassifications(
                 [arg('literal_string', 'STRING')],
-                ['PROCEDURE(*STRING s)', 'PROCEDURE(LONG n)']
+                ['PROCEDURE(*STRING s)']
             );
-            // Both candidates are incompatible: *STRING (literal can't bind) and LONG (string!=numeric).
-            // → match-all fallback.
+            // *STRING is by-ref; literal has no address → cannot bind. Single-candidate
+            // fixture (matches test name); pre-#120 version had a second LONG decl pinning
+            // cross-family-rejection, which Mark's rule now permits — second decl removed.
             assert.deepStrictEqual(r, { matchedIndex: -1, matchedAll: true });
         });
 
@@ -363,7 +364,7 @@ suite('MethodOverloadResolver — findOverloadByArgClassifications (10ea5a80 Pha
         });
 
         // Test 3 — Gap 3: signaturesMatch complex-type equivalence (#121 substrate pin).
-        // SKIPPED: GREEN when #121 lands.
+        // SKIPPED: GREEN when #121 lands — pre-pinned regression sentinel.
         test.skip('signaturesMatch treats (StringTheory) ≡ (*StringTheory) per rule 6 (complex-type * implicit) — #121', () => {
             assert.strictEqual(
                 resolver.signaturesMatch('PROCEDURE(StringTheory)', 'PROCEDURE(*StringTheory)'),
