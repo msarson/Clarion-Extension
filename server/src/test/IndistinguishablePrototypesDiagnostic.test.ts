@@ -30,18 +30,28 @@ import { serverSettings } from '../serverSettings';
  *   implicitly. `Func(MyClass)` and `Func(*MyClass)` declare the same prototype.
  *   Helper: extended `MethodOverloadResolver.signaturesMatch` (post `30dedfc`).
  *
- * ─── Tier-2 DEFERRED ───
+ * ─── Tier-2 / Rule 4 (#123 Phase A — added after Mark's 2026-05-11 verdict) ───
  *
- * Same-family scalar pair detection (e.g. `Func(LONG)` + `Func(REAL)`) and
- * cross-family scalar pair detection (e.g. `Func(LONG)` + `Func(STRING)`) are
- * NOT pinned here. Canonical docs explicitly show these as legal coexisting
- * overloads (Func9 SHORT=10 + Func10 LONG in the same `rules_for_procedure_overloading.htm`
- * example; rule 6 "All Value-parameters are considered to have the same type"
- * is a call-site disambiguation tie-breaker, NOT a decl-time illegality rule).
- * Mark's rule-3 framing (`project_clarion_overload_resolution_rule.md` 2026-05-11
- * clarification) contradicts the canonical docs — escalation in flight; will
- * land as a separate task IF Mark confirms empirical compiler-error observation.
- * Do NOT add same-family/cross-family scalar pair pins here without Mark's verdict.
+ * Mark empirically tested the actual Clarion compiler 2026-05-11: BOTH same-family
+ * AND cross-family scalar pairs produce "indistinguishable prototype" errors.
+ * Canonical docs (`rules_for_procedure_overloading.htm`) are wrong on this point;
+ * reality wins. Confirmation captured in `project_clarion_overload_resolution_rule.md`.
+ *
+ * Mark's underlying framing: "Clarion is not a type-safe language" — since
+ * cross-family implicit conversion makes scalar literals interchangeable, the
+ * compiler can't disambiguate at call sites, so it rejects decl-time ambiguity.
+ *
+ * Rule 4 — scalar-pair indistinguishability
+ *   Predicate: for every position pair (paramTypesA[i], paramTypesB[i]), both must
+ *   satisfy `isStringType(t) || isNumericType(t)`. Reuses `MethodOverloadResolver.ts:759-769`
+ *   family predicates — no new substrate.
+ *   Same-family example: `Func(LONG)` + `Func(SHORT)` (numeric-family internal)
+ *   Cross-family example: `Func(LONG)` + `Func(STRING)` (Mark's explicit test case)
+ *
+ * Dispatch ordering: rule 4 slots AFTER rules 1/2/3 in the walker's dispatch chain
+ * (otherwise it would mask the more-specific rule 3 for `(MyGroup)` + `(*MyGroup)`).
+ * Counter-examples: by-ref scalar (`*LONG`), class-vs-scalar, arity discriminator,
+ * different class names — all must NOT fire rule 4.
  *
  * ─── OPEN SUBSTRATE QUESTION (Phase B' will verify) ───
  *
@@ -81,6 +91,7 @@ const MESSAGES = {
     rule1: 'Indistinguishable prototype: both declarations are callable with zero arguments.',
     rule2: 'Duplicate prototype: identical parameter shape as a previous declaration.',
     rule3: 'Duplicate prototype: `*` is implicit for complex types.',
+    rule4: 'Indistinguishable prototype: scalar value-parameters are interchangeable in Clarion (cross-family conversion).',
 };
 
 function createDocument(code: string): TextDocument {
@@ -373,6 +384,176 @@ suite('Indistinguishable Prototype Diagnostic Walker — Integration (#121 Phase
             const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
             assert.strictEqual(diags.length, 0,
                 'gate off → walker silent; matches `feedback_silent_regression_pushback` opt-out path for users with noisy legacy codebases');
+        });
+    });
+
+    // ─── Rule 4 — same-family scalar pair (#123 Phase A) ────────────────────
+    //
+    // Per Mark's 2026-05-11 empirical verdict on the Clarion compiler.
+    // Drives Phase B' (Alice) extension of the walker dispatch chain with a
+    // 4th rule check (areScalarPair predicate) AFTER rules 1/2/3.
+
+    suite('Rule 4 — same-family scalar pair (#123 Phase A)', () => {
+
+        test('CLASS Foo(LONG) + Foo(SHORT) → fires (numeric-family internal)', () => {
+            const code = [
+                "MyClass CLASS,TYPE",
+                "Foo PROCEDURE(LONG n)",
+                "Foo PROCEDURE(SHORT n)",
+                "        END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+
+        test('INTERFACE Foo(STRING) + Foo(CSTRING) → fires (string-family internal)', () => {
+            const code = [
+                "MyIface INTERFACE",
+                "Foo PROCEDURE(STRING s)",
+                "Foo PROCEDURE(CSTRING s)",
+                "        END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+
+        test('MAP Foo(DATE) + Foo(LONG) → fires (DATE is in isNumericType per Q3 docs answer)', () => {
+            const code = [
+                "  MAP",
+                "Foo PROCEDURE(DATE d)",
+                "Foo PROCEDURE(LONG n)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+
+        test('Procedure-local MAP Foo(LONG) + Foo(REAL) → fires (basic numeric pair)', () => {
+            const code = [
+                "TestProc PROCEDURE()",
+                "LocalMap MAP",
+                "Foo PROCEDURE(LONG n)",
+                "Foo PROCEDURE(REAL r)",
+                "     END",
+                "  CODE",
+                "  RETURN",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 3 });
+        });
+    });
+
+    // ─── Rule 4 — cross-family scalar pair (#123 Phase A — Mark's broadening) ───
+    //
+    // Mark's explicit test case: `ProcA(LONG)` + `ProcA(STRING)` produces a
+    // Clarion compile error. Same dispatch hookup as same-family rule 4.
+
+    suite('Rule 4 — cross-family scalar pair (#123 Phase A — Mark broadening)', () => {
+
+        test("CLASS Foo(LONG) + Foo(STRING) → fires (Mark's explicit cross-family case)", () => {
+            const code = [
+                "MyClass CLASS,TYPE",
+                "Foo PROCEDURE(LONG n)",
+                "Foo PROCEDURE(STRING s)",
+                "        END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+
+        test('MAP Foo(REAL) + Foo(CSTRING) → fires (cross-family numeric ↔ string)', () => {
+            const code = [
+                "  MAP",
+                "Foo PROCEDURE(REAL r)",
+                "Foo PROCEDURE(CSTRING s)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+
+        test('INTERFACE Foo(SHORT) + Foo(PSTRING) → fires (cross-family numeric ↔ string)', () => {
+            const code = [
+                "MyIface INTERFACE",
+                "Foo PROCEDURE(SHORT n)",
+                "Foo PROCEDURE(PSTRING s)",
+                "        END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1);
+            assertDiagnosticShape(diags[0], { message: MESSAGES.rule4, line: 2 });
+        });
+    });
+
+    // ─── Rule 4 — counter-examples (must NOT fire over-eagerly) ─────────────
+
+    suite('Rule 4 — counter-examples (over-fire sentinels)', () => {
+
+        test('Foo(STRING) + Foo(StringTheory) does NOT fire rule 4 (class-vs-scalar)', () => {
+            // StringTheory is complex (not in isStringType ∪ isNumericType).
+            // Rule 4 requires BOTH sides scalar; complex side breaks the predicate.
+            const code = [
+                "StringTheory CLASS,TYPE",
+                "        END",
+                "  MAP",
+                "Foo PROCEDURE(STRING s)",
+                "Foo PROCEDURE(StringTheory st)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 0,
+                'class-vs-scalar is the canonical Mark distinguisher (StringTheory SetValue case) — rule 4 must NOT swallow it');
+        });
+
+        test('Foo(LONG) + Foo(*LONG) does NOT fire rule 4 (by-ref scalar discriminator preserved)', () => {
+            // *LONG is not in isNumericType (which expects bare types).
+            // Tier-1 already pins this as a counter-example for rules 1/2/3;
+            // rule 4 must equally NOT fire.
+            const code = [
+                "  MAP",
+                "Foo PROCEDURE(LONG n)",
+                "Foo PROCEDURE(*LONG n)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 0,
+                'by-ref scalar discriminator preserved — Mark discriminator from 35019583/fe254d6f');
+        });
+
+        test('Foo(STRING) + Foo(STRING, LONG=default) does NOT fire rule 4 (arity discriminator)', () => {
+            const code = [
+                "  MAP",
+                "Foo PROCEDURE(STRING s)",
+                "Foo PROCEDURE(STRING s, LONG n=0)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 0,
+                'different arity → different prototypes — rule 4 requires same-arity-scalar match');
+        });
+
+        test('Foo(MyGroup) + Foo(*MyGroup) fires Tier-1 rule 3 (NOT rule 4 — dispatch order)', () => {
+            // Already fires under rule 3 (`*` implicit for complex types).
+            // Dispatch order means rule 4 never gets checked. Pin to ensure
+            // (a) only ONE diagnostic emitted, (b) it has rule 3 message text.
+            const code = [
+                "MyGroup GROUP,TYPE",
+                "        END",
+                "  MAP",
+                "Foo PROCEDURE(MyGroup g)",
+                "Foo PROCEDURE(*MyGroup g)",
+                "  END",
+            ].join('\n');
+            const diags = walkerDiagnostics(DiagnosticProvider.validateDocument(createDocument(code)));
+            assert.strictEqual(diags.length, 1, 'exactly one diagnostic — dispatch fires first matching rule + breaks');
+            assert.strictEqual(diags[0].message, MESSAGES.rule3,
+                'rule 3 wins for complex-type * duplicate; rule 4 not reached due to dispatch order');
         });
     });
 });
