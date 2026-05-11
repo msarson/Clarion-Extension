@@ -323,9 +323,11 @@ suite('MethodOverloadResolver — findOverloadByArgClassifications (10ea5a80 Pha
     //   `argMatchesParam:660-669` to allow scalar paramBase for scalar literals,
     //   paired with a natural-family scoring bias in `scoreArgParam:712-718`
     //   (natural=3, cross-family=1) so existing pins at line 290-298/301-308 stay GREEN.
-    // - Test 3 (Gap 3 signaturesMatch complex-type) — `test.skip` today; un-skip
-    //   when #121's Phase B lands the `*COMPLEX` ≡ `COMPLEX` equivalence in
-    //   `parametersMatch` / `extractParameterType`. Pre-pins #121's substrate.
+    // - Test 3 (Gap 3 signaturesMatch complex-type) — MIGRATED to
+    //   `MethodOverloadResolver.IndistinguishablePrototypes.test.ts` per Bob's
+    //   2026-05-11 housekeeping call. That suite (35ceab3) is the canonical home
+    //   for decl-vs-decl signature-equivalence pinning; this call-site suite is
+    //   the wrong context for the assertion.
     // - Test 4 (Gap 4 &Type variable inference) — GREEN today as a synthetic
     //   resolver-boundary pin; serves as hypothesis-validation gate per
     //   `feedback_non_x_regression_sentinel`. Real upstream coverage of
@@ -363,20 +365,10 @@ suite('MethodOverloadResolver — findOverloadByArgClassifications (10ea5a80 Pha
                 'NOT match-all — cross-family literal should resolve uniquely against the single legal overload');
         });
 
-        // Test 3 — Gap 3: signaturesMatch complex-type equivalence (#121 substrate pin).
-        // SKIPPED: GREEN when #121 lands — pre-pinned regression sentinel.
-        test.skip('signaturesMatch treats (StringTheory) ≡ (*StringTheory) per rule 6 (complex-type * implicit) — #121', () => {
-            assert.strictEqual(
-                resolver.signaturesMatch('PROCEDURE(StringTheory)', 'PROCEDURE(*StringTheory)'),
-                true,
-                '(StringTheory) IS recognised as same prototype as (*StringTheory) — complex type * is implicit'
-            );
-            assert.notStrictEqual(
-                resolver.signaturesMatch('PROCEDURE(STRING)', 'PROCEDURE(*STRING)'),
-                true,
-                '(STRING) is NOT same prototype as (*STRING) — scalar * discriminator preserved'
-            );
-        });
+        // Test 3 from f10c65a — moved to IndistinguishablePrototypes suite via 35ceab3.
+        // Decl-vs-decl signature equivalence pinned canonically there (rule 6 *COMPLEX
+        // ≡ COMPLEX + scalar discriminator preserved). This call-site suite was the
+        // wrong context for the assertion.
 
         // Test 4 — Gap 4: &Type variable inference (hypothesis-validation gate).
         // Synthetic resolver-boundary pin: GIVEN the upstream type-index strips `&`

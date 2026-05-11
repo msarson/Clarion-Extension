@@ -451,32 +451,44 @@ export class MethodOverloadResolver {
     private extractParameterType(param: string): string {
         // Remove angle brackets for omittable parameters
         let normalized = param.replace(/^<\s*/, '').replace(/\s*>$/, '');
-        
+
         // Remove default values (=something)
         normalized = normalized.replace(/\s*=.+$/, '');
-        
+
         // Strip CONST and REF qualifiers (prototype-only modifiers, not part of the type)
         normalized = normalized.replace(/\bCONST\s+/gi, '').replace(/\bREF\s+/gi, '');
-        
+
         // Extract type - everything before the last word (which is the variable name)
         // Handle special cases like *STRING, &STRING, etc.
         const words = normalized.trim().split(/\s+/);
-        
+
         if (words.length === 0) return '';
-        if (words.length === 1) return words[0].toUpperCase();
-        
-        // If last word is a valid type, it's the type (no variable name given)
-        // Otherwise, everything except last word is the type
-        const lastWord = words[words.length - 1];
-        
-        // Check if last word looks like a variable name (starts with letter, has mixed case or lowercase)
-        if (lastWord.match(/^[a-z]/i) && (lastWord !== lastWord.toUpperCase() || lastWord.length > 1)) {
-            // Last word is likely variable name, rest is type
-            return words.slice(0, -1).join(' ').toUpperCase();
+
+        let result: string;
+        if (words.length === 1) {
+            result = words[0].toUpperCase();
+        } else {
+            // If last word is a valid type, it's the type (no variable name given)
+            // Otherwise, everything except last word is the type
+            const lastWord = words[words.length - 1];
+
+            // Check if last word looks like a variable name (starts with letter, has mixed case or lowercase)
+            if (lastWord.match(/^[a-z]/i) && (lastWord !== lastWord.toUpperCase() || lastWord.length > 1)) {
+                result = words.slice(0, -1).join(' ').toUpperCase();
+            } else {
+                result = words.join(' ').toUpperCase();
+            }
         }
-        
-        // All words are the type
-        return words.join(' ').toUpperCase();
+
+        // Rule 6 (#121): `*` is implicit for complex types — `*Foo` ≡ `Foo` when Foo
+        // is NOT scalar. Scalar `*X` ≠ `X` discriminator preserved (rule 4).
+        if (result.startsWith('*')) {
+            const base = result.slice(1).trim();
+            if (base && !this.isStringType(base) && !this.isNumericType(base)) {
+                return base;
+            }
+        }
+        return result;
     }
     
     /**
@@ -512,19 +524,49 @@ export class MethodOverloadResolver {
      *
      * Inherits the transformation behaviors of `extractParameterType`:
      * CONST/REF stripped, default values stripped, omittable angle brackets
-     * stripped, types upcased. Reference indicators like `*STRING` are
-     * preserved as part of the type — so `*STRING` and `STRING` remain
-     * distinct (the Mark-reported discriminator that 35019583 / fe254d6f
-     * depend on).
-     *
-     * Foundation for fe254d6f Phase A.
+     * stripped, types upcased. Scalar reference indicators (`*STRING`,
+     * `*LONG`, etc.) are preserved — `*STRING` ≠ `STRING` (Mark-reported
+     * discriminator that 35019583 / fe254d6f depend on). Complex-type `*`
+     * is normalized away per #121 rule 6 — `*StringTheory` ≡ `StringTheory`.
      */
     public signaturesMatch(sigA: string, sigB: string): boolean {
         const typesA = this.extractParameterTypes(sigA);
         const typesB = this.extractParameterTypes(sigB);
         return this.parametersMatch(typesA, typesB);
     }
-    
+
+    /**
+     * #121 — true when two declarations are structurally identical at the
+     * prototype level (same param types, same positions, after documentary
+     * labels stripped + complex-type `*` normalized per rule 6). Used by the
+     * indistinguishable-prototype diagnostic walker to flag duplicate decls.
+     *
+     * Semantic alias of `signaturesMatch` once rule-6 normalization lives in
+     * `extractParameterType`; kept as a separate public API so call sites can
+     * name their intent (decl-vs-decl duplicate detection vs FAR-family
+     * type-shape comparison).
+     */
+    public arePrototypesIdentical(sigA: string, sigB: string): boolean {
+        return this.signaturesMatch(sigA, sigB);
+    }
+
+    /**
+     * #121 — true when both declarations are callable with zero arguments
+     * (each has 0 mandatory params — every param is defaulted or the param
+     * list is empty). Used by the indistinguishable-prototype diagnostic to
+     * flag rule-1 collisions (e.g. `Func PROCEDURE()` + `Func PROCEDURE(SHORT=10)`
+     * → both invokable as `Func` with no args).
+     */
+    public areZeroArityCompatible(sigA: string, sigB: string): boolean {
+        const isZeroArityCallable = (sig: string): boolean => {
+            const paramCount = this.extractParameterTypes(sig).length;
+            const defaults = ClarionPatterns.countDefaultParams(sig);
+            return paramCount - defaults === 0;
+        };
+        return isZeroArityCallable(sigA) && isZeroArityCallable(sigB);
+    }
+
+
     /**
      * Counts parameters in a method declaration
      * Extracts parameter list from PROCEDURE(...) 
