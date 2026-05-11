@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
 import { ArgClassification } from './CallSiteArgumentClassifier';
@@ -97,11 +98,127 @@ export class MethodOverloadResolver {
         logger.info(`[#127-trace] findAllMethodDeclarationsIncludingIncludes ENTRY className=${className} methodName=${methodName} docUri=${document.uri}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         const currentFile = this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens);
         logger.info(`[#127-trace] gatherCurrentFileMethodDeclarations EXIT count=${currentFile.length} signatures=${JSON.stringify(currentFile.map(c => c.signature))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        const includes = this.gatherIncludeMethodDeclarations(className, methodName, document);
-        logger.info(`[#127-trace] gatherIncludeMethodDeclarations EXIT count=${includes.length} signatures=${JSON.stringify(includes.map(c => `${c.file}:${c.line} → ${c.signature}`))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
-        const all = [...currentFile, ...includes];
+        const scope = this.gatherScopeMethodDeclarations(className, methodName, document);
+        logger.info(`[#127-trace] gatherScopeMethodDeclarations EXIT count=${scope.length} signatures=${JSON.stringify(scope.map(c => `${c.file}:${c.line} → ${c.signature}`))}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
+        const all = [...currentFile, ...scope];
         logger.info(`[#127-trace] findAllMethodDeclarationsIncludingIncludes EXIT totalCandidates=${all.length}`); // TEMP — remove after #127 real-world diagnosis (Bob 2026-05-11)
         return all;
+    }
+
+    /**
+     * #128 — gather all `className.methodName` candidates by walking Clarion's
+     * compilation-model file graph: MEMBER → PROGRAM → recursive INCLUDE BFS.
+     *
+     * Mark's real-world repro shape: a MEMBER file (`MyNextProcedure.clw`)
+     * calls `st.SetValue('Hello World')`, but StringTheory is declared in
+     * `stringtheory.inc` reached only via the PROGRAM's INCLUDE chain
+     * (possibly transitive: PROGRAM → `Global.inc` → `StringTheory.inc`).
+     *
+     * Algorithm:
+     *   1. Canonical-path the current doc URI.
+     *   2. Detect MEMBER directive in the top ~10 lines.
+     *   3. scan-root = `FRG.getProgramFile(currentDoc)` when MEMBER (fallback
+     *      to current doc if FRG hasn't tracked the MEMBER edge); else current doc.
+     *   4. BFS from scan-root via `FRG.getForwardEdges(file).type==='INCLUDE'`.
+     *   5. Pre-add current doc to visited (token-based scan already covers it).
+     *
+     * FRG-not-ready soft fallback: when `frg.isBuilt === false`, falls back to
+     * the legacy `gatherIncludeMethodDeclarations` direct-INCLUDE walk and
+     * emits `logger.warn` for telemetry.
+     *
+     * Cycle protection: canonical-path visited-set (lowercased / forward-slash
+     * to match FRG's `normalizePath`).
+     */
+    private gatherScopeMethodDeclarations(
+        className: string,
+        methodName: string,
+        document: TextDocument
+    ): MethodDeclarationInfo[] {
+        const frg = FileRelationshipGraph.getInstance();
+        if (!frg.isBuilt) {
+            logger.warn(`[#128] FRG not built — falling back to direct-INCLUDE walk for ${className}.${methodName}`);
+            return this.gatherIncludeMethodDeclarations(className, methodName, document);
+        }
+
+        const canonicalPath = decodeURIComponent(document.uri.replace('file:///', ''));
+        const currentDocKey = this.normalizeFilePath(canonicalPath);
+
+        const topLines = document.getText().split('\n').slice(0, 10);
+        const hasMember = topLines.some(l => /^\s*MEMBER\s*\(\s*['"][^'"]+['"]\s*\)/i.test(l));
+
+        const scanRoot = hasMember
+            ? (frg.getProgramFile(canonicalPath) ?? canonicalPath)
+            : canonicalPath;
+
+        const visited = new Set<string>([currentDocKey]);
+        const queue: string[] = [];
+
+        // Seed queue: skip scanning the current doc (token-based pass covers it),
+        // but push its INCLUDE neighbours so cross-file decls remain reachable.
+        if (this.normalizeFilePath(scanRoot) === currentDocKey) {
+            for (const e of frg.getForwardEdges(scanRoot).filter(e => e.type === 'INCLUDE')) {
+                queue.push(e.toFile);
+            }
+        } else {
+            queue.push(scanRoot);
+        }
+
+        const candidates: MethodDeclarationInfo[] = [];
+        while (queue.length > 0) {
+            const file = queue.shift()!;
+            const key = this.normalizeFilePath(file);
+            if (visited.has(key)) continue;
+            visited.add(key);
+
+            candidates.push(...this.scanFileForClassMethods(file, className, methodName));
+
+            for (const e of frg.getForwardEdges(file).filter(e => e.type === 'INCLUDE')) {
+                queue.push(e.toFile);
+            }
+        }
+        return candidates;
+    }
+
+    /**
+     * #128 — read a single file from disk and return all `className.methodName`
+     * declarations found inside. Empty result on read failure / no match —
+     * caller composes results across the BFS frontier.
+     */
+    private scanFileForClassMethods(
+        filePath: string,
+        className: string,
+        methodName: string
+    ): MethodDeclarationInfo[] {
+        let content: string;
+        try {
+            content = fs.readFileSync(filePath, 'utf8');
+        } catch {
+            return [];
+        }
+        const lines = content.split('\n');
+        const candidates: MethodDeclarationInfo[] = [];
+
+        for (let j = 0; j < lines.length; j++) {
+            if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(lines[j])) continue;
+
+            for (let k = j + 1; k < lines.length; k++) {
+                const methodLine = lines[k];
+                if (/^\s*END\s*$/i.test(methodLine) || /^END\s*$/i.test(methodLine)) break;
+
+                if (new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i').test(methodLine)) {
+                    const signature = methodLine.trim();
+                    const declParamCount = ClarionPatterns.countParameters(signature);
+                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                    candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
+                }
+            }
+        }
+        return candidates;
+    }
+
+    /** Match FRG's `normalizePath` shape so visited-set keys dedupe correctly across path forms. */
+    private normalizeFilePath(p: string): string {
+        return p.toLowerCase().replace(/\\/g, '/');
     }
 
     private gatherCurrentFileMethodDeclarations(
