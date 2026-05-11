@@ -176,6 +176,10 @@ export const globalSettings = {
         return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", true);
     },
 
+    get indistinguishablePrototypesEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.indistinguishablePrototypes.enabled", true);
+    },
+
     get configuration() {
         return _globalClarionConfiguration;
     },

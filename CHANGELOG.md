@@ -10,6 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **New Features**
 
+- ✨ **Diagnostic: detect indistinguishable procedure prototypes** (#121): Warning fires on duplicate decls within CLASS / INTERFACE / MAP scopes (module-level + procedure-local) that the Clarion compiler treats as illegal — zero-arity overlap, structural identity (documentary labels ignored), and complex-type `*` redundancy (`Foo(StringTheory)` ≡ `Foo(*StringTheory)`). Configurable via `clarion.diagnostics.indistinguishablePrototypes.enabled` (default `true`).
 - ✨ **Hover data taxonomy refactor — keywords / directives / built-ins separated** (#77): 32 keywords moved to new `clarion-keywords.json` and 6 directives into existing `clarion-directives.json`; new `KeywordService` mirrors `DirectiveService`. No user-visible change.
 - ✨ **Find All References / Rename scope isolation for local MAP procedures** (#91, #95): FAR + Rename now correctly restrict to files reachable via the same procedure-local MAP scope; hover on a local-MAP procedure call in a MEMBER file is also correctly scoped.
 - ✨ **Save before build** (#88): new `clarion.saveBeforeBuild` setting (default `true`) saves all unsaved open files before any build is triggered.

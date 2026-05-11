@@ -18,6 +18,15 @@ export const serverSettings = {
      */
     undeclaredVariablesEnabled: true,
 
+    /**
+     * Issue #121 — diagnostic for indistinguishable procedure prototypes
+     * (compile-error duplicates that Clarion's compiler rejects). Populated
+     * from `clarion.diagnostics.indistinguishablePrototypes.enabled` via the
+     * `clarion/updatePaths` notification; defaults to true so the diagnostic
+     * fires out of the box. Toggling requires a VS Code reload.
+     */
+    indistinguishablePrototypesEnabled: true,
+
     get primaryRedirectionPath(): string {
         return this.redirectionPaths[0] ?? "";
     },

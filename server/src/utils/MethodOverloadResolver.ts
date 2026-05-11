@@ -394,24 +394,27 @@ export class MethodOverloadResolver {
     
     /**
      * Extracts parameter types from a method signature
-     * Returns array of normalized parameter types (e.g., ['STRING', '*STRING', 'LONG'])
+     * Returns array of normalized parameter types (e.g., ['STRING', '*STRING', 'LONG']).
+     * `applyComplexRefNormalization` (default true) toggles the rule-6 `*COMPLEX` ≡
+     * `COMPLEX` collapsing — used by `isComplexRefDuplicate` to detect rule-3
+     * duplicates by comparing pre- and post-normalization shapes.
      */
-    private extractParameterTypes(signature: string): string[] {
+    private extractParameterTypes(signature: string, applyComplexRefNormalization: boolean = true): string[] {
         const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
         if (!match) return [];
-        
+
         const paramList = match[1].trim();
         if (paramList === '') return [];
-        
+
         // Split by commas at depth 0 (respecting nested parens and angle brackets)
         const params: string[] = [];
         let currentParam = '';
         let depth = 0;
         let angleDepth = 0;
-        
+
         for (let i = 0; i < paramList.length; i++) {
             const char = paramList[i];
-            
+
             if (char === '(') {
                 depth++;
                 currentParam += char;
@@ -431,13 +434,13 @@ export class MethodOverloadResolver {
                 currentParam += char;
             }
         }
-        
+
         if (currentParam.trim()) {
             params.push(currentParam.trim());
         }
-        
+
         // Extract just the type from each parameter (remove variable names and defaults)
-        return params.map(param => this.extractParameterType(param));
+        return params.map(param => this.extractParameterType(param, applyComplexRefNormalization));
     }
     
     /**
@@ -448,7 +451,7 @@ export class MethodOverloadResolver {
      *   "<LONG lOpt>" -> "LONG"
      *   "LONG lVal=0" -> "LONG"
      */
-    private extractParameterType(param: string): string {
+    private extractParameterType(param: string, applyComplexRefNormalization: boolean = true): string {
         // Remove angle brackets for omittable parameters
         let normalized = param.replace(/^<\s*/, '').replace(/\s*>$/, '');
 
@@ -482,7 +485,8 @@ export class MethodOverloadResolver {
 
         // Rule 6 (#121): `*` is implicit for complex types — `*Foo` ≡ `Foo` when Foo
         // is NOT scalar. Scalar `*X` ≠ `X` discriminator preserved (rule 4).
-        if (result.startsWith('*')) {
+        // Skip when caller needs raw form (isComplexRefDuplicate rule-2/rule-3 disambiguation).
+        if (applyComplexRefNormalization && result.startsWith('*')) {
             const base = result.slice(1).trim();
             if (base && !this.isStringType(base) && !this.isNumericType(base)) {
                 return base;
@@ -564,6 +568,24 @@ export class MethodOverloadResolver {
             return paramCount - defaults === 0;
         };
         return isZeroArityCallable(sigA) && isZeroArityCallable(sigB);
+    }
+
+    /**
+     * #121 — true when sigA and sigB are equivalent prototypes ONLY due to
+     * rule-6 complex-type `*` normalization (e.g. `Foo(MyClass)` and
+     * `Foo(*MyClass)`). Used by the indistinguishable-prototype diagnostic
+     * walker to pick between rule-2 message (raw structural identity) and
+     * rule-3 message (`*COMPLEX` ≡ `COMPLEX` redundancy).
+     *
+     * Returns false when:
+     *   - The signatures don't match at all (even post-rule-6).
+     *   - The signatures match raw without needing rule 6 (true rule-2 dupes).
+     */
+    public isComplexRefDuplicate(sigA: string, sigB: string): boolean {
+        if (!this.signaturesMatch(sigA, sigB)) return false;
+        const rawA = this.extractParameterTypes(sigA, false);
+        const rawB = this.extractParameterTypes(sigB, false);
+        return !this.parametersMatch(rawA, rawB);
     }
 
 

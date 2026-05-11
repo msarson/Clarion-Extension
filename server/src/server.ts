@@ -1028,6 +1028,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     solutionFilePath?: string; // Add optional solution file path
     defaultLookupExtensions?: string[]; // Add default lookup extensions
     undeclaredVariablesEnabled?: boolean; // #62 opt-in
+    indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1061,6 +1062,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
         // the field. Only an explicit boolean from the client wins. (#62 fix)
         if (params.undeclaredVariablesEnabled !== undefined) {
             serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+        }
+        if (params.indistinguishablePrototypesEnabled !== undefined) {
+            serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
         }
 
         // Always-visible startup summary of Clarion folder configuration
