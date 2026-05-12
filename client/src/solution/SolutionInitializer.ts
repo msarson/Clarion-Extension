@@ -100,47 +100,31 @@ export async function workspaceHasBeenTrusted(
             }
         }
 
-        // If still missing, try defaults as a last resort
+        // If still missing — pre-#132/#141 era used to hardcode legacy defaults
+        // (`Clarion11` + `%APPDATA%\SoftVelocity\Clarion\ClarionProperties.xml`)
+        // AND write them back to workspace settings.json. That was an
+        // anti-pattern: it stomped good user state with bad legacy values when
+        // upstream version-resolution had failed for unrelated reasons (e.g.
+        // version-format mismatch between legacy `Clarion11` token and the
+        // new `Clarion 11.1.13855` installation-entry-name format from #132).
+        //
+        // Post-#141, the authoritative default lives at the User-scope
+        // `clarion.activeVersion` (L1) — workspace-scope writes here would
+        // either duplicate or contradict that source. Better to surface the
+        // missing-config diagnostic (warning fires at line ~174 below) than to
+        // silently corrupt settings with stale-format values.
+        //
+        // If recovery from missing config is needed, the proper path is the
+        // version picker (#134 two-stage) which writes the new-format value
+        // to L1 default. The warning at line ~174 already offers that as the
+        // "Configure Now" action.
         if (!globalClarionPropertiesFile || !globalClarionVersion) {
-            logger.warn("⚠️ Missing Clarion properties file or version. Attempting to use defaults...");
-            
-            // Try to find a default properties file if not set
-            if (!globalClarionPropertiesFile) {
-                const defaultPropertiesPath = path.join(process.env.APPDATA || '', 'SoftVelocity', 'Clarion', 'ClarionProperties.xml');
-                if (fs.existsSync(defaultPropertiesPath)) {
-                    logger.info(`✅ Using default properties file: ${defaultPropertiesPath}`);
-                    const target = getClarionConfigTarget();
-                    if (target && workspace.workspaceFolders) {
-                        const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-                        await config.update('propertiesFile', defaultPropertiesPath, target);
-                    }
-                    
-                    await setGlobalClarionSelection(
-                        globalSolutionFile,
-                        defaultPropertiesPath,
-                        globalClarionVersion || "Clarion11",
-                        globalSettings.configuration
-                    );
-                }
-            }
-            
-            // Set a default version if not set
-            if (!globalClarionVersion) {
-                const defaultVersion = "Clarion11";
-                logger.info(`✅ Using default Clarion version: ${defaultVersion}`);
-                const target = getClarionConfigTarget();
-                if (target && workspace.workspaceFolders) {
-                    const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-                    await config.update('version', defaultVersion, target);
-                }
-                
-                await setGlobalClarionSelection(
-                    globalSolutionFile,
-                    globalClarionPropertiesFile,
-                    defaultVersion,
-                    globalSettings.configuration
-                );
-            }
+            logger.warn(
+                `⚠️ Missing Clarion properties file or version after upstream load — ` +
+                `globalClarionPropertiesFile="${globalClarionPropertiesFile || 'MISSING'}", ` +
+                `globalClarionVersion="${globalClarionVersion || 'MISSING'}". ` +
+                `Surfacing diagnostic at line ~174 instead of writing legacy defaults that would stomp user state.`
+            );
         }
         
         // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
