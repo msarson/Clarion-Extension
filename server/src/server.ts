@@ -58,6 +58,7 @@ import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
+import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
@@ -1395,37 +1396,12 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
                 logger.warn(`⚠️ File not found: ${params.filename}`);
             }
         } else {
-            // No-solution mode (#113): build candidate list (localDir → libsrcPaths,
-            // with extension fallback if filename has no extension) and walk it.
-            const candidates: { path: string, source: string }[] = [];
-
-            let localDir: string | null = null;
-            if (params.sourceUri) {
-                const sourcePath = decodeURIComponent(params.sourceUri.replace('file:///', ''));
-                localDir = path.dirname(sourcePath);
-                candidates.push({ path: path.join(localDir, params.filename), source: "local" });
-            }
-            for (const libDir of (serverSettings.libsrcPaths ?? [])) {
-                if (libDir) candidates.push({ path: path.join(libDir, params.filename), source: "libsrc" });
-            }
-            if (!path.extname(params.filename)) {
-                for (const ext of serverSettings.defaultLookupExtensions) {
-                    const filenameWithExt = `${params.filename}${ext}`;
-                    if (localDir) {
-                        candidates.push({ path: path.join(localDir, filenameWithExt), source: "local" });
-                    }
-                    for (const libDir of (serverSettings.libsrcPaths ?? [])) {
-                        if (libDir) candidates.push({ path: path.join(libDir, filenameWithExt), source: "libsrc" });
-                    }
-                }
-            }
-
-            for (const c of candidates) {
-                const normalized = path.normalize(c.path);
-                if (fs.existsSync(normalized)) {
-                    logger.info(`✅ Found file (no-solution): ${normalized} (source: ${c.source})`);
-                    return { path: normalized, source: c.source };
-                }
+            // No-solution mode (#113): delegate to the resolver in findFileNoSolution.ts
+            // (extracted for testability — see server/src/test/FindFile.NoSolutionResolution.test.ts).
+            const noSolutionHit = resolveFileInNoSolutionMode(params.filename, params.sourceUri);
+            if (noSolutionHit) {
+                logger.info(`✅ Found file (no-solution): ${noSolutionHit.path} (source: ${noSolutionHit.source})`);
+                return noSolutionHit;
             }
 
             // Silent-miss diagnostic: if libsrcPaths is empty here, the user likely
