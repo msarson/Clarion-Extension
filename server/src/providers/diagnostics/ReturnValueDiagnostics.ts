@@ -11,6 +11,11 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
 logger.setLevel("error");
 
+// #158 Phase B Priority 1 — per-call-site perf instrumentation for
+// validateDiscardedReturnValues. Set level to "perf" to emit; flip to
+// "error" at final commit.
+const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "perf");
+
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
 function getCodeBlockRanges(
@@ -698,12 +703,34 @@ export async function validateDiscardedReturnValues(
     document: TextDocument,
     memberLocator: MemberLocatorService
 ): Promise<Diagnostic[]> {
+    const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
     const codeRanges = getCodeBlockRanges(tokens);
-    if (codeRanges.length === 0) return diagnostics;
+    if (codeRanges.length === 0) {
+        perfLogger.perf("validateDiscardedReturnValues early-exit (no code ranges)", {
+            ms: Date.now() - fnStart,
+            uri: document.uri
+        });
+        return diagnostics;
+    }
 
     const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/;
+
+    // #158 Phase B Priority 1 — per-call-site memoization. Pre-#158 this loop
+    // called `memberLocator.findMemberInClass` / `resolveDotAccess` once PER
+    // line for every dot-access call site. On hot files (StringTheory.clw,
+    // 72k tokens, hundreds of repeated `obj.method` patterns), that meant
+    // hundreds of full cross-file include-chain walks. Most call sites
+    // resolve to the same (objUpper, methodName.toUpper(), paramCount,
+    // selfContext) tuple — so cache the promise per tuple and reuse.
+    //
+    // Cache key includes `selfContext` (range.selfClassName for SELF/PARENT)
+    // because the receiver-class context can differ per code-range within
+    // the same file (e.g., two CLASSes each with their own SELF references).
+    const memberCache = new Map<string, Promise<{ type: string } | null>>();
+    let dotCallSites = 0;
+    let cacheHits = 0;
 
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
         const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
@@ -752,14 +779,27 @@ export async function validateDiscardedReturnValues(
             }
         }
 
-        let memberInfo;
+        dotCallSites++;
+
         const objUpper = objectName.toUpperCase();
-        if (objUpper === 'SELF' || objUpper === 'PARENT') {
-            if (!range.selfClassName) continue;
-            memberInfo = await memberLocator.findMemberInClass(range.selfClassName, methodName, document, paramCount);
+        const isSelfOrParent = objUpper === 'SELF' || objUpper === 'PARENT';
+        if (isSelfOrParent && !range.selfClassName) continue;
+
+        const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
+        const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
+
+        let memberInfoPromise = memberCache.get(cacheKey);
+        if (!memberInfoPromise) {
+            if (isSelfOrParent) {
+                memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
+            } else {
+                memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+            }
+            memberCache.set(cacheKey, memberInfoPromise);
         } else {
-            memberInfo = await memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+            cacheHits++;
         }
+        const memberInfo = await memberInfoPromise;
 
         if (!memberInfo) {
             logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
@@ -780,8 +820,23 @@ export async function validateDiscardedReturnValues(
         });
     }
 
+    const dotCallMs = Date.now() - fnStart;
+
+    const crossFileStart = Date.now();
     const crossFileDiags = validateCrossFilePlainCalls(tokens, document, docLines, codeRanges);
     diagnostics.push(...crossFileDiags);
+    const crossFileMs = Date.now() - crossFileStart;
+
+    perfLogger.perf("validateDiscardedReturnValues complete", {
+        total_ms: Date.now() - fnStart,
+        dotcall_loop_ms: dotCallMs,
+        crossfile_ms: crossFileMs,
+        dotcall_sites: dotCallSites,
+        cache_hits: cacheHits,
+        cache_unique_keys: memberCache.size,
+        diag_count: diagnostics.length,
+        uri: document.uri
+    });
 
     return diagnostics;
 }
