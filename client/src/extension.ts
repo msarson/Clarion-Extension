@@ -55,7 +55,22 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
-    
+
+    // #148 — register the Actions-pane webview provider EARLY, before any
+    // awaits in the activation flow. The view's `visibility: "visible"`
+    // contribution in package.json triggers VS Code to start setting up the
+    // webview iframe + service worker as soon as the view container is
+    // available. If our provider isn't registered yet when VS Code tries to
+    // resolve the view, VS Code's SW registration hits an `InvalidStateError`
+    // (the SW tries to attach to a half-set-up document). #132 B3 widened
+    // the activation chain (added `activateClarionVersionState` + LSP server
+    // start awaits) enough to expose this latent race deterministically.
+    //
+    // The provider only depends on `context.extensionUri` (immediately
+    // available); no need to wait on globalState/solution/LSP/folder-settings
+    // before registering. Existing late-call at line ~141 removed.
+    registerSolutionToolbar(context);
+
     const state: ActivationManager.ActivationState = {
         client,
         treeView,
@@ -138,8 +153,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     solutionTreeDataProvider = solutionTreeResult.provider;
     context.subscriptions.push(treeView);
 
-    registerSolutionToolbar(context);
-    
+    // #148 — `registerSolutionToolbar(context)` moved to the top of activate(),
+    // right after logger setup, to avoid VS Code's webview SW registration
+    // racing against our late-registration in the original flow.
+
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;
     structureViewProvider = structureViewResult.provider;
