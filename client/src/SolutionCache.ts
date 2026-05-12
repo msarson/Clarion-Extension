@@ -1716,17 +1716,7 @@ export class SolutionCache {
             return cachedPath;
         }
         
-        if (!this.solutionInfo) {
-            logger.info(`❌ No solution info available when searching for ${filename}`);
-            return "";
-        }
-
-        if (!this.solutionFilePath || this.solutionFilePath.trim() === "") {
-            logger.info(`❌ No solution file path set when searching for ${filename}`);
-            return "";
-        }
-
-        logger.info(`🔍 Searching for file: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}`);
+        logger.info(`🔍 Searching for file: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}${this.solutionInfo ? '' : ' (no-solution mode)'}`);
         
         // Skip server lookup entirely during activation/refresh — all 113 parallel
         // clarion/findFile requests queue on the server and block it for 5+ seconds.
@@ -1761,11 +1751,13 @@ export class SolutionCache {
             return fsResult;
         }
 
-        // Safety net: if we have no projects yet (server still building), skip the server
-        // request entirely. This prevents thousands of clarion/findFile requests flooding
-        // the LSP stdio pipe during startup, causing 50s+ hangs.
-        if (!this.solutionInfo?.projects?.length) {
-            logger.info(`⏩ [REFRESH] Skipping server lookup for ${filename} — solution not ready (0 projects)`);
+        // Safety net: solution loaded but projects not ready yet (server still building) —
+        // skip the server request to prevent thousands of clarion/findFile requests flooding
+        // the LSP stdio pipe during startup, causing 50s+ hangs. Genuine no-solution mode
+        // (solutionInfo === null) proceeds to the server; the server has a dedicated
+        // no-solution-mode resolver that walks localDir + libsrcPaths.
+        if (this.solutionInfo && this.solutionInfo.projects.length === 0) {
+            logger.info(`⏩ [REFRESH] Skipping server lookup for ${filename} — solution loaded but not ready (0 projects)`);
             return "";
         }
 
