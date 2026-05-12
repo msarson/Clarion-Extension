@@ -161,7 +161,8 @@ export class ClarionExtensionCommands {
       const globals = await import('./globals');
       const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
       const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
-      const { buildCompileTargetItems, buildInstallationItems } = await import('./utils/VersionPickerItems');
+      const { buildCompileTargetItems, buildInstallationItems, buildSetAsDefaultFooterItem } = await import('./utils/VersionPickerItems');
+      const { SettingsStorageManager } = await import('./utils/SettingsStorageManager');
 
       const installations = await ClarionInstallationDetector.detectInstallations();
       logger.info(`🔍 Discovered ${installations.length} Clarion installation(s)`);
@@ -199,6 +200,22 @@ export class ClarionExtensionCommands {
 
         // Stage 1 — pick Compile Target.
         const targetItems = buildCompileTargetItems(currentInstallation, activeCompileTargetName);
+
+        // #141 Q6 — append "Set as default for new solutions" footer item when
+        // there's a concrete effective version to promote. The footer reads
+        // the CURRENT effective active (not the user's stage-1 hover) — picking
+        // it sets that as L1 default without changing L2 state.
+        const installationLabel = `Clarion ${currentInstallation.ideVersion} installation`;
+        const currentDefaultCompileTargetName = workspace.getConfiguration('clarion').get<string>('activeVersion') || null;
+        const setAsDefaultItem = buildSetAsDefaultFooterItem(
+          activeCompileTargetName,
+          installationLabel,
+          currentDefaultCompileTargetName
+        );
+        if (setAsDefaultItem) {
+          targetItems.push(setAsDefaultItem);
+        }
+
         const pickedTarget = await window.showQuickPick(targetItems, {
           placeHolder: `Compile target for Clarion ${currentInstallation.ideVersion} Installation`,
         });
@@ -208,6 +225,29 @@ export class ClarionExtensionCommands {
           // Loop back to Stage 2.
           currentInstallation = null;
           continue;
+        }
+
+        // #141 Q6 — "Set as default for new solutions" picked: write L1
+        // default from the CURRENT effective active (not the user's pick item,
+        // which carries no targetName). L2 effective active stays put — Q4
+        // cross-instance bubble isolation preserved.
+        if (pickedTarget.isSetAsDefault) {
+          if (!activeCompileTargetName || !globalClarionPropertiesFile) {
+            window.showWarningMessage(
+              "No current Clarion version to set as default. Pick a compile target first."
+            );
+            return;
+          }
+          const ok = await SettingsStorageManager.setDefaultVersion(
+            activeCompileTargetName,
+            globalClarionPropertiesFile
+          );
+          if (ok) {
+            window.showInformationMessage(
+              `'${activeCompileTargetName}' is now your default Clarion version for new solutions.`
+            );
+          }
+          return;
         }
 
         // Apply the picked Compile Target.
