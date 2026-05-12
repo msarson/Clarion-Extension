@@ -26,6 +26,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     }
 
     public setGraphStatus(status: GraphStatus): void {
+        logger.error(`[#148-trace] setGraphStatus called: status=${status.status} fileCount=${status.fileCount ?? '?'}`);
         this._graphStatus = status;
         this.update();
     }
@@ -35,6 +36,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
     ): void {
+        logger.error(`[#148-trace] resolveWebviewView fired (visible=${webviewView.visible})`);
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -87,6 +89,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
     /** Re-renders the webview with current solution state. */
     public update(): void {
+        logger.error(`[#148-trace] update() called, re-assigning html (view present=${!!this._view})`);
         if (this._view) {
             this._view.webview.html = this._getHtml(this._view.webview);
         }
