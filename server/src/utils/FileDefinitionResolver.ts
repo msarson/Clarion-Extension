@@ -8,6 +8,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("FileDefinitionResolver");
@@ -140,6 +141,22 @@ export class FileDefinitionResolver {
             );
         }
 
+        // No-solution-mode tier (#113 site A): when solutionManager is null, walk
+        // serverSettings.libsrcPaths via resolveFileInNoSolutionMode. Gated on
+        // !solutionManager because in solution-loaded mode the redirection parser
+        // above (line 119+) already walks libsrc as its own Tier 3
+        // (redirectionFileParserServer.ts:672+); re-probing here would be redundant.
+        if (!solutionManager) {
+            const noSolutionHit = resolveFileInNoSolutionMode(fileName, documentUri);
+            if (noSolutionHit) {
+                logger.info(`Found file via no-solution resolver: ${noSolutionHit.path} (source: ${noSolutionHit.source})`);
+                return Location.create(
+                    `file:///${noSolutionHit.path.replace(/\\/g, '/')}`,
+                    { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+                );
+            }
+        }
+
         logger.info(`File not found: ${fileName}`);
         return null;
     }
@@ -199,6 +216,15 @@ export class FileDefinitionResolver {
                 }
             }
 
+            // No-solution-mode tier (#113 site B): libsrcPaths walk when no solution.
+            if (!resolvedPath && !solutionManager) {
+                const fromUri = `file:///${fromPath.replace(/\\/g, '/')}`;
+                const noSolutionHit = resolveFileInNoSolutionMode(includeFileName, fromUri);
+                if (noSolutionHit) {
+                    resolvedPath = noSolutionHit.path;
+                }
+            }
+
             if (resolvedPath && fs.existsSync(resolvedPath)) {
                 logger.info(`Resolved INCLUDE to: ${resolvedPath}`);
 
@@ -255,6 +281,15 @@ export class FileDefinitionResolver {
                 const relativePath = path.join(currentDir, memberFileName);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = path.resolve(relativePath);
+                }
+            }
+
+            // No-solution-mode tier (#113 site C): libsrcPaths walk when no solution.
+            if (!resolvedPath && !solutionManager) {
+                const fromUri = `file:///${fromPath.replace(/\\/g, '/')}`;
+                const noSolutionHit = resolveFileInNoSolutionMode(memberFileName, fromUri);
+                if (noSolutionHit) {
+                    resolvedPath = noSolutionHit.path;
                 }
             }
 

@@ -58,6 +58,7 @@ import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
+import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
@@ -1366,10 +1367,13 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
     }
 });
 
-// Add a handler for finding files using the server-side redirection parser
-connection.onRequest('clarion/findFile', async (params: { filename: string }): Promise<{ path: string, source: string }> => {
+// Add a handler for finding files using the server-side redirection parser.
+// No-solution-mode resolution (#113): when SolutionManager is null, walk
+// localDir(sourceUri) → serverSettings.libsrcPaths → extension fallback.
+// Substrate: serverSettings.libsrcPaths is version-bound per dd87633f B1.
+connection.onRequest('clarion/findFile', async (params: { filename: string, sourceUri?: string }): Promise<{ path: string, source: string }> => {
     logger.info(`🔍 Received request to find file: ${params.filename}`);
-    
+
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
@@ -1392,7 +1396,21 @@ connection.onRequest('clarion/findFile', async (params: { filename: string }): P
                 logger.warn(`⚠️ File not found: ${params.filename}`);
             }
         } else {
-            logger.warn(`⚠️ No SolutionManager instance available to find file: ${params.filename}`);
+            // No-solution mode (#113): delegate to the resolver in findFileNoSolution.ts
+            // (extracted for testability — see server/src/test/FindFile.NoSolutionResolution.test.ts).
+            const noSolutionHit = resolveFileInNoSolutionMode(params.filename, params.sourceUri);
+            if (noSolutionHit) {
+                logger.info(`✅ Found file (no-solution): ${noSolutionHit.path} (source: ${noSolutionHit.source})`);
+                return noSolutionHit;
+            }
+
+            // Silent-miss diagnostic: if libsrcPaths is empty here, the user likely
+            // has no Clarion version selected (ensureActiveClarionVersion did not
+            // populate the substrate). Surface this in logs so misses are traceable.
+            if (!serverSettings.libsrcPaths?.length) {
+                logger.warn(`[clarion/findFile] no-solution mode, libsrcPaths empty — no Clarion version selected?`);
+            }
+            logger.warn(`⚠️ File not found (no-solution mode): ${params.filename}`);
         }
     } catch (error) {
         logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
