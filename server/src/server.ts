@@ -992,23 +992,8 @@ const foldingCache = new Map<string, FoldingRange[]>();
 
 connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
     const document = documents.get(params.textDocument.uri);
-    if (!document) {
-        logger.error(`[#158-doclink-trace] onDocumentLinks fired but no cached doc for uri=${params.textDocument.uri}`);
-        return [];
-    }
-    const results = documentLinkProvider.provideDocumentLinks(document);
-    // #158 follow-up trace — captures: did the client actually re-request
-    // links after the workspace/documentLink/refresh signal? what was the
-    // FRG state at that point? how many links were returned?
-    try {
-        // Lazy require to avoid an extra top-level import for trace-only code.
-        const { FileRelationshipGraph } = require('./FileRelationshipGraph');
-        const frg = FileRelationshipGraph.getInstance();
-        logger.error(`[#158-doclink-trace] onDocumentLinks fired: uri=${params.textDocument.uri.split('/').pop()}, frg.isBuilt=${frg.isBuilt}, returning N=${results.length} links`);
-    } catch {
-        logger.error(`[#158-doclink-trace] onDocumentLinks fired: uri=${params.textDocument.uri.split('/').pop()}, returning N=${results.length} links (FRG state read failed)`);
-    }
-    return results;
+    if (!document) return [];
+    return documentLinkProvider.provideDocumentLinks(document);
 });
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
@@ -1394,20 +1379,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // commit (`9838cdd`) — pre-defer, incidental refreshes masked
             // the gap.
             //
-            // Uses the raw LSP request name because vscode-languageserver 7.0
-            // typings don't expose `connection.languages.documentLink.refresh()`
-            // — the wire protocol (`workspace/documentLink/refresh`, LSP
-            // 3.16+) is the same regardless. VS Code's LSP client honors it
-            // natively.
-            logger.error("[#158-doclink-trace] solution-ready: about to fire workspace/documentLink/refresh");
-            try {
-                await connection.sendRequest('workspace/documentLink/refresh');
-                logger.error("[#158-doclink-trace] sent workspace/documentLink/refresh request successfully");
-                logger.info("🔗 Document-link refresh requested from client (#158 follow-up)");
-            } catch (err) {
-                logger.error(`[#158-doclink-trace] refresh request failed: ${err instanceof Error ? err.message : String(err)}`);
-                logger.warn(`⚠️ workspace/documentLink/refresh failed — client may not support it: ${err instanceof Error ? err.message : String(err)}`);
-            }
+            // Trace at `a0367cb` revealed `workspace/documentLink/refresh`
+            // raised "Unhandled method" — VS Code LSP client requires the
+            // client to declare `workspace.documentLink.refreshSupport: true`
+            // per LSP 3.16 spec, and vscode-languageclient doesn't expose a
+            // clean field for this in our version. Switching to a custom
+            // notification: server sends `clarion/refreshDocumentLinks`,
+            // client (registered in LanguageServerManager.ts) iterates
+            // visible editors and re-invokes the document link provider via
+            // `vscode.executeDocumentLinkProvider` command. Same effective
+            // refresh; reliable via our existing notification plumbing.
+            connection.sendNotification('clarion/refreshDocumentLinks');
+            logger.info("🔗 Document-link refresh notification sent to client (#158 follow-up)");
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan

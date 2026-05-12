@@ -1,4 +1,4 @@
-import { workspace, window as vscodeWindow, ExtensionContext, Location, Position } from 'vscode';
+import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
@@ -181,6 +181,26 @@ export async function startLanguageServer(
             logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
             if (structureViewProvider) {
                 structureViewProvider.refresh();
+            }
+        });
+
+        // #158 follow-up — listen for document-link refresh notifications.
+        // Server sends this when solution-ready completes (FRG is now built);
+        // we re-invoke the DocumentLinkProvider for each visible editor so
+        // INCLUDE/MODULE/MEMBER links appear without requiring a doc edit.
+        // Custom notification used instead of LSP 3.16's
+        // `workspace/documentLink/refresh` because our vscode-languageclient
+        // version doesn't expose the `workspace.documentLink.refreshSupport`
+        // capability field cleanly (trace at `a0367cb` showed the request
+        // raised "Unhandled method").
+        client.onNotification('clarion/refreshDocumentLinks', async () => {
+            logger.info(`🔗 Received clarion/refreshDocumentLinks notification; refreshing visible editors`);
+            for (const editor of vscodeWindow.visibleTextEditors) {
+                try {
+                    await commands.executeCommand('vscode.executeDocumentLinkProvider', editor.document.uri);
+                } catch (err) {
+                    logger.warn(`⚠️ refresh failed for ${editor.document.uri}: ${err instanceof Error ? err.message : String(err)}`);
+                }
             }
         });
 
