@@ -368,6 +368,46 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
         const syncMs = Date.now() - syncStart;
 
+        // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
+        // files. Library files (StringTheory, ABC, etc.) are stable, read-only
+        // by convention, and don't change based on user edits. Their async
+        // diagnostics (discardedReturn / missingIncludes / undeclaredVar /
+        // missingImpl) impose massive cost on large files (Mark's Phase A:
+        // 13.9s on 72k-token StringTheory.clw) for ~zero user-actionable
+        // value: users don't fix lint warnings inside library code they
+        // didn't write.
+        //
+        // Trade-off: a user who DOES edit a libsrc file (e.g., extending
+        // ABC) will silently miss async diagnostics. Acceptable per Bob's
+        // dispatch — release-build trade-off for the perf win. Sync
+        // diagnostics still run normally so syntax / structure errors
+        // remain visible.
+        //
+        // Detection: case-insensitive prefix match of normalized
+        // `document.uri` filesystem path against each `serverSettings.libsrcPaths`
+        // entry. Uses the same URI → fs-path pattern as the rest of
+        // server.ts (decodeURIComponent + replace).
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\').toLowerCase();
+        const isLibsrcFile = (serverSettings.libsrcPaths ?? []).some(libDir => {
+            if (!libDir) return false;
+            const normalizedLibDir = libDir.replace(/\//g, '\\').toLowerCase();
+            return docFsPath.startsWith(normalizedLibDir + '\\') || docFsPath.startsWith(normalizedLibDir + '/');
+        });
+
+        if (isLibsrcFile) {
+            // Send only sync diagnostics; skip the async Promise.all entirely.
+            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            perfLogger.perf("validateTextDocument libsrc-skip (async validators bypassed)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
+
         // Send sync diagnostics immediately for fast feedback
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
 

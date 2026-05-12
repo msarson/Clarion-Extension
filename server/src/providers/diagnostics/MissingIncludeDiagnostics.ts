@@ -12,6 +12,14 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger('MissingIncludeDiagnostics');
 logger.setLevel('error');
 
+// #158 Phase B Priority 2 — per-call-site perf instrumentation. Mark's
+// Phase A devlog shows 5.6s on a 29-token file — cost is NOT
+// token-proportional, so per-phase logging will localize whether it's
+// the SDI rebuild, the clearCache+include-chain walk, or
+// per-type isClassIncluded calls. Set level to "perf" to emit; flip to
+// "error" at final commit.
+const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'perf');
+
 const includeVerifier = IncludeVerifier.getInstance();
 
 /**
@@ -87,20 +95,32 @@ export async function validateMissingIncludes(
     tokens: Token[],
     document: TextDocument
 ): Promise<Diagnostic[]> {
+    const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
 
     const { projectPath, cwprojPath } = resolveProjectPaths(document);
 
     // Always invalidate the current document's include cache — it just changed
+    const clearCacheStart = Date.now();
     includeVerifier.clearCache(document.uri);
+    const clearCacheMs = Date.now() - clearCacheStart;
 
+    const sdiStart = Date.now();
     const sdi = StructureDeclarationIndexer.getInstance();
     await sdi.getOrBuildIndex(projectPath);
+    const sdiMs = Date.now() - sdiStart;
 
     const constantParser = new ClassConstantParser();
     const constantsChecker = cwprojPath ? new ProjectConstantsChecker() : undefined;
 
-    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
+    let typeTokenCount = 0;
+    let includeCheckCount = 0;
+    let includeCheckTotalMs = 0;
+    let constantCheckTotalMs = 0;
+
+    const typeTokens = collectGlobalTypeTokens(tokens);
+    for (const { typeToken, typeName, typeNameStart } of typeTokens) {
+        typeTokenCount++;
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)
@@ -111,13 +131,17 @@ export async function validateMissingIncludes(
         const incFilePath = definitions[0].filePath;
         const incFileName = path.basename(incFilePath);
 
+        const incCheckStart = Date.now();
         const alreadyIncluded = await includeVerifier.isClassIncluded(incFileName, document);
+        includeCheckCount++;
+        includeCheckTotalMs += Date.now() - incCheckStart;
         if (alreadyIncluded) continue;
 
         // Also check whether this class requires constants that are missing from the project.
         // Include them in the message and data payload so the code action can handle both at once.
         let missingConstants: string[] = [];
         if (cwprojPath && constantsChecker) {
+            const constantCheckStart = Date.now();
             const classConstants = await constantParser.parseFile(incFilePath);
             const thisClass = classConstants.find(c => c.className.toLowerCase() === typeName.toLowerCase());
             if (thisClass && thisClass.constants.length > 0) {
@@ -126,6 +150,7 @@ export async function validateMissingIncludes(
                     if (!isDefined) missingConstants.push(constant.name);
                 }
             }
+            constantCheckTotalMs += Date.now() - constantCheckStart;
         }
 
         const constantsSuffix = missingConstants.length > 0
@@ -146,6 +171,19 @@ export async function validateMissingIncludes(
             data: { typeName, incFileName, missingConstants },
         });
     }
+
+    perfLogger.perf("validateMissingIncludes complete", {
+        total_ms: Date.now() - fnStart,
+        clearCache_ms: clearCacheMs,
+        sdi_getOrBuild_ms: sdiMs,
+        type_tokens: typeTokenCount,
+        include_checks: includeCheckCount,
+        include_check_avg_ms: includeCheckCount > 0 ? Math.round(includeCheckTotalMs / includeCheckCount) : 0,
+        include_check_total_ms: includeCheckTotalMs,
+        constant_check_total_ms: constantCheckTotalMs,
+        diag_count: diagnostics.length,
+        uri: document.uri
+    });
 
     return diagnostics;
 }
