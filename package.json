@@ -19,7 +19,8 @@
     "vscode": "^1.97.0"
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onLanguage:clarion",
+    "workspaceContains:**/*.{clw,inc,equ,int,app,sln,cwproj}"
   ],
   "main": "./out/client/src/extension.js",
   "icon": "images/sv57x57.png",
