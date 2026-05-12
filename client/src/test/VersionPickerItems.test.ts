@@ -3,6 +3,7 @@ import * as assert from 'assert';
 import {
     buildCompileTargetItems,
     buildInstallationItems,
+    buildSetAsDefaultFooterItem,
 } from '../utils/VersionPickerItems';
 import { ClarionInstallation } from '../utils/ClarionInstallationDetector';
 
@@ -140,6 +141,67 @@ describe('VersionPickerItems', () => {
         it('returns an empty array for an empty Installation list', () => {
             const items = buildInstallationItems([], null);
             assert.deepStrictEqual(items, []);
+        });
+    });
+
+    describe('buildSetAsDefaultFooterItem (#141 Q6)', () => {
+
+        it('builds a footer item with isSetAsDefault sentinel when current target + installation are set', () => {
+            const item = buildSetAsDefaultFooterItem(
+                'C11.0.13855',
+                'Clarion 11.0 installation',
+                null
+            );
+
+            assert.ok(item, 'footer item should be returned when current target + installation are set');
+            assert.strictEqual(item!.isSetAsDefault, true);
+            assert.strictEqual(item!.targetName, undefined, 'footer item must not carry a targetName (caller routes to setDefaultVersion using current effective state, not item state)');
+            assert.ok(item!.label.includes('C11.0.13855'), 'label should embed the compile target name');
+            assert.ok(item!.label.includes('Clarion 11.0 installation'), 'label should embed the installation label');
+            assert.ok(item!.label.includes('gear'), 'label should use the gear icon');
+        });
+
+        it('marks the footer "(current default)" when the effective version IS already the default', () => {
+            const item = buildSetAsDefaultFooterItem(
+                'C11.0.13855',
+                'Clarion 11.0',
+                'C11.0.13855'
+            );
+
+            assert.ok(item);
+            assert.ok(item!.description?.includes('check'), 'description should include check icon when already default');
+            assert.ok(item!.description?.includes('(current default)'), 'description should say (current default)');
+            assert.ok(item!.detail?.includes('already your default'), 'detail should hint that picking is a no-op');
+        });
+
+        it('omits the "(current default)" mark when effective differs from current default', () => {
+            const item = buildSetAsDefaultFooterItem(
+                'C11.0.13855',
+                'Clarion 11.0',
+                'C6.3' // user has a different default; THIS instance is on a different target
+            );
+
+            assert.ok(item);
+            assert.strictEqual(item!.description, undefined, 'description should be undefined when effective != default');
+            assert.ok(
+                item!.detail?.includes('cross-instance shared default'),
+                'detail should describe the cross-instance semantics for the not-yet-default case'
+            );
+        });
+
+        it('returns null when there is no current compile target (no L2 to promote)', () => {
+            const item = buildSetAsDefaultFooterItem(null, 'Clarion 11.0', null);
+            assert.strictEqual(item, null);
+        });
+
+        it('returns null when there is no current installation label', () => {
+            const item = buildSetAsDefaultFooterItem('C11.0.13855', null, 'C11.0.13855');
+            assert.strictEqual(item, null);
+        });
+
+        it('returns null when both current target + installation are null', () => {
+            const item = buildSetAsDefaultFooterItem(null, null, null);
+            assert.strictEqual(item, null);
         });
     });
 });
