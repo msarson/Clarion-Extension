@@ -813,7 +813,7 @@
     "viewsWelcome": [
       {
         "view": "solutionView",
-        "contents": "Initializing Clarion Extension...\n\nPlease wait while the extension loads.",
+        "contents": "No Clarion solution is currently open.\n\n[Open Solution](command:clarion.openSolution)\n\nClick the button above to open a `.sln` file or pick from recently-used solutions.",
         "when": "!clarion.solutionOpen"
       }
     ],

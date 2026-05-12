@@ -1,6 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
-import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
+import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
@@ -34,23 +34,20 @@ export async function workspaceHasBeenTrusted(
 ): Promise<void> {
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
-    // #146 sticky-until-open — if the user explicitly closed a solution,
-    // skip the entire trust-init flow on this activation. The flag is
-    // read again inside `initializeFromWorkspace` (defensive double-check),
-    // but checking HERE prevents the trailing "settings incomplete" warning
-    // at line ~174 from firing when some other code path populated
-    // `globalSolutionFile` without populating `globalSettings.redirectionPath`
-    // (an inconsistent state that the suppression-without-clean-up could
-    // leave behind).
+    // #146 sticky-until-open suppression is handled INSIDE
+    // `initializeFromWorkspace` (line 62 below). When the flag is set, that
+    // function returns early without populating `globalSolutionFile`, which
+    // naturally routes the rest of this function into the `else` branch at
+    // line ~209 (welcome-view refresh).
     //
-    // Solution tree view is still refreshed so the UI shows the
-    // "Open Solution" entry — user can still open a solution explicitly.
-    const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
-    if (explicitlyClosed) {
-        logger.info("ℹ️ Solution was explicitly closed — skipping workspaceHasBeenTrusted init (#146)");
-        await refreshSolutionTreeView();
-        return;
-    }
+    // Previously this function had an early-return defensive guard here
+    // when `explicitlyClosed=true`. That short-circuit blocked legitimate
+    // trust-init side effects (language feature registration, FRG build,
+    // file watchers, etc.) which then didn't re-fire when the user later
+    // explicitly opened a solution. Removed in favor of letting the
+    // single-source-of-truth suppression in `initializeFromWorkspace`
+    // handle the flag — the natural code flow already routes to the
+    // welcome-view branch when `globalSolutionFile` stays empty.
 
     // Read current solution directly from workspace settings
     const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
