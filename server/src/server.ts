@@ -108,6 +108,27 @@ logger.info(`⏱️ [STARTUP] Server process started at ${new Date().toISOString
 let firstDocumentOpenFired = false;
 let firstValidateFired = false;
 
+// #158 Phase B addendum — defer async validators until solution-ready.
+// Mark's perf-data insight: initial onDidOpen fires at t~63ms but
+// libsrcPaths isn't populated until clarion/solutionReady fires (~11s in
+// Mark's setup). The P3 libsrc-skip can't catch the initial async scan
+// because libsrcPaths is empty → libsrc files get the full 14s async pass
+// despite being structurally exempt.
+//
+// Fix: hold the async validator pass on `onDidOpen` until solution-ready
+// drains the queue. Sync diagnostics still fire immediately (fast
+// feedback). Once solution loads, libsrcPaths is populated, the drain
+// loop hits the now-effective P3 libsrc-skip on first deferred async
+// pass — eliminating ~15s of redundant async work.
+//
+// No-solution-mode safety net: a 2s timeout marks the pipeline ready +
+// drains the queue if solutionReady never fires (loose .clw in
+// non-Clarion workspace). 2s is well under perceived-startup-blocking
+// threshold; loose-file users wait 2s for async diagnostics instead of
+// getting them at t=63ms. Acceptable per Bob's dispatch.
+let solutionPipelineReady = false;
+const deferredAsyncDocs = new Set<string>();
+
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
@@ -413,6 +434,29 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Send sync diagnostics immediately for fast feedback
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 Phase B addendum — defer async validators until solution-ready
+        // when the caller is the initial `onDidOpen`. At t=63ms (first
+        // onDidOpen), libsrcPaths is empty so the P3 libsrc-skip can't fire;
+        // running the full async pass on a libsrc file like StringTheory.clw
+        // burns ~14s of pointless work. By the time solutionReady fires
+        // (~11s in), libsrcPaths is populated, and the drain loop hits the
+        // now-effective P3 libsrc-skip on first deferred async pass.
+        //
+        // No-solution timeout fallback (registered at bottom of file) marks
+        // pipeline ready after 2s if solutionReady never fires.
+        if (!solutionPipelineReady && caller === 'onDidOpen') {
+            deferredAsyncDocs.add(document.uri);
+            perfLogger.perf("validateTextDocument async deferred (solution pending)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
@@ -1300,12 +1344,25 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const revalDispatchStart = Date.now();
             const openDocs = documents.all();
             lastValidatedVersions.clear();
+
+            // #158 Phase B addendum — mark pipeline ready BEFORE the
+            // re-validation loop so deferred docs hit the (now-effective) P3
+            // libsrc-skip on their first async pass. `documents.all()`
+            // already covers every doc (including the deferred ones), so
+            // calling `validateTextDocument` on each is sufficient — no
+            // separate `deferredAsyncDocs` drain loop needed. Clear the set
+            // for hygiene.
+            solutionPipelineReady = true;
+            const deferredCount = deferredAsyncDocs.size;
+            deferredAsyncDocs.clear();
+
             for (const doc of openDocs) {
                 validateTextDocument(doc, 'solutionReady');
             }
             perfLogger.perf("Phase: Post-solution re-validation dispatched", {
                 dispatch_ms: Date.now() - revalDispatchStart,
                 doc_count: openDocs.length,
+                deferred_drained: deferredCount,
                 since_module_load_ms: Date.now() - serverModuleLoadedAt
             });
             // NOTE: dispatch_ms only measures the synchronous loop. Each
@@ -2178,6 +2235,31 @@ connection.onExit(() => {
         // Ignore - server is exiting anyway
     }
 });
+
+// #158 Phase B addendum — no-solution-mode safety net for deferred async
+// queue. If `clarion/solutionReady` never fires within 2s of server start
+// (loose `.clw` opened in a non-Clarion workspace), mark the pipeline ready
+// + drain the queue so deferred docs get their async pass.
+//
+// 2s threshold rationale: solutionReady on Mark's setup arrives at ~11s;
+// real no-solution-mode workspaces produce no solutionReady at all. 2s is
+// well under perceived-startup-blocking; loose-file users wait 2s for
+// async diagnostics instead of getting them at t=63ms. Acceptable trade.
+setTimeout(() => {
+    if (!solutionPipelineReady) {
+        perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt,
+            deferred_count: deferredAsyncDocs.size
+        });
+        solutionPipelineReady = true;
+        const queuedUris = Array.from(deferredAsyncDocs);
+        deferredAsyncDocs.clear();
+        for (const uri of queuedUris) {
+            const doc = documents.get(uri);
+            if (doc) validateTextDocument(doc, 'noSolutionTimeout');
+        }
+    }
+}, 2000);
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
