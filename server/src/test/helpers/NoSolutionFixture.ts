@@ -48,6 +48,10 @@ export interface NoSolutionFixture {
     sourceUri: string | null;
     /** Libsrc directories created on disk, in walk order. */
     libsrcDirs: string[];
+    /** Absolute path to the `.red` file (when spec.redFile is set). Set into `serverSettings.redirectionFile`. */
+    redFile: string | null;
+    /** Directory containing the `.red` file — usable as a relative-path anchor in test assertions. */
+    redDir: string | null;
 }
 
 export interface NoSolutionFixtureSpec {
@@ -83,11 +87,30 @@ export interface NoSolutionFixtureSpec {
      * tests. Default is the production list (`.clw / .inc / .equ / .eq / .int`).
      */
     defaultLookupExtensions?: string[];
+
+    /**
+     * #156 — optional `.red` file written to tmpRoot for version-redirection
+     * tests. When set, the fixture writes the `.red` to a dedicated `red/`
+     * subdir and points `serverSettings.redirectionFile` at it.
+     *
+     * Saved + restored across setup/teardown alongside other serverSettings.
+     *
+     * Optional `targetDirs`: additional subdirs created next to the `.red`
+     * file to host pattern-routed target files (e.g. an `equates/` subdir
+     * for `*.equ` patterns). Outer record key is subdir name; inner record
+     * maps filename → file content.
+     */
+    redFile?: {
+        filename: string;
+        content: string;
+        targetDirs?: Record<string, Record<string, string>>;
+    };
 }
 
 let _savedSmInstance: SolutionManager | null = null;
 let _savedLibsrcPaths: string[] | null = null;
 let _savedDefaultLookupExtensions: string[] | null = null;
+let _savedRedirectionFile: string | null = null;
 let _fixtureActive = false;
 
 /**
@@ -104,6 +127,7 @@ export function buildNoSolutionFixture(spec: NoSolutionFixtureSpec): NoSolutionF
     _savedSmInstance = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;
     _savedLibsrcPaths = serverSettings.libsrcPaths;
     _savedDefaultLookupExtensions = serverSettings.defaultLookupExtensions;
+    _savedRedirectionFile = serverSettings.redirectionFile;
 
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'no-solution-403afd0e-'));
 
@@ -131,14 +155,32 @@ export function buildNoSolutionFixture(spec: NoSolutionFixtureSpec): NoSolutionF
         sourceUri = `file:///${sourceFile.replace(/\\/g, '/').replace(/:/g, '%3A')}`;
     }
 
+    // #156 — optional `.red` file for version-redirection tests.
+    let redFile: string | null = null;
+    let redDir: string | null = null;
+    if (spec.redFile) {
+        redDir = path.join(tmpRoot, 'red');
+        fs.mkdirSync(redDir, { recursive: true });
+        redFile = path.join(redDir, spec.redFile.filename);
+        fs.writeFileSync(redFile, spec.redFile.content);
+        for (const [subdir, files] of Object.entries(spec.redFile.targetDirs ?? {})) {
+            const fullSubdir = path.join(redDir, subdir);
+            fs.mkdirSync(fullSubdir, { recursive: true });
+            for (const [filename, content] of Object.entries(files)) {
+                fs.writeFileSync(path.join(fullSubdir, filename), content);
+            }
+        }
+    }
+
     // Enter no-solution mode + point libsrc walk at fixture
     (SolutionManager as unknown as { instance: SolutionManager | null }).instance = null;
     serverSettings.libsrcPaths = libsrcDirs.slice();
+    serverSettings.redirectionFile = redFile ?? '';
     if (spec.defaultLookupExtensions) {
         serverSettings.defaultLookupExtensions = spec.defaultLookupExtensions.slice();
     }
 
-    return { tmpRoot, sourceDir, sourceFile, sourceUri, libsrcDirs };
+    return { tmpRoot, sourceDir, sourceFile, sourceUri, libsrcDirs, redFile, redDir };
 }
 
 /**
@@ -159,9 +201,13 @@ export function teardownNoSolutionFixture(fix: NoSolutionFixture | null): void {
     if (_savedDefaultLookupExtensions !== null) {
         serverSettings.defaultLookupExtensions = _savedDefaultLookupExtensions;
     }
+    if (_savedRedirectionFile !== null) {
+        serverSettings.redirectionFile = _savedRedirectionFile;
+    }
     _savedSmInstance = null;
     _savedLibsrcPaths = null;
     _savedDefaultLookupExtensions = null;
+    _savedRedirectionFile = null;
     if (fix) {
         try { fs.rmSync(fix.tmpRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
