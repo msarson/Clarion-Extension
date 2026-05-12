@@ -1369,6 +1369,29 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // validateTextDocument runs async; individual completion times appear
             // as `validateTextDocument complete` perf entries above.
 
+            // #158 follow-up — document-link refresh post-solution-load.
+            // DocumentLinkProvider uses FRG, which isn't built until solution
+            // load completes. Editor requests links right after onDidOpen
+            // (~t=63ms) and caches the empty result; without an explicit
+            // refresh, links stay missing until the doc is edited. Native LSP
+            // server-to-client refresh tells the editor to re-request links
+            // for all open docs. Surfaced cleanly by the deferred-async
+            // commit (`9838cdd`) — pre-defer, incidental refreshes masked
+            // the gap.
+            //
+            // Uses the raw LSP request name because vscode-languageserver 7.0
+            // typings don't expose `connection.languages.documentLink.refresh()`
+            // — the wire protocol (`workspace/documentLink/refresh`, LSP
+            // 3.16+) is the same regardless. VS Code's LSP client honors it
+            // natively.
+            try {
+                await connection.sendRequest('workspace/documentLink/refresh');
+                logger.info("🔗 Document-link refresh requested from client (#158 follow-up)");
+            } catch (err) {
+                // Older LSP clients may not support this capability; non-fatal.
+                logger.warn(`⚠️ workspace/documentLink/refresh failed — client may not support it: ${err instanceof Error ? err.message : String(err)}`);
+            }
+
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
             // of all .inc files (potentially thousands), causing a 4-5s freeze.
