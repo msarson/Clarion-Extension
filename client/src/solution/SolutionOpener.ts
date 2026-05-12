@@ -432,17 +432,23 @@ export async function closeClarionSolution(
 ) {
     try {
         logger.info("🔄 Closing Clarion solution...");
-        
+        logger.error("[#146-trace] closeClarionSolution called");
+
         const target = getClarionConfigTarget();
+        logger.error(`[#146-trace] target=${target ?? '(undefined)'}, workspaceFolders=${workspace.workspaceFolders?.length ?? 0}`);
         if (target && workspace.workspaceFolders) {
+            logger.error(`[#146-trace] BEFORE settings clear: solutionFile="${workspace.getConfiguration().get('clarion.solutionFile', '')}", currentSolution="${workspace.getConfiguration().get('clarion.currentSolution', '')}"`);
             const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            
+
             // Clear solution-related settings from folder settings
             await config.update("solutionFile", "", target);
-            
+
             // Clear the current solution setting
             await config.update("currentSolution", "", target);
             logger.info("✅ Cleared current solution setting");
+            logger.error(`[#146-trace] AFTER settings clear: solutionFile="${workspace.getConfiguration().get('clarion.solutionFile', '')}", currentSolution="${workspace.getConfiguration().get('clarion.currentSolution', '')}"`);
+        } else {
+            logger.error("[#146-trace] settings-clear path SKIPPED (target check failed) — currentSolution may still be populated on restart");
         }
 
         // #146: mark the close as explicit. Consumed (cleared) by
@@ -451,6 +457,8 @@ export async function closeClarionSolution(
         // auto-reopen on next VS Code startup.
         await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, true);
         logger.info("✅ Set solutionExplicitlyClosed workspaceState flag (#146)");
+        const flagAfterWrite = context.workspaceState.get(SOLUTION_EXPLICITLY_CLOSED_KEY);
+        logger.error(`[#146-trace] workspaceState.update(${SOLUTION_EXPLICITLY_CLOSED_KEY}, true) — verified via re-read: ${flagAfterWrite}`);
         
         // Reset global variables
         await setGlobalClarionSelection("", globalClarionPropertiesFile, globalClarionVersion, "");

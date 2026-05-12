@@ -527,10 +527,13 @@ export const globalSettings = {
      */
     async initializeFromWorkspace(context: ExtensionContext) {
         logger.info("🔄 Loading settings from .vscode/settings.json...");
+        logger.error("[#146-trace] initializeFromWorkspace called");
+        logger.error(`[#146-trace] context provided: ${context ? 'yes' : 'NO — flag cannot be read!'}`);
 
         // ✅ Early exit if no folder open
         if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
             logger.info("ℹ️ No folder open - skipping initialization");
+            logger.error("[#146-trace] early-exit: no folder open");
             return;
         }
 
@@ -551,12 +554,15 @@ export const globalSettings = {
         // ensure `closeClarionSolution` sets the flag; once set, no
         // auto-load fires until the user explicitly opens a solution.
         const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+        logger.error(`[#146-trace] explicitlyClosed flag read: ${explicitlyClosed}`);
         if (explicitlyClosed) {
+            logger.error("[#146-trace] FLAG TRUE → hard-suppress all auto-load + consume flag");
             logger.info("ℹ️ Solution was explicitly closed — suppressing all auto-load (#146 hardened)");
             await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
             logger.info("✅ Consumed solutionExplicitlyClosed flag (#146)");
             return;
         }
+        logger.error("[#146-trace] FLAG FALSE → proceed with normal auto-load logic");
 
         // Check if we need to migrate existing settings to the solutions array
         await this.migrateToSolutionsArray();
