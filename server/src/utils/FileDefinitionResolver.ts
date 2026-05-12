@@ -305,46 +305,4 @@ export class FileDefinitionResolver {
         return null;
     }
 
-    /**
-     * Searches for a global definition across all files in the solution
-     */
-    public async findGlobalDefinition(word: string, documentUri: string): Promise<Location | null> {
-        logger.info(`Searching for global definition of ${word}`);
-
-        const SolutionManager = require('../solution/solutionManager').SolutionManager;
-        const solutionManager = SolutionManager.getInstance();
-        
-        if (!solutionManager || !solutionManager.solution) {
-            logger.info('No solution loaded');
-            return null;
-        }
-
-        // Search across all projects in the solution
-        for (const project of solutionManager.solution.projects) {
-            logger.info(`Searching in project: ${project.name}`);
-            
-            // Search in project source files
-            for (const sourceFile of project.sourceFiles) {
-                if (!fs.existsSync(sourceFile)) continue;
-
-                const content = fs.readFileSync(sourceFile, 'utf8');
-                const lines = content.split('\n');
-
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    // Check if line starts with the word (label/definition at column 0)
-                    if (line.trim().toLowerCase().startsWith(word.toLowerCase())) {
-                        logger.info(`Found global definition in ${sourceFile} at line ${i}`);
-                        return Location.create(
-                            `file:///${sourceFile.replace(/\\/g, '/')}`,
-                            { start: { line: i, character: 0 }, end: { line: i, character: line.length } }
-                        );
-                    }
-                }
-            }
-        }
-
-        logger.info(`No global definition found for ${word}`);
-        return null;
-    }
 }
