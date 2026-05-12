@@ -44,11 +44,16 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
-        webviewView.onDidChangeVisibility(() => {
-            if (webviewView.visible) {
-                webviewView.webview.html = this._getHtml(webviewView.webview);
-            }
-        });
+        // #148 — the prior `onDidChangeVisibility(() => visible && reassign html)`
+        // handler is removed: re-assigning `webview.html` on every visibility
+        // flip re-ran the webview lifecycle (including service-worker
+        // registration) and produced the deterministic
+        // `InvalidStateError: Could not register service worker` Mark hit on
+        // every load post-#132 B3. Combined with `retainContextWhenHidden: true`
+        // in `ViewManager.registerSolutionToolbar`, the webview state now
+        // survives hide-flips without re-render. Explicit re-renders still
+        // happen via `update()` (called from `setGraphStatus` etc.) when the
+        // content actually needs to change.
 
         webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
@@ -80,10 +85,25 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         logger.info("✅ Solution toolbar webview resolved");
     }
 
-    /** Re-renders the webview with current solution state. */
+    /**
+     * #148 Option 8 — propagate state changes to the webview via postMessage
+     * instead of re-assigning `webview.html`. Re-assigning html re-ran VS
+     * Code's webview lifecycle (iframe teardown + recreate + service-worker
+     * re-registration) which caused the deterministic `InvalidStateError`
+     * Mark reported. The initial html is set ONCE in `resolveWebviewView`;
+     * all subsequent updates flow through the inline `message` listener,
+     * which patches the DOM in place — no lifecycle churn.
+     *
+     * Trace confirmed: every `[#148-trace] update()` log line correlated
+     * 1:1 with an `InvalidStateError` from `HostMessaging.channel.port1.
+     * onmessage`. Hypothesis was load-bearing.
+     */
     public update(): void {
         if (this._view) {
-            this._view.webview.html = this._getHtml(this._view.webview);
+            this._view.webview.postMessage({
+                command: 'updateContent',
+                summaryRows: this._getSummaryRows(),
+            });
         }
     }
 
@@ -147,14 +167,24 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         const summaryRows = this._getSummaryRows();
         const summaryHtml = summaryRows.map(r =>
-            `<tr><td class="lbl">${r.label}</td><td class="val">${r.value}</td></tr>`
+            `<tr><td class="lbl">${escapeHtml(r.label)}</td><td class="val">${escapeHtml(r.value)}</td></tr>`
         ).join('');
+
+        // #148 — nonce-based CSP per VS Code webview guidance. `'unsafe-inline'`
+        // on script-src was the source of the deterministic SW registration
+        // race after the initial visibility-flip handler removal didn't fix it.
+        // `'strict-dynamic'` says "trust only scripts authorized by nonce" —
+        // explicit allowlist, no host-source ambiguity. Inline event handlers
+        // (onclick="...") are NOT covered by nonce, so the buttons use
+        // `data-cmd` attributes + a single `addEventListener` loop inside
+        // the nonce-tagged script.
+        const nonce = getNonce();
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}' 'strict-dynamic'; style-src ${webview.cspSource} 'unsafe-inline'; connect-src 'none';">
 <style>
   body {
     margin: 0;
@@ -217,24 +247,81 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div class="toolbar">
-    <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')"><img src="${iconUri}" /></button>
+    <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
     <div class="sep"></div>
-    <button title="Build solution" onclick="send('build')">🔨&#xFE0E;</button>
+    <button title="Build solution" data-cmd="build">🔨&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
-    <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
+    <button title="Run (Ctrl+F5)" data-cmd="run">▶&#xFE0E;</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun">🔨&#xFE0E;▶&#xFE0E;</button>
+    <button title="Debug (F5)" data-cmd="startDebugging">🐛&#xFE0E;</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug">🔨&#xFE0E;🐛&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Set Active Clarion Version" onclick="send('setActiveVersion')">⚙&#xFE0E;</button>
+    <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    function send(cmd) { vscode.postMessage({ command: cmd }); }
+
+    // Button click → postMessage to extension host (existing).
+    document.querySelectorAll('button[data-cmd]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        vscode.postMessage({ command: btn.dataset.cmd });
+      });
+    });
+
+    // #148 Option 8 — extension-host → webview message listener. Replaces the
+    // prior html-reassign update pattern that triggered VS Code's webview
+    // lifecycle teardown + SW re-registration race. The DOM is patched in
+    // place; no iframe churn.
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = String(s);
+      return div.innerHTML;
+    }
+
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.command === 'updateContent') {
+        const tbody = document.querySelector('table tbody');
+        if (tbody && Array.isArray(e.data.summaryRows)) {
+          tbody.innerHTML = e.data.summaryRows.map(function(r) {
+            return '<tr><td class="lbl">' + escapeHtml(r.label) +
+                   '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
+          }).join('');
+        }
+      }
+    });
   </script>
 </body>
 </html>`;
     }
+}
+
+/**
+ * #148 — Cryptographically-random 32-char nonce for CSP `'nonce-...'` source.
+ * Standard VS Code webview helper pattern.
+ */
+function getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
+
+/**
+ * #148 Option 8 — XSS hardening for summary-row cell content. `summaryRows`
+ * includes user-supplied strings (solution names, project names, version
+ * labels) — prior `${r.label}` / `${r.value}` template interpolation was
+ * vulnerable. Used in initial server-side render only; client-side message
+ * handler has its own `escapeHtml` (DOM-based `textContent` round-trip).
+ */
+function escapeHtml(s: string): string {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
