@@ -17,6 +17,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
@@ -806,14 +807,15 @@ export class ImplementationProvider {
                     }
                 }
             } else {
-                // No solution open - try relative path
-                const currentDir = path.dirname(currentPath);
-                const relativeModulePath = path.join(currentDir, moduleFile);
-                
-                if (fs.existsSync(relativeModulePath)) {
-                    logger.info(`Found module file at: ${relativeModulePath} (no solution open)`);
+                // No solution open — walk localDir + libsrcPaths via no-solution resolver
+                // (#113 site D). Previously localDir-only; now also reaches libsrcPaths
+                // for moduleFile hints pointing at library-hosted classes.
+                // Symmetric with MethodHoverResolver.ts (site F).
+                const resolved = resolveFileInNoSolutionMode(moduleFile, currentDocument.uri);
+                if (resolved) {
+                    logger.info(`Found module file at: ${resolved.path} (no solution open, source: ${resolved.source})`);
                     const implLocation = this.searchFileForMethodImplementation(
-                        relativeModulePath,
+                        resolved.path,
                         className,
                         methodName,
                         paramCount,
@@ -853,6 +855,20 @@ export class ImplementationProvider {
         // Fallback: Search all solution files
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {
+            // No-solution hail-mary (#113 site E): try `${className}.clw` via the
+            // no-solution resolver. Covers library classes living in libsrcPaths
+            // (e.g. StringTheory) when no moduleFile hint was provided.
+            // Symmetric with MethodHoverResolver.ts (site G).
+            const resolved = resolveFileInNoSolutionMode(`${className}.clw`, currentDocument.uri);
+            if (resolved) {
+                logger.info(`Trying ${className}.clw via no-solution resolver: ${resolved.path} (source: ${resolved.source})`);
+                const implLocation = this.searchFileForMethodImplementation(
+                    resolved.path, className, methodName, paramCount, declarationSignature
+                );
+                if (implLocation) {
+                    return implLocation;
+                }
+            }
             logger.info(`No solution manager available for cross-file search`);
             return null;
         }
