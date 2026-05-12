@@ -222,7 +222,18 @@ export function registerSolutionToolbar(context: ExtensionContext): void {
     const provider = new SolutionToolbarProvider(context.extensionUri);
     globalToolbarProvider = provider;
     context.subscriptions.push(
-        window.registerWebviewViewProvider(SolutionToolbarProvider.viewId, provider)
+        // #148 — `retainContextWhenHidden: true` tells VS Code to preserve the
+        // webview's state when the view is hidden (e.g. sidebar collapsed,
+        // tab-switch) instead of tearing it down + recreating on next show.
+        // Without retention, every visibility-flip re-ran `resolveWebviewView`
+        // which re-registered the service worker; under #132 B3's widened
+        // activation flow the re-registration deterministically lost the race
+        // and surfaced as `InvalidStateError: Could not register service worker`.
+        window.registerWebviewViewProvider(
+            SolutionToolbarProvider.viewId,
+            provider,
+            { webviewOptions: { retainContextWhenHidden: true } }
+        )
     );
     logger.info("✅ Solution toolbar registered");
 }

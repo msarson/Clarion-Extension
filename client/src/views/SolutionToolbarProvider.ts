@@ -44,11 +44,16 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
-        webviewView.onDidChangeVisibility(() => {
-            if (webviewView.visible) {
-                webviewView.webview.html = this._getHtml(webviewView.webview);
-            }
-        });
+        // #148 — the prior `onDidChangeVisibility(() => visible && reassign html)`
+        // handler is removed: re-assigning `webview.html` on every visibility
+        // flip re-ran the webview lifecycle (including service-worker
+        // registration) and produced the deterministic
+        // `InvalidStateError: Could not register service worker` Mark hit on
+        // every load post-#132 B3. Combined with `retainContextWhenHidden: true`
+        // in `ViewManager.registerSolutionToolbar`, the webview state now
+        // survives hide-flips without re-render. Explicit re-renders still
+        // happen via `update()` (called from `setGraphStatus` etc.) when the
+        // content actually needs to change.
 
         webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
