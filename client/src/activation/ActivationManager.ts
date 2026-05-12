@@ -140,13 +140,16 @@ export function checkFolderTrust(hasFolder: boolean, isTrusted: boolean): boolea
     return true;
 }
 
-export async function loadFolderSettings(hasFolder: boolean): Promise<void> {
+export async function loadFolderSettings(hasFolder: boolean, context: ExtensionContext): Promise<void> {
     logger.info("🔄 Phase 10: Loading folder settings...");
     if (hasFolder) {
         logger.info("   - Calling globalSettings.initializeFromWorkspace()...");
         try {
             const { globalSettings } = await import('../globals');
-            await globalSettings.initializeFromWorkspace();
+            // #141 B1 — context is now required for the workspaceState
+            // explicit-close flag read (#146) and the L1→L2 default-version
+            // init at activation.
+            await globalSettings.initializeFromWorkspace(context);
             logger.info("   - initializeFromWorkspace() completed successfully");
         } catch (error) {
             logger.error("   - ❌ Error in initializeFromWorkspace():", error);

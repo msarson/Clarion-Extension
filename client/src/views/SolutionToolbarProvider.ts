@@ -97,12 +97,17 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
      * Trace confirmed: every `[#148-trace] update()` log line correlated
      * 1:1 with an `InvalidStateError` from `HostMessaging.channel.port1.
      * onmessage`. Hypothesis was load-bearing.
+     *
+     * #141 Q9 directive #2 — `solutionLoaded` field gates toolbar Build/Run/
+     * Debug button visibility in the webview. "Open in IDE" + "Set Active
+     * Version" buttons remain visible regardless (meaningful in both modes).
      */
     public update(): void {
         if (this._view) {
             this._view.webview.postMessage({
                 command: 'updateContent',
                 summaryRows: this._getSummaryRows(),
+                solutionLoaded: !!globalSolutionFile,
             });
         }
     }
@@ -113,7 +118,24 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         // #132 / dd87633f B3 — Clarion version row always shows (even without
         // a solution open). Falls back to "Not set — click to choose" when
         // empty so the user has a discoverable entry point.
-        const versionLabel = globalClarionVersion || 'Not set — use Set Version';
+        //
+        // #141 Q9 directive #3 + Q4 three-layer storage — when the L1 default
+        // (settings.json `clarion.activeVersion`) differs from the L2 effective
+        // active (in-memory `globalClarionVersion` for this instance), surface
+        // BOTH so the user can see "I'm using C6 in this instance, but C11 is
+        // my default for first-time-seen solutions and no-solution-mode."
+        // When they match (or the default isn't set yet), show just the
+        // effective active.
+        const effectiveVersion = globalClarionVersion;
+        const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
+        let versionLabel: string;
+        if (!effectiveVersion) {
+            versionLabel = 'Not set — use Set Version';
+        } else if (defaultVersion && defaultVersion !== effectiveVersion) {
+            versionLabel = `${effectiveVersion} (default: ${defaultVersion})`;
+        } else {
+            versionLabel = effectiveVersion;
+        }
         rows.push({ label: 'Clarion', value: versionLabel });
 
         if (!globalSolutionFile) {
@@ -169,6 +191,13 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         const summaryHtml = summaryRows.map(r =>
             `<tr><td class="lbl">${escapeHtml(r.label)}</td><td class="val">${escapeHtml(r.value)}</td></tr>`
         ).join('');
+
+        // #141 Q9 directive #2 — initial render must honour solution-loaded
+        // state. Without this, the data-solution-only toolbar buttons would
+        // briefly render visible in no-solution mode until the first
+        // postMessage update() fires + the listener toggles them off.
+        const initialSolutionLoaded = !!globalSolutionFile;
+        const initialHiddenAttr = initialSolutionLoaded ? '' : ' style="display:none"';
 
         // #148 — nonce-based CSP per VS Code webview guidance. `'unsafe-inline'`
         // on script-src was the source of the deterministic SW registration
@@ -248,13 +277,13 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 <body>
   <div class="toolbar">
     <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
-    <div class="sep"></div>
-    <button title="Build solution" data-cmd="build">🔨&#xFE0E;</button>
-    <div class="sep"></div>
-    <button title="Run (Ctrl+F5)" data-cmd="run">▶&#xFE0E;</button>
-    <button title="Build &amp; Run" data-cmd="buildAndRun">🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" data-cmd="startDebugging">🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" data-cmd="buildAndDebug">🔨&#xFE0E;🐛&#xFE0E;</button>
+    <div class="sep" data-solution-only${initialHiddenAttr}></div>
+    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;</button>
+    <div class="sep" data-solution-only${initialHiddenAttr}></div>
+    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>▶&#xFE0E;</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;▶&#xFE0E;</button>
+    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>🐛&#xFE0E;</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;🐛&#xFE0E;</button>
     <div class="sep"></div>
     <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
   </div>
@@ -280,6 +309,16 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
       return div.innerHTML;
     }
 
+    // #141 Q9 directive #2 — toolbar gating helper. Solution-only elements
+    // (marked with data-solution-only) hide when no solution is open.
+    // "Open in IDE" and "Set Active Version" buttons are NOT marked because
+    // they're meaningful in both modes.
+    function applySolutionLoaded(loaded) {
+      document.querySelectorAll('[data-solution-only]').forEach(function(el) {
+        el.style.display = loaded ? '' : 'none';
+      });
+    }
+
     window.addEventListener('message', function(e) {
       if (e.data && e.data.command === 'updateContent') {
         const tbody = document.querySelector('table tbody');
@@ -288,6 +327,9 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
             return '<tr><td class="lbl">' + escapeHtml(r.label) +
                    '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
           }).join('');
+        }
+        if (typeof e.data.solutionLoaded === 'boolean') {
+          applySolutionLoaded(e.data.solutionLoaded);
         }
       }
     });

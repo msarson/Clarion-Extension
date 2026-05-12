@@ -19,10 +19,12 @@ import { ClarionInstallation } from './ClarionInstallationDetector';
  */
 
 export interface CompileTargetPickItem extends QuickPickItem {
-    /** The Compile Target name; undefined for the switch-Installation sentinel. */
+    /** The Compile Target name; undefined for the switch-Installation + set-as-default sentinels. */
     targetName?: string;
     /** True for the bottom "↩ Switch Clarion installation…" entry. */
     isSwitchInstallation?: boolean;
+    /** #141 Q6 — true for the "⚙ Set as default for new solutions" sentinel. */
+    isSetAsDefault?: boolean;
 }
 
 export interface InstallationPickItem extends QuickPickItem {
@@ -58,6 +60,47 @@ export function buildCompileTargetItems(
     });
 
     return items;
+}
+
+/**
+ * #141 Q6 — build the "⚙ Set as default for new solutions" footer item.
+ *
+ * Renders into the Stage-1 picker (after Compile Targets + switch-Installation
+ * sentinel). When picked, the caller writes the CURRENT effective active
+ * version (compileTargetName + propertiesPath) to L1 via
+ * `SettingsStorageManager.setDefaultVersion`.
+ *
+ * The label embeds the current effective version + Clarion installation
+ * label for explicitness ("Set 'C11.0.13855' (Clarion 11.0 installation)
+ * as default…"). The description shows the current default state — when
+ * the effective version IS already the default, the description marks
+ * "$(check) (current default)" so the user sees there's nothing to do.
+ *
+ * Returns `null` if no current effective version (`currentCompileTargetName`
+ * or `currentInstallationLabel` empty) — the footer is only meaningful
+ * when there's a concrete L2 effective active to promote to L1.
+ */
+export function buildSetAsDefaultFooterItem(
+    currentCompileTargetName: string | null,
+    currentInstallationLabel: string | null,
+    currentDefaultCompileTargetName: string | null
+): CompileTargetPickItem | null {
+    if (!currentCompileTargetName || !currentInstallationLabel) {
+        return null;
+    }
+
+    const isAlreadyDefault =
+        currentDefaultCompileTargetName !== null
+        && currentDefaultCompileTargetName === currentCompileTargetName;
+
+    return {
+        label: `$(gear) Set "${currentCompileTargetName}" (${currentInstallationLabel}) as default for new solutions`,
+        description: isAlreadyDefault ? '$(check) (current default)' : undefined,
+        detail: isAlreadyDefault
+            ? `This compile target is already your default.`
+            : `Updates the cross-instance shared default; per-instance effective active versions remain unchanged.`,
+        isSetAsDefault: true,
+    };
 }
 
 /**
