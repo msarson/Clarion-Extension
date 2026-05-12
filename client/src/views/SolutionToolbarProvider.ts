@@ -26,7 +26,6 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     }
 
     public setGraphStatus(status: GraphStatus): void {
-        logger.error(`[#148-trace] setGraphStatus called: status=${status.status} fileCount=${status.fileCount ?? '?'}`);
         this._graphStatus = status;
         this.update();
     }
@@ -36,7 +35,6 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
     ): void {
-        logger.error(`[#148-trace] resolveWebviewView fired (visible=${webviewView.visible})`);
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -87,11 +85,25 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         logger.info("✅ Solution toolbar webview resolved");
     }
 
-    /** Re-renders the webview with current solution state. */
+    /**
+     * #148 Option 8 — propagate state changes to the webview via postMessage
+     * instead of re-assigning `webview.html`. Re-assigning html re-ran VS
+     * Code's webview lifecycle (iframe teardown + recreate + service-worker
+     * re-registration) which caused the deterministic `InvalidStateError`
+     * Mark reported. The initial html is set ONCE in `resolveWebviewView`;
+     * all subsequent updates flow through the inline `message` listener,
+     * which patches the DOM in place — no lifecycle churn.
+     *
+     * Trace confirmed: every `[#148-trace] update()` log line correlated
+     * 1:1 with an `InvalidStateError` from `HostMessaging.channel.port1.
+     * onmessage`. Hypothesis was load-bearing.
+     */
     public update(): void {
-        logger.error(`[#148-trace] update() called, re-assigning html (view present=${!!this._view})`);
         if (this._view) {
-            this._view.webview.html = this._getHtml(this._view.webview);
+            this._view.webview.postMessage({
+                command: 'updateContent',
+                summaryRows: this._getSummaryRows(),
+            });
         }
     }
 
@@ -155,7 +167,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         const summaryRows = this._getSummaryRows();
         const summaryHtml = summaryRows.map(r =>
-            `<tr><td class="lbl">${r.label}</td><td class="val">${r.value}</td></tr>`
+            `<tr><td class="lbl">${escapeHtml(r.label)}</td><td class="val">${escapeHtml(r.value)}</td></tr>`
         ).join('');
 
         // #148 — nonce-based CSP per VS Code webview guidance. `'unsafe-inline'`
@@ -250,10 +262,34 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   <table><tbody>${summaryHtml}</tbody></table>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+
+    // Button click → postMessage to extension host (existing).
     document.querySelectorAll('button[data-cmd]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         vscode.postMessage({ command: btn.dataset.cmd });
       });
+    });
+
+    // #148 Option 8 — extension-host → webview message listener. Replaces the
+    // prior html-reassign update pattern that triggered VS Code's webview
+    // lifecycle teardown + SW re-registration race. The DOM is patched in
+    // place; no iframe churn.
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = String(s);
+      return div.innerHTML;
+    }
+
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.command === 'updateContent') {
+        const tbody = document.querySelector('table tbody');
+        if (tbody && Array.isArray(e.data.summaryRows)) {
+          tbody.innerHTML = e.data.summaryRows.map(function(r) {
+            return '<tr><td class="lbl">' + escapeHtml(r.label) +
+                   '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
+          }).join('');
+        }
+      }
     });
   </script>
 </body>
@@ -272,4 +308,20 @@ function getNonce(): string {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
     return text;
+}
+
+/**
+ * #148 Option 8 — XSS hardening for summary-row cell content. `summaryRows`
+ * includes user-supplied strings (solution names, project names, version
+ * labels) — prior `${r.label}` / `${r.value}` template interpolation was
+ * vulnerable. Used in initial server-side render only; client-side message
+ * handler has its own `escapeHtml` (DOM-based `textContent` round-trip).
+ */
+function escapeHtml(s: string): string {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
