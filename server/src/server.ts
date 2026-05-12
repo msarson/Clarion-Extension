@@ -1366,10 +1366,13 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
     }
 });
 
-// Add a handler for finding files using the server-side redirection parser
-connection.onRequest('clarion/findFile', async (params: { filename: string }): Promise<{ path: string, source: string }> => {
+// Add a handler for finding files using the server-side redirection parser.
+// No-solution-mode resolution (#113): when SolutionManager is null, walk
+// localDir(sourceUri) → serverSettings.libsrcPaths → extension fallback.
+// Substrate: serverSettings.libsrcPaths is version-bound per dd87633f B1.
+connection.onRequest('clarion/findFile', async (params: { filename: string, sourceUri?: string }): Promise<{ path: string, source: string }> => {
     logger.info(`🔍 Received request to find file: ${params.filename}`);
-    
+
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
@@ -1392,7 +1395,46 @@ connection.onRequest('clarion/findFile', async (params: { filename: string }): P
                 logger.warn(`⚠️ File not found: ${params.filename}`);
             }
         } else {
-            logger.warn(`⚠️ No SolutionManager instance available to find file: ${params.filename}`);
+            // No-solution mode (#113): build candidate list (localDir → libsrcPaths,
+            // with extension fallback if filename has no extension) and walk it.
+            const candidates: { path: string, source: string }[] = [];
+
+            let localDir: string | null = null;
+            if (params.sourceUri) {
+                const sourcePath = decodeURIComponent(params.sourceUri.replace('file:///', ''));
+                localDir = path.dirname(sourcePath);
+                candidates.push({ path: path.join(localDir, params.filename), source: "local" });
+            }
+            for (const libDir of (serverSettings.libsrcPaths ?? [])) {
+                if (libDir) candidates.push({ path: path.join(libDir, params.filename), source: "libsrc" });
+            }
+            if (!path.extname(params.filename)) {
+                for (const ext of serverSettings.defaultLookupExtensions) {
+                    const filenameWithExt = `${params.filename}${ext}`;
+                    if (localDir) {
+                        candidates.push({ path: path.join(localDir, filenameWithExt), source: "local" });
+                    }
+                    for (const libDir of (serverSettings.libsrcPaths ?? [])) {
+                        if (libDir) candidates.push({ path: path.join(libDir, filenameWithExt), source: "libsrc" });
+                    }
+                }
+            }
+
+            for (const c of candidates) {
+                const normalized = path.normalize(c.path);
+                if (fs.existsSync(normalized)) {
+                    logger.info(`✅ Found file (no-solution): ${normalized} (source: ${c.source})`);
+                    return { path: normalized, source: c.source };
+                }
+            }
+
+            // Silent-miss diagnostic: if libsrcPaths is empty here, the user likely
+            // has no Clarion version selected (ensureActiveClarionVersion did not
+            // populate the substrate). Surface this in logs so misses are traceable.
+            if (!serverSettings.libsrcPaths?.length) {
+                logger.warn(`[clarion/findFile] no-solution mode, libsrcPaths empty — no Clarion version selected?`);
+            }
+            logger.warn(`⚠️ File not found (no-solution mode): ${params.filename}`);
         }
     } catch (error) {
         logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
