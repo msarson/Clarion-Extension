@@ -90,8 +90,20 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+// #158 — startup-perf instrumentation. Set level to "perf" to emit; flip to
+// "error" to silence post-investigation. Captures the 7 startup-phase
+// boundaries Bob named in the dispatch + per-document validation timing.
+// Pattern per the `perfLogger` infrastructure from `0d70270`.
+const perfLogger = LoggerManager.getLogger("StartupPerf", "perf");
+const serverModuleLoadedAt = Date.now();
+perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
+
 const globalStartTime = Date.now();
 logger.info(`⏱️ [STARTUP] Server process started at ${new Date().toISOString()}`);
+
+// #158 — first-call flags for one-shot phase boundaries.
+let firstDocumentOpenFired = false;
+let firstValidateFired = false;
 
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
@@ -135,6 +147,9 @@ process.on('unhandledRejection', (reason: any) => {
 connection.onInitialize((params) => {
     const t0 = Date.now();
     logger.info(`⏱️ [STARTUP] onInitialize called at ${new Date().toISOString()}`);
+    perfLogger.perf("Phase: LSP onInitialize received", {
+        since_module_load_ms: t0 - serverModuleLoadedAt
+    });
     try {
         logger.info(`📥 [CRITICAL] Initialize request received`);
         logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -204,6 +219,10 @@ connection.onInitialize((params) => {
             }
         };
         logger.info(`⏱️ [STARTUP] onInitialize complete in ${Date.now() - t0}ms`);
+        perfLogger.perf("Phase: LSP onInitialize complete", {
+            handler_ms: Date.now() - t0,
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
         return result;
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
@@ -223,6 +242,9 @@ connection.onInitialized(() => {
     try {
         logger.info(`📥 [CRITICAL] Server initialized notification received`);
         logger.info(`📥 [CRITICAL] Server is now fully initialized`);
+        perfLogger.perf("Phase: Client initialize handshake complete (onInitialized)", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
         
         // Set the serverInitialized flag
         setServerInitialized(true);
@@ -270,7 +292,15 @@ documents.onDidOpen((event) => {
         const uri = document.uri;
 
         logger.info(`📂 Document opened: ${uri}`);
-        
+
+        if (!firstDocumentOpenFired) {
+            firstDocumentOpenFired = true;
+            perfLogger.perf("Phase: First onDidOpen", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                uri
+            });
+        }
+
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
         }
@@ -301,7 +331,7 @@ const lastValidatedVersions = new Map<string, number>();
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
-        if (!document.uri.toLowerCase().endsWith('.clw') && 
+        if (!document.uri.toLowerCase().endsWith('.clw') &&
             !document.uri.toLowerCase().endsWith('.inc') &&
             !document.uri.toLowerCase().endsWith('.equ')) {
             return;
@@ -317,13 +347,26 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
+        // #158 — startup-perf instrumentation
+        const validateStart = Date.now();
+        if (!firstValidateFired) {
+            firstValidateFired = true;
+            perfLogger.perf("Phase: First validateTextDocument", {
+                since_module_load_ms: validateStart - serverModuleLoadedAt,
+                caller,
+                uri: document.uri
+            });
+        }
+
         // Record version before any async work so duplicate-skip still works
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
 
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
+        const syncStart = Date.now();
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        const syncMs = Date.now() - syncStart;
 
         // Send sync diagnostics immediately for fast feedback
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
@@ -344,18 +387,37 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // pass for cross-file scope resolution via SymbolFinderService.
         const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
         const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+        // #158 — per-validator timing. Wrap each Promise.all element with a
+        // perf-timed shim that captures its individual wallclock.
+        const asyncStart = Date.now();
+        const timeIt = async <T>(name: string, p: Promise<T>): Promise<T> => {
+            const t0 = Date.now();
+            const result = await p;
+            perfLogger.perf(`Validator ${name}`, {
+                ms: Date.now() - t0,
+                uri: document.uri
+            });
+            return result;
+        };
         const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags] = await Promise.all([
-            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
-            DiagnosticProvider.validateMissingIncludes(tokens, document),
-            DiagnosticProvider.validateMissingConstants(tokens, document),
-            DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
-            DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
-            DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder),
+            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
+            timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
+            timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
+            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document)),
+            timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
+            timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
         ]);
+        const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
         if (!currentDoc || currentDoc.version !== startVersion) {
+            perfLogger.perf("validateTextDocument stale-skip", {
+                total_ms: Date.now() - validateStart,
+                token_count: tokens.length,
+                uri: document.uri,
+                caller
+            });
             return;
         }
 
@@ -364,6 +426,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 — per-document final perf summary
+        perfLogger.perf("validateTextDocument complete", {
+            total_ms: Date.now() - validateStart,
+            sync_ms: syncMs,
+            async_ms: asyncMs,
+            token_count: tokens.length,
+            diag_count: diagnostics.length,
+            uri: document.uri,
+            caller
+        });
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1171,16 +1244,30 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 projectCount: globalSolution.projects.length
             });
             logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
+            perfLogger.perf("Phase: Solution loaded (clarion/solutionReady sent)", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                project_count: globalSolution.projects.length
+            });
 
             // Re-validate all open documents now that cross-file type info is available.
             // The async diagnostic pass (discarded return value detection) needs the solution
             // to be ready; it may have already run (and silently skipped resolutions) before
             // this point, so force a fresh pass on every open file.
             logger.info("🔁 Re-validating open documents after solution ready...");
+            const revalDispatchStart = Date.now();
+            const openDocs = documents.all();
             lastValidatedVersions.clear();
-            for (const doc of documents.all()) {
+            for (const doc of openDocs) {
                 validateTextDocument(doc, 'solutionReady');
             }
+            perfLogger.perf("Phase: Post-solution re-validation dispatched", {
+                dispatch_ms: Date.now() - revalDispatchStart,
+                doc_count: openDocs.length,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
+            // NOTE: dispatch_ms only measures the synchronous loop. Each
+            // validateTextDocument runs async; individual completion times appear
+            // as `validateTextDocument complete` perf entries above.
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
@@ -2052,6 +2139,9 @@ connection.onExit(() => {
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
 console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+perfLogger.perf("Phase: Server listening (connection.listen called)", {
+    since_module_load_ms: Date.now() - serverModuleLoadedAt
+});
 connection.listen();
 
 // Add a handler for getting performance metrics
