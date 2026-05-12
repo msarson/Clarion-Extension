@@ -186,20 +186,48 @@ export async function startLanguageServer(
 
         // #158 follow-up — listen for document-link refresh notifications.
         // Server sends this when solution-ready completes (FRG is now built);
-        // we re-invoke the DocumentLinkProvider for each visible editor so
-        // INCLUDE/MODULE/MEMBER links appear without requiring a doc edit.
-        // Custom notification used instead of LSP 3.16's
-        // `workspace/documentLink/refresh` because our vscode-languageclient
-        // version doesn't expose the `workspace.documentLink.refreshSupport`
-        // capability field cleanly (trace at `a0367cb` showed the request
-        // raised "Unhandled method").
+        // we force VS Code to invalidate its doc-link cache for each visible
+        // editor so INCLUDE/MODULE/MEMBER links appear without requiring a
+        // user edit.
+        //
+        // History (per `a0367cb` trace + `0087068` follow-up):
+        //   1. First attempted `connection.sendRequest('workspace/documentLink/refresh')`
+        //      server-side per LSP 3.16 — failed with "Unhandled method"
+        //      because our vscode-languageclient version doesn't auto-declare
+        //      `workspace.documentLink.refreshSupport` capability.
+        //   2. Then switched to `vscode.executeDocumentLinkProvider` command —
+        //      that command returns fresh links but DOES NOT tell VS Code to
+        //      use them; the editor keeps its cached empty result. No UI
+        //      change.
+        //   3. NOW — fake-edit trick: insert + delete a single character at
+        //      position (0,0). Two `WorkspaceEdit`s with net-zero content
+        //      change forces VS Code's TextDocument.onDidChangeContent →
+        //      invalidates the doc-link cache → re-queries the provider.
+        //
+        // The two-step (insert then delete) is required because a single
+        // empty replace is optimized away by VS Code; the net-zero edit pair
+        // is the smallest reliable invalidation. Two entries land in the
+        // undo stack but they cancel out (one undo restores original; two
+        // undos goes to pre-pre-state which is also original).
+        //
+        // Per-editor try/catch — readonly files / racing-edits don't crash
+        // the handler.
         client.onNotification('clarion/refreshDocumentLinks', async () => {
-            logger.info(`🔗 Received clarion/refreshDocumentLinks notification; refreshing visible editors`);
+            logger.info(`🔗 Received clarion/refreshDocumentLinks notification; forcing doc-link cache invalidation`);
+            const { WorkspaceEdit, Position, Range } = require('vscode');
             for (const editor of vscodeWindow.visibleTextEditors) {
+                const uri = editor.document.uri;
                 try {
-                    await commands.executeCommand('vscode.executeDocumentLinkProvider', editor.document.uri);
+                    // Step 1: insert a space at (0,0)
+                    const insertEdit = new WorkspaceEdit();
+                    insertEdit.insert(uri, new Position(0, 0), ' ');
+                    await workspace.applyEdit(insertEdit);
+                    // Step 2: delete that same space (net-zero content change)
+                    const deleteEdit = new WorkspaceEdit();
+                    deleteEdit.delete(uri, new Range(0, 0, 0, 1));
+                    await workspace.applyEdit(deleteEdit);
                 } catch (err) {
-                    logger.warn(`⚠️ refresh failed for ${editor.document.uri}: ${err instanceof Error ? err.message : String(err)}`);
+                    logger.warn(`⚠️ doc-link refresh failed for ${uri.toString()}: ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
         });
