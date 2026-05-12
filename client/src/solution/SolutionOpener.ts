@@ -1,5 +1,5 @@
 import { commands, Uri, window, ExtensionContext, workspace, window as vscodeWindow } from 'vscode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion } from '../globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
@@ -444,6 +444,13 @@ export async function closeClarionSolution(
             await config.update("currentSolution", "", target);
             logger.info("✅ Cleared current solution setting");
         }
+
+        // #146: mark the close as explicit. Consumed (cleared) by
+        // initializeFromWorkspace on the next activation; suppresses the
+        // #104 `solutions[0]` fallback so the closed solution does NOT
+        // auto-reopen on next VS Code startup.
+        await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, true);
+        logger.info("✅ Set solutionExplicitlyClosed workspaceState flag (#146)");
         
         // Reset global variables
         await setGlobalClarionSelection("", globalClarionPropertiesFile, globalClarionVersion, "");
