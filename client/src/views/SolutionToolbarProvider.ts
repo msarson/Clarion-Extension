@@ -155,11 +155,21 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
             `<tr><td class="lbl">${r.label}</td><td class="val">${r.value}</td></tr>`
         ).join('');
 
+        // #148 — nonce-based CSP per VS Code webview guidance. `'unsafe-inline'`
+        // on script-src was the source of the deterministic SW registration
+        // race after the initial visibility-flip handler removal didn't fix it.
+        // `'strict-dynamic'` says "trust only scripts authorized by nonce" —
+        // explicit allowlist, no host-source ambiguity. Inline event handlers
+        // (onclick="...") are NOT covered by nonce, so the buttons use
+        // `data-cmd` attributes + a single `addEventListener` loop inside
+        // the nonce-tagged script.
+        const nonce = getNonce();
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}' 'strict-dynamic'; style-src ${webview.cspSource} 'unsafe-inline'; connect-src 'none';">
 <style>
   body {
     margin: 0;
@@ -222,24 +232,41 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div class="toolbar">
-    <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')"><img src="${iconUri}" /></button>
+    <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
     <div class="sep"></div>
-    <button title="Build solution" onclick="send('build')">🔨&#xFE0E;</button>
+    <button title="Build solution" data-cmd="build">🔨&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
-    <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
+    <button title="Run (Ctrl+F5)" data-cmd="run">▶&#xFE0E;</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun">🔨&#xFE0E;▶&#xFE0E;</button>
+    <button title="Debug (F5)" data-cmd="startDebugging">🐛&#xFE0E;</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug">🔨&#xFE0E;🐛&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Set Active Clarion Version" onclick="send('setActiveVersion')">⚙&#xFE0E;</button>
+    <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    function send(cmd) { vscode.postMessage({ command: cmd }); }
+    document.querySelectorAll('button[data-cmd]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        vscode.postMessage({ command: btn.dataset.cmd });
+      });
+    });
   </script>
 </body>
 </html>`;
     }
+}
+
+/**
+ * #148 — Cryptographically-random 32-char nonce for CSP `'nonce-...'` source.
+ * Standard VS Code webview helper pattern.
+ */
+function getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }
