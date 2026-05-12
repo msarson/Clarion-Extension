@@ -14,7 +14,9 @@ logger.setLevel("error");
 // #158 Phase B Priority 1 — per-call-site perf instrumentation for
 // validateDiscardedReturnValues. Set level to "perf" to emit; flip to
 // "error" at final commit.
-const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "perf");
+// #158 — level set to "error" post-investigation. Flip to "perf" for
+// future investigations (single-character toggle).
+const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "error");
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 

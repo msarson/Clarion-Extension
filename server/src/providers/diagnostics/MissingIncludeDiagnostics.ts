@@ -18,7 +18,9 @@ logger.setLevel('error');
 // the SDI rebuild, the clearCache+include-chain walk, or
 // per-type isClassIncluded calls. Set level to "perf" to emit; flip to
 // "error" at final commit.
-const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'perf');
+// #158 — level set to "error" post-investigation. Flip to "perf" for
+// future investigations (single-character toggle).
+const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'error');
 
 const includeVerifier = IncludeVerifier.getInstance();
 

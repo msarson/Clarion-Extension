@@ -94,7 +94,10 @@ logger.setLevel("error");
 // "error" to silence post-investigation. Captures the 7 startup-phase
 // boundaries Bob named in the dispatch + per-document validation timing.
 // Pattern per the `perfLogger` infrastructure from `0d70270`.
-const perfLogger = LoggerManager.getLogger("StartupPerf", "perf");
+// #158 — perfLogger level set to "error" post-investigation. Calls remain
+// in place; flip back to "perf" for future startup-time investigations
+// (toggle is a single-character edit per logger).
+const perfLogger = LoggerManager.getLogger("StartupPerf", "error");
 const serverModuleLoadedAt = Date.now();
 perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
 
