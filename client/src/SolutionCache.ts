@@ -1777,9 +1777,14 @@ export class SolutionCache {
                     }, timeoutMs);
                 });
 
+                // Propagate sourceUri so the server's no-solution-mode resolver can compute
+                // localDir = dirname(sourceUri). Solution-loaded callers don't depend on it but
+                // sending it is harmless; the server param is optional.
+                const sourceUri = sourceFilePath ? Uri.file(sourceFilePath).toString() : undefined;
+
                 // Race between the actual request and the timeout
                 const result = await Promise.race([
-                    this.client.sendRequest<{ path: string, source: string }>('clarion/findFile', { filename }),
+                    this.client.sendRequest<{ path: string, source: string }>('clarion/findFile', { filename, sourceUri }),
                     timeoutPromise
                 ]);
 
