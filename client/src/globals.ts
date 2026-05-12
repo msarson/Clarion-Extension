@@ -79,9 +79,13 @@ export async function setActiveClarionVersion(
     await SettingsStorageManager.saveActiveVersion(version, propertiesFile);
 
     // Refresh the version status-bar item (B2). Lazy import to avoid circular dep.
+    // #141 Q9 — pass solution-loaded state so the status bar gates correctly
+    // (hidden when no solution; visible only when solution is loaded). At
+    // activation time `globalSolutionFile` is empty → hide. At mid-session
+    // picker time with a solution open → show.
     try {
         const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
-        updateVersionStatusBar(version, propertiesFile);
+        updateVersionStatusBar(version, propertiesFile, !!globalSolutionFile);
     } catch {
         // Status bar not initialised yet — fine; activation will paint it later.
     }
