@@ -41,7 +41,7 @@ export async function workspaceHasBeenTrusted(
 
     // Load settings from workspace.json
     await globalSettings.initialize();
-    await globalSettings.initializeFromWorkspace();
+    await globalSettings.initializeFromWorkspace(context);
     
     // Set environment variable for the server to use if we have a solution file
     if (solutionFileFromSettings && fs.existsSync(solutionFileFromSettings)) {

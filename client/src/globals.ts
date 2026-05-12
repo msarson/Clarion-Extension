@@ -1,4 +1,4 @@
-import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration } from 'vscode';
+import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration, ExtensionContext } from 'vscode';
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
@@ -15,6 +15,12 @@ export interface ClarionSolutionSettings {
     version: string;
     configuration: string;
 }
+
+// #146 explicit-close flag and fallback-policy helper live in
+// `./utils/SolutionFallbackPolicy` (vscode-free so unit tests can import
+// them without dragging in the workspace/ExtensionContext surface).
+import { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
+export { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY };
 
 /**
  * Helper function to get the correct configuration target (always folder-level)
@@ -447,8 +453,15 @@ export const globalSettings = {
         }
     },
     
-    /** ✅ Load settings from .vscode/settings.json */
-    async initializeFromWorkspace() {
+    /** ✅ Load settings from .vscode/settings.json
+     *
+     * @param context Optional ExtensionContext. When provided, the
+     *   `SOLUTION_EXPLICITLY_CLOSED_KEY` workspaceState flag is consulted to
+     *   suppress the #104 `solutions[0]` fallback in the explicit-close case
+     *   (#146). When `undefined` (legacy callers / tests), the flag defaults
+     *   to `false` — preserving original behavior.
+     */
+    async initializeFromWorkspace(context?: ExtensionContext) {
         logger.info("🔄 Loading settings from .vscode/settings.json...");
 
         // ✅ Early exit if no folder open
@@ -462,18 +475,23 @@ export const globalSettings = {
 
         // Get the current solution from settings
         const currentSolution = workspace.getConfiguration().get<string>("clarion.currentSolution", "");
-        
+
+        // #146: read the explicit-close flag. Drives whether the #104
+        // `solutions[0]` fallback is honored below.
+        const explicitlyClosed = context?.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+
         // ✅ Read workspace settings
         let solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
         let clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
         let clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
         let clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
 
+        const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+
         // If we have a current solution, try to find it in the solutions array
         if (currentSolution) {
-            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
             const solution = solutions.find(s => s.solutionFile === currentSolution);
-            
+
             if (solution) {
                 logger.info(`✅ Found current solution in solutions array: ${solution.solutionFile}`);
                 solutionFile = solution.solutionFile;
@@ -483,18 +501,28 @@ export const globalSettings = {
             } else {
                 logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
             }
-        } else {
-            // currentSolution is blank — fall back to solutions array
-            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
-            if (solutions.length > 0) {
-                // Use the first (or only) entry
-                const solution = solutions[0];
-                logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
-                solutionFile = solution.solutionFile;
-                clarionPropertiesFile = solution.propertiesFile;
-                clarionVersion = solution.version;
-                clarionConfiguration = solution.configuration;
-            }
+        } else if (shouldUseSolutionFallback(currentSolution, solutions, explicitlyClosed)) {
+            // currentSolution is blank, no explicit close, solutions[] populated:
+            // honor the #104 fallback so a never-set currentSolution still
+            // auto-loads from solutions[0].
+            const solution = solutions[0];
+            logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
+            solutionFile = solution.solutionFile;
+            clarionPropertiesFile = solution.propertiesFile;
+            clarionVersion = solution.version;
+            clarionConfiguration = solution.configuration;
+        } else if (explicitlyClosed) {
+            // #146: user explicitly closed — suppress fallback. Solution stays
+            // closed across restart, exactly as Mark flagged.
+            logger.info("ℹ️ Solution was explicitly closed — suppressing solutions[0] fallback (#146)");
+        }
+
+        // #146: consume the explicit-close flag (one-shot). After this read
+        // the flag returns to its default-false state so subsequent activations
+        // resume normal #104 fallback semantics for the next-empty-state case.
+        if (explicitlyClosed && context) {
+            await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+            logger.info("✅ Consumed solutionExplicitlyClosed flag (#146)");
         }
 
         logger.info(`🔍 Read from workspace settings:
