@@ -114,7 +114,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         return;
     }
     
-    await ActivationManager.loadFolderSettings(hasFolder);
+    await ActivationManager.loadFolderSettings(hasFolder, context);
     
     // Phase 11: Register commands
     logger.info("🔄 Phase 11: Registering commands...");

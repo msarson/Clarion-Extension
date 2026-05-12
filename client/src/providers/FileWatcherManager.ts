@@ -247,7 +247,8 @@ export async function handleSettingsChange(
     logger.info("🔄 Updating settings from workspace...");
 
     // Reinitialize global settings from workspace settings.json
-    await globalSettings.initializeFromWorkspace();
+    // #141 B1 — context is now required; threaded through from handleSettingsChange caller.
+    await globalSettings.initializeFromWorkspace(context);
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);

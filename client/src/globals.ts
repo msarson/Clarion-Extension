@@ -60,10 +60,13 @@ export async function setActiveClarionVersion(
     version: string,
     propertiesFile: string
 ): Promise<boolean> {
-    logger.info(`🔄 Setting active Clarion version (solution-free): ${version} → ${propertiesFile}`);
+    logger.info(`🔄 Setting effective active Clarion version (L2, in-memory): ${version} → ${propertiesFile}`);
 
-    // Update module-level state — these are the same vars solution-open writes,
-    // so subsequent solution-open flows see a non-empty version+propertiesFile.
+    // L2 (effective active): in-memory per-VSCode-instance state. Drives
+    // file-resolution surfaces (libsrcPaths / redirectionPath / macros).
+    // Per #141 Q4 — does NOT write L1 (settings.json default) or L3
+    // (solutionVersionMemory). Those are explicit-action paths (picker
+    // "Set as default", solution-open confirm, mid-session switch).
     globalClarionVersion = version;
     globalClarionPropertiesFile = propertiesFile;
 
@@ -74,9 +77,18 @@ export async function setActiveClarionVersion(
         logger.warn(`⚠️ Version "${version}" not found in ${propertiesFile}; globalSettings unchanged`);
     }
 
-    // Persist to User scope so the choice survives VS Code restarts + is
-    // available before any solution is loaded.
-    await SettingsStorageManager.saveActiveVersion(version, propertiesFile);
+    // Q5 baseline (first-time install): if no L1 default is configured yet,
+    // also write the L1 default so the user's first-ever pick survives a
+    // VS Code restart. Picker handlers in B2 can refine this with explicit
+    // "Set as default" behavior; this preserves today's first-install UX
+    // without B2 needing to land first. Cross-instance behavior unchanged
+    // (L1 is User-scope; other instances inherit naturally).
+    const config = workspace.getConfiguration('clarion');
+    const existingDefault = config.get<string>('activeVersion', '');
+    if (!existingDefault) {
+        logger.info(`🔄 Q5 baseline: no existing L1 default → auto-writing default to ${version}`);
+        await SettingsStorageManager.setDefaultVersion(version, propertiesFile);
+    }
 
     // Refresh the version status-bar item (B2). Lazy import to avoid circular dep.
     // #141 Q9 — pass solution-loaded state so the status bar gates correctly
@@ -212,13 +224,16 @@ export async function setGlobalClarionSelection(
         return;
     }
     
-    // #132 / dd87633f B1 — Persist active version to User scope (global)
-    // independently of solution-open. This is the load-bearing decoupling:
-    // version-derived state (libsrcPaths / redirectionPath / macros) is now
-    // available even when no solution is loaded.
-    if (clarionVersion && clarionPropertiesFile) {
-        await SettingsStorageManager.saveActiveVersion(clarionVersion, clarionPropertiesFile);
-    }
+    // #141 B1 / Q4 — solution-open no longer writes L1 (default version).
+    // Default is set explicitly via the picker's "Set as default" action (B2),
+    // or auto-seeded by the Q5 baseline inside `setActiveClarionVersion` for
+    // first-install. The original #132 decoupling (line above) was: "make
+    // libsrcPaths/redirectionPath/macros available even with no solution
+    // loaded" — that goal is now served by L2 in-memory effective active,
+    // not by writing every solution-open version into L1.
+    //
+    // Per-solution version memory (L3) is written by B2 on Q3 mid-session
+    // switch or Q2/Q8 confirm prompts — not from setGlobalClarionSelection.
 
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
         logger.info("✅ All required settings are set. Saving using smart storage manager...");
@@ -459,13 +474,18 @@ export const globalSettings = {
     
     /** ✅ Load settings from .vscode/settings.json
      *
-     * @param context Optional ExtensionContext. When provided, the
+     * @param context Required ExtensionContext. The
      *   `SOLUTION_EXPLICITLY_CLOSED_KEY` workspaceState flag is consulted to
      *   suppress the #104 `solutions[0]` fallback in the explicit-close case
-     *   (#146). When `undefined` (legacy callers / tests), the flag defaults
-     *   to `false` — preserving original behavior.
+     *   (#146).
+     *
+     * #141 B1 — was optional in #146; tightened to required here now that a
+     * concrete caller (SolutionInitializer.workspaceHasBeenTrusted) reliably
+     * has the context handle. Removing the optional shim simplifies the
+     * activation flow + prevents legacy callers from silently bypassing the
+     * close-flag check.
      */
-    async initializeFromWorkspace(context?: ExtensionContext) {
+    async initializeFromWorkspace(context: ExtensionContext) {
         logger.info("🔄 Loading settings from .vscode/settings.json...");
 
         // ✅ Early exit if no folder open
