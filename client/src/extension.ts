@@ -89,8 +89,14 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // a legacy `solutions[].version` to User-scope `clarion.activeVersion`
     // (gated by `clarion.versionMigrated`) and refreshes the version status
     // bar item from the User-scope value.
+    //
+    // #141 B3 — `context` is passed through so the L3 backfill (legacy
+    // `solutions[].version` → `solutionVersionMemory` globalState seed) can
+    // run on first post-#141 activation. Gated by a separate flag from
+    // `versionMigrated` so pre-#141 users who already have L1 set still get
+    // their per-solution intent preserved.
     try {
-        await activateClarionVersionState();
+        await activateClarionVersionState(context);
     } catch (err) {
         logger.warn(`⚠️ Clarion-version activation failed: ${err instanceof Error ? err.message : String(err)}`);
         // Non-fatal — extension continues activating.
