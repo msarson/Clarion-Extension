@@ -7,7 +7,6 @@ import LoggerManager from './utils/LoggerManager';
 import { globalSettings } from './globals';
 import { LanguageClientManager, isClientReady, getClientReadyPromise } from './LanguageClientManager';
 import { SolutionParser } from './SolutionParser';
-import { redirectionService } from './paths/RedirectionService';
 import { ProjectIndex } from './ProjectIndex';
 
 const logger = LoggerManager.getLogger("SolutionCache");
@@ -1833,17 +1832,8 @@ export class SolutionCache {
                     return libsrcPath;
                 }
             }
-            
-            // Try using the RedirectionService with the solution directory
-            const solutionResolver = redirectionService.getResolver(solutionDir);
-            const solutionResolvedPath = solutionResolver(filename);
-            
-            if (solutionResolvedPath && fs.existsSync(solutionResolvedPath)) {
-                logger.info(`✅ File found via RedirectionService (solution): ${solutionResolvedPath}`);
-                return solutionResolvedPath;
-            }
         }
-        
+
         // Try in each project directory
         if (this.solutionInfo) {
             for (const project of this.solutionInfo.projects) {
@@ -1851,15 +1841,6 @@ export class SolutionCache {
                 if (fs.existsSync(projectPath)) {
                     logger.info(`✅ File found in project directory: ${projectPath}`);
                     return projectPath;
-                }
-                
-                // Use the RedirectionService to resolve the file
-                const resolver = redirectionService.getResolver(project.path);
-                const resolvedPath = resolver(filename);
-                
-                if (resolvedPath && fs.existsSync(resolvedPath)) {
-                    logger.info(`✅ File found via RedirectionService (project): ${resolvedPath}`);
-                    return resolvedPath;
                 }
             }
         }

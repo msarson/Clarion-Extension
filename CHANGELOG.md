@@ -36,6 +36,7 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **Auto-restore solution after cross-folder workspace switch**: opening a solution from the Solution View history that lives in a different folder now correctly restores all settings (properties file, version, configuration) on the subsequent activation, eliminating the "Clarion settings are incomplete" warning.
 - 🐛 **GlobalSolutionHistory saves full settings on all paths**: history entries now always include `propertiesFile`, `version`, and `configuration` regardless of which code path triggered the save, so cross-folder restore has the information it needs.
 - 🐛 **Blank `currentSolution` no longer prevents solution load**: when `clarion.currentSolution` is empty but `clarion.solutions` contains entries (e.g. after closing a solution), the extension now falls back to the first solutions array entry so the solution loads correctly on next activation.
+- 🐛 **Removed incorrect client-side redirection parser** ([#111](https://github.com/msarson/Clarion-Extension/issues/111)): all client-side file resolution now routes through the server's `clarion/findFile` handler, eliminating the parallel client parser that dropped section info (mixing `[Debug]`/`[Release]`/`[Common]` indistinguishably) and reintroduced the synthetic `*.* = .` fallback that contradicted the server-side cleanup.
 
 ---
 
