@@ -534,15 +534,41 @@ export const globalSettings = {
             return;
         }
 
+        // #146 (hardened) — explicit-close hard-suppression. Mark reported
+        // (post-#146 ship) that closing a solution then restarting still
+        // auto-loaded. Root cause: the original #146 only gated the
+        // `solutions[0]` fallback branch; when `currentSolution` was
+        // non-empty at restart (e.g. `closeClarionSolution`'s settings-clear
+        // is guarded by `target && workspace.workspaceFolders` and skips
+        // when target is undefined — untrusted workspace at close, race
+        // conditions, etc.), the `if (currentSolution)` branch fired
+        // unconditionally and the flag was bypassed entirely.
+        //
+        // Fix: check the flag FIRST, hard-skip ALL auto-load when set.
+        // Broader than the original #146 — gates the direct-currentSolution
+        // -load path too.
+        //
+        // Sticky-until-explicit-open semantics (trace-revealed at `a0367cb`):
+        // `initializeFromWorkspace` is called TWICE during activation
+        // (`ActivationManager.loadFolderSettings` + `SolutionInitializer.
+        // workspaceHasBeenTrusted`). Consume-on-read meant only the FIRST
+        // call benefited; the second saw `false` and auto-loaded.
+        // Decoupled fix: flag persists until the user explicitly opens a
+        // solution (`SolutionOpener.openClarionSolution` /
+        // `openSolutionFromList` clear it at entry). Multiple
+        // `initializeFromWorkspace` calls within one activation all
+        // see the same flag value — all suppress.
+        const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+        if (explicitlyClosed) {
+            logger.info("ℹ️ Solution was explicitly closed — suppressing all auto-load (#146 hardened)");
+            return;
+        }
+
         // Check if we need to migrate existing settings to the solutions array
         await this.migrateToSolutionsArray();
 
         // Get the current solution from settings
         const currentSolution = workspace.getConfiguration().get<string>("clarion.currentSolution", "");
-
-        // #146: read the explicit-close flag. Drives whether the #104
-        // `solutions[0]` fallback is honored below.
-        const explicitlyClosed = context?.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
 
         // ✅ Read workspace settings
         let solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
@@ -565,28 +591,20 @@ export const globalSettings = {
             } else {
                 logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
             }
-        } else if (shouldUseSolutionFallback(currentSolution, solutions, explicitlyClosed)) {
-            // currentSolution is blank, no explicit close, solutions[] populated:
+        } else if (shouldUseSolutionFallback(currentSolution, solutions, /* explicitlyClosed */ false)) {
+            // currentSolution is blank, solutions[] populated:
             // honor the #104 fallback so a never-set currentSolution still
-            // auto-loads from solutions[0].
+            // auto-loads from solutions[0]. `explicitlyClosed` passed as
+            // false-literal because the explicit-close case early-returned
+            // above (the original #146 gating preserved here for clarity
+            // even though it can't fire post-hardening — keeps the helper's
+            // contract honest).
             const solution = solutions[0];
             logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
             solutionFile = solution.solutionFile;
             clarionPropertiesFile = solution.propertiesFile;
             clarionVersion = solution.version;
             clarionConfiguration = solution.configuration;
-        } else if (explicitlyClosed) {
-            // #146: user explicitly closed — suppress fallback. Solution stays
-            // closed across restart, exactly as Mark flagged.
-            logger.info("ℹ️ Solution was explicitly closed — suppressing solutions[0] fallback (#146)");
-        }
-
-        // #146: consume the explicit-close flag (one-shot). After this read
-        // the flag returns to its default-false state so subsequent activations
-        // resume normal #104 fallback semantics for the next-empty-state case.
-        if (explicitlyClosed && context) {
-            await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
-            logger.info("✅ Consumed solutionExplicitlyClosed flag (#146)");
         }
 
         logger.info(`🔍 Read from workspace settings:

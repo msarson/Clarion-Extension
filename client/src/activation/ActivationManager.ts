@@ -11,7 +11,7 @@ import LoggerManager from '../utils/LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
-import { setGlobalClarionSelection } from '../globals';
+import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
@@ -218,6 +218,16 @@ export async function setupFolderDependentFeatures(
 
         if (!isRefreshingRef.value) {
             await refreshOpenDocuments(state.documentManager);
+
+            // #146 audit (#169): the GlobalSolutionHistory restore below was bypassing
+            // the explicit-close gate that initializeFromWorkspace honours at
+            // globals.ts:561. Mirror that early-return so the only auto-open trigger
+            // in this function respects the same flag.
+            const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+            if (explicitlyClosed) {
+                logger.info("ℹ️ Solution was explicitly closed — suppressing GlobalSolutionHistory restore (#146 audit)");
+                return;
+            }
 
             // If workspace settings don't have a solution file, check global history
             // for a match on the current workspace folder (happens after a cross-folder switch)

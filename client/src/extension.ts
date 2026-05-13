@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
@@ -55,6 +56,13 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
+
+    // Per-session log file — truncates on activate so each session is fresh.
+    // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log
+    // (or extension log dir when no workspace is open).
+    const wsRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const logBaseDir = wsRoot ?? context.logUri.fsPath;
+    LoggerManager.initFileSink(path.join(logBaseDir, '.clarion-debug', 'client.log'));
 
     // #148 — register the Actions-pane webview provider EARLY, before any
     // awaits in the activation flow. The view's `visibility: "visible"`

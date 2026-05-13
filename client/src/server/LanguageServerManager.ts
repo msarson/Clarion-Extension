@@ -1,4 +1,4 @@
-import { workspace, window as vscodeWindow, ExtensionContext, Location, Position } from 'vscode';
+import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
@@ -182,6 +182,23 @@ export async function startLanguageServer(
             if (structureViewProvider) {
                 structureViewProvider.refresh();
             }
+        });
+
+        // #158 follow-up — listen for document-link refresh notifications.
+        // Server sends this when solution-ready completes so doc-link cache
+        // can be invalidated for visible editors.
+        //
+        // 2026-05-13: handler no-op'd. Previous fake-edit invalidation
+        // (insert+delete a space) flipped VS Code's dirty flag on every
+        // visible doc on every activation — `workspace.applyEdit` marks dirty
+        // regardless of net-zero content. Doc-links still resolve on first
+        // user interaction (focus / edit / save). Proper fix tracked in
+        // GH issue #160 / kanban f09c0b59: upgrade vscode-languageclient
+        // v7 → v8/v9 to auto-declare `workspace.documentLink.refreshSupport`
+        // capability per LSP 3.16, then delete this handler entirely and let
+        // the server fire `workspace/documentLink/refresh` directly.
+        client.onNotification('clarion/refreshDocumentLinks', () => {
+            logger.info(`🔗 Received clarion/refreshDocumentLinks (no-op — proper LSP refresh gated on languageclient upgrade, see GH #160)`);
         });
 
         return client;

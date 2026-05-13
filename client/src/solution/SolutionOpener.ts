@@ -94,6 +94,11 @@ export async function openSolutionFromList(
     closeClarionSolution: (context: ExtensionContext) => Promise<void>
 ) {
     try {
+        // #146 sticky-until-open semantics — clear the explicit-close flag.
+        // User opening a solution is the explicit "I want to load something"
+        // signal that reverses any prior close intent.
+        await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+
         // Get the list of solutions from workspace settings
         const config = workspace.getConfiguration("clarion");
         const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
@@ -179,6 +184,11 @@ export async function openClarionSolution(
     initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>
 ) {
     try {
+        // #146 sticky-until-open semantics — clear the explicit-close flag.
+        // User opening a solution is the explicit "I want to load something"
+        // signal that reverses any prior close intent.
+        await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+
         // #132 / dd87633f B3 — solution-open guard. Require a Clarion version
         // before proceeding (so `globalSettings.libsrcPaths`, redirectionPath,
         // macros are populated by the time the solution tries to use them).
@@ -432,23 +442,23 @@ export async function closeClarionSolution(
 ) {
     try {
         logger.info("🔄 Closing Clarion solution...");
-        
+
         const target = getClarionConfigTarget();
         if (target && workspace.workspaceFolders) {
             const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            
+
             // Clear solution-related settings from folder settings
             await config.update("solutionFile", "", target);
-            
+
             // Clear the current solution setting
             await config.update("currentSolution", "", target);
             logger.info("✅ Cleared current solution setting");
         }
 
-        // #146: mark the close as explicit. Consumed (cleared) by
-        // initializeFromWorkspace on the next activation; suppresses the
-        // #104 `solutions[0]` fallback so the closed solution does NOT
-        // auto-reopen on next VS Code startup.
+        // #146: mark the close as explicit. Persists until the user
+        // explicitly opens a solution (cleared in openClarionSolution /
+        // openSolutionFromList). Suppresses ALL auto-load paths in
+        // initializeFromWorkspace until then.
         await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, true);
         logger.info("✅ Set solutionExplicitlyClosed workspaceState flag (#146)");
         

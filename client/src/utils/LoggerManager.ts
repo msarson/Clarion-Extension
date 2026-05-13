@@ -1,16 +1,35 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { LoggingConfig } from '../../../common/LoggingConfig';
 
 interface OutputChannel {
     appendLine(value: string): void;
 }
 
+/**
+ * Log levels:
+ *   - "debug" / "info" / "warn" / "error" — standard severity axis. Each level
+ *     includes higher-severity levels (info shows info+warn+error, etc.).
+ *   - "perf" — SEPARATE axis. A logger set to "perf" emits perf() messages and
+ *     SILENCES all standard-severity output. Use for per-module perf
+ *     instrumentation that should be cleanly togglable (set to "perf" to
+ *     measure, set back to "error" to silence).
+ *
+ * Pattern:
+ *   const perfLogger = LoggerManager.getLogger("MyModule.Perf", "perf");
+ *   perfLogger.perf("operation took", { time_ms: 42 });
+ *   // ...later, to silence:
+ *   perfLogger.setLevel("error");
+ */
+type LogLevel = "debug" | "info" | "warn" | "error" | "perf";
+
 class Logger {
-    private level: "debug" | "info" | "warn" | "error";
+    private level: LogLevel;
     private name: string;
     public fullDebugging: boolean = false;
     public static enabled: boolean = true;
 
-    constructor(name: string, level: "debug" | "info" | "warn" | "error" = "error") {
+    constructor(name: string, level: LogLevel = "error") {
         this.name = name;
         this.level = level;
     }
@@ -22,6 +41,8 @@ class Logger {
     private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
         if (!Logger.enabled) return false;
         if (this.fullDebugging) return true;
+        // "perf" level silences all standard-severity output — perf is its own channel.
+        if (this.level === "perf") return false;
         const levels = ["debug", "info", "warn", "error"];
         return levels.indexOf(level) >= levels.indexOf(this.level);
     }
@@ -32,6 +53,7 @@ class Logger {
             : `[${this.getTimestamp()}] [${this.name}] ${label} ${message}`;
         console.log(line);
         LoggerManager.outputChannel?.appendLine(line);
+        LoggerManager.writeToFileSink(line);
     }
 
     debug(message: string, ...args: any[]) {
@@ -53,15 +75,25 @@ class Logger {
         if (this.shouldLog("error")) this.emit('❌ ERROR:', message, args);
     }
 
+    /**
+     * 📊 Log performance metrics. Emits when:
+     *   - This logger's level is "perf" (preferred — per-module perf channel), OR
+     *   - `LoggingConfig.PERF_TEST_MODE` is on globally, OR
+     *   - This logger's level is "debug" (legacy — perf bundled with debug noise).
+     *
+     * The "perf" level is the cleanly-togglable surface: a module declares
+     * `const perfLogger = LoggerManager.getLogger("X.Perf", "perf")` for
+     * deliberate perf instrumentation; flip to "error" when not measuring.
+     */
     perf(message: string, metrics?: Record<string, number | string>) {
-        if (!LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
+        if (this.level !== "perf" && !LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
         const suffix = metrics
             ? ` | ${Object.entries(metrics).map(([k, v]) => `${k}=${v}`).join(', ')}`
             : '';
         this.emit('📊 PERF:', message + suffix, []);
     }
 
-    setLevel(newLevel: "debug" | "info" | "warn" | "error") {
+    setLevel(newLevel: LogLevel) {
         this.level = newLevel;
     }
 }
@@ -69,6 +101,7 @@ class Logger {
 class LoggerManager {
     private static loggers: Map<string, Logger> = new Map();
     static outputChannel: OutputChannel | undefined;
+    private static fileSinkPath: string | undefined;
 
     /**
      * Register a VS Code OutputChannel to receive all log messages.
@@ -78,7 +111,40 @@ class LoggerManager {
         LoggerManager.outputChannel = channel;
     }
 
-    static getLogger(name: string, level?: "debug" | "info" | "warn" | "error"): Logger {
+    /**
+     * Open a per-session log file. Truncates on call so each VS Code session
+     * starts with a fresh log. Subsequent emit() calls append synchronously.
+     * Failures are reported to the console only — never throw, never block
+     * extension activation.
+     */
+    static initFileSink(filePath: string): void {
+        try {
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
+            fs.writeFileSync(filePath, `# Clarion client log — session start ${new Date().toISOString()}\n`, 'utf8');
+            LoggerManager.fileSinkPath = filePath;
+        } catch (err) {
+            console.warn(`[LoggerManager] file sink init failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+            LoggerManager.fileSinkPath = undefined;
+        }
+    }
+
+    static writeToFileSink(line: string): void {
+        if (!LoggerManager.fileSinkPath) return;
+        try {
+            fs.appendFileSync(LoggerManager.fileSinkPath, line + '\n', 'utf8');
+        } catch {
+            // swallow — diagnostic-only sink, never break the caller
+        }
+    }
+
+    /**
+     * Get or create a logger instance.
+     * @param name Logger name (usually module/class name)
+     * @param level Optional log level. "perf" gives a perf-only logger
+     *   (silences all standard severities; perf() emits). Otherwise uses
+     *   environment-appropriate default.
+     */
+    static getLogger(name: string, level?: LogLevel): Logger {
         const logLevel = level ?? LoggingConfig.getDefaultLogLevel();
         if (!LoggerManager.loggers.has(name)) {
             LoggerManager.loggers.set(name, new Logger(name, logLevel));

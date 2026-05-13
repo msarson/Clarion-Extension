@@ -90,8 +90,44 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+// #158 — startup-perf instrumentation. Set level to "perf" to emit; flip to
+// "error" to silence post-investigation. Captures the 7 startup-phase
+// boundaries Bob named in the dispatch + per-document validation timing.
+// Pattern per the `perfLogger` infrastructure from `0d70270`.
+// #158 — perfLogger level set to "error" post-investigation. Calls remain
+// in place; flip back to "perf" for future startup-time investigations
+// (toggle is a single-character edit per logger).
+const perfLogger = LoggerManager.getLogger("StartupPerf", "error");
+const serverModuleLoadedAt = Date.now();
+perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
+
 const globalStartTime = Date.now();
 logger.info(`⏱️ [STARTUP] Server process started at ${new Date().toISOString()}`);
+
+// #158 — first-call flags for one-shot phase boundaries.
+let firstDocumentOpenFired = false;
+let firstValidateFired = false;
+
+// #158 Phase B addendum — defer async validators until solution-ready.
+// Mark's perf-data insight: initial onDidOpen fires at t~63ms but
+// libsrcPaths isn't populated until clarion/solutionReady fires (~11s in
+// Mark's setup). The P3 libsrc-skip can't catch the initial async scan
+// because libsrcPaths is empty → libsrc files get the full 14s async pass
+// despite being structurally exempt.
+//
+// Fix: hold the async validator pass on `onDidOpen` until solution-ready
+// drains the queue. Sync diagnostics still fire immediately (fast
+// feedback). Once solution loads, libsrcPaths is populated, the drain
+// loop hits the now-effective P3 libsrc-skip on first deferred async
+// pass — eliminating ~15s of redundant async work.
+//
+// No-solution-mode safety net: a 2s timeout marks the pipeline ready +
+// drains the queue if solutionReady never fires (loose .clw in
+// non-Clarion workspace). 2s is well under perceived-startup-blocking
+// threshold; loose-file users wait 2s for async diagnostics instead of
+// getting them at t=63ms. Acceptable per Bob's dispatch.
+let solutionPipelineReady = false;
+const deferredAsyncDocs = new Set<string>();
 
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
@@ -135,6 +171,9 @@ process.on('unhandledRejection', (reason: any) => {
 connection.onInitialize((params) => {
     const t0 = Date.now();
     logger.info(`⏱️ [STARTUP] onInitialize called at ${new Date().toISOString()}`);
+    perfLogger.perf("Phase: LSP onInitialize received", {
+        since_module_load_ms: t0 - serverModuleLoadedAt
+    });
     try {
         logger.info(`📥 [CRITICAL] Initialize request received`);
         logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -204,6 +243,10 @@ connection.onInitialize((params) => {
             }
         };
         logger.info(`⏱️ [STARTUP] onInitialize complete in ${Date.now() - t0}ms`);
+        perfLogger.perf("Phase: LSP onInitialize complete", {
+            handler_ms: Date.now() - t0,
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
         return result;
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
@@ -223,6 +266,9 @@ connection.onInitialized(() => {
     try {
         logger.info(`📥 [CRITICAL] Server initialized notification received`);
         logger.info(`📥 [CRITICAL] Server is now fully initialized`);
+        perfLogger.perf("Phase: Client initialize handshake complete (onInitialized)", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
         
         // Set the serverInitialized flag
         setServerInitialized(true);
@@ -270,7 +316,15 @@ documents.onDidOpen((event) => {
         const uri = document.uri;
 
         logger.info(`📂 Document opened: ${uri}`);
-        
+
+        if (!firstDocumentOpenFired) {
+            firstDocumentOpenFired = true;
+            perfLogger.perf("Phase: First onDidOpen", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                uri
+            });
+        }
+
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
         }
@@ -301,7 +355,7 @@ const lastValidatedVersions = new Map<string, number>();
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
-        if (!document.uri.toLowerCase().endsWith('.clw') && 
+        if (!document.uri.toLowerCase().endsWith('.clw') &&
             !document.uri.toLowerCase().endsWith('.inc') &&
             !document.uri.toLowerCase().endsWith('.equ')) {
             return;
@@ -317,16 +371,92 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
+        // #158 — startup-perf instrumentation
+        const validateStart = Date.now();
+        if (!firstValidateFired) {
+            firstValidateFired = true;
+            perfLogger.perf("Phase: First validateTextDocument", {
+                since_module_load_ms: validateStart - serverModuleLoadedAt,
+                caller,
+                uri: document.uri
+            });
+        }
+
         // Record version before any async work so duplicate-skip still works
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
 
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
+        const syncStart = Date.now();
         const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        const syncMs = Date.now() - syncStart;
+
+        // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
+        // files. Library files (StringTheory, ABC, etc.) are stable, read-only
+        // by convention, and don't change based on user edits. Their async
+        // diagnostics (discardedReturn / missingIncludes / undeclaredVar /
+        // missingImpl) impose massive cost on large files (Mark's Phase A:
+        // 13.9s on 72k-token StringTheory.clw) for ~zero user-actionable
+        // value: users don't fix lint warnings inside library code they
+        // didn't write.
+        //
+        // Trade-off: a user who DOES edit a libsrc file (e.g., extending
+        // ABC) will silently miss async diagnostics. Acceptable per Bob's
+        // dispatch — release-build trade-off for the perf win. Sync
+        // diagnostics still run normally so syntax / structure errors
+        // remain visible.
+        //
+        // Detection: case-insensitive prefix match of normalized
+        // `document.uri` filesystem path against each `serverSettings.libsrcPaths`
+        // entry. Uses the same URI → fs-path pattern as the rest of
+        // server.ts (decodeURIComponent + replace).
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\').toLowerCase();
+        const isLibsrcFile = (serverSettings.libsrcPaths ?? []).some(libDir => {
+            if (!libDir) return false;
+            const normalizedLibDir = libDir.replace(/\//g, '\\').toLowerCase();
+            return docFsPath.startsWith(normalizedLibDir + '\\') || docFsPath.startsWith(normalizedLibDir + '/');
+        });
+
+        if (isLibsrcFile) {
+            // Send only sync diagnostics; skip the async Promise.all entirely.
+            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            perfLogger.perf("validateTextDocument libsrc-skip (async validators bypassed)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
 
         // Send sync diagnostics immediately for fast feedback
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 Phase B addendum — defer async validators until solution-ready
+        // when the caller is the initial `onDidOpen`. At t=63ms (first
+        // onDidOpen), libsrcPaths is empty so the P3 libsrc-skip can't fire;
+        // running the full async pass on a libsrc file like StringTheory.clw
+        // burns ~14s of pointless work. By the time solutionReady fires
+        // (~11s in), libsrcPaths is populated, and the drain loop hits the
+        // now-effective P3 libsrc-skip on first deferred async pass.
+        //
+        // No-solution timeout fallback (registered at bottom of file) marks
+        // pipeline ready after 2s if solutionReady never fires.
+        if (!solutionPipelineReady && caller === 'onDidOpen') {
+            deferredAsyncDocs.add(document.uri);
+            perfLogger.perf("validateTextDocument async deferred (solution pending)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
@@ -344,18 +474,37 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // pass for cross-file scope resolution via SymbolFinderService.
         const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
         const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+        // #158 — per-validator timing. Wrap each Promise.all element with a
+        // perf-timed shim that captures its individual wallclock.
+        const asyncStart = Date.now();
+        const timeIt = async <T>(name: string, p: Promise<T>): Promise<T> => {
+            const t0 = Date.now();
+            const result = await p;
+            perfLogger.perf(`Validator ${name}`, {
+                ms: Date.now() - t0,
+                uri: document.uri
+            });
+            return result;
+        };
         const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags] = await Promise.all([
-            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
-            DiagnosticProvider.validateMissingIncludes(tokens, document),
-            DiagnosticProvider.validateMissingConstants(tokens, document),
-            DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
-            DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
-            DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder),
+            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
+            timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
+            timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
+            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document)),
+            timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
+            timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
         ]);
+        const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
         if (!currentDoc || currentDoc.version !== startVersion) {
+            perfLogger.perf("validateTextDocument stale-skip", {
+                total_ms: Date.now() - validateStart,
+                token_count: tokens.length,
+                uri: document.uri,
+                caller
+            });
             return;
         }
 
@@ -364,6 +513,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 — per-document final perf summary
+        perfLogger.perf("validateTextDocument complete", {
+            total_ms: Date.now() - validateStart,
+            sync_ms: syncMs,
+            async_ms: asyncMs,
+            token_count: tokens.length,
+            diag_count: diagnostics.length,
+            uri: document.uri,
+            caller
+        });
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1171,16 +1331,66 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 projectCount: globalSolution.projects.length
             });
             logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
+            perfLogger.perf("Phase: Solution loaded (clarion/solutionReady sent)", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                project_count: globalSolution.projects.length
+            });
 
             // Re-validate all open documents now that cross-file type info is available.
             // The async diagnostic pass (discarded return value detection) needs the solution
             // to be ready; it may have already run (and silently skipped resolutions) before
             // this point, so force a fresh pass on every open file.
             logger.info("🔁 Re-validating open documents after solution ready...");
+            const revalDispatchStart = Date.now();
+            const openDocs = documents.all();
             lastValidatedVersions.clear();
-            for (const doc of documents.all()) {
+
+            // #158 Phase B addendum — mark pipeline ready BEFORE the
+            // re-validation loop so deferred docs hit the (now-effective) P3
+            // libsrc-skip on their first async pass. `documents.all()`
+            // already covers every doc (including the deferred ones), so
+            // calling `validateTextDocument` on each is sufficient — no
+            // separate `deferredAsyncDocs` drain loop needed. Clear the set
+            // for hygiene.
+            solutionPipelineReady = true;
+            const deferredCount = deferredAsyncDocs.size;
+            deferredAsyncDocs.clear();
+
+            for (const doc of openDocs) {
                 validateTextDocument(doc, 'solutionReady');
             }
+            perfLogger.perf("Phase: Post-solution re-validation dispatched", {
+                dispatch_ms: Date.now() - revalDispatchStart,
+                doc_count: openDocs.length,
+                deferred_drained: deferredCount,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
+            // NOTE: dispatch_ms only measures the synchronous loop. Each
+            // validateTextDocument runs async; individual completion times appear
+            // as `validateTextDocument complete` perf entries above.
+
+            // #158 follow-up — document-link refresh post-solution-load.
+            // DocumentLinkProvider uses FRG, which isn't built until solution
+            // load completes. Editor requests links right after onDidOpen
+            // (~t=63ms) and caches the empty result; without an explicit
+            // refresh, links stay missing until the doc is edited. Native LSP
+            // server-to-client refresh tells the editor to re-request links
+            // for all open docs. Surfaced cleanly by the deferred-async
+            // commit (`9838cdd`) — pre-defer, incidental refreshes masked
+            // the gap.
+            //
+            // Trace at `a0367cb` revealed `workspace/documentLink/refresh`
+            // raised "Unhandled method" — VS Code LSP client requires the
+            // client to declare `workspace.documentLink.refreshSupport: true`
+            // per LSP 3.16 spec, and vscode-languageclient doesn't expose a
+            // clean field for this in our version. Switching to a custom
+            // notification: server sends `clarion/refreshDocumentLinks`,
+            // client (registered in LanguageServerManager.ts) iterates
+            // visible editors and re-invokes the document link provider via
+            // `vscode.executeDocumentLinkProvider` command. Same effective
+            // refresh; reliable via our existing notification plumbing.
+            connection.sendNotification('clarion/refreshDocumentLinks');
+            logger.info("🔗 Document-link refresh notification sent to client (#158 follow-up)");
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
@@ -2049,9 +2259,37 @@ connection.onExit(() => {
     }
 });
 
+// #158 Phase B addendum — no-solution-mode safety net for deferred async
+// queue. If `clarion/solutionReady` never fires within 2s of server start
+// (loose `.clw` opened in a non-Clarion workspace), mark the pipeline ready
+// + drain the queue so deferred docs get their async pass.
+//
+// 2s threshold rationale: solutionReady on Mark's setup arrives at ~11s;
+// real no-solution-mode workspaces produce no solutionReady at all. 2s is
+// well under perceived-startup-blocking; loose-file users wait 2s for
+// async diagnostics instead of getting them at t=63ms. Acceptable trade.
+setTimeout(() => {
+    if (!solutionPipelineReady) {
+        perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt,
+            deferred_count: deferredAsyncDocs.size
+        });
+        solutionPipelineReady = true;
+        const queuedUris = Array.from(deferredAsyncDocs);
+        deferredAsyncDocs.clear();
+        for (const uri of queuedUris) {
+            const doc = documents.get(uri);
+            if (doc) validateTextDocument(doc, 'noSolutionTimeout');
+        }
+    }
+}, 2000);
+
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
 console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+perfLogger.perf("Phase: Server listening (connection.listen called)", {
+    since_module_load_ms: Date.now() - serverModuleLoadedAt
+});
 connection.listen();
 
 // Add a handler for getting performance metrics
