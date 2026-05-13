@@ -184,21 +184,22 @@ export async function startLanguageServer(
             }
         });
 
-        // #158 follow-up — listen for document-link refresh notifications.
-        // Server sends this when solution-ready completes so doc-link cache
-        // can be invalidated for visible editors.
-        //
-        // 2026-05-13: handler no-op'd. Previous fake-edit invalidation
-        // (insert+delete a space) flipped VS Code's dirty flag on every
-        // visible doc on every activation — `workspace.applyEdit` marks dirty
-        // regardless of net-zero content. Doc-links still resolve on first
-        // user interaction (focus / edit / save). Proper fix tracked in
-        // GH issue #160 / kanban f09c0b59: upgrade vscode-languageclient
-        // v7 → v8/v9 to auto-declare `workspace.documentLink.refreshSupport`
-        // capability per LSP 3.16, then delete this handler entirely and let
-        // the server fire `workspace/documentLink/refresh` directly.
-        client.onNotification('clarion/refreshDocumentLinks', () => {
-            logger.info(`🔗 Received clarion/refreshDocumentLinks (no-op — proper LSP refresh gated on languageclient upgrade, see GH #160)`);
+        // Re-invoke the doc-link provider per visible Clarion editor on
+        // solution-ready. Uses `vscode.executeDocumentLinkProvider` so the
+        // refresh runs without touching document content — no dirty-flag flip.
+        // Audit trail for the framing pivot (away from LSP capability backport)
+        // lives in GH #160.
+        client.onNotification('clarion/refreshDocumentLinks', async () => {
+            logger.info(`🔗 Received clarion/refreshDocumentLinks; re-invoking document-link provider on visible editors`);
+            for (const editor of vscodeWindow.visibleTextEditors) {
+                if (editor.document.languageId === 'clarion') {
+                    try {
+                        await commands.executeCommand('vscode.executeDocumentLinkProvider', editor.document.uri);
+                    } catch (err) {
+                        logger.warn(`⚠️ doc-link refresh failed for ${editor.document.uri.toString()}: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                }
+            }
         });
 
         return client;

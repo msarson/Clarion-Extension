@@ -1369,28 +1369,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // validateTextDocument runs async; individual completion times appear
             // as `validateTextDocument complete` perf entries above.
 
-            // #158 follow-up — document-link refresh post-solution-load.
-            // DocumentLinkProvider uses FRG, which isn't built until solution
-            // load completes. Editor requests links right after onDidOpen
-            // (~t=63ms) and caches the empty result; without an explicit
-            // refresh, links stay missing until the doc is edited. Native LSP
-            // server-to-client refresh tells the editor to re-request links
-            // for all open docs. Surfaced cleanly by the deferred-async
-            // commit (`9838cdd`) — pre-defer, incidental refreshes masked
-            // the gap.
-            //
-            // Trace at `a0367cb` revealed `workspace/documentLink/refresh`
-            // raised "Unhandled method" — VS Code LSP client requires the
-            // client to declare `workspace.documentLink.refreshSupport: true`
-            // per LSP 3.16 spec, and vscode-languageclient doesn't expose a
-            // clean field for this in our version. Switching to a custom
-            // notification: server sends `clarion/refreshDocumentLinks`,
-            // client (registered in LanguageServerManager.ts) iterates
-            // visible editors and re-invokes the document link provider via
-            // `vscode.executeDocumentLinkProvider` command. Same effective
-            // refresh; reliable via our existing notification plumbing.
+            // Doc-link refresh post-solution-ready. DocumentLinkProvider uses
+            // FRG, which isn't ready until solution-load completes; editors
+            // request links right after onDidOpen and cache the empty result.
+            // Custom notification (rather than a standard LSP refresh request,
+            // which doesn't exist for document links — see GH #160). Client
+            // re-invokes the provider per visible editor.
             connection.sendNotification('clarion/refreshDocumentLinks');
-            logger.info("🔗 Document-link refresh notification sent to client (#158 follow-up)");
+            logger.info("🔗 Document-link refresh notification sent to client");
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
