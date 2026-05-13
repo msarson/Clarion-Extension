@@ -311,180 +311,99 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     private async _loadDetectedSolutionsNodes(): Promise<TreeNode[]> {
         logger.info(`🔍 Building detected solutions nodes (cache expired or empty)...`);
         const nodes: TreeNode[] = [];
-        
+
+        // Always emit the primary "Open Solution" action at the top, so the tree
+        // is never empty in the no-solution state (which would let viewsWelcome
+        // become the only visible UI). Fires the same command as the welcome button.
+        nodes.push(new TreeNode(
+            "📂 Open Solution...",
+            TreeItemCollapsibleState.None,
+            {
+                type: 'openSolutionAction',
+                tooltip: "Browse for a Clarion .sln file to open"
+            }
+        ));
+
         try {
-            // Check if we have any folder open
             const hasFolder = workspace.workspaceFolders && workspace.workspaceFolders.length > 0;
-            
+
             if (!hasFolder) {
-                logger.info(`ℹ️ No folder open - checking recent solutions...`);
-                
-                // Get recent solutions from global history
-                const recentSolutions = await GlobalSolutionHistory.getValidReferences();
-                logger.info(`📜 Found ${recentSolutions.length} recent solutions to display`);
-                
-                if (recentSolutions.length > 0) {
-                    // Show recent solutions header
-                    const headerNode = new TreeNode(
-                        `📜 Recent Solutions (${recentSolutions.length})`,
-                        TreeItemCollapsibleState.None,
-                        { type: 'info' }
-                    );
-                    nodes.push(headerNode);
-                    
-                    // Add recent solution nodes
-                    for (const ref of recentSolutions) {
-                        const solutionName = path.basename(ref.solutionFile, '.sln');
-                        const recentNode = new TreeNode(
-                            `▶ ${solutionName}`,
-                            TreeItemCollapsibleState.None,
-                            {
-                                type: 'recentSolution',
-                                solutionPath: ref.solutionFile,
-                                folderPath: ref.folderPath,
-                                tooltip: `${ref.solutionFile}\nLast opened: ${ref.lastOpened.toLocaleString()}`
-                            },
-                            undefined,
-                            ref.folderPath
-                        );
-                        recentNode.description = ref.folderPath; // Show full path, not just folder name
-                        nodes.push(recentNode);
-                    }
-                    
-                    // Add separator
-                    const separatorNode = new TreeNode(
-                        "─────────────",
-                        TreeItemCollapsibleState.None,
-                        { type: 'separator' }
-                    );
-                    nodes.push(separatorNode);
-                }
-                
-                // No folder open - offer to open one
-                const openFolderNode = new TreeNode(
+                logger.info(`ℹ️ No folder open - offering Open Folder + Recent Solutions section`);
+                nodes.push(new TreeNode(
                     "📁 Open Folder...",
                     TreeItemCollapsibleState.None,
-                    { 
-                        type: 'openFolder', 
-                        tooltip: "Open a folder containing Clarion solutions" 
+                    {
+                        type: 'openFolder',
+                        tooltip: "Open a folder containing Clarion solutions"
                     }
-                );
-                nodes.push(openFolderNode);
-                
-                const browseNode = new TreeNode(
-                    "📂 Browse for Solution...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
-                );
-                nodes.push(browseNode);
-                
-                // Cache immediately to prevent rapid re-calls
-                this._detectedSolutionsCache = nodes;
-                this._lastFolderCheckTime = Date.now();
-                logger.info(`✅ Cached ${nodes.length} nodes (no folder, ${recentSolutions.length} recent)`);
-                
-                return nodes;
-            }
-            
-            // Scan for solutions in the opened folder
-            const detectedSolutions = await SolutionScanner.scanWorkspaceFolders();
-            
-            // Check Clarion installations
-            const installations = await ClarionInstallationDetector.detectInstallations();
-            
-            logger.info(`🔍 Found ${detectedSolutions.length} solution(s) and ${installations.length} Clarion installation(s)`);
-            
-            if (detectedSolutions.length === 0) {
-                // No solutions found - offer to browse
-                const noSolutionsNode = new TreeNode(
-                    "No Solutions Detected",
-                    TreeItemCollapsibleState.None,
-                    { type: 'info', tooltip: "No .sln files found in this folder" }
-                );
-                
-                const browseNode = new TreeNode(
-                    "📂 Browse for Solution...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
-                );
+                ));
+            } else {
+                const detectedSolutions = await SolutionScanner.scanWorkspaceFolders();
+                const installations = await ClarionInstallationDetector.detectInstallations();
+                logger.info(`🔍 Found ${detectedSolutions.length} solution(s) and ${installations.length} Clarion installation(s)`);
 
-                const newSolutionNode = new TreeNode(
-                    "✨ New Solution...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'newSolution', tooltip: "Create a new Clarion solution in this folder" }
-                );
+                if (installations.length === 0) {
+                    nodes.push(new TreeNode(
+                        "⚠️ No Clarion Installation Detected",
+                        TreeItemCollapsibleState.None,
+                        { type: 'warning', tooltip: "Clarion IDE not found. Install Clarion or manually configure settings." }
+                    ));
+                }
 
-                nodes.push(noSolutionsNode);
-                nodes.push(browseNode);
-                nodes.push(newSolutionNode);
-                return nodes;
+                if (detectedSolutions.length > 0) {
+                    nodes.push(new TreeNode(
+                        `📁 ${detectedSolutions.length} Solution(s) Found`,
+                        TreeItemCollapsibleState.None,
+                        { type: 'info' }
+                    ));
+
+                    for (const solution of detectedSolutions) {
+                        const solutionNode = new TreeNode(
+                            `▶ ${solution.solutionName}`,
+                            TreeItemCollapsibleState.None,
+                            {
+                                type: 'detectedSolution',
+                                solutionPath: solution.solutionPath,
+                                tooltip: `Click to open: ${solution.solutionPath}`
+                            },
+                            undefined,
+                            path.dirname(solution.solutionPath)
+                        );
+                        nodes.push(solutionNode);
+                    }
+                } else {
+                    nodes.push(new TreeNode(
+                        "No Solutions Detected",
+                        TreeItemCollapsibleState.None,
+                        { type: 'info', tooltip: "No .sln files found in this folder" }
+                    ));
+                    nodes.push(new TreeNode(
+                        "✨ New Solution...",
+                        TreeItemCollapsibleState.None,
+                        { type: 'newSolution', tooltip: "Create a new Clarion solution in this folder" }
+                    ));
+                }
             }
-            
-            // Show warning if no Clarion installation detected
-            if (installations.length === 0) {
-                const warningNode = new TreeNode(
-                    "⚠️ No Clarion Installation Detected",
-                    TreeItemCollapsibleState.None,
-                    { type: 'warning', tooltip: "Clarion IDE not found. Install Clarion or manually configure settings." }
-                );
-                nodes.push(warningNode);
-            }
-            
-            // Add header
-            const headerNode = new TreeNode(
-                `📁 ${detectedSolutions.length} Solution(s) Found`,
-                TreeItemCollapsibleState.None,
-                { type: 'info' }
-            );
-            nodes.push(headerNode);
-            
-            // Add detected solution nodes (clickable)
-            for (const solution of detectedSolutions) {
-                const solutionNode = new TreeNode(
-                    `▶ ${solution.solutionName}`,
-                    TreeItemCollapsibleState.None,
-                    { 
-                        type: 'detectedSolution', 
-                        solutionPath: solution.solutionPath,
-                        tooltip: `Click to open: ${solution.solutionPath}`
-                    },
-                    undefined,
-                    path.dirname(solution.solutionPath)
-                );
-                
-                nodes.push(solutionNode);
-            }
-            
-            // Add browse option
-            const browseNode = new TreeNode(
-                "📂 Browse for Solution...",
-                TreeItemCollapsibleState.None,
-                { type: 'browseSolution', tooltip: "Open a Clarion solution file from anywhere" }
-            );
-            nodes.push(browseNode);
-            
-            // ✅ Also show recent solutions from global history (even when folder is open)
+
+            // Always emit the Recent Solutions section (header + entries OR empty-state hint),
+            // so the user always sees this affordance regardless of folder/.sln combination.
             const recentSolutions = await GlobalSolutionHistory.getValidReferences();
             logger.info(`📜 Found ${recentSolutions.length} recent solutions in global history`);
-            
+
+            nodes.push(new TreeNode(
+                "─────────────",
+                TreeItemCollapsibleState.None,
+                { type: 'separator' }
+            ));
+            nodes.push(new TreeNode(
+                recentSolutions.length > 0
+                    ? `📜 Recent Solutions (${recentSolutions.length})`
+                    : "📜 Recent Solutions",
+                TreeItemCollapsibleState.None,
+                { type: 'info' }
+            ));
+
             if (recentSolutions.length > 0) {
-                // Add separator
-                const separatorNode = new TreeNode(
-                    "─────────────",
-                    TreeItemCollapsibleState.None,
-                    { type: 'separator' }
-                );
-                nodes.push(separatorNode);
-                
-                // Show recent solutions header
-                const recentHeaderNode = new TreeNode(
-                    `📜 Recent Solutions (${recentSolutions.length})`,
-                    TreeItemCollapsibleState.None,
-                    { type: 'info' }
-                );
-                nodes.push(recentHeaderNode);
-                
-                // Add recent solution nodes
                 for (const ref of recentSolutions) {
                     const solutionName = path.basename(ref.solutionFile, '.sln');
                     const recentNode = new TreeNode(
@@ -499,27 +418,26 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         undefined,
                         ref.folderPath
                     );
-                    recentNode.description = ref.folderPath; // Show full path, not just folder name
+                    recentNode.description = ref.folderPath;
                     nodes.push(recentNode);
                 }
+            } else {
+                nodes.push(new TreeNode(
+                    "(no recent solutions yet — open one to add it here)",
+                    TreeItemCollapsibleState.None,
+                    { type: 'emptyHint' }
+                ));
             }
-            
         } catch (error) {
             logger.error('❌ Error getting detected solutions:', error);
-            // Return browse option on error
-            const browseNode = new TreeNode(
-                "📂 Browse for Solution...",
-                TreeItemCollapsibleState.None,
-                { type: 'browseSolution', tooltip: "Open a Clarion solution file" }
-            );
-            nodes.push(browseNode);
+            // openSolutionAction is already in `nodes` from the top push,
+            // so the tree is never empty even on error.
         }
-        
-        // Cache the results
+
         this._detectedSolutionsCache = nodes;
         this._lastFolderCheckTime = Date.now();
         logger.info(`✅ Cached ${nodes.length} detected solution nodes`);
-        
+
         return nodes;
     }
 
@@ -851,15 +769,22 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
 
-        // Handle browse solution node
-        if ((data as any)?.type === 'browseSolution') {
+        // Handle primary Open Solution action node — top of the no-solution-state tree
+        if ((data as any)?.type === 'openSolutionAction') {
             treeItem.iconPath = new ThemeIcon('folder-opened');
-            treeItem.tooltip = (data as any).tooltip || "Open a Clarion solution file from anywhere";
+            treeItem.tooltip = (data as any).tooltip || "Browse for a Clarion .sln file to open";
             treeItem.command = {
-                title: 'Browse for Solution',
+                title: 'Open Solution',
                 command: 'clarion.openSolution',
                 arguments: []
             };
+            return treeItem;
+        }
+
+        // Handle empty-state hint nodes (non-clickable, informational)
+        if ((data as any)?.type === 'emptyHint') {
+            treeItem.iconPath = new ThemeIcon('info');
+            treeItem.collapsibleState = TreeItemCollapsibleState.None;
             return treeItem;
         }
 
