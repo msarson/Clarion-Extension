@@ -2,7 +2,6 @@ import { workspace, ExtensionContext, Uri, FileSystemWatcher } from 'vscode';
 import { window as vscodeWindow } from 'vscode';
 import { globalSettings, globalSolutionFile } from '../globals';
 import { SolutionCache } from '../SolutionCache';
-import { redirectionService } from '../paths/RedirectionService';
 import { DocumentManager } from '../documentManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
@@ -161,10 +160,6 @@ async function handleRedirectionFileChange(
     documentManager: DocumentManager | undefined
 ) {
     logger.info("🔄 Redirection file changed. Refreshing environment...");
-
-    // Clear the redirection service cache
-    redirectionService.clearCache();
-    logger.info("✅ Redirection service cache cleared");
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);
