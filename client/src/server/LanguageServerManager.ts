@@ -185,51 +185,20 @@ export async function startLanguageServer(
         });
 
         // #158 follow-up — listen for document-link refresh notifications.
-        // Server sends this when solution-ready completes (FRG is now built);
-        // we force VS Code to invalidate its doc-link cache for each visible
-        // editor so INCLUDE/MODULE/MEMBER links appear without requiring a
-        // user edit.
+        // Server sends this when solution-ready completes so doc-link cache
+        // can be invalidated for visible editors.
         //
-        // History (per `a0367cb` trace + `0087068` follow-up):
-        //   1. First attempted `connection.sendRequest('workspace/documentLink/refresh')`
-        //      server-side per LSP 3.16 — failed with "Unhandled method"
-        //      because our vscode-languageclient version doesn't auto-declare
-        //      `workspace.documentLink.refreshSupport` capability.
-        //   2. Then switched to `vscode.executeDocumentLinkProvider` command —
-        //      that command returns fresh links but DOES NOT tell VS Code to
-        //      use them; the editor keeps its cached empty result. No UI
-        //      change.
-        //   3. NOW — fake-edit trick: insert + delete a single character at
-        //      position (0,0). Two `WorkspaceEdit`s with net-zero content
-        //      change forces VS Code's TextDocument.onDidChangeContent →
-        //      invalidates the doc-link cache → re-queries the provider.
-        //
-        // The two-step (insert then delete) is required because a single
-        // empty replace is optimized away by VS Code; the net-zero edit pair
-        // is the smallest reliable invalidation. Two entries land in the
-        // undo stack but they cancel out (one undo restores original; two
-        // undos goes to pre-pre-state which is also original).
-        //
-        // Per-editor try/catch — readonly files / racing-edits don't crash
-        // the handler.
-        client.onNotification('clarion/refreshDocumentLinks', async () => {
-            logger.info(`🔗 Received clarion/refreshDocumentLinks notification; forcing doc-link cache invalidation`);
-            const { WorkspaceEdit, Position, Range } = require('vscode');
-            for (const editor of vscodeWindow.visibleTextEditors) {
-                const uri = editor.document.uri;
-                try {
-                    // Step 1: insert a space at (0,0)
-                    const insertEdit = new WorkspaceEdit();
-                    insertEdit.insert(uri, new Position(0, 0), ' ');
-                    await workspace.applyEdit(insertEdit);
-                    // Step 2: delete that same space (net-zero content change)
-                    const deleteEdit = new WorkspaceEdit();
-                    deleteEdit.delete(uri, new Range(0, 0, 0, 1));
-                    await workspace.applyEdit(deleteEdit);
-                } catch (err) {
-                    logger.warn(`⚠️ doc-link refresh failed for ${uri.toString()}: ${err instanceof Error ? err.message : String(err)}`);
-                }
-            }
+        // 2026-05-13: handler no-op'd. Previous fake-edit invalidation
+        // (insert+delete a space) flipped VS Code's dirty flag on every
+        // visible doc on every activation — `workspace.applyEdit` marks dirty
+        // regardless of net-zero content. Doc-links still resolve on first
+        // user interaction (focus / edit / save). Proper fix tracked in
+        // GH issue #160 / kanban f09c0b59: upgrade vscode-languageclient
+        // v7 → v8/v9 to auto-declare `workspace.documentLink.refreshSupport`
+        // capability per LSP 3.16, then delete this handler entirely and let
+        // the server fire `workspace/documentLink/refresh` directly.
+        client.onNotification('clarion/refreshDocumentLinks', () => {
+            logger.info(`🔗 Received clarion/refreshDocumentLinks (no-op — proper LSP refresh gated on languageclient upgrade, see GH #160)`);
         });
 
         return client;

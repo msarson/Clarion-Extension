@@ -31,3 +31,6 @@ antlr-grammar/**/*.tokens
 
 # ANTLR generated files (server integration)
 server/src/generated/
+
+# Per-session diagnostic log sink (truncated each session by LoggerManager)
+.clarion-debug/

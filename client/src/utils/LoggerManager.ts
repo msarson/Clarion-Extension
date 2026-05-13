@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { LoggingConfig } from '../../../common/LoggingConfig';
 
 interface OutputChannel {
@@ -51,6 +53,7 @@ class Logger {
             : `[${this.getTimestamp()}] [${this.name}] ${label} ${message}`;
         console.log(line);
         LoggerManager.outputChannel?.appendLine(line);
+        LoggerManager.writeToFileSink(line);
     }
 
     debug(message: string, ...args: any[]) {
@@ -98,6 +101,7 @@ class Logger {
 class LoggerManager {
     private static loggers: Map<string, Logger> = new Map();
     static outputChannel: OutputChannel | undefined;
+    private static fileSinkPath: string | undefined;
 
     /**
      * Register a VS Code OutputChannel to receive all log messages.
@@ -105,6 +109,32 @@ class LoggerManager {
      */
     static setOutputChannel(channel: OutputChannel): void {
         LoggerManager.outputChannel = channel;
+    }
+
+    /**
+     * Open a per-session log file. Truncates on call so each VS Code session
+     * starts with a fresh log. Subsequent emit() calls append synchronously.
+     * Failures are reported to the console only — never throw, never block
+     * extension activation.
+     */
+    static initFileSink(filePath: string): void {
+        try {
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
+            fs.writeFileSync(filePath, `# Clarion client log — session start ${new Date().toISOString()}\n`, 'utf8');
+            LoggerManager.fileSinkPath = filePath;
+        } catch (err) {
+            console.warn(`[LoggerManager] file sink init failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+            LoggerManager.fileSinkPath = undefined;
+        }
+    }
+
+    static writeToFileSink(line: string): void {
+        if (!LoggerManager.fileSinkPath) return;
+        try {
+            fs.appendFileSync(LoggerManager.fileSinkPath, line + '\n', 'utf8');
+        } catch {
+            // swallow — diagnostic-only sink, never break the caller
+        }
     }
 
     /**

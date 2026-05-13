@@ -1298,6 +1298,12 @@
           "default": false,
           "scope": "application",
           "description": "Internal one-shot flag: true after the first-run migration auto-promotes a legacy `solutions[].version` to `clarion.activeVersion`. Prevents re-running the migration. Do not edit manually. See #132."
+        },
+        "clarion.solutionVersionMemoryBackfilled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Internal one-shot flag: true after the first-run L3 backfill seeds per-solution version memory from legacy `solutions[].version` entries. Prevents re-running the backfill. Do not edit manually. See #141."
         }
       }
     }
