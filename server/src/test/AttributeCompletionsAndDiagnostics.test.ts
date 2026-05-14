@@ -315,4 +315,114 @@ suite('validateAttributeApplicability', () => {
                 `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => d.message).join(' | ')}`);
         });
     });
+
+    // ─── #175 — Attribute-applicability false positive on bare-identifier compound USE-labels ─
+    // Real-user repro: Frame_AcctsMap.clw:820 — `CHECK(' Filter Bar'),AT(...),USE(RCFilter_SL_Clients:External),...`.
+    // Same false-positive shape as #174 but the USE-label has no `?` prefix, so it routes through
+    // the Variable tokenizer pattern instead of FieldEquateLabel. #174's tokenizer-side fix
+    // (FieldEquateLabel including `:`) didn't cover this case.
+    //
+    // Fix shape (option b — diagnostic-side guard, per Phase A architectural-threshold analysis):
+    // skip Attribute tokens that are the suffix of a compound `Variable:External` or
+    // `FieldEquateLabel:External` pattern. The tokenizer-side fix for Variable was rejected as
+    // the same-cycle option because Variable has 128 references across 30 files vs FieldEquateLabel's
+    // 4 files (architectural-surprise threshold per Mark's standing rule). Tokenizer-side question
+    // deferred to a follow-up task for Mark's architectural review.
+    //
+    // Bidirectional-pin per feedback_bidirectional_pin_assertion:
+    //   - Positive ×3: :External / :Hide / :Trn suffixes on bare-identifier USE-labels do NOT fire
+    //   - Negative regression sentinel: genuinely misapplied attributes STILL fire (scope-fence)
+    //   - Type-annotation regression coverage: MyVar:BYTE / MyVar:LONG STILL tokenize correctly
+    //   - #174 symmetry verification: the ?-prefixed case still works (no regression on #174)
+    suite('#175 — bare-identifier compound USE-labels do not trigger false-positive diagnostics', () => {
+
+        test('real-user repro — CHECK with USE(RCFilter_SL_Clients:External) does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK(' Filter Bar'),AT(650,61),USE(RCFilter_SL_Clients:External),TIP('Filter')",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on bare-identifier :External label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('generalisation — :Hide suffix on bare-identifier label does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),AT(20,40),USE(Btn_Control:Hide)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on bare-identifier :Hide label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('generalisation — :Trn suffix on bare-identifier label does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('Foo'),AT(20,40),USE(Win_Element:Trn)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on bare-identifier :Trn label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        // Negative regression sentinel — load-bearing scope-fence per
+        // feedback_bidirectional_pin_assertion. Without it, the fix could over-relax:
+        // a real misapplied attribute (without the compound-label prefix shape) MUST
+        // still fire. This mirrors #174's negative sentinel exactly — same control,
+        // same attribute, same diagnostic.
+        test('negative regression sentinel — genuinely misapplied EXTERNAL still fires on bare control', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('OK'),EXTERNAL",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'Expected diagnostic for misapplied EXTERNAL on CHECK control (scope-fence — guard must NOT over-relax)');
+            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('EXTERNAL')),
+                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+        });
+
+        // Type-annotation regression coverage NOT included because option (b) doesn't
+        // touch the tokenizer. The TypeAnnotation regression risk (load-bearing for
+        // option (a)) is mitigated by construction here — the tokenizer's existing
+        // behavior for `MyVar:BYTE` / `MyVar:LONG` / etc. is untouched by this fix.
+        // Full server suite catches any incidental regression in tokenizer-driven
+        // tests as a structural cross-check.
+        //
+        // If a future cycle adopts option (a) tokenizer-side fix (deferred via GH #176
+        // architectural follow-up), explicit type-annotation regression coverage
+        // becomes load-bearing and should land in `FieldEquateLabel.test.ts` or a new
+        // tokenizer test file.
+
+        // #174 symmetry verification — the `?`-prefixed case still passes after #175's
+        // diagnostic-side guard lands. #174's tokenizer-side fix should be untouched by
+        // this change. If this test regresses, #175's guard accidentally interferes with
+        // the FieldEquateLabel single-token path.
+        test('#174 symmetry — ?-prefixed compound label STILL captured as single FieldEquateLabel + no diagnostic', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  PROGRESS,AT(10,10,200,14),USE(?Prog)",
+                "  STRING('Foo'),AT(20,30,,10),USE(?SL_Clients:External)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `#174 symmetry: ?-prefixed :External label-suffix must NOT fire (regression check); got: ${JSON.stringify(attrDiags)}`);
+        });
+    });
 });
