@@ -59,8 +59,13 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
     // anonymous-control marker (e.g. `BUTTON('OK'),USE(?)`); `?Name` is a named
-    // field equate. Both produce the same token type.
-    [TokenType.FieldEquateLabel]: /\?(?:[A-Za-z_][A-Za-z0-9_]*)?/i,
+    // field equate. Compound `?Prefix:Suffix` names (#174) are captured as ONE
+    // token, matching the sibling `Label` pattern (which already includes `:` in
+    // its character class). Pre-#174 the suffix was split off and re-classified
+    // as a separate token (often `Attribute` when the suffix happened to match an
+    // attribute-keyword name like EXTERNAL/HIDE/TRN), driving the
+    // `AttributeDiagnostics` false-positive Mark surfaced from `Frame_AcctsMap.clw:816`.
+    [TokenType.FieldEquateLabel]: /\?(?:[A-Za-z_][A-Za-z0-9_:]*)?/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
     [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly

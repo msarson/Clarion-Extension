@@ -230,4 +230,89 @@ suite('validateAttributeApplicability', () => {
         assert.strictEqual(diag!.range.start.line, 1, 'Diagnostic should be on line 1 (BUTTON line)');
         assert.ok(diag!.range.start.character >= 0, 'Diagnostic should have valid start character');
     });
+
+    // ─── #174 — Attribute-applicability false positive on :Suffix label names ─────
+    // Real-user repro: Frame_AcctsMap.clw:816 — `STRING('...'),USE(?SL_Clients:External)`
+    // inside PROGRESS structure. Pre-fix tokenized `External` as a separate Attribute
+    // token, driving 'External is not applicable to PROGRESS' false positive.
+    //
+    // Root-cause fix at TokenPatterns.ts:63 (FieldEquateLabel regex now includes `:` in
+    // its character class, symmetric to the sibling Label pattern at line 89). All
+    // attribute-keyword suffixes in field-equate label position are now captured as
+    // part of the single FieldEquateLabel token, so AttributeDiagnostics never sees
+    // them.
+    //
+    // Bidirectional-pin per feedback_bidirectional_pin_assertion:
+    //   - Positive: :EXTERNAL / :HIDE / :TRN suffixes on field-equate labels do NOT fire
+    //   - Negative regression sentinel: genuine misapplied EXTERNAL (in an actual
+    //     control's attribute list, not a USE-arg label) STILL fires. Without the
+    //     sentinel, the fix could over-relax the diagnostic.
+    suite('#174 — :Suffix label names do not trigger false-positive diagnostics', () => {
+
+        test('real-user repro — STRING with USE(?Label:External) inside PROGRESS does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  PROGRESS,AT(10,10,200,14),USE(?Prog)",
+                "  STRING('Data In External Accounting System'),AT(20,30,,10),USE(?SL_Clients:External)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on :External label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('generalisation — :Hide suffix on field-equate label does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  STRING('Label'),AT(20,40),USE(?Control:Hide)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on :Hide label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('generalisation — :Trn suffix on field-equate label does NOT fire', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),AT(20,40),USE(?Btn:Trn)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on :Trn label-suffix; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        // Negative regression sentinel — Bob's load-bearing scope-fence per
+        // feedback_bidirectional_pin_assertion. Without this test, the fix could
+        // silently over-relax: if we simply skipped all "External" tokens regardless of
+        // context, a real misapplied EXTERNAL attribute would no longer fire either.
+        // EXTERNAL has applicableTo: ["DATA_TYPE", "PROCEDURE"] per clarion-attributes.json
+        // — neither is a control. STRING is in VALIDATABLE_CONTROLS, so a genuine
+        // STRING-control EXTERNAL attribute is the right reverse-pinning shape.
+        test('negative regression sentinel — genuinely misapplied EXTERNAL still fires', () => {
+            // Use BUTTON (in VALIDATABLE_CONTROLS at AttributeDiagnostics.ts:19-23) — STRING is
+            // NOT in VALIDATABLE_CONTROLS so wouldn't be validated regardless. EXTERNAL has
+            // applicableTo:["DATA_TYPE", "PROCEDURE"]; BUTTON matches neither — should fire.
+            // Mirrors the existing working `BUTTON('OK'),RESIZE` test shape at lines 138-150.
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),EXTERNAL",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'Expected diagnostic for misapplied EXTERNAL on BUTTON control (scope-fence — fix must NOT over-relax)');
+            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('EXTERNAL')),
+                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+        });
+    });
 });
