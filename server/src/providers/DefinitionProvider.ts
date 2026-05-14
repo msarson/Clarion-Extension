@@ -67,7 +67,27 @@ export class DefinitionProvider {
                 return null;
             }
 
-            // Don't navigate on words inside string literals
+            // #171 — INCLUDE-aware exception to the string-position guard.
+            // F12 on the filename inside INCLUDE / MODULE / MEMBER / LINK
+            // (`'MyClass.inc'` lives in a single-quoted string) should route
+            // through `FileDefinitionResolver`, not bail like other string
+            // positions. We extract the filename directly from the matched
+            // String token's `value` (stripping the surrounding quote chars)
+            // because `getWordRangeAtPosition` was designed for identifier-
+            // shaped tokens and doesn't reliably recover filename-with-ext from
+            // inside a string. The detector scopes precisely to the FIRST
+            // string-arg after a file-ref token, so two-arg forms like
+            // `INCLUDE('foo.inc'),SECTION('bar')` still bail correctly at the
+            // SECTION arg.
+            const fileRefStr = TokenHelper.getFileRefArgStringToken(tokens, position.line, position.character);
+            if (fileRefStr) {
+                const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
+                return await this.fileResolver.findFileDefinition(filename, document.uri);
+            }
+
+            // Don't navigate on words inside string literals (the file-ref
+            // exception above is the only case where a cursor inside a string
+            // routes anywhere useful).
             if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
                 return null;
             }
