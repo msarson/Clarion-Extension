@@ -35,8 +35,43 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
     const structure = new DocumentStructure(tokens);
     structure.process();
 
-    for (const token of tokens) {
+    // Index-based loop (not `for ... of`) so the #175 compound-label-suffix guard
+    // can look at neighboring tokens in O(1) per check rather than O(N) per
+    // `tokens.indexOf(token)`. Keeps the overall loop O(N).
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
         if (token.type !== TokenType.Attribute) continue;
+
+        // #175 compound-label-suffix guard: skip Attribute tokens that are actually
+        // the suffix part of a compound USE-label like `RCFilter_SL_Clients:External`
+        // or `?Prefix:External`. The Variable pattern doesn't include `:` in its
+        // character class because `:typename` is the type-annotation separator (see
+        // the sibling `TypeAnnotation` pattern), so the tokenizer correctly preserves
+        // that grammatical distinction. When the suffix happens to match an attribute
+        // keyword (EXTERNAL/HIDE/TRN/etc.), it greedy-matches the Attribute pattern
+        // and surfaces here as a false positive against the enclosing control's
+        // attribute-applicability rules.
+        //
+        // The `?`-prefixed compound case (#174) is handled at the tokenizer level by
+        // the FieldEquateLabel pattern (which includes `:` per the substrate-symmetry
+        // restoration with the `Label` pattern). This guard includes `FieldEquateLabel`
+        // in the prev-prev check as belt-and-suspenders: if a `?`-prefixed compound
+        // somehow slips through the tokenizer fix (e.g. a token-stream produced before
+        // the fix landed), the guard still suppresses the false positive.
+        //
+        // Tokenizer-side fix considered + deferred to #176 follow-up — Variable
+        // pattern has 128 references across 30 files (vs FieldEquateLabel's 4 files),
+        // making the cascade audit non-trivial. Substrate-asymmetry framing (load-
+        // bearing for #174) does NOT transfer: Variable's `:`-naivete is grammatically
+        // intentional, not anomalous. See #175 commit body for full Phase A analysis.
+        if (i >= 2 &&
+            tokens[i - 1].value === ':' &&
+            tokens[i - 1].line === token.line &&
+            tokens[i - 2].line === token.line &&
+            (tokens[i - 2].type === TokenType.Variable ||
+             tokens[i - 2].type === TokenType.FieldEquateLabel)) {
+            continue;
+        }
 
         const attrName = token.value.toUpperCase();
         const attrDef = attributeService.getAttribute(attrName);
