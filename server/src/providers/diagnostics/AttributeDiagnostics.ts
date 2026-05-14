@@ -73,6 +73,38 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
             continue;
         }
 
+        // #177 forward-direction symmetric guard — Attribute as PREFIX of compound
+        // EQUATE name (e.g. `CREATE:Radio`, `CREATE:Check`, `CREATE:Region`,
+        // `ICON:Custom`). These are Clarion built-in EQUATE constants representing
+        // control-type numeric literals (or user-defined EQUATEs); they are NOT
+        // attribute applications. The tokenizer splits them as
+        // `Attribute(CREATE) + Delimiter(:) + (WindowElement|Variable|FieldEquateLabel)`
+        // because CREATE is in the attribute keyword list and the suffix matches one
+        // of those identifier-token categories.
+        //
+        // The Constant pattern in the same `TokenPatterns` file already enumerates
+        // some common Attribute-prefix EQUATE constants inline (e.g. `LEVEL:BENIGN`,
+        // `ICON:Asterisk`, `BUTTON:YES/NO/OK/CANCEL`), but this enumeration is
+        // incomplete: user-defined EQUATEs and other built-in families (notably
+        // `CREATE:Radio` and the rest) don't appear. Continually expanding the
+        // Constant enumeration is structurally fragile; the diagnostic-side guard
+        // is more future-proof and handles all keyword-symmetric cases by construction.
+        //
+        // WindowElement cascade audit yielded a small consumer count — well below the
+        // architectural-surprise threshold from #175 — see the analogous #176 body
+        // for the cascade-audit framework. Tokenizer-side fix is feasible at this
+        // scale, but the diagnostic-side guard symmetric to #175's backward-direction
+        // check is mechanically simpler.
+        if (i + 2 < tokens.length &&
+            tokens[i + 1].value === ':' &&
+            tokens[i + 1].line === token.line &&
+            tokens[i + 2].line === token.line &&
+            (tokens[i + 2].type === TokenType.Variable ||
+             tokens[i + 2].type === TokenType.FieldEquateLabel ||
+             tokens[i + 2].type === TokenType.WindowElement)) {
+            continue;
+        }
+
         const attrName = token.value.toUpperCase();
         const attrDef = attributeService.getAttribute(attrName);
         if (!attrDef) continue; // Not in our JSON — don't guess
