@@ -172,26 +172,22 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
 
     suite('DefinitionProvider.provideDefinition on INCLUDE filename', () => {
 
-        // Gap B framing pending Mark decision — see PM channel.
+        // Pending [MT 651935b9 / GH #171] — DefinitionProvider INCLUDE-aware guard.
         //
-        // #139 Test 2 RED on `provideDefinition` of INCLUDE filename surfaced an entry-point
-        // guard at `DefinitionProvider.ts:70-73` (`TokenHelper.isPositionInString`) that
-        // bails immediately when the cursor sits inside a single-quoted string — which is
-        // exactly where INCLUDE filenames live. The guard fires regardless of no-solution
-        // mode (it would block F12-on-INCLUDE-filename even with a solution loaded), so
-        // this is NOT a no-solution-specific gap; it's an entry-point-framing question
-        // that Bob is escalating to Mark — either:
-        //   (a) Fix `DefinitionProvider` to recognize INCLUDE-filename context and route
-        //       through `fileResolver.findFileDefinition` despite the string-position guard
-        //   (b) Re-target Test 2 to `DocumentLinkProvider.provideDocumentLinks` (= Test 4,
-        //       B2-deferred behind d7e34cc5 / FRG no-solution-mode build), since the
-        //       production user-flow for INCLUDE navigation is ctrl-click on the rendered
-        //       link rather than F12.
+        // Gap B from #139 / 70350986 probe (2026-05-14). `DefinitionProvider.ts:71`
+        // (`TokenHelper.isPositionInString`) bails when the cursor sits inside a
+        // string literal — which is exactly where INCLUDE filenames live. The guard
+        // fires regardless of no-solution mode; F12 on INCLUDE filenames currently
+        // dies at this guard before reaching `fileResolver.findFileDefinition`.
+        // Mark's framing call (option C): both paths matter — F12 should work
+        // alongside ctrl-click (`DocumentLinkProvider`, tracked separately as B2 /
+        // MT ecddd1a7 / GH #172 behind d7e34cc5 FRG no-solution-mode build).
         //
-        // Un-skip + task-id link when Mark calls it.
+        // Fix shape (per GH #171): INCLUDE-aware string-guard exception in
+        // `DefinitionProvider` (or a `TokenHelper.isInsideIncludeFilenameArg`
+        // detector). Un-skipping THIS test verifies that fix lands.
         test.skip('resolves INCLUDE filename to libsrc when no solution is loaded', async () => {
-            // Skipped pending Mark's framing call on (a) vs (b) above.
-            // GH #139 + PM channel hold the decision context.
+            // Un-skip when MT 651935b9 / GH #171 ships.
         });
     });
 
