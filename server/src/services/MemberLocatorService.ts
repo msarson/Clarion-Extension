@@ -19,6 +19,7 @@ import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -726,7 +727,15 @@ export class MemberLocatorService {
         return { typeName: typeStr, isClass: true, isReference };
     }
 
-    /** Resolves a filename using SolutionManager redirection, then relative path fallback. */
+    /**
+     * Resolves a filename via SolutionManager redirection when a solution is loaded,
+     * falling back to a relative-path probe under `fromDir`. In no-solution mode
+     * (#139 Gap A — substrate-symmetric to #113 C2 fix-sites), delegates to
+     * `resolveFileInNoSolutionMode` so the 8 callers (MEMBER parent + INCLUDE
+     * chain walks) reach libsrcPaths the same way FileDefinitionResolver /
+     * ImplementationProvider / MethodHoverResolver already do via their
+     * direct-fix-sites.
+     */
     private resolveFilePath(filename: string, fromDir: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
@@ -734,9 +743,24 @@ export class MemberLocatorService {
                 const resolved = project.getRedirectionParser().findFile(filename);
                 if (resolved?.path && fs.existsSync(resolved.path)) return resolved.path;
             }
+            const relative = path.join(fromDir, filename);
+            return fs.existsSync(relative) ? relative : null;
         }
-        const relative = path.join(fromDir, filename);
-        return fs.existsSync(relative) ? relative : null;
+        // No-solution mode: synthesize a sourceUri anchored under `fromDir` so
+        // the resolver's Tier-0 localDir extraction (`path.dirname` of decoded
+        // sourcePath) yields `fromDir` — preserving the prior relative-path
+        // fallback semantics for siblings while gaining .red + libsrcPaths reach
+        // for INCLUDEs that point at library-hosted files.
+        //
+        // `encodeURI` percent-encodes literal `%` (and other URI-reserved chars
+        // that aren't path separators) so `findFileNoSolution.ts:71` can safely
+        // `decodeURIComponent` the result. C2 fix-sites pass already-encoded
+        // `currentDocument.uri` (vscode-uri normalises); our synthetic URI does
+        // the equivalent normalisation explicitly so paths like `F:\50%Profit\`
+        // don't throw `URIError: URI malformed`.
+        const syntheticUri = `file:///${encodeURI(fromDir.replace(/\\/g, '/'))}/_member_locator_anchor_`;
+        const resolved = resolveFileInNoSolutionMode(filename, syntheticUri);
+        return resolved?.path ?? null;
     }
 
     /** Loads a TextDocument and its tokens, using CrossFileCache if available. */

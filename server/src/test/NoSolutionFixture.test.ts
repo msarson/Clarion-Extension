@@ -6,6 +6,7 @@ import { serverSettings } from '../serverSettings';
 import {
     NoSolutionFixture,
     buildNoSolutionFixture,
+    cursorPositionOf,
     teardownNoSolutionFixture
 } from './helpers/NoSolutionFixture';
 
@@ -133,5 +134,64 @@ suite('NoSolutionFixture (403afd0e scaffold)', () => {
             /already active/,
             'second build call without teardown must throw'
         );
+    });
+
+    // #139 — cursor-position helper for entry-point smoke tests.
+    suite('cursorPositionOf', () => {
+
+        test('returns 0-based Position on the first occurrence by default', () => {
+            const src = "  PROGRAM\n  INCLUDE('MyClass.inc')\n  CODE\n";
+            const pos = cursorPositionOf(src, 'MyClass.inc');
+            // Line index 1 (the INCLUDE line); character index where 'M' starts.
+            // Line 1 prefix: `  INCLUDE('` = 11 chars before 'M'.
+            assert.strictEqual(pos.line, 1, 'line is 0-based and lands on INCLUDE line');
+            assert.strictEqual(pos.character, 11, "character lands on 'M' of MyClass.inc inside quotes");
+        });
+
+        test('finds nth occurrence via 1-based occurrence param', () => {
+            const src = "  obj.MyMethod()\n  other.MyMethod()\n";
+            const pos1 = cursorPositionOf(src, 'MyMethod', 1);
+            const pos2 = cursorPositionOf(src, 'MyMethod', 2);
+            assert.strictEqual(pos1.line, 0);
+            assert.strictEqual(pos2.line, 1);
+            assert.notStrictEqual(pos1.character, pos2.character,
+                'multi-line second occurrence yields a distinct character offset on its line');
+        });
+
+        test('finds multiple occurrences on the same line', () => {
+            const src = "  MyMethod() ; MyMethod()\n";
+            const pos1 = cursorPositionOf(src, 'MyMethod', 1);
+            const pos2 = cursorPositionOf(src, 'MyMethod', 2);
+            assert.strictEqual(pos1.line, 0);
+            assert.strictEqual(pos2.line, 0);
+            assert.ok(pos2.character > pos1.character,
+                'second occurrence on same line has greater character offset');
+        });
+
+        test('throws on genuine miss (silent off-by-one regression sentinel)', () => {
+            const src = "  PROGRAM\n  CODE\n";
+            assert.throws(
+                () => cursorPositionOf(src, 'NotInSource'),
+                /not found/,
+                'missing search-string must throw, not silently return Position {0,0}'
+            );
+        });
+
+        test('throws when requested occurrence exceeds matches', () => {
+            const src = "  obj.MyMethod()\n";
+            assert.throws(
+                () => cursorPositionOf(src, 'MyMethod', 2),
+                /occurrence 2.*only 1 matches/,
+                'requesting Nth match when only N-1 exist must throw'
+            );
+        });
+
+        test('rejects occurrence < 1', () => {
+            assert.throws(
+                () => cursorPositionOf('  CODE\n', 'CODE', 0),
+                /occurrence must be >= 1/,
+                '0-based occurrence index is rejected'
+            );
+        });
     });
 });
