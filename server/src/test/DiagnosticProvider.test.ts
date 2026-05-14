@@ -1343,11 +1343,17 @@ Field2  STRING(20)
 
     suite('validateDiscardedReturnValuesForPlainCalls', () => {
 
-        function discardDiags(code: string) {
+        // #164 — migrated from the legacy `discardDiags` raw-tokenizer helper to the
+        // DS-path helper (post-deletion of the `!hasSubType` else branch). The body
+        // matches the sibling suite's `discardDiagsWithDS` exactly; both exercise the
+        // production code path (DocumentStructure.process() → subType tagging → if branch).
+        function discardDiagsWithDS(code: string) {
             const doc = createDocument(code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            new DocumentStructure(tokens).process();
             // Match only plain (non-dot-access) call diagnostics: "Return value of 'ProcName'"
             // where ProcName has no dot (dot-access is handled by validateDiscardedReturnValues).
-            return DiagnosticProvider.validateDocument(doc).filter(d =>
+            return DiagnosticProvider.validateDocument(doc, tokens).filter(d =>
                 /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
             );
         }
@@ -1362,7 +1368,7 @@ MainProc    PROCEDURE()
   CODE
   GetStatus()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'should warn once');
             assert.ok(diags[0].message.includes("'GetStatus'"), 'message names the procedure');
         });
@@ -1377,7 +1383,7 @@ MainProc    PROCEDURE()
   CODE
   GetStatus
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'should warn for no-paren call');
         });
 
@@ -1392,7 +1398,7 @@ result      LONG
   CODE
   result = GetStatus()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'assignment captures the return value');
         });
 
@@ -1406,7 +1412,7 @@ MainProc    PROCEDURE()
   CODE
   GetStatus()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'PROC attribute suppresses warning');
         });
 
@@ -1420,7 +1426,7 @@ MainProc    PROCEDURE()
   CODE
   DoSomething()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'void procedure should not warn');
         });
 
@@ -1440,7 +1446,7 @@ MainProc    PROCEDURE()
   DoNothing('hello')
   DoNothing('world')
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'void procedure before a returning one must not generate warnings');
         });
 
@@ -1455,7 +1461,7 @@ MainProc    PROCEDURE()
   CODE
   GetStatus()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'PROC overload suppresses all overloads of that name');
         });
 
@@ -1470,7 +1476,7 @@ MainProc    PROCEDURE()
   Self.GetStatus()
 `;
             // dot-access calls are filtered out by the dot-prefix check
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'dot-access should not be flagged by plain-call validator');
         });
 
@@ -1486,7 +1492,7 @@ MainProc    PROCEDURE()
   CODE
   GetHelper()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'MODULE declaration should be included');
         });
 
@@ -1512,7 +1518,7 @@ MainProc    PROCEDURE()
   Trace('world')
   VoidHelper('no warn')
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
             assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
         });
@@ -1529,7 +1535,7 @@ MainProc    PROCEDURE()
   FuncA()
   FuncB()
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 2, 'should warn for both bare calls');
         });
 
@@ -1547,7 +1553,7 @@ ProcB       PROCEDURE()
   CODE
   x = 1
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'should warn only in ProcA');
         });
 
@@ -1562,17 +1568,22 @@ MainProc    PROCEDURE()
   IF GetStatus() = 1
   END
 `;
-            const diags = discardDiags(code);
+            const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 0, 'used in IF condition — return value is consumed');
         });
     });
 
-    // ── Same tests via the production code path (DocumentStructure pre-processed) ───────────
-    // In production, TokenCache runs DocumentStructure before validateDocument, which sets
-    // MapProcedure subtypes — activating the hasSubType branch. The tests above use the raw
-    // tokenizer path (no DocumentStructure), exercising only the !hasSubType branch.
+    // ── Pre-#164 mirror suite — kept for historical coverage + DS-only extras ──────────────
+    // Pre-#164, the suite ABOVE used the raw-tokenizer path (no DocumentStructure),
+    // exercising the !hasSubType else branch in
+    // `validateDiscardedReturnValuesForPlainCalls`. That branch was static-confirmed
+    // DEAD in production (see #164 audit-trail commit) and removed; the suite above
+    // was migrated to DS-path so its 13 tests now exercise the production code path.
+    // This suite retains the original DS-path coverage (3 mirrors of the first suite's
+    // first-3 cases) plus the DS-only extras (shorthand-MAP-MODULE + GlobalProcedure
+    // tests) that aren't mirrored above.
 
-    suite('validateDiscardedReturnValuesForPlainCalls (with DocumentStructure — production path)', () => {
+    suite('validateDiscardedReturnValuesForPlainCalls (DS-path — original mirror suite)', () => {
 
         function discardDiagsWithDS(code: string) {
             const doc = createDocument(code);
