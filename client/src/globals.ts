@@ -318,48 +318,6 @@ export async function setGlobalClarionSelection(
     }
 }
 
-/**
- * Updates the solutions array in workspace settings
- */
-async function updateSolutionsArray(
-    solutionFile: string,
-    clarionPropertiesFile: string,
-    clarionVersion: string,
-    clarionConfiguration: string
-) {
-    if (!solutionFile) return;
-    
-    // Get the current solutions array
-    const config = workspace.getConfiguration("clarion");
-    const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
-    
-    // Check if this solution is already in the array
-    const solutionIndex = solutions.findIndex(s => s.solutionFile === solutionFile);
-    
-    if (solutionIndex >= 0) {
-        // Update existing solution
-        solutions[solutionIndex] = {
-            solutionFile,
-            propertiesFile: clarionPropertiesFile,
-            version: clarionVersion,
-            configuration: clarionConfiguration
-        };
-    } else {
-        // Add new solution
-        solutions.push({
-            solutionFile,
-            propertiesFile: clarionPropertiesFile,
-            version: clarionVersion,
-            configuration: clarionConfiguration
-        });
-    }
-    
-    // Save the updated solutions array
-    await config.update("solutions", solutions, ConfigurationTarget.Workspace);
-    logger.info(`✅ Updated solutions array with ${solutions.length} solutions`);
-}
-
-
 // ❌ These should NOT be saved in workspace
 let _globalRedirectionFile = "";
 let _globalRedirectionPath = "";
