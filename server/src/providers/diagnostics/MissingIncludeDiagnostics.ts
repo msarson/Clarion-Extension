@@ -40,10 +40,18 @@ function resolveProjectPaths(document: TextDocument): {
 }
 
 /**
- * Shared: collect Variable/ReferenceVariable type tokens at col 0 global scope,
- * skipping structure definitions and already-warned types.
+ * Shared: collect Variable/ReferenceVariable type tokens at col 0 (file-top-level
+ * scope), skipping structure definitions and already-warned types.
+ *
+ * #166 — naming clarification (renamed from `collectGlobalTypeTokens`): "col 0
+ * in current file" means file-top-level, which is **global** in a PROGRAM file
+ * but **module-scope** (tier 5 per the Clarion scope model — see
+ * `project_clarion_scope_model.md`) in a MEMBER file. The function name said
+ * "Global" but the check is file-relationship — "is this type's defining file
+ * in the include chain?" — not scope-resolution. The new name reflects intent.
+ * No behavior change.
  */
-function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> {
+function collectFileTopLevelTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> {
     const localTypes = new Set<string>();
     for (const t of tokens) {
         if (t.type === TokenType.Structure && t.label) {
@@ -120,7 +128,7 @@ export async function validateMissingIncludes(
     let includeCheckTotalMs = 0;
     let constantCheckTotalMs = 0;
 
-    const typeTokens = collectGlobalTypeTokens(tokens);
+    const typeTokens = collectFileTopLevelTypeTokens(tokens);
     for (const { typeToken, typeName, typeNameStart } of typeTokens) {
         typeTokenCount++;
         const definitions = (sdi.find(typeName, projectPath).length > 0
@@ -223,7 +231,7 @@ export async function validateMissingConstants(
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();
 
-    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
+    for (const { typeToken, typeName, typeNameStart } of collectFileTopLevelTypeTokens(tokens)) {
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)

@@ -56,6 +56,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🧹 **Internal rename — `collectGlobalTypeTokens` → `collectFileTopLevelTypeTokens`** (#166): name change in `MissingIncludeDiagnostics` to reflect what the function actually checks ("col 0 in current file" = file-top-level, not global — see Clarion scope model). Pure polish; no behavior change.
 - 🧹 **Dead-code removal — orphan `updateSolutionsArray` in `globals.ts`** (#167): module-private function with zero production callers, superseded by `SettingsStorageManager.updateSolutionsArray` (correct `ConfigurationTarget.WorkspaceFolder` target). Was the lone `ConfigurationTarget.Workspace` write Eve flagged in #142.
 - 🧪 **Test backfill — `ClassMemberResolver.findImplementationCrossFile`** (#112): zero-coverage gap closed with 6 tests across no-solution-open mode + cross-directory `.inc`/`.clw` siblings outside `.red` paths. Sibling-dir fallback (the load-bearing path for both scenarios) is now structurally pinned by tier-trace assertions — future refactors that accidentally reroute through a different tier will flip a test.
 - 🐛 **`extractParameterType` mis-classified single-letter all-uppercase variable names** (#130): `PROCEDURE(LONG X)` was read as a 2-word type `"LONG X"` instead of type `"LONG"` + variable name `"X"` — broke overload-matching and MAP-procedure / cross-file / diagnostics paths that compare signature shapes. Fix dropped a hypothetical length-1 defensive clause from BOTH parallel implementations (`MethodOverloadResolver` + `ProcedureSignatureUtils`).
