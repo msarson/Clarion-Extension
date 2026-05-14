@@ -69,4 +69,39 @@ CODE
         assert.strictEqual(labels[0].value, '?Hello',
             `expected greedy match of ?Hello (not bare ? + Hello). Got: ${labels[0].value}`);
     });
+
+    // #174 — compound `?Prefix:Suffix` field equates must tokenize as ONE token.
+    // Pre-fix, the suffix was split off and re-classified (as TokenType.Attribute
+    // when the suffix happened to match an attribute-keyword like EXTERNAL/HIDE/TRN),
+    // driving the `AttributeDiagnostics` false positive Mark surfaced from
+    // `Frame_AcctsMap.clw:816`. The Label pattern at TokenPatterns.ts:89 already
+    // includes `:` in its character class; FieldEquateLabel was the outlier — now
+    // symmetric.
+    test('#174 — ?Prefix:Suffix is a single FieldEquateLabel token (no split on colon)', () => {
+        const code = `Win WINDOW
+       STRING('Foo'),AT(10,10,50,14),USE(?SL_Clients:External)
+     END`;
+        const tokens = tokenize(code);
+        const labels = fieldEquateTokens(tokens);
+        // Bidirectional-pin per feedback_bidirectional_pin_assertion:
+        // (positive) the compound name IS captured as ONE token
+        assert.ok(labels.some(t => t.value === '?SL_Clients:External'),
+            `expected greedy match of ?SL_Clients:External as ONE token. Got values: ${labels.map(t => t.value).join(',')}`);
+        // (negative — split-shape regression sentinel) no `?SL_Clients`-only token
+        // appears (which would prove the suffix got split off as a separate token)
+        assert.ok(!labels.some(t => t.value === '?SL_Clients'),
+            `regression: ?SL_Clients should NOT appear as a separate token (means the suffix got split off). Got: ${labels.map(t => t.value).join(',')}`);
+    });
+
+    test('#174 — multi-colon compound names also tokenize as one (?A:B:C)', () => {
+        // Defensive coverage for chained suffix-style names. The character class
+        // [A-Za-z0-9_:]* matches multiple colons by construction.
+        const code = `Win WINDOW
+       STRING('Foo'),USE(?Multi:Colon:Suffix)
+     END`;
+        const tokens = tokenize(code);
+        const labels = fieldEquateTokens(tokens);
+        assert.ok(labels.some(t => t.value === '?Multi:Colon:Suffix'),
+            `expected greedy match of ?Multi:Colon:Suffix as ONE token. Got values: ${labels.map(t => t.value).join(',')}`);
+    });
 });

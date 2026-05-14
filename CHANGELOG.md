@@ -56,6 +56,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🐛 **Attribute-applicability false positive on `:Suffix` field-equate labels** (#174): `USE(?Label:External)` (or any `:Suffix` matching an attribute keyword like HIDE/TRN/STATIC) inside a validatable control no longer fires `'X is not applicable to <control>'`. Root-cause fix in the tokenizer — `FieldEquateLabel` regex now includes `:` in its character class, matching the sibling `Label` pattern. Generalisation-by-construction: keyword-agnostic.
 - 🧹 **Dead-fallback removal — `!hasSubType` else branch in `validateDiscardedReturnValuesForPlainCalls`** (#164): static-analysis confirmed the else branch was test-only-by-design (production caller always runs `DocumentStructure.process()` first → subType tagging stable post-#62). Deleted ~53 LOC + migrated 13 raw-tokenizer tests to DS-path. No behavior change.
 - 🧹 **Internal rename — `collectGlobalTypeTokens` → `collectFileTopLevelTypeTokens`** (#166): name change in `MissingIncludeDiagnostics` to reflect what the function actually checks ("col 0 in current file" = file-top-level, not global — see Clarion scope model). Pure polish; no behavior change.
 - 🧹 **Dead-code removal — orphan `updateSolutionsArray` in `globals.ts`** (#167): module-private function with zero production callers, superseded by `SettingsStorageManager.updateSolutionsArray` (correct `ConfigurationTarget.WorkspaceFolder` target). Was the lone `ConfigurationTarget.Workspace` write Eve flagged in #142.
