@@ -425,4 +425,162 @@ suite('validateAttributeApplicability', () => {
                 `#174 symmetry: ?-prefixed :External label-suffix must NOT fire (regression check); got: ${JSON.stringify(attrDiags)}`);
         });
     });
+
+    // ─── #177 — Attribute as PREFIX of compound EQUATE (CREATE:Radio family) ─────
+    // Symmetric partner of #175 — third instance of the compound-name false-positive
+    // cluster.
+    //
+    // Real-user repros (Frame_AcctsMap.clw lines 3485, 3486, 7808):
+    //   - EnhancedFocusManager.DisableControlType(CREATE:Radio)
+    //   - EnhancedFocusManager.DisableControlType(CREATE:Check)
+    //   - RegionBottomRightFEQ = CREATE(0,CREATE:Region)
+    //
+    // `CREATE:Radio` etc. are Clarion built-in EQUATE constants. The tokenizer
+    // splits them as `Attribute(CREATE) + Delimiter(:) + WindowElement(Radio)`
+    // because CREATE is in the attribute keyword list and Radio/Check/Region are
+    // in the WindowElement keyword list. `validateAttributeApplicability` then
+    // sees `Attribute(CREATE)`, infers an enclosing control context from the
+    // adjacent WindowElement token, and fires the false-positive diagnostic.
+    //
+    // Fix shape: forward-direction symmetric guard added to AttributeDiagnostics
+    // alongside #175's backward-direction guard. Skip Attribute tokens where the
+    // FOLLOWING token is `:` and the token after that is a Variable / FieldEquateLabel /
+    // WindowElement on the same line.
+    //
+    // Bidirectional-pin per feedback_bidirectional_pin_assertion:
+    //   - Positive ×N: 3 real-user repros + 2 keyword-agnostic synthetic cases
+    //   - Negative regression sentinel: genuinely misapplied CREATE on a non-FILE
+    //     control STILL fires (scope-fence)
+    //   - #174/#175 regression: prior fix surfaces still work
+    suite('#177 — Attribute as PREFIX of compound EQUATE does NOT trigger false-positive diagnostics', () => {
+
+        test('real-user repro — CREATE:Radio in function-call argument does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  EnhancedFocusManager.DisableControlType(CREATE:Radio)',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on CREATE:Radio compound EQUATE; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('real-user repro — CREATE:Check in function-call argument does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  EnhancedFocusManager.DisableControlType(CREATE:Check)',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on CREATE:Check compound EQUATE; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('real-user repro — CREATE:Region in assignment RHS does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  RegionBottomRightFEQ = CREATE(0,CREATE:Region)',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on CREATE:Region compound EQUATE; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        // Keyword-agnostic generalisation per Bob's spec — demonstrates the guard
+        // isn't CREATE-specific. The Attribute keyword list has ~70 entries; only
+        // a handful have common EQUATE forms in production Clarion (CREATE: being
+        // the widespread one). These synthetic cases prove the guard catches any
+        // Attribute:Identifier compound regardless of the specific keyword.
+        test('generalisation — ICON:Custom compound EQUATE does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  MyVar = ICON:Custom',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on ICON:Custom compound EQUATE; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        test('generalisation — STATIC:Foo compound EQUATE does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  MyVar = STATIC:Foo',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on STATIC:Foo compound EQUATE; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        // Negative regression sentinel — load-bearing scope-fence per
+        // feedback_bidirectional_pin_assertion. Without it, the forward-direction
+        // guard could over-relax: genuinely misapplied CREATE on a non-FILE control
+        // MUST still fire. CREATE has applicableTo:["FILE"]; BUTTON is in
+        // VALIDATABLE_CONTROLS but doesn't match FILE — diagnostic should fire.
+        test('negative regression sentinel — genuinely misapplied CREATE on BUTTON still fires', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),CREATE",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'Expected diagnostic for misapplied CREATE on BUTTON (scope-fence — forward-direction guard must NOT over-relax)');
+            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('CREATE')),
+                `Diagnostic message must reference CREATE; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+        });
+
+        // #175 regression check — the suffix-direction guard from #175 should still
+        // work after #177's forward-direction guard lands. If this test regresses,
+        // #177's edit accidentally broke #175's coverage.
+        test('#175 regression — bare-identifier :Suffix STILL suppressed (no false-positive on USE(Foo:External))', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK(' Filter'),AT(10,10),USE(RCFilter_SL_Clients:External)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `#175 regression: bare-identifier :External label-suffix must STILL be suppressed; got: ${JSON.stringify(attrDiags)}`);
+        });
+
+        // #174 regression check — the FieldEquateLabel-side tokenizer fix should also
+        // remain undisturbed. The ?-prefixed compound case routes through a different
+        // path (single-token capture at the tokenizer) but shares the no-diagnostic
+        // outcome.
+        test('#174 regression — ?-prefixed compound STILL suppressed (no false-positive on USE(?Foo:External))', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  PROGRESS,AT(10,10,200,14),USE(?Prog)",
+                "  STRING('Foo'),AT(20,30,,10),USE(?SL_Clients:External)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `#174 regression: ?-prefixed :External label-suffix must STILL be suppressed; got: ${JSON.stringify(attrDiags)}`);
+        });
+    });
 });
