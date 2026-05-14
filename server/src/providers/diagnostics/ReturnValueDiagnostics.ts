@@ -511,59 +511,6 @@ export function validateDiscardedReturnValuesForPlainCalls(
             }
             if (!excluded.has(name)) warnableProcs.set(name, returnType);
         }
-    } else {
-        let mapClassDepth = 0;
-        for (let i = 0; i < tokens.length; i++) {
-            const t = tokens[i];
-            const val = t.value.toUpperCase();
-
-            if (t.type === TokenType.Structure && (val === 'MAP' || val === 'CLASS')) mapClassDepth++;
-            if (t.type === TokenType.EndStatement && mapClassDepth > 0) mapClassDepth--;
-
-            if (mapClassDepth === 0) continue;
-            if (!TokenHelper.isProcedureOrFunction(t) && t.type !== TokenType.Routine) continue;
-            if (val !== 'PROCEDURE' && val !== 'FUNCTION') continue;
-
-            const nameToken = tokens.find(n =>
-                n.line === t.line && n.start === 0 && n.type === TokenType.Label
-            );
-            if (!nameToken) continue;
-
-            const name = nameToken.value.toUpperCase();
-            if (excluded.has(name)) continue;
-
-            const lineTokens = tokens.filter(tok => tok.line === t.line);
-            if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            let depth = 0, afterIdx = -1;
-            for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
-                if (tokens[k].value === '(') depth++;
-                else if (tokens[k].value === ')') {
-                    depth--;
-                    if (depth === 0) { afterIdx = k + 1; break; }
-                }
-            }
-            if (afterIdx === -1) continue;
-
-            // Guard: afterIdx must still be on the same declaration line.
-            if (afterIdx >= tokens.length || tokens[afterIdx].line !== t.line) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            const returnType = extractReturnType(tokens, afterIdx, true);
-            if (!returnType) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-            if (!excluded.has(name)) warnableProcs.set(name, returnType);
-        }
     }
 
     // Also collect GlobalProcedure subtypes defined in this file.
