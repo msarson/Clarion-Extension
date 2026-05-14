@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { Position } from 'vscode-languageserver-protocol';
 import { SolutionManager } from '../../solution/solutionManager';
 import { serverSettings } from '../../serverSettings';
 
@@ -181,6 +182,47 @@ export function buildNoSolutionFixture(spec: NoSolutionFixtureSpec): NoSolutionF
     }
 
     return { tmpRoot, sourceDir, sourceFile, sourceUri, libsrcDirs, redFile, redDir };
+}
+
+/**
+ * Locate the nth occurrence of `searchString` in `sourceText` and return its
+ * LSP `Position` (0-based line + character at the START of the match).
+ *
+ * Used by no-solution-mode entry-point smoke tests (#139) to land the LSP
+ * cursor on a specific token inside the synthetic source body — e.g. the
+ * filename inside `INCLUDE('MyClass.inc')`, or the method name in
+ * `obj.MyMethod()`. Mirrors the per-character offset shape the providers
+ * read from `Position` parameters.
+ *
+ * `occurrence` is 1-based to read naturally at the call site (`occurrence=2`
+ * = "the second `MyMethod` on the page"). Throws on miss — silent off-by-one
+ * is a hard fail mode for entry-point tests.
+ */
+export function cursorPositionOf(
+    sourceText: string,
+    searchString: string,
+    occurrence: number = 1
+): Position {
+    if (occurrence < 1) {
+        throw new Error(`cursorPositionOf: occurrence must be >= 1 (got ${occurrence})`);
+    }
+    const lines = sourceText.split(/\r?\n/);
+    let hits = 0;
+    for (let line = 0; line < lines.length; line++) {
+        let from = 0;
+        while (true) {
+            const idx = lines[line].indexOf(searchString, from);
+            if (idx === -1) break;
+            hits++;
+            if (hits === occurrence) {
+                return { line, character: idx };
+            }
+            from = idx + searchString.length;
+        }
+    }
+    throw new Error(
+        `cursorPositionOf: occurrence ${occurrence} of '${searchString}' not found (only ${hits} matches in source)`
+    );
 }
 
 /**
