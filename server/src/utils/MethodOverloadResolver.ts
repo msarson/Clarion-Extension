@@ -675,8 +675,16 @@ export class MethodOverloadResolver {
             // Otherwise, everything except last word is the type
             const lastWord = words[words.length - 1];
 
-            // Check if last word looks like a variable name (starts with letter, has mixed case or lowercase)
-            if (lastWord.match(/^[a-z]/i) && (lastWord !== lastWord.toUpperCase() || lastWord.length > 1)) {
+            // #130 — if the last word starts with a letter, treat it as the
+            // variable name. The previous heuristic also required mixed-case
+            // OR length > 1 to "protect single-letter all-uppercase TYPES"
+            // (e.g. `LONG X` was read as a 2-word type), but the probe found
+            // that defensive case is hypothetical: Clarion has no single-letter
+            // scalar types (every member of `isStringType`/`isNumericType`
+            // at line 1066-1076 is multi-letter), and user-defined single-letter
+            // types in no-name param shapes hit the `words.length === 1` branch
+            // above. `LONG X` / `STRING N` / `BYTE I` are now correctly read.
+            if (lastWord.match(/^[a-z]/i)) {
                 result = words.slice(0, -1).join(' ').toUpperCase();
             } else {
                 result = words.join(' ').toUpperCase();
