@@ -583,4 +583,106 @@ suite('validateAttributeApplicability', () => {
                 `#174 regression: ?-prefixed :External label-suffix must STILL be suppressed; got: ${JSON.stringify(attrDiags)}`);
         });
     });
+
+    // ─── #179 — getControlContextAt mis-infers control from a nearby CREATE:Region ─
+    // Distinct bug class from #177. #177's single-line `RegionBottomRightFEQ =
+    // CREATE(0,CREATE:Region)` test passes because the second CREATE (the EQUATE
+    // suffix) is suppressed by the forward-direction guard and there is no OTHER
+    // control nearby. But in real code (Frame_AcctsMap.clw 7772-7808) these
+    // CREATE() calls appear in CONSECUTIVE blocks. The FIRST `CREATE` on each line
+    // is the runtime CREATE *statement* (not the FILE attribute and not the EQUATE
+    // suffix), tokenized as TokenType.Attribute. `getControlContextAt`'s multi-line
+    // fallback then walks back ~10 lines, finds the `Region` WindowElement that is
+    // the suffix of a PREVIOUS line's `CREATE:Region` EQUATE, and mistakes it for an
+    // open REGION control declaration — so the diagnostic fires `'CREATE' is not
+    // applicable to REGION`.
+    //
+    // Root-cause fix lives in `DocumentStructure.getControlContextAt`: a keyword
+    // token that is the suffix of a `Prefix:Suffix` compound (immediately preceded
+    // by `:`) is part of an EQUATE constant, never a control declaration, and must
+    // not be treated as enclosing control context. Fix at the helper (not the
+    // diagnostic) so every getControlContextAt consumer benefits; strictly more
+    // conservative, so no risk of newly suppressing a real control context.
+    //
+    // Bidirectional pin per feedback_bidirectional_pin_assertion:
+    //   - Positive: consecutive CREATE() calls in a code section → NO diagnostic
+    //   - Negative sentinels: misapplied CREATE on a REAL BUTTON / REAL REGION
+    //     declaration (control keyword NOT `:`-suffixed) STILL fires
+    suite('#179 — standalone CREATE() function call near CREATE:Region EQUATE does NOT fire', () => {
+
+        test('real-user repro — consecutive CREATE(0,CREATE:Region) blocks in a code section', () => {
+            // Faithful to Frame_AcctsMap.clw 7772-7808: the multi-line fallback only
+            // mis-fires when a prior CREATE:Region line is within the lookback window,
+            // which a single isolated line (the #177 test) does not exercise.
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  RegionRightFEQ = CREATE(0,CREATE:Region)',
+                '  IF RegionRightFEQ',
+                '    UNHIDE(RegionRightFEQ)',
+                '  END',
+                '  RegionBottomFEQ = CREATE(0,CREATE:Region)',
+                '  IF RegionBottomFEQ',
+                '    UNHIDE(RegionBottomFEQ)',
+                '  END',
+                '  RegionTopFEQ = CREATE(0,CREATE:Region)',
+                '  IF RegionTopFEQ',
+                '    UNHIDE(RegionTopFEQ)',
+                '  END',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on code-section CREATE() calls; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        test('tightest repro — two consecutive CREATE:Region lines', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                '  FeqA = CREATE(0,CREATE:Region)',
+                '  FeqB = CREATE(0,CREATE:Region)',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on the second CREATE() (fallback must not pick up the prior line's :Region suffix); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        // Negative sentinel A — a misapplied CREATE on a REAL BUTTON control (the
+        // control keyword is NOT `:`-suffixed) must STILL fire. Guards against the
+        // fix over-relaxing into wholesale suppression.
+        test('negative sentinel — misapplied CREATE on real BUTTON still fires', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),CREATE",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'misapplied CREATE on a real BUTTON must STILL fire after the getControlContextAt fix');
+        });
+
+        // Negative sentinel B — proves getControlContextAt still detects a REAL
+        // REGION declaration (REGION at the start of the declaration, not `:`-suffixed).
+        // A misapplied CREATE attribute on it must fire.
+        test('negative sentinel — misapplied CREATE on real REGION declaration still fires', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                '  REGION,AT(0,0,100,100),CREATE',
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'misapplied CREATE on a real REGION declaration must STILL fire — real control-context detection must survive the fix');
+        });
+    });
 });

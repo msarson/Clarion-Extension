@@ -444,6 +444,21 @@ export class DocumentStructure {
      * Gets the control and structure context at a specific position
      * Used for context-aware IntelliSense features
      */
+    /**
+     * True when `token` is the suffix of a `Prefix:Suffix` compound — i.e. the
+     * token immediately preceding it on the same line is `:`. Such a token (e.g.
+     * the `Region` in `CREATE:Region`) is part of an EQUATE constant, not a
+     * control declaration, so getControlContextAt must not treat it as enclosing
+     * control context. Mirrors the compound-name understanding behind the
+     * AttributeDiagnostics #174/#175/#177 guards. (#179)
+     */
+    private isCompoundNameSuffix(token: Token): boolean {
+        const lineTokens = this.tokensByLine.get(token.line) || [];
+        const idx = lineTokens.indexOf(token);
+        if (idx <= 0) return false;
+        return lineTokens[idx - 1].value === ':';
+    }
+
     public getControlContextAt(line: number, character: number): {
         controlType: string | null;
         controlToken: Token | null;
@@ -465,12 +480,15 @@ export class DocumentStructure {
             // If we hit the start of the line and it's not a control, we're done
             if (token.start < character) {
                 // Check if this is a window element (control)
-                if (token.type === TokenType.WindowElement || 
+                if (token.type === TokenType.WindowElement ||
                     token.type === TokenType.Structure) {
                     const upperValue = token.value.toUpperCase();
-                    
-                    // Check if it's a known control type
-                    if (this.isControlKeyword(upperValue)) {
+
+                    // Check if it's a known control type — but NOT when the token is
+                    // the suffix of a `Prefix:Suffix` compound (e.g. `Region` in
+                    // `CREATE:Region`), which is an EQUATE constant, not a control
+                    // declaration. (#179)
+                    if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
                         controlToken = token;
                         break;
                     }
@@ -486,12 +504,18 @@ export class DocumentStructure {
                 
                 // Look for control keyword that hasn't been closed
                 for (const token of prevLineTokens) {
-                    if (token.type === TokenType.WindowElement || 
+                    if (token.type === TokenType.WindowElement ||
                         token.type === TokenType.Structure) {
                         const upperValue = token.value.toUpperCase();
-                        if (this.isControlKeyword(upperValue)) {
+                        // Skip `Prefix:Suffix` compound suffixes (e.g. `Region` in
+                        // `CREATE:Region`) — an EQUATE constant on a code line, not an
+                        // open control declaration. Without this, consecutive
+                        // `feq = CREATE(0,CREATE:Region)` lines make this fallback
+                        // mistake a prior line's EQUATE suffix for enclosing control
+                        // context. (#179)
+                        if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
                             // Check if this control declaration is still open (no END on its line)
-                            const hasEnd = prevLineTokens.some(t => 
+                            const hasEnd = prevLineTokens.some(t =>
                                 t.type === TokenType.EndStatement
                             );
                             if (!hasEnd) {
