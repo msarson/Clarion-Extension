@@ -1635,8 +1635,19 @@ export class DocumentStructure {
         // 1. It's not at the beginning of the LOOP (LOOP WHILE... or LOOP UNTIL...)
         // 2. There's a LOOP on the structure stack
         
-        // Check if there's a LOOP in the structure stack
-        const loopIndex = this.structureStack.findIndex(s => s.value.toUpperCase() === 'LOOP');
+        // Find the NEAREST (innermost) open LOOP — search from the top of the
+        // stack down. Using the outermost match (findIndex) misattributes a
+        // header-form `LOOP UNTIL …` / `LOOP WHILE …` to an enclosing LOOP when
+        // loops are nested: the same-line guard below then compares against the
+        // wrong loop, treats the header condition as a terminator, and closes the
+        // inner loop on its own line. (#178)
+        let loopIndex = -1;
+        for (let i = this.structureStack.length - 1; i >= 0; i--) {
+            if (this.structureStack[i].value.toUpperCase() === 'LOOP') {
+                loopIndex = i;
+                break;
+            }
+        }
         if (loopIndex === -1) {
             // No LOOP to terminate - this must be LOOP WHILE/UNTIL (at the start)
             return;
