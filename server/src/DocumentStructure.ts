@@ -459,6 +459,22 @@ export class DocumentStructure {
         return lineTokens[idx - 1].value === ':';
     }
 
+    /**
+     * True when `line` ends with a `|` line-continuation — i.e. the following
+     * physical line is a continuation of this one. Used by getControlContextAt to
+     * walk only the unbroken continuation chain above the cursor (rather than a
+     * blind fixed window that reaches across closed structure boundaries). (#180)
+     */
+    private lineHasContinuation(line: number): boolean {
+        const lineTokens = this.tokensByLine.get(line) || [];
+        for (let i = lineTokens.length - 1; i >= 0; i--) {
+            const t = lineTokens[i];
+            if (t.type === TokenType.Comment) continue;
+            return t.type === TokenType.LineContinuation || t.value === '|';
+        }
+        return false;
+    }
+
     public getControlContextAt(line: number, character: number): {
         controlType: string | null;
         controlToken: Token | null;
@@ -496,32 +512,33 @@ export class DocumentStructure {
             }
         }
         
-        // If no control found on current line, check if we're in a multi-line control declaration
+        // If no control found on the current line, the cursor may sit on a
+        // `|`-CONTINUATION line of a control's attribute list (e.g. a control
+        // declared as `BUTTON(...),AT(...), |` whose attributes continue onto the
+        // next line). Walk back ONLY across the unbroken continuation chain above
+        // the cursor — NOT a fixed line window.
+        //
+        // A fixed ~10-line window reached across closed structure boundaries: e.g.
+        // a WINDOW's IMAGE control followed (after the WINDOW's END) by a CLASS
+        // whose `Init PROCEDURE(),...,DERIVED` method then mis-resolved to IMAGE.
+        // The continuation chain structurally excludes any declaration the cursor
+        // is not actually a continuation of. (#180)
         if (!controlToken) {
-            // Walk back through previous lines to find control start
-            for (let checkLine = line - 1; checkLine >= Math.max(0, line - 10); checkLine--) {
+            for (let checkLine = line - 1;
+                 checkLine >= 0 && this.lineHasContinuation(checkLine);
+                 checkLine--) {
                 const prevLineTokens = this.tokensByLine.get(checkLine) || [];
-                
-                // Look for control keyword that hasn't been closed
+
+                // Look for a control keyword on this continuation line
                 for (const token of prevLineTokens) {
                     if (token.type === TokenType.WindowElement ||
                         token.type === TokenType.Structure) {
                         const upperValue = token.value.toUpperCase();
                         // Skip `Prefix:Suffix` compound suffixes (e.g. `Region` in
-                        // `CREATE:Region`) — an EQUATE constant on a code line, not an
-                        // open control declaration. Without this, consecutive
-                        // `feq = CREATE(0,CREATE:Region)` lines make this fallback
-                        // mistake a prior line's EQUATE suffix for enclosing control
-                        // context. (#179)
+                        // `CREATE:Region`) — an EQUATE constant, not a control. (#179)
                         if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
-                            // Check if this control declaration is still open (no END on its line)
-                            const hasEnd = prevLineTokens.some(t =>
-                                t.type === TokenType.EndStatement
-                            );
-                            if (!hasEnd) {
-                                controlToken = token;
-                                break;
-                            }
+                            controlToken = token;
+                            break;
                         }
                     }
                 }

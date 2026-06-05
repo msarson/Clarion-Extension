@@ -685,4 +685,83 @@ suite('validateAttributeApplicability', () => {
                 'misapplied CREATE on a real REGION declaration must STILL fire — real control-context detection must survive the fix');
         });
     });
+
+    // ─── #180 — getControlContextAt reaches across a closed structure boundary ────
+    // Sibling of #179, deeper trigger. After a WINDOW (containing real controls)
+    // closes with END, a following CLASS method declaration like
+    // `Init PROCEDURE(),BYTE,PROC,DERIVED` fires `'DERIVED' is not applicable to
+    // IMAGE`. DERIVED is a valid METHOD attribute; the IMAGE control context is
+    // hallucinated.
+    //
+    // Real repro (Frame_AcctsMap.clw 1264-1276): the WINDOW's IMAGE control is on
+    // line 1266, the WINDOW closes (END) on 1267, and the CLASS declaration starts
+    // on 1273. `getControlContextAt`'s multi-line fallback walked back a fixed
+    // ~10-line window and latched onto the IMAGE control across the closed WINDOW
+    // boundary — it has no structural-scope check.
+    //
+    // Root-cause fix: the multi-line fallback exists to resolve a cursor sitting on
+    // a `|`-CONTINUATION line of a control's attribute list. It now walks back ONLY
+    // across the unbroken `|`-continuation chain above the cursor, instead of a blind
+    // fixed window — so it can never reach a declaration the cursor isn't actually a
+    // continuation of.
+    //
+    // Bidirectional pin per feedback_bidirectional_pin_assertion:
+    //   - Positive: DERIVED on CLASS methods after a closed WINDOW → no diagnostic
+    //   - Negative sentinel A: misapplied attr on a REAL IMAGE control STILL fires
+    //   - Negative sentinel B: misapplied attr on a genuine `|`-CONTINUATION line of a
+    //     control's attribute list STILL fires (protects the fallback's real purpose)
+    suite('#180 — getControlContextAt does not reach across a closed structure boundary', () => {
+
+        test('real-user repro — DERIVED on CLASS methods after a closed WINDOW does NOT fire', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                'MyWin WINDOW',
+                "  IMAGE('logo.png'),AT(6,4,122,34),USE(?LogoImage),CENTERED",
+                'END',
+                '',
+                'ThisWindow           CLASS(PDStrWindowManager)',
+                'Init                   PROCEDURE(),BYTE,PROC,DERIVED',
+                'Kill                   PROCEDURE(),BYTE,PROC,DERIVED',
+                'TakeAccepted           PROCEDURE(),BYTE,PROC,DERIVED',
+                '                     END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected NO diagnostic on DERIVED CLASS-method attributes; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        // Negative sentinel A — real IMAGE control with a genuinely misapplied
+        // attribute must STILL fire (CREATE applicableTo:["FILE"], not IMAGE).
+        test('negative sentinel — misapplied CREATE on real IMAGE control still fires', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  IMAGE('logo.png'),AT(6,4,122,34),CREATE",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'misapplied CREATE on a real IMAGE control must STILL fire');
+        });
+
+        // Negative sentinel B — the fallback's legitimate purpose: a cursor on a
+        // `|`-continuation line of a control's attribute list must still resolve to
+        // that control. A misapplied attribute on the continuation line must fire.
+        test('negative sentinel — misapplied attr on a |-continuation line still resolves to its control', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  BUTTON('OK'),AT(10,10,50,14), |",
+                '    CREATE',
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'misapplied CREATE on a |-continuation line of BUTTON must STILL fire (continuation fallback must survive)');
+        });
+    });
 });
