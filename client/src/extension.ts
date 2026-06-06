@@ -34,7 +34,7 @@ import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("info"); // #183 diag: trace activation/deactivation lifecycle
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
@@ -302,7 +302,7 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 export function deactivate(): Thenable<void> | undefined {
     // Set to info level to capture shutdown process
-    logger.setLevel("error");
+    logger.setLevel("info");
     logger.info("🛑 DEACTIVATE: Starting extension deactivation");
     console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());
     
