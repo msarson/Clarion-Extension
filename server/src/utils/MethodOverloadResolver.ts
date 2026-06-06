@@ -4,7 +4,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
-import { ArgClassification } from './CallSiteArgumentClassifier';
+import { ArgClassification, CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
@@ -99,6 +99,49 @@ export class MethodOverloadResolver {
             ...this.gatherCurrentFileMethodDeclarations(className, methodName, document, tokens),
             ...this.gatherScopeMethodDeclarations(className, methodName, document),
         ];
+    }
+
+    /**
+     * #182 — given an ALREADY-RESOLVED class + method + the call's line, classify
+     * the call's arguments and return the single arg-matching overload
+     * declaration. Shared glue behind the Def / Hover / Impl arg-classification
+     * overlays for the SELF / PARENT / chained call shapes, where the caller has
+     * already resolved the receiver's class and only needs to disambiguate
+     * same-arity overloads by argument type.
+     *
+     * Returns null to signal "fall through to the paramCount-only path" when:
+     *   - the call's name token isn't found on `callLine`,
+     *   - the call's arguments can't be classified,
+     *   - fewer than 2 candidates (nothing to disambiguate, or cross-file miss),
+     *   - the resolver reports `matchedAll` / no match (un-disambiguatable —
+     *     conservative fallback preserves existing UX).
+     */
+    public resolveOverloadDeclByArgs(
+        className: string,
+        methodName: string,
+        document: TextDocument,
+        tokens: Token[],
+        callLine: number
+    ): MethodDeclarationInfo | null {
+        const lowerMethod = methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        return candidates[matchedIndex];
     }
 
     /**

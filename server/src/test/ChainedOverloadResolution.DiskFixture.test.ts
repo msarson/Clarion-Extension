@@ -3,9 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Location } from 'vscode-languageserver-protocol';
+import { Location, Hover } from 'vscode-languageserver-protocol';
 import { TokenCache } from '../TokenCache';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { HoverProvider } from '../providers/HoverProvider';
+import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { SolutionManager } from '../solution/solutionManager';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { serverSettings } from '../serverSettings';
@@ -55,6 +57,10 @@ interface DiskFixture {
     selfCallLine: number;
     /** 0-based line of the typed-var-rooted call site `outer.inner.SetValue('Hello World')`. */
     varCallLine: number;
+    /** 0-based line of the STRING implementation in stringtheory.clw. */
+    stringImplLine: number;
+    /** 0-based line of the class-ref implementation in stringtheory.clw. */
+    classrefImplLine: number;
 }
 
 let _savedSm: SolutionManager | null = null;
@@ -119,6 +125,20 @@ function buildDiskFixture(classRefFirst: boolean): DiskFixture {
     fs.writeFileSync(callerPath, callerContent);
     const callerUri = `file:///${callerPath.replace(/\\/g, '/')}`;
 
+    // StringTheory implementations on disk (for Go-to-Implementation). Impl line
+    // numbers are fixed regardless of declaration order: class-ref impl on line 1,
+    // STRING impl on line 4.
+    const implContent = [
+        "  MEMBER('caller.clw')",                                          // 0
+        'StringTheory.SetValue PROCEDURE(StringTheory newValue)',          // 1 (class-ref impl)
+        '  CODE',                                                          // 2
+        '  RETURN',                                                        // 3
+        'StringTheory.SetValue PROCEDURE(STRING newValue, LONG pClip=0)',  // 4 (STRING impl)
+        '  CODE',                                                          // 5
+        '  RETURN',                                                        // 6
+    ].join('\n');
+    fs.writeFileSync(path.join(tmpRoot, 'stringtheory.clw'), implContent);
+
     // Wire settings: redirectionFile is a filename joined to the project path;
     // libsrcPaths supplies the dir the SDI scans directly.
     _savedRedirectionFile = serverSettings.redirectionFile;
@@ -129,7 +149,10 @@ function buildDiskFixture(classRefFirst: boolean): DiskFixture {
     const fakeProject = {
         name: 'TestProj',
         path: tmpRoot,
-        sourceFiles: [{ relativePath: 'caller.clw', getAbsolutePath: () => callerPath }],
+        sourceFiles: [
+            { relativePath: 'caller.clw', getAbsolutePath: () => callerPath },
+            { relativePath: 'stringtheory.clw', getAbsolutePath: () => path.join(tmpRoot, 'stringtheory.clw') }
+        ],
         getRedirectionParser: () => ({ findFile: (_: string) => null })
     };
     const fakeSm = {
@@ -149,7 +172,7 @@ function buildDiskFixture(classRefFirst: boolean): DiskFixture {
     const callerDoc = TextDocument.create(callerUri, 'clarion', 1, callerContent);
     TokenCache.getInstance().getTokens(callerDoc);
 
-    return { tmpRoot, callerUri, callerDoc, selfCallLine: 6, varCallLine: 7 };
+    return { tmpRoot, callerUri, callerDoc, selfCallLine: 6, varCallLine: 7, stringImplLine: 4, classrefImplLine: 1 };
 }
 
 function teardownDiskFixture(fix: DiskFixture | null): void {
@@ -221,5 +244,63 @@ suite('Issue #131 — chained SELF.inner.Method(args) overload resolution (disk 
         const line = lineOf(await provider.provideDefinition(fix.callerDoc, { line: fix.varCallLine, character: VAR_CALL_CHAR }));
         assert.strictEqual(line, 1, `chained outer.inner must resolve to STRING overload (.inc line 1); got ${line}`);
         assert.notStrictEqual(line, 2, 'must NOT pick the StringTheory class-ref overload');
+    });
+});
+
+function hoverText(h: Hover | null | undefined): string {
+    if (!h) return '';
+    const c = h.contents;
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) return c.map(p => (typeof p === 'string' ? p : p.value)).join('\n');
+    return (c as { value?: string }).value ?? '';
+}
+
+/**
+ * #182 — the same chained shapes must resolve the right overload in Hover and
+ * Go-to-Implementation, not just Goto Definition. Reuses the #131 disk fixture
+ * (the chain walk needs the SDI). The STRING overload's declaration carries the
+ * unique token `pClip`; its implementation lives on stringtheory.clw line 4
+ * (the class-ref impl is on line 1).
+ */
+suite('Issue #182 — chained overload resolution in Hover + Implementation (disk fixture)', () => {
+
+    let fix: DiskFixture | null = null;
+
+    teardown(() => {
+        teardownDiskFixture(fix);
+        fix = null;
+    });
+
+    const SELF_CALL_CHAR = 15;
+    const VAR_CALL_CHAR = 16;
+
+    // ── Hover ─────────────────────────────────────────────────────────────────
+    test("SELF.inner.SetValue('s') hover shows STRING overload (class-ref declared first)", async () => {
+        fix = buildDiskFixture(/* classRefFirst */ true);
+        const text = hoverText(await new HoverProvider().provideHover(fix.callerDoc, { line: fix.selfCallLine, character: SELF_CALL_CHAR }));
+        assert.ok(text.includes('pClip'), `chained SELF hover must show the STRING overload (pClip); got:\n${text}`);
+        assert.ok(!text.includes('(StringTheory newValue)'), `chained SELF hover must NOT show the class-ref overload; got:\n${text}`);
+    });
+
+    test("outer.inner.SetValue('s') hover shows STRING overload (class-ref declared first)", async () => {
+        fix = buildDiskFixture(/* classRefFirst */ true);
+        const text = hoverText(await new HoverProvider().provideHover(fix.callerDoc, { line: fix.varCallLine, character: VAR_CALL_CHAR }));
+        assert.ok(text.includes('pClip'), `chained var hover must show the STRING overload (pClip); got:\n${text}`);
+        assert.ok(!text.includes('(StringTheory newValue)'), `chained var hover must NOT show the class-ref overload; got:\n${text}`);
+    });
+
+    // ── Go-to-Implementation ──────────────────────────────────────────────────
+    test("SELF.inner.SetValue('s') impl targets the STRING implementation (class-ref declared first)", async () => {
+        fix = buildDiskFixture(/* classRefFirst */ true);
+        const line = lineOf(await new ImplementationProvider().provideImplementation(fix.callerDoc, { line: fix.selfCallLine, character: SELF_CALL_CHAR }));
+        assert.strictEqual(line, fix.stringImplLine, `chained SELF impl must target the STRING implementation (line ${fix.stringImplLine}); got ${line}`);
+        assert.notStrictEqual(line, fix.classrefImplLine, 'must NOT target the class-ref implementation');
+    });
+
+    test("outer.inner.SetValue('s') impl targets the STRING implementation (class-ref declared first)", async () => {
+        fix = buildDiskFixture(/* classRefFirst */ true);
+        const line = lineOf(await new ImplementationProvider().provideImplementation(fix.callerDoc, { line: fix.varCallLine, character: VAR_CALL_CHAR }));
+        assert.strictEqual(line, fix.stringImplLine, `chained var impl must target the STRING implementation (line ${fix.stringImplLine}); got ${line}`);
+        assert.notStrictEqual(line, fix.classrefImplLine, 'must NOT target the class-ref implementation');
     });
 });
