@@ -155,7 +155,7 @@ export class StructureFieldResolver {
             }
             const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
             if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount);
+                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
             }
         } else if (beforeDot.includes('.')) {
             // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
@@ -165,7 +165,7 @@ export class StructureFieldResolver {
             }
             const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
             if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount);
+                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
             }
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
@@ -203,7 +203,7 @@ export class StructureFieldResolver {
                         const ifaceInfo = await this.memberLocator.findMemberInInterface(varType, fieldName, document, paramCount);
                         if (ifaceInfo) {
                             logger.info(`✅ Found interface method "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount);
+                            return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount, position);
                         }
                     }
                     if (isClass) {
@@ -213,14 +213,14 @@ export class StructureFieldResolver {
                             const picked = this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
                             if (picked) {
                                 logger.info(`✅ Arg-classify resolved typed-var hover "${fieldName}" in "${varType}" to line ${picked.line}`);
-                                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount);
+                                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
                             }
                         }
                         // CLASS member resolver (methods, properties)
                         const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
                         if (memberInfo) {
                             logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount);
+                            return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);
                         }
                     }
                     // QUEUE/GROUP/FILE structure field (type defined in INCLUDE files)

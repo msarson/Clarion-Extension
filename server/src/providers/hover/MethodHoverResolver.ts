@@ -259,16 +259,22 @@ export class MethodHoverResolver {
         paramCount?: number
     ): Promise<Hover | null> {
         const tokens = this.tokenCache.getTokens(document);
-        const memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
-        
+        let memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+
         if (!memberInfo) {
             logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
             return null;
         }
 
+        // #182 — arg-classification overlay (symmetric with Goto Definition's SELF
+        // branch): when the SELF call has overloaded candidates differing by arg
+        // type, classify the call's args and re-point memberInfo at the matching
+        // overload before the paramCount-only result is shown.
+        const matchedSignature = this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
+
         // Check if this is a method (not a property)
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
-        
+
         if (isMethod) {
             const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
 
@@ -277,15 +283,43 @@ export class MethodHoverResolver {
                 fieldName,
                 document,
                 paramCount,
-                implModuleFile
+                implModuleFile,
+                matchedSignature
             );
-            
+
             if (implLocation) {
                 return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
             }
         }
-        
+
         return this.formatter.formatClassMember(fieldName, memberInfo);
+    }
+
+    /**
+     * #182 — shared arg-classification overlay for SELF / PARENT / chained method
+     * hovers. When the call has overloaded candidates that differ by argument
+     * type, classify the call's args and MUTATE `memberInfo.line`/`.file` to point
+     * at the matching overload's declaration (so the hover shows the right
+     * signature). Returns the matched declaration signature for arg-aware
+     * implementation lookup, or undefined when no disambiguation applied (falls
+     * through to the existing paramCount-only behaviour).
+     */
+    private applyArgClassifyOverlay(
+        memberInfo: { type: string; className: string; line: number; file: string },
+        fieldName: string,
+        document: TextDocument,
+        tokens: Token[],
+        position: Position,
+        paramCount?: number
+    ): string | undefined {
+        if (paramCount === undefined) return undefined; // no-paren access — nothing to classify
+        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+            memberInfo.className, fieldName, document, tokens, position.line);
+        if (!picked) return undefined;
+        memberInfo.line = picked.line;
+        memberInfo.file = picked.file;
+        logger.info(`✅ #182 arg-classify re-pointed ${memberInfo.className}.${fieldName} hover to line ${picked.line}`);
+        return picked.signature;
     }
 
     /**
@@ -300,11 +334,30 @@ export class MethodHoverResolver {
         paramCount?: number
     ): Promise<Hover | null> {
         const tokens = this.tokenCache.getTokens(document);
-        const memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+        let memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+        let matchedSignature: string | undefined;
 
         if (!memberInfo) {
-            logger.info(`❌ findParentClassMemberInfo returned null for ${fieldName} in PARENT context`);
-            return null;
+            // #182 — the paramCount-only findParentClassMemberInfo misses same-arity
+            // overloads (and in-memory / cross-file cases). Fall back to resolving the
+            // parent class directly and arg-classifying — symmetric with Goto
+            // Definition's PARENT branch, whose overlay is the actual working path.
+            const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+            if (parentInfo?.parentClassName && paramCount !== undefined) {
+                const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                    parentInfo.parentClassName, fieldName, document, tokens, position.line);
+                if (picked) {
+                    memberInfo = { type: 'PROCEDURE', className: parentInfo.parentClassName, line: picked.line, file: picked.file };
+                    matchedSignature = picked.signature;
+                }
+            }
+            if (!memberInfo) {
+                logger.info(`❌ PARENT resolution returned null for ${fieldName}`);
+                return null;
+            }
+        } else {
+            // #182 — arg-classification overlay (symmetric with Goto Definition's PARENT branch).
+            matchedSignature = this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
         }
 
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
@@ -317,7 +370,8 @@ export class MethodHoverResolver {
                 fieldName,
                 document,
                 paramCount,
-                implModuleFile
+                implModuleFile,
+                matchedSignature
             );
             if (implLocation) {
                 return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
@@ -336,8 +390,24 @@ export class MethodHoverResolver {
         fieldName: string,
         chainedInfo: { type: string; className: string; line: number; file: string },
         document: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        position?: Position
     ): Promise<Hover | null> {
+        // #182 — arg-classification overlay for chained calls (symmetric with the
+        // SELF/PARENT branches). When the resolved final class has overloaded
+        // candidates differing by arg type, re-point chainedInfo at the matching
+        // overload's declaration before resolving its implementation. Idempotent
+        // for callers that already arg-classified (re-picks the same overload).
+        if (position && paramCount !== undefined) {
+            const tokens = this.tokenCache.getTokens(document);
+            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                chainedInfo.className, fieldName, document, tokens, position.line);
+            if (picked) {
+                chainedInfo = { ...chainedInfo, line: picked.line, file: picked.file };
+                logger.info(`✅ #182 arg-classify re-pointed chained ${chainedInfo.className}.${fieldName} hover to line ${picked.line}`);
+            }
+        }
+
         const isMethod = chainedInfo.type.toUpperCase().includes('PROCEDURE') ||
                          chainedInfo.type.toUpperCase().includes('FUNCTION');
 
@@ -426,14 +496,15 @@ export class MethodHoverResolver {
         methodName: string,
         currentDocument: TextDocument,
         paramCount?: number,
-        moduleFile?: string | null
+        moduleFile?: string | null,
+        declarationSignature?: string
     ): Promise<string | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
-        
+
         // FIRST: Search the current file (local implementation)
         const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
         logger.info(`Searching current file first: ${currentPath}`);
-        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount);
+        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount, declarationSignature);
         if (localImplLine !== null) {
             const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
             logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
@@ -451,7 +522,7 @@ export class MethodHoverResolver {
                     const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
-                        const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);
+                        const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount, declarationSignature);
                         if (implLine !== null) {
                             const fileUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
                             return `${fileUri}:${implLine}`;
@@ -466,7 +537,7 @@ export class MethodHoverResolver {
                 const resolved = resolveFileInNoSolutionMode(moduleFile, currentDocument.uri);
                 if (resolved) {
                     logger.info(`Found module file at: ${resolved.path} (no solution open, source: ${resolved.source})`);
-                    const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);
+                    const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount, declarationSignature);
                     if (implLine !== null) {
                         const fileUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
                         return `${fileUri}:${implLine}`;
@@ -485,7 +556,7 @@ export class MethodHoverResolver {
             const resolved = resolveFileInNoSolutionMode(`${className}.clw`, currentDocument.uri);
             if (resolved) {
                 logger.info(`Trying ${className}.clw via no-solution resolver: ${resolved.path} (source: ${resolved.source})`);
-                const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount);
+                const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount, declarationSignature);
                 if (implLine !== null) {
                     const fileUri = `file:///${resolved.path.replace(/\\/g, '/')}`;
                     return `${fileUri}:${implLine}`;
@@ -516,7 +587,7 @@ export class MethodHoverResolver {
                     continue;
                 }
                 
-                const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount);
+                const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount, declarationSignature);
                 if (implLine !== null) {
                     const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
                     return `${fileUri}:${implLine}`;
@@ -535,24 +606,25 @@ export class MethodHoverResolver {
         filePath: string,
         className: string,
         methodName: string,
-        paramCount?: number
+        paramCount?: number,
+        declarationSignature?: string
     ): number | null {
         try {
             const content = fs.readFileSync(filePath, 'utf8');
             const lines = content.split(/\r?\n/);
-            
+
             // Search for method implementation: ClassName.MethodName PROCEDURE
-            const candidates: { lineNum: number; implParamCount: number }[] = [];
+            const candidates: { lineNum: number; implParamCount: number; signature: string }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
-                
-                if (implMatch && 
+
+                if (implMatch &&
                     implMatch[1].toUpperCase() === className.toUpperCase() &&
                     implMatch[2].toUpperCase() === methodName.toUpperCase()) {
                     const params = implMatch[3] ? implMatch[3].trim() : '';
                     const implParamCount = params === '' ? 0 : params.split(',').length;
-                    candidates.push({ lineNum: i, implParamCount });
+                    candidates.push({ lineNum: i, implParamCount, signature: line.trim() });
                 }
             }
 
@@ -560,6 +632,17 @@ export class MethodHoverResolver {
             if (candidates.length === 1) {
                 logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
                 return candidates[0].lineNum;
+            }
+
+            // #182 — type-based overload match when the arg-classified declaration
+            // signature is known (disambiguates same-arity overloads by type).
+            if (declarationSignature) {
+                const bestIdx = this.overloadResolver.findBestMatchingImplementation(
+                    declarationSignature, candidates.map(c => c.signature));
+                if (bestIdx >= 0) {
+                    logger.info(`✅ Found type-matched implementation in ${filePath} at line ${candidates[bestIdx].lineNum}`);
+                    return candidates[bestIdx].lineNum;
+                }
             }
 
             // Multiple overloads — pick best match

@@ -392,15 +392,23 @@ export class ImplementationProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
+                            // #182 — arg-classification overlay: re-point at the matching
+                            // overload's declaration so both the returned decl and the impl
+                            // lookup target the arg-matched overload, not the paramCount one.
+                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
+                            const declInfo = picked
+                                ? { ...chainedInfo, line: picked.line, file: picked.file }
+                                : chainedInfo;
                             // For methods, try to find the implementation; for properties just return declaration
-                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
-                                    chainedInfo.className, memberName, document, paramCount, null, line,
-                                    chainedInfo.file
+                                    declInfo.className, memberName, document, paramCount, null,
+                                    picked?.signature ?? line, declInfo.file
                                 );
                                 if (implLoc) return implLoc;
                             }
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
                         }
                     }
                 }
@@ -418,14 +426,20 @@ export class ImplementationProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            // #182 — arg-classification overlay (var-chain variant).
+                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
+                            const declInfo = picked
+                                ? { ...chainedInfo, line: picked.line, file: picked.file }
+                                : chainedInfo;
+                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
-                                    chainedInfo.className, memberName, document, paramCount, null, line,
-                                    chainedInfo.file
+                                    declInfo.className, memberName, document, paramCount, null,
+                                    picked?.signature ?? line, declInfo.file
                                 );
                                 if (implLoc) return implLoc;
                             }
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
                         }
                     }
                 }
@@ -446,13 +460,18 @@ export class ImplementationProvider {
                     const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
                     if (parentInfo) {
                         logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
+                        // #182 — arg-classification overlay: pick the matching overload by
+                        // argument type and target its implementation via the matched decl
+                        // signature, instead of the paramCount-only call line.
+                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             parentInfo.parentClassName,
                             callInfo.methodName,
                             document,
                             callInfo.paramCount,
                             parentInfo.moduleFile ?? null,
-                            line
+                            picked?.signature ?? line
                         );
                         if (impl) return impl;
                     }
@@ -466,13 +485,16 @@ export class ImplementationProvider {
                         callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
                     );
                     if (memberInfo && memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                        // #182 — arg-classification overlay (symmetric with PARENT/Definition).
+                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             memberInfo.className,
                             callInfo.methodName,
                             document,
                             callInfo.paramCount,
                             null,
-                            line,
+                            picked?.signature ?? line,
                             memberInfo.file
                         );
                         if (impl) return impl;
