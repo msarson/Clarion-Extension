@@ -8,6 +8,7 @@ import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
@@ -270,8 +271,8 @@ export async function openClarionSolution(context: ExtensionContext) {
     await SolutionOpener.openClarionSolution(context, initializeSolution);
 }
 
-export async function closeClarionSolution(context: ExtensionContext) {
-    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+export async function closeClarionSolution(context: ExtensionContext, reason: SolutionCloseReason = 'user') {
+    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, reason);
     updateSolutionToolbar();
 }
 
