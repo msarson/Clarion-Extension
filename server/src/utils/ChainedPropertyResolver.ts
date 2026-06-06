@@ -62,6 +62,41 @@ export class ChainedPropertyResolver {
         position: Position,
         paramCount?: number
     ): Promise<ChainedMemberInfo | null> {
+        // Steps 1-2: walk the chain to the class that owns the final member.
+        const currentClassName = await this.resolveFinalClassName(beforeDot, document, position);
+        if (!currentClassName) return null;
+
+        // Step 3: look up the final target member in the resolved class
+        logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${currentClassName}"`);
+        const result = await this.memberResolver.findMemberInNamedStructure(
+            memberName, currentClassName, document, paramCount
+        );
+
+        if (result) {
+            logger.info(`ChainedPropertyResolver: ✅ resolved "${memberName}" in "${currentClassName}" at ${result.file}:${result.line}`);
+        } else {
+            logger.info(`ChainedPropertyResolver: ❌ member "${memberName}" not found in "${currentClassName}"`);
+        }
+
+        return result ?? null;
+    }
+
+    /**
+     * Resolves the chain `beforeDot` to the class that owns the FINAL member —
+     * i.e. steps 1-2 of {@link resolve} without the final member lookup.
+     *
+     * Exposed so the DefinitionProvider chained branch can apply the #125
+     * argument-classification overload overlay against the resolved final class
+     * (symmetric with the SELF/PARENT/typed-var branches), which the
+     * paramCount-only final lookup in step 3 cannot do (#131).
+     *
+     * @returns the final class name, or null if the chain is unresolvable.
+     */
+    public async resolveFinalClassName(
+        beforeDot: string,
+        document: TextDocument,
+        position: Position
+    ): Promise<string | null> {
         const tokens = this.tokenCache.getTokens(document);
 
         // Split beforeDot by dots to get the chain segments.
@@ -94,7 +129,7 @@ export class ChainedPropertyResolver {
             return null;
         }
 
-        logger.info(`ChainedPropertyResolver: root=${root} → class="${currentClassName}", chain=[${segments.slice(1).join('.')}].${memberName}`);
+        logger.info(`ChainedPropertyResolver: root=${root} → class="${currentClassName}", chain=[${segments.slice(1).join('.')}]`);
 
         // Step 2: walk each intermediate segment to get to the final type
         const intermediateSegments = segments.slice(1); // drop SELF/PARENT
@@ -127,19 +162,7 @@ export class ChainedPropertyResolver {
             logger.info(`ChainedPropertyResolver: "${segmentName}" → type="${memberInfo.type}" → next class="${currentClassName}"`);
         }
 
-        // Step 3: look up the final target member in the resolved class
-        logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${currentClassName}"`);
-        const result = await this.memberResolver.findMemberInNamedStructure(
-            memberName, currentClassName, document, paramCount
-        );
-
-        if (result) {
-            logger.info(`ChainedPropertyResolver: ✅ resolved "${memberName}" in "${currentClassName}" at ${result.file}:${result.line}`);
-        } else {
-            logger.info(`ChainedPropertyResolver: ❌ member "${memberName}" not found in "${currentClassName}"`);
-        }
-
-        return result ?? null;
+        return currentClassName;
     }
 
     /** Extracts the class name the current scope belongs to (for SELF resolution). Public for CompletionProvider. */

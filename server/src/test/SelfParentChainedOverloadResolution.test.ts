@@ -141,4 +141,10 @@ suite('Issue #131 — SELF / PARENT overload resolution', () => {
         assert.strictEqual(line, 1, `PARENT must resolve to parent STRING overload (line 1); got ${line}`);
         assert.notStrictEqual(line, 2, 'must NOT pick the StringTheory class-ref overload');
     });
+
+    // Note: the 3rd #131 shape — chained `SELF.inner.SetValue(args)` — routes
+    // through ChainedPropertyResolver, whose chain walk depends on the
+    // StructureDeclarationIndexer (disk + redirection). It cannot be exercised
+    // in this in-memory suite, so its coverage lives in the disk-backed
+    // ChainedOverloadResolution.DiskFixture.test.ts.
 });

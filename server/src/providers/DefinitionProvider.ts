@@ -205,6 +205,23 @@ export class DefinitionProvider {
 
                     // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
                     if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                        // #131 — arg-classification overlay for chained calls like
+                        // SELF.inner.SetValue(args). Resolve the chain to the class that
+                        // owns the final member, then pick the matching overload by argument
+                        // shape before the paramCount-only step-3 lookup (which can't
+                        // disambiguate same-arity overloads). Symmetric with the SELF /
+                        // PARENT / typed-var branches.
+                        if (hasParentheses) {
+                            const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                            if (finalClass) {
+                                const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                if (argResolved) {
+                                    logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
+                                    return argResolved;
+                                }
+                            }
+                        }
+
                         const paramCount = hasParentheses
                             ? this.memberResolver.countParametersInCall(line, methodName)
                             : undefined;
@@ -232,6 +249,22 @@ export class DefinitionProvider {
                     if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
                         // Multi-segment variable chain: variable.property.method
                         if (beforeDot.includes('.')) {
+                            // #131 — arg-classification overlay for typed-var chained calls
+                            // like outer.inner.SetValue(args). Same gap and same fix as the
+                            // SELF/PARENT chained branch above: resolve the chain's final
+                            // class, then pick the matching overload by argument shape before
+                            // the paramCount-only fallback.
+                            if (hasParentheses) {
+                                const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                                if (finalClass) {
+                                    const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                    if (argResolved) {
+                                        logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
+                                        return argResolved;
+                                    }
+                                }
+                            }
+
                             const paramCount = hasParentheses
                                 ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                 : undefined;
