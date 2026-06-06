@@ -148,7 +148,21 @@ export class DefinitionProvider {
                     if (hasParentheses && (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith('self'))) {
                         // This is a method call - find the declaration
                         logger.info(`F12 on method call: ${beforeDot}.${methodName}()`);
-                        
+
+                        // #131 — arg-classification overlay for SELF.Method(args), symmetric
+                        // with the typed-var branch below. SELF resolves to the enclosing
+                        // class; classify the call args and pick the matching overload before
+                        // the paramCount-only fallback (which can't disambiguate same-arity
+                        // overloads that differ only by argument type).
+                        const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
+                        if (selfClass) {
+                            const argResolved = this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
+                            if (argResolved) {
+                                logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
+                                return argResolved;
+                            }
+                        }
+
                         // Count parameters for overload resolution
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         logger.info(`Method call has ${paramCount} parameters`);
@@ -167,6 +181,20 @@ export class DefinitionProvider {
                     if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
                         // PARENT.Method() — look up the method starting from the parent class
                         logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
+
+                        // #131 — arg-classification overlay for PARENT.Method(args). Resolve
+                        // the parent class name, then pick the matching overload by argument
+                        // shape before the paramCount-only fallback (which otherwise picks the
+                        // first-declared overload regardless of argument type).
+                        const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+                        if (parentInfo?.parentClassName) {
+                            const argResolved = this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
+                            if (argResolved) {
+                                logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
+                                return argResolved;
+                            }
+                        }
+
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
