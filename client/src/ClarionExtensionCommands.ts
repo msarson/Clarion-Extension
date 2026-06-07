@@ -1,8 +1,7 @@
 import { window, workspace, ConfigurationTarget, Uri, commands } from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
+import { ClarionInstallationDetector, ClarionCompilerVersion } from './utils/ClarionInstallationDetector';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './utils/LoggerManager';
 const logger = LoggerManager.getLogger("ExtensionCommands");
@@ -14,15 +13,6 @@ logger.setLevel("error");
 
 
 
-
-// Define the ClarionVersionProperties interface
-interface ClarionVersionProperties {
-  clarionVersion: string;
-  path: string;
-  redirectionFile: string;
-  macros: Record<string, string>;
-  libsrc: string;
-}
 
 export class ClarionExtensionCommands {
 
@@ -68,8 +58,10 @@ export class ClarionExtensionCommands {
       // ✅ Save the properties file path
       await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
 
-      // ✅ Parse available versions from the selected file
-      const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
+      // ✅ Parse available versions from the selected file (single XML-parse
+      // pathway — ClarionInstallationDetector; #136)
+      const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(selectedFilePath);
+      const versionProperties = installation?.compilerVersions ?? [];
 
       if (versionProperties.length === 0) {
         window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
@@ -77,7 +69,7 @@ export class ClarionExtensionCommands {
       }
 
       // ✅ Prompt user to select a version
-      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
+      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.name), {
         placeHolder: "Select a Clarion version",
       });
 
@@ -87,7 +79,7 @@ export class ClarionExtensionCommands {
       }
 
       // ✅ Find the selected version's properties
-      const selectedVersionProps = versionProperties.find((v) => v.clarionVersion === versionSelection);
+      const selectedVersionProps = versionProperties.find((v) => v.name === versionSelection);
       if (!selectedVersionProps) {
         window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
         return;
@@ -119,8 +111,8 @@ export class ClarionExtensionCommands {
    */
   public static async loadVersionGlobalSettings(propertiesFile: string, version: string): Promise<boolean> {
     try {
-      const versions = await this.parseAvailableVersions(propertiesFile);
-      const selectedVersionProps = versions.find(v => v.clarionVersion === version);
+      const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(propertiesFile);
+      const selectedVersionProps = installation?.compilerVersions.find(v => v.name === version);
       if (!selectedVersionProps) {
         return false;
       }
@@ -345,7 +337,7 @@ export class ClarionExtensionCommands {
    * This method adjusts the global redirection file, its directory path, macros, and LIBSRC paths
    * to match the specified version's configuration. It logs the updated settings for reference.
    */
-  private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
+  private static updateGlobalSettings(selectedVersionProps: ClarionCompilerVersion | undefined) {
 
     if (selectedVersionProps) {
       globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
@@ -356,59 +348,6 @@ export class ClarionExtensionCommands {
 
     }
   }
-
-  /**
-   * Asynchronously parses the specified XML file to retrieve all available Clarion versions.
-   *
-   * @param filePath - The full path to the XML file containing Clarion version properties.
-   * @returns A promise that resolves to an array of ClarionVersionProperties objects, each representing
-   *          a discovered Clarion version along with its associated configuration data.
-   */
-  private static async parseAvailableVersions(filePath: string): Promise<ClarionVersionProperties[]> {
-    const xmlContent = fs.readFileSync(filePath, 'utf-8');
-    let versions: ClarionVersionProperties[] = [];
-
-    parseString(xmlContent, (err: Error | null, result: any) => {
-      if (!err && result?.ClarionProperties?.Properties) {
-        const propertiesArray = result.ClarionProperties.Properties;
-
-        for (const properties of propertiesArray) {
-          if (properties.$.name === 'Clarion.Versions') {
-            for (const versionProperty of properties.Properties) {
-              const versionName = versionProperty.$.name;
-              if (!versionName.includes("Clarion.NET")) {
-                const versionProps: ClarionVersionProperties = {
-                  clarionVersion: versionName,
-                  path: versionProperty.path?.[0]?.$.value || '',
-                  redirectionFile: ClarionExtensionCommands.extractRedirectionFile(versionProperty.Properties),
-                  macros: ClarionExtensionCommands.extractMacros(versionProperty.Properties),
-                  libsrc: versionProperty.libsrc?.[0]?.$.value || ''
-                };
-
-                versions.push(versionProps);
-              }
-            }
-            break; // Exit loop after finding Clarion.Versions
-          }
-        }
-      }
-    });
-
-    return versions;
-  }
-
-  /**
-   * Retrieves the value of the "RedirectionFile" property from a given array
-   * of property objects. If the property is not found, returns an empty string.
-   *
-   * @param properties - The array of property objects to search.
-   * @returns The value of the "RedirectionFile" property or an empty string if it's absent.
-   */
-  private static extractRedirectionFile(properties: any[]): string {
-    const redirectionFileProperty = properties.find((p: any) => p.$.name === 'RedirectionFile');
-    return redirectionFileProperty?.Name?.[0]?.$.value || '';
-  }
-
 
   /**
    * Extracts macro definitions from a given properties object, typically derived
@@ -591,31 +530,6 @@ export class ClarionExtensionCommands {
 
 
 
-  /**
-   * Asynchronously updates the workspace configurations for Clarion.
-   *
-   * This method retrieves the Clarion properties file path and selected version from
-   * the user's workspace settings. It parses available versions and updates the global
-   * settings if a matching version is found. Any errors are logged.
-   *
-   * @throws {Error} If there is a problem reading or parsing the properties file, or
-   * if updating the configuration fails for any reason.
-   */
-  static async updateWorkspaceConfigurations() {
-    try {
-      const clarionFilePath = workspace.getConfiguration().get<string>('clarion.propertiesFile');
-      if (clarionFilePath) {
-        const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(clarionFilePath);
-        const selectedVersion = workspace.getConfiguration().get<string>('selectedClarionVersion');
-        if (selectedVersion) {
-          const selectedVersionProps = versionProperties.find(v => v.clarionVersion === selectedVersion);
-          ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
-        }
-      }
-    } catch (error) {
-      logger.info(String(error));
-    }
-  }
   static async followLink(documentManager: DocumentManager) {
     const editor = window.activeTextEditor;
     if (editor) {

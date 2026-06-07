@@ -19,6 +19,19 @@ export interface ClarionCompilerVersion {
     libsrc: string;
 }
 
+/**
+ * Single source of truth for parsing `ClarionProperties.xml` (#136 — consolidated
+ * the former `ClarionExtensionCommands.parseAvailableVersions` here).
+ *
+ * Cache invariant: only the AppData scan in {@link ClarionInstallationDetector.detectInstallations}
+ * is cached (`cachedInstallations`) — it reflects the installed IDEs, which don't
+ * change within a session. Call {@link ClarionInstallationDetector.clearCache} to
+ * force a re-scan (e.g. after a Clarion install/upgrade). Reads of an explicit,
+ * user-supplied path via {@link ClarionInstallationDetector.parseInstallationFromPropertiesPath}
+ * are NOT cached — they re-parse each call so an edited/relocated properties file
+ * is always read fresh (matching the old `parseAvailableVersions` semantics its
+ * callers relied on).
+ */
 export class ClarionInstallationDetector {
     private static cachedInstallations: ClarionInstallation[] | null = null;
 
