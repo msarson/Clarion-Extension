@@ -119,7 +119,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`🔍 [FAR] Finding references for "${word}" at ${position.line}:${position.character} in ${path.basename(decodeURIComponent(document.uri))}`);
+        logger.test(`🔍 [FAR] Finding references for "${word}" at ${position.line}:${position.character} in ${path.basename(decodeURIComponent(document.uri))}`);
 
         // Get full line text — used for pattern-based routing before symbol resolution
         const fullLine = document.getText({
@@ -138,11 +138,11 @@ export class ReferencesProvider {
             const methEnd    = methStart + methPart.length;
 
             if (position.character >= methStart && position.character <= methEnd) {
-                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
+                logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
                 return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
             }
             if (position.character >= ifaceStart && position.character <= ifaceEnd) {
-                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
+                logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
                 return this.provideImplementsReferences(ifacePart, document);
             }
         }
@@ -155,7 +155,7 @@ export class ReferencesProvider {
             const nameStart = implementsM.index + implementsM[0].indexOf(ifaceName);
             const nameEnd   = nameStart + ifaceName.length;
             if (position.character >= nameStart && position.character <= nameEnd) {
-                logger.error(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
+                logger.test(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceName, document);
             }
         }
@@ -183,7 +183,7 @@ export class ReferencesProvider {
             });
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
-            logger.error(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
+            logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
         }
 
@@ -210,7 +210,7 @@ export class ReferencesProvider {
                     end: { line: classToken.line, character: 999 }
                 }) : '';
                 if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
-                    logger.error(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
+                    logger.test(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
                     return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
                 }
             }
@@ -225,7 +225,7 @@ export class ReferencesProvider {
             t.finishesAt >= position.line
         );
         if (enclosingInterface) {
-            logger.error(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
+            logger.test(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
             return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
         }
 
@@ -241,7 +241,7 @@ export class ReferencesProvider {
         if (ifaceDeclToken && ifaceDeclToken.label) {
             const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
             if (word.toLowerCase() === ifaceLabelLower) {
-                logger.error(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
+                logger.test(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceDeclToken.label, document);
             }
         }
@@ -267,7 +267,7 @@ export class ReferencesProvider {
         // result. Type-aware via `MethodOverloadResolver.signaturesMatch` (5f7478dc).
         const overloadFilter = this.buildPlainSymbolOverloadFilter(symbolInfo, document);
 
-        logger.error(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
+        logger.test(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
 
         // When the declaration is in a MEMBER file, also walk MAP INCLUDE files to find
         // the MODULE declaration (e.g. startproc.inc) and add it to the search list.
@@ -283,7 +283,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`[FAR] Searching ${filesToSearch.length} file(s) for "${searchWord}":\n` +
+        logger.test(`[FAR] Searching ${filesToSearch.length} file(s) for "${searchWord}":\n` +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
         // For structure field scope, collect all PRE prefixes that map to this field
@@ -311,7 +311,7 @@ export class ReferencesProvider {
             locations.push(...fileLocations);
         }
 
-        logger.error(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
+        logger.test(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -395,7 +395,7 @@ export class ReferencesProvider {
                         const resolved = this.resolveModuleFile(m[1], incUri);
                         if (resolved && !filesToSearch.includes(resolved)) {
                             filesToSearch.push(resolved);
-                            logger.error(`[FAR] Found implementor via LibSrc scan: ${path.basename(decodeURIComponent(resolved))} (from ${fname})`);
+                            logger.test(`[FAR] Found implementor via LibSrc scan: ${path.basename(decodeURIComponent(resolved))} (from ${fname})`);
                         }
                     }
                 }
@@ -403,12 +403,12 @@ export class ReferencesProvider {
                 // (b) INTERFACE declaration — add the INC itself so the InterfaceMethod token is found
                 if (!filesToSearch.includes(incUri) && ifaceDeclRe.test(incContent)) {
                     filesToSearch.push(incUri);
-                    logger.error(`[FAR] Found interface declaration in: ${fname}`);
+                    logger.test(`[FAR] Found interface declaration in: ${fname}`);
                 }
             }
         }
 
-        logger.error(`[FAR] Interface method "${methodName}" (${ifaceName}) — searching ${filesToSearch.length} file(s)` +
+        logger.test(`[FAR] Interface method "${methodName}" (${ifaceName}) — searching ${filesToSearch.length} file(s)` +
             (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution — using current file + MODULE fallback]') + ':\n' +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
@@ -484,7 +484,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
+        logger.test(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
 
         // ── Call sites: varName.MethodName() where varName &IfaceName ──
         for (const fileUri of filesToSearch) {
@@ -506,7 +506,7 @@ export class ReferencesProvider {
             return true;
         });
 
-        logger.error(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
+        logger.test(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
         return deduped.length > 0 ? deduped : null;
     }
 
@@ -534,7 +534,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`[FAR] IMPLEMENTS("${ifaceName}") — searching ${filesToSearch.length} file(s)` +
+        logger.test(`[FAR] IMPLEMENTS("${ifaceName}") — searching ${filesToSearch.length} file(s)` +
             (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution]') + ':\n' +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
@@ -581,7 +581,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`✅ [FAR] IMPLEMENTS "${ifaceName}" — ${locations.length} reference(s) found`);
+        logger.test(`✅ [FAR] IMPLEMENTS "${ifaceName}" — ${locations.length} reference(s) found`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -743,7 +743,7 @@ export class ReferencesProvider {
         const isLocalClass = !effectiveModuleFile && !!className &&
             this.isClassDeclaredInDocument(className, document);
         if (isLocalClass) {
-            logger.error(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
+            logger.test(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
         }
 
         const filesToSearch = isLocalClass
@@ -2268,7 +2268,7 @@ export class ReferencesProvider {
             declarationFileNorm: symbolInfo.location.uri.toLowerCase(),
             declSignature: declLineText.trim()
         };
-        logger.error(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, sig="${filter.declSignature}"`);
+        logger.test(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, sig="${filter.declSignature}"`);
         return filter;
     }
 
@@ -2279,7 +2279,7 @@ export class ReferencesProvider {
         const scopeType = symbolInfo.scope.type;
 
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
-            logger.error(`[FAR] Scope="${scopeType}" → searching only current file`);
+            logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
             return [currentDocument.uri];
         }
 
@@ -2305,19 +2305,19 @@ export class ReferencesProvider {
                     }
                 }
 
-                logger.error(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets`);
+                logger.test(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets`);
                 return implFiles;
             }
             const isMember = this.isMemberFile(symbolInfo.location.uri);
             const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);
-            logger.error(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
+            logger.test(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
             if (!isMember && isProcDecl) {
                 // Non-MEMBER file procedure declaration at module level (PROGRAM file MAP entry) —
                 // fall through to global search so all call sites are found.
             } else {
                 // MEMBER-file module symbols are visible only within that MEMBER module.
                 // PROGRAM-file module-level data (non-procedure) also stays local.
-                logger.error(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
+                logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
         }
@@ -2353,7 +2353,7 @@ export class ReferencesProvider {
                         allFiles.push(uri);
                     }
                 }
-                logger.error(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
                 return allFiles;
             }
 
@@ -2369,11 +2369,11 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.error(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
             return allFiles;
         }
 
-        logger.error(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
+        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
 
         return [...alwaysInclude];
     }

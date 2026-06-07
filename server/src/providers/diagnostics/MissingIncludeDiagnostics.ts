@@ -167,7 +167,7 @@ export async function validateMissingIncludes(
             ? ` It also requires project constants: ${missingConstants.join(', ')}.`
             : '';
 
-        logger.error(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}${missingConstants.length > 0 ? ` + ${missingConstants.length} missing constants` : ''}`);
+        logger.test(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}${missingConstants.length > 0 ? ` + ${missingConstants.length} missing constants` : ''}`);
 
         diagnostics.push({
             severity: DiagnosticSeverity.Warning,

@@ -43,7 +43,7 @@ export class GlobalSolutionHistory {
         configuration?: string
     ): Promise<void> {
         if (!this.context) {
-            logger.error("GlobalSolutionHistory not initialized");
+            logger.test("GlobalSolutionHistory not initialized");
             return;
         }
 
@@ -85,7 +85,7 @@ export class GlobalSolutionHistory {
      */
     static async getReferences(): Promise<SolutionReference[]> {
         if (!this.context) {
-            logger.error("GlobalSolutionHistory not initialized");
+            logger.test("GlobalSolutionHistory not initialized");
             return [];
         }
 
@@ -144,7 +144,7 @@ export class GlobalSolutionHistory {
      */
     static async clear(): Promise<void> {
         if (!this.context) {
-            logger.error("GlobalSolutionHistory not initialized");
+            logger.test("GlobalSolutionHistory not initialized");
             return;
         }
 
@@ -157,7 +157,7 @@ export class GlobalSolutionHistory {
      */
     static async removeSolution(solutionFile: string): Promise<void> {
         if (!this.context) {
-            logger.error("GlobalSolutionHistory not initialized");
+            logger.test("GlobalSolutionHistory not initialized");
             return;
         }
 

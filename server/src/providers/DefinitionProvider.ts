@@ -117,7 +117,7 @@ export class DefinitionProvider {
                 let typeArgMatch: RegExpExecArray | null;
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
-                        logger.error(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
+                        logger.test(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
                         return this.findClassTypeDefinition(word, document);
                     }
                 }
@@ -1607,7 +1607,7 @@ export class DefinitionProvider {
                     // PREFIX-CHECK: Get the symbol to check if it's a structure field with prefix requirements
                     const symbolTokens = this.tokenCache.getTokens(document);
                     if (!symbolTokens || symbolTokens.length === 0) {
-                        logger.error(`PREFIX-CHECK: No tokens found for document ${document.uri}`);
+                        logger.test(`PREFIX-CHECK: No tokens found for document ${document.uri}`);
                         // Don't return early - continue to check if this is a structure field
                         // If we can't get symbols, we can't validate, so skip this match
                         continue;
@@ -2146,7 +2146,7 @@ export class DefinitionProvider {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {
             timeoutId = setTimeout(() => {
-                logger.error(`⏱️ [DEF] findClassTypeDefinition timed out for "${word}" — index build too slow`);
+                logger.test(`⏱️ [DEF] findClassTypeDefinition timed out for "${word}" — index build too slow`);
                 resolve(null);
             }, 10000);
         });
@@ -2163,7 +2163,7 @@ export class DefinitionProvider {
             if (!info) return null;
 
             const uri = `file:///${info.filePath.replace(/\\/g, '/')}`;
-            logger.error(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
+            logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
             return Location.create(uri, Range.create(info.line, 0, info.line, 0));
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
