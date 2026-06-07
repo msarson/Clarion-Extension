@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
 import { DocumentStructure } from './DocumentStructure';
 import LoggerManager from './logger';
+import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("TokenCache");
 logger.setLevel("error");
@@ -33,6 +34,13 @@ interface CachedTokenData {
 export class TokenCache {
     private static instance: TokenCache;
     private cache = new Map<string, CachedTokenData>();
+    // #188 — parsed tokens for CLOSED files (no live TextDocument), keyed by
+    // lowercased URI and validated by file mtime. Without this, every cross-file
+    // consumer (Find-All-References, CodeLens counts) re-read + re-tokenized the
+    // same on-disk file from scratch on every call — e.g. a single reference
+    // count re-parsed StringTheory.clw ~4-5×. mtime validation guarantees we
+    // never serve stale tokens after an external (on-disk) change.
+    private closedFileCache = new Map<string, { tokens: Token[]; mtimeMs: number }>();
 
     private constructor() {
         // Private constructor to enforce singleton pattern
@@ -280,6 +288,40 @@ export class TokenCache {
     }
 
     /**
+     * #188 — Get tokens for a URI without a live TextDocument (closed on-disk
+     * file). Resolution order:
+     *   1. live editor buffer (open file) — always wins, never stale;
+     *   2. mtime-validated closed-file cache — reused across calls so a file is
+     *      tokenized at most once until it changes on disk;
+     *   3. read + tokenize from disk (tokenize() runs DocumentStructure.process()
+     *      internally — we do NOT process() again).
+     * Returns [] if the file is missing/unreadable.
+     */
+    public getTokensForClosedFile(uri: string): Token[] {
+        const open = this.getTokensByUriCaseInsensitive(uri);
+        if (open) return open;
+
+        const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        let mtimeMs: number;
+        try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return []; }
+
+        const key = uri.toLowerCase();
+        const cached = this.closedFileCache.get(key);
+        if (cached && cached.mtimeMs === mtimeMs) return cached.tokens;
+
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            // tokenize() builds + runs DocumentStructure.process() internally; a
+            // second process() here would be redundant (and double-push children).
+            const tokens = new ClarionTokenizer(content).tokenize();
+            this.closedFileCache.set(key, { tokens, mtimeMs });
+            return tokens;
+        } catch {
+            return [];
+        }
+    }
+
+    /**
      * Get the cached DocumentStructure for a URI without a TextDocument.
      * Returns null when the URI has no cache entry or the structure has not
      * been built yet. Callers that need a guaranteed structure should use
@@ -297,6 +339,7 @@ export class TokenCache {
     public clearTokens(uri: string): void {
         logger.info(`🗑️ Clearing tokens for ${uri}`);
         this.cache.delete(uri);
+        this.closedFileCache.delete(uri.toLowerCase()); // #188
     }
 
     /**
@@ -305,6 +348,7 @@ export class TokenCache {
     public clearAllTokens(): void {
         logger.info(`🗑️ Clearing all tokens`);
         this.cache.clear();
+        this.closedFileCache.clear(); // #188
     }
 
     /**

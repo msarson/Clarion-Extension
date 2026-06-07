@@ -3114,25 +3114,13 @@ export class ReferencesProvider {
      * falls back to reading and tokenizing from disk for closed files.
      */
     private getTokensForUri(uri: string): Token[] {
-        // Case-insensitive fallback bridges FRG-lowercased URIs (Tier 6 globalScope
-        // load path, etc.) with TokenCache's original-case keys (`671d7cd8`).
-        const cached = this.tokenCache.getTokensByUriCaseInsensitive(uri);
-        if (cached) return cached;
-
-        try {
-            const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            if (!fs.existsSync(filePath)) return [];
-
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const tokenizer = new ClarionTokenizer(content);
-            const tokens = tokenizer.tokenize();
-            const structure = new DocumentStructure(tokens);
-            structure.process();
-            return tokens;
-        } catch (error) {
-            logger.error(`❌ Failed to tokenize ${uri}: ${error instanceof Error ? error.message : String(error)}`);
-            return [];
-        }
+        // #188 — delegate to the shared mtime-validated closed-file cache so each
+        // file is tokenized at most once (open buffers still win; case-insensitive
+        // lookup preserved inside). Previously this re-read + re-tokenized from
+        // disk on EVERY call AND ran DocumentStructure.process() a second time
+        // (tokenize() already runs it), so one reference count re-parsed the same
+        // huge file ~4-5×.
+        return this.tokenCache.getTokensForClosedFile(uri);
     }
 
     /**
