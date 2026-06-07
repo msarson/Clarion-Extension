@@ -486,13 +486,14 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             });
             return result;
         };
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags] = await Promise.all([
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
             timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
             timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
             timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
             timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document)),
             timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
             timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
+            timeIt('ifaceImpl', DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)),
         ]);
         const asyncMs = Date.now() - asyncStart;
 
@@ -508,7 +509,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags];
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);

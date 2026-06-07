@@ -6,7 +6,7 @@ import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
 import { validateStructureTerminators, validateConditionalBlocks, validateFileStructures, validateCaseStructures, validateExecuteStructures, validateViewProjectFields } from './diagnostics/StructureDiagnostics';
-import { validateClassInterfaceImplementation, validateClassProperties } from './diagnostics/ClassDiagnostics';
+import { validateClassInterfaceImplementationAsync as _validateClassInterfaceImplementationAsync, validateClassProperties } from './diagnostics/ClassDiagnostics';
 import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, validateDiscardedReturnValues as _validateDiscardedReturnValues } from './diagnostics/ReturnValueDiagnostics';
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateUndeclaredVariablesAsync as _validateUndeclaredVariablesAsync } from './diagnostics/UndeclaredVariableDiagnostics';
@@ -43,7 +43,10 @@ export class DiagnosticProvider {
             ...validateCaseStructures(tokens, document),
             ...validateExecuteStructures(tokens, document),
             ...validateViewProjectFields(tokens, document),
-            ...validateClassInterfaceImplementation(tokens, document),
+            // #181: class-interface-implementation moved to the async pass — it
+            // resolves cross-file interfaces via the INCLUDE chain (MemberLocator).
+            // See DiagnosticProvider.validateClassInterfaceImplementation + the
+            // server.ts await site.
             ...validateReturnStatements(tokens, document),
             ...validateClassProperties(tokens, document),
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
@@ -75,6 +78,19 @@ export class DiagnosticProvider {
         memberLocator: MemberLocatorService
     ): Promise<Diagnostic[]> {
         return _validateDiscardedReturnValues(tokens, document, memberLocator);
+    }
+
+    /**
+     * Async pass: warn when a CLASS implements an interface but omits one of its
+     * methods — resolving the interface same-file or via the class file's INCLUDE
+     * chain. Closes #165 (same-file) / #181 (cross-file).
+     */
+    public static async validateClassInterfaceImplementation(
+        tokens: Token[],
+        document: TextDocument,
+        memberLocator: MemberLocatorService
+    ): Promise<Diagnostic[]> {
+        return _validateClassInterfaceImplementationAsync(tokens, document, memberLocator);
     }
 
     /** Async pass: warn when a procedure implementation has no MAP declaration in the parent file. Closes #89 */

@@ -466,6 +466,164 @@ export class MemberLocatorService {
         return null;
     }
 
+    /**
+     * #181 — enumerates ALL method names declared in an INTERFACE, resolving the
+     * interface through the same search order as {@link findMemberInInterface}:
+     * current document → INCLUDE chain → StructureDeclarationIndexer.
+     *
+     * In Clarion a CLASS that implements an interface from another file pulls it
+     * in via `INCLUDE('iface.inc'),ONCE`, so the interface is reachable by
+     * walking the class file's own INCLUDE chain — this is the inverse of the
+     * single-method `findMemberInInterface` lookup.
+     *
+     * Returns the declared method names (original case), or `null` when the
+     * interface cannot be located anywhere reachable — letting callers skip
+     * validation rather than false-positive on an unresolvable interface.
+     */
+    async enumerateInterfaceMembers(
+        ifaceName: string,
+        document: TextDocument
+    ): Promise<string[] | null> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        // 1. Current document
+        const local = this.enumerateInterfaceMembersFromTokens(tokens, ifaceName);
+        if (local) return local;
+
+        // 2. INCLUDE chain reachable from this document
+        const fromInclude = await this.enumerateInterfaceMembersInIncludeChain(
+            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+        );
+        if (fromInclude) return fromInclude;
+
+        // 3. StructureDeclarationIndexer (libsrc / accessory paths)
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(ifaceName);
+        if (infos.length > 0) {
+            const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
+            const data = await this.loadDocument(info.filePath);
+            if (data) {
+                const fromSdi = this.enumerateInterfaceMembersFromTokens(data.tokens, ifaceName);
+                if (fromSdi) return fromSdi;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * #165/#181 — collects the interface-method implementations a class actually
+     * provides, keyed `interfacename.methodname` (lowercased).
+     *
+     * Per the Clarion INTERFACE docs (verified against LibSrc, e.g.
+     * `CSocketConnection.IConnection.CloseSocket PROCEDURE` in abapi.clw), an
+     * implementing class does NOT re-declare interface methods in its body — it
+     * defines them in its implementation module as three-part
+     * `Class.Interface.Method PROCEDURE` definitions. Those tokenize as
+     * `MethodImplementation` tokens with a 3-part dotted `.label`.
+     *
+     * `moduleFile` is the `.clw` named in the class's `MODULE(...)` attribute.
+     * Returns `null` when it can't be resolved/loaded so callers skip rather than
+     * false-positive.
+     */
+    async collectImplementedInterfaceMethods(
+        className: string,
+        moduleFile: string,
+        document: TextDocument
+    ): Promise<Set<string> | null> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const resolved = this.resolveFilePath(moduleFile, path.dirname(docPath));
+        if (!resolved) return null;
+        const data = await this.loadDocument(resolved);
+        if (!data) return null;
+        return this.scanThreePartImpls(data.tokens, className);
+    }
+
+    /**
+     * #165/#181 — token-scanning variant of {@link collectImplementedInterfaceMethods}
+     * for a class declared AND implemented in the same module (a PROGRAM/MEMBER
+     * `.clw` with no `MODULE(...)` attribute) — the three-part impls are in the
+     * document's own tokens.
+     */
+    collectImplementedInterfaceMethodsFromTokens(
+        tokens: Token[],
+        className: string
+    ): Set<string> {
+        return this.scanThreePartImpls(tokens, className);
+    }
+
+    /** Collects `interface.method` (lowercased) for every three-part
+     * `Class.Interface.Method` MethodImplementation token of `className`. */
+    private scanThreePartImpls(tokens: Token[], className: string): Set<string> {
+        const clsLower = className.toLowerCase();
+        const impls = new Set<string>();
+        for (const t of tokens) {
+            if (t.subType !== TokenType.MethodImplementation || !t.label) continue;
+            const parts = t.label.split('.');
+            if (parts.length !== 3) continue;
+            if (parts[0].toLowerCase() !== clsLower) continue;
+            impls.add(`${parts[1].toLowerCase()}.${parts[2].toLowerCase()}`);
+        }
+        return impls;
+    }
+
+    /** Walks the INCLUDE chain enumerating an INTERFACE's method names (#181). */
+    private async enumerateInterfaceMembersInIncludeChain(
+        ifaceName: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<string[] | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (data) {
+                const found = this.enumerateInterfaceMembersFromTokens(data.tokens, ifaceName);
+                if (found) return found;
+
+                const nested = await this.enumerateInterfaceMembersInIncludeChain(
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                );
+                if (nested) return nested;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Collects ALL method names declared inside the named INTERFACE in `tokens`.
+     * Returns `null` when the interface is not declared in these tokens (so the
+     * caller keeps searching), or the (possibly empty) name list when it is.
+     * Mirrors {@link findInterfaceMemberFromTokens}'s interface/method detection.
+     */
+    private enumerateInterfaceMembersFromTokens(
+        tokens: Token[],
+        ifaceName: string
+    ): string[] | null {
+        const ifaceToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase() &&
+            t.finishesAt !== undefined
+        );
+        if (!ifaceToken || ifaceToken.finishesAt === undefined) return null;
+        const ifaceEnd = ifaceToken.finishesAt;
+
+        const names: string[] = [];
+        for (const token of tokens) {
+            if (token.line <= ifaceToken.line || token.line >= ifaceEnd) continue;
+            if (!TokenHelper.isProcedureOrFunction(token)) continue;
+            if (token.subType !== TokenType.InterfaceMethod) continue;
+            if (token.label) names.push(token.label);
+        }
+        return names;
+    }
+
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
     private async findInIncludeChain(
         className: string,
