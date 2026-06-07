@@ -630,7 +630,7 @@ export class DocumentStructure {
             } else if (token.type === TokenType.Structure) {
                 this.handleStructureToken(token, i);
             } else if (token.type === TokenType.EndStatement) {
-                this.handleEndStatementForStructure(token);
+                this.handleEndStatementForStructure(token, i);
             } else if (token.type === TokenType.Label && token.start === 0) {
                 // Special case: CODE/DATA at column 0 should be execution markers, not field labels
                 const upperValue = token.value.toUpperCase();
@@ -719,6 +719,17 @@ export class DocumentStructure {
         const containers: Token[] = [...cases, ...ifs];
         if (containers.length === 0) return;
 
+        // #188 — collect the OF/OROF/ELSE/ELSIF branch keywords ONCE (O(T)) so each
+        // container scans this small list instead of re-scanning every token in the
+        // document (was O(containers × T)). Token order is preserved.
+        const isBranchKeyword = (v: string): boolean => {
+            const u = v.toUpperCase();
+            return u === 'OF' || u === 'OROF' || u === 'ELSE' || u === 'ELSIF';
+        };
+        const allBranchTokens = this.tokens.filter(t =>
+            t.type === TokenType.ConditionalContinuation && isBranchKeyword(t.value)
+        );
+
         for (const container of containers) {
             // Always reset — process() may run more than once on the same DS.
             container.branches = undefined;
@@ -735,11 +746,8 @@ export class DocumentStructure {
             );
 
             const branchTokens: Token[] = [];
-            for (const t of this.tokens) {
-                if (t.type !== TokenType.ConditionalContinuation) continue;
+            for (const t of allBranchTokens) {
                 if (t.line <= container.line || t.line >= container.finishesAt) continue;
-                const upper = t.value.toUpperCase();
-                if (upper !== 'OF' && upper !== 'OROF' && upper !== 'ELSE' && upper !== 'ELSIF') continue;
 
                 // Skip if inside a nested CASE/IF — that pass owns it.
                 const inNested = inner.some(n =>
@@ -1258,6 +1266,17 @@ export class DocumentStructure {
     }
 
     private assignMaxLabelLengths(): void {
+        // #188 — index children by parent once (O(T)) instead of
+        // `this.tokens.filter(t => t.parent === token)` per structure (O(S×T)).
+        // Same predicate, just indexed → provably identical results.
+        const childrenByParent = new Map<Token, Token[]>();
+        for (const t of this.tokens) {
+            if (!t.parent) continue;
+            let arr = childrenByParent.get(t.parent);
+            if (!arr) { arr = []; childrenByParent.set(t.parent, arr); }
+            arr.push(t);
+        }
+
         for (const token of this.tokens) {
             if (token.type !== TokenType.Structure) continue;
 
@@ -1272,32 +1291,22 @@ export class DocumentStructure {
 
             let maxLabelLength = 0;
 
-            const topLabel = this.tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === token.line &&
-                t.start === 0
-            );
-
+            // Top label: the column-0 Label on the structure's own line.
+            // (tokensByLine preserves token order, so .find returns the same first match.)
+            const sameLine = this.tokensByLine.get(token.line) || [];
+            const topLabel = sameLine.find(t => t.type === TokenType.Label && t.start === 0);
             if (topLabel) {
                 maxLabelLength = topLabel.value.length;
             }
 
-            let structureTokens = this.tokens.filter(t => t.parent === token);
+            // All Label children. The former separate `inlineLabels` pass
+            // (parent===token, start===0, Label, line>token.line) is a strict
+            // subset of this loop, so its Math.max is already covered here.
+            const structureTokens = childrenByParent.get(token) || [];
             for (const childToken of structureTokens) {
                 if (childToken.type === TokenType.Label) {
                     maxLabelLength = Math.max(maxLabelLength, childToken.value.length);
                 }
-            }
-
-            let inlineLabels = this.tokens.filter(t =>
-                t.line > token.line &&
-                t.start === 0 &&
-                t.type === TokenType.Label &&
-                t.parent === token
-            );
-
-            for (const label of inlineLabels) {
-                maxLabelLength = Math.max(maxLabelLength, label.value.length);
             }
 
             token.maxLabelLength = maxLabelLength;
@@ -1711,7 +1720,7 @@ export class DocumentStructure {
         }
     }
 
-    private handleEndStatementForStructure(token: Token): void {
+    private handleEndStatementForStructure(token: Token, index: number): void {
         // ✅ Check if this END/period is an inline terminator
         // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
         const sameLine = this.tokensByLine.get(token.line) || [];
@@ -1749,8 +1758,9 @@ export class DocumentStructure {
             }
         }
         
-        // Look ahead to find the next non-comment token
-        const currentIndex = this.tokens.indexOf(token);
+        // Look ahead to find the next non-comment token. #188 — use the caller's
+        // loop index instead of this.tokens.indexOf(token) (O(T) per END → O(1)).
+        const currentIndex = index;
         let nextSignificantToken: Token | undefined;
         
         for (let i = currentIndex + 1; i < this.tokens.length; i++) {
