@@ -14,6 +14,10 @@ interface OutputChannel {
  *     SILENCES all standard-severity output. Use for per-module perf
  *     instrumentation that should be cleanly togglable (set to "perf" to
  *     measure, set back to "error" to silence).
+ *   - "test" — SEPARATE axis. A logger set to "test" emits test() messages and
+ *     SILENCES all standard-severity output. Use for temporary, targeted
+ *     diagnostic tracing: flip a module to "test" to see ONLY its test() lines
+ *     (no info/debug flood), then set back to "error".
  *
  * Pattern:
  *   const perfLogger = LoggerManager.getLogger("MyModule.Perf", "perf");
@@ -21,7 +25,7 @@ interface OutputChannel {
  *   // ...later, to silence:
  *   perfLogger.setLevel("error");
  */
-type LogLevel = "debug" | "info" | "warn" | "error" | "perf";
+type LogLevel = "debug" | "info" | "warn" | "error" | "perf" | "test";
 
 class Logger {
     private level: LogLevel;
@@ -41,8 +45,9 @@ class Logger {
     private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
         if (!Logger.enabled) return false;
         if (this.fullDebugging) return true;
-        // "perf" level silences all standard-severity output — perf is its own channel.
-        if (this.level === "perf") return false;
+        // "perf" / "test" levels are their own channels — they silence all
+        // standard-severity output.
+        if (this.level === "perf" || this.level === "test") return false;
         const levels = ["debug", "info", "warn", "error"];
         return levels.indexOf(level) >= levels.indexOf(this.level);
     }
@@ -91,6 +96,17 @@ class Logger {
             ? ` | ${Object.entries(metrics).map(([k, v]) => `${k}=${v}`).join(', ')}`
             : '';
         this.emit('📊 PERF:', message + suffix, []);
+    }
+
+    /**
+     * 🔬 Targeted diagnostic trace. Emits ONLY when this logger's level is "test"
+     * (a clean, flood-free channel for temporary instrumentation — no need to
+     * enable "info" and drown in unrelated output). Set the module's logger to
+     * "test" to capture, back to "error" to silence.
+     */
+    test(message: string, ...args: any[]) {
+        if (this.level !== "test") return;
+        this.emit('🔬 TEST:', message, args);
     }
 
     setLevel(newLevel: LogLevel) {
