@@ -12,6 +12,7 @@ import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
+import { shouldRestoreSolutionFromHistory } from '../utils/SolutionFallbackPolicy';
 import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
@@ -230,9 +231,12 @@ export async function setupFolderDependentFeatures(
             }
 
             // If workspace settings don't have a solution file, check global history
-            // for a match on the current workspace folder (happens after a cross-folder switch)
-            if (!globalSolutionFile && workspace.workspaceFolders?.length) {
-                const currentFolder = workspace.workspaceFolders[0].uri.fsPath;
+            // for a match on the current workspace folder (happens after a cross-folder
+            // switch). Gate via the pure policy (#169/#104) so the decision is
+            // unit-testable and stays in lock-step with the explicit-close flag.
+            const hasWorkspaceFolder = (workspace.workspaceFolders?.length ?? 0) > 0;
+            if (shouldRestoreSolutionFromHistory(explicitlyClosed, globalSolutionFile, hasWorkspaceFolder)) {
+                const currentFolder = workspace.workspaceFolders![0].uri.fsPath;
                 const refs = await GlobalSolutionHistory.getValidReferences();
                 const match = refs.find(r => r.folderPath.toLowerCase() === currentFolder.toLowerCase());
                 if (match) {

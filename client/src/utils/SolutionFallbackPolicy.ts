@@ -69,3 +69,28 @@ export type SolutionCloseReason = 'user' | 'switch';
 export function shouldMarkExplicitlyClosed(reason: SolutionCloseReason = 'user'): boolean {
     return reason === 'user';
 }
+
+/**
+ * #169/#104 — should `ActivationManager.setupFolderDependentFeatures` attempt to
+ * restore the last solution from `GlobalSolutionHistory` (the cross-folder-switch
+ * auto-open path)?
+ *
+ * Returns `true` only when:
+ *   - `explicitlyClosed` is `false` — a user "Close Solution" suppresses
+ *     auto-restore across restarts (#146/#169; the parallel of
+ *     {@link shouldUseSolutionFallback}'s flag guard, which the #169 regression
+ *     was missing on this code path);
+ *   - `globalSolutionFile` is empty — workspace settings don't already define a
+ *     solution (if they do, that path handles the load; history isn't needed);
+ *   - a workspace folder is open — history is keyed by folder path (#104, the
+ *     after-folder-switch restore).
+ */
+export function shouldRestoreSolutionFromHistory(
+    explicitlyClosed: boolean,
+    globalSolutionFile: string,
+    hasWorkspaceFolder: boolean
+): boolean {
+    if (explicitlyClosed) return false;
+    if (globalSolutionFile) return false;
+    return hasWorkspaceFolder;
+}
