@@ -240,6 +240,11 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return this.indexes.has(this.normalizeKey(projectPath));
     }
 
+    /** Returns true if ANY project index is built (e.g. a solution is loaded). */
+    hasAnyIndex(): boolean {
+        return this.indexes.size > 0;
+    }
+
     async getOrBuildIndex(projectPath: string): Promise<StructureIndex> {
         // Without a redirection file we cannot meaningfully scan anything.
         // Return an empty uncached index so the first real call after solution
