@@ -2016,11 +2016,11 @@ connection.onDocumentHighlight(async (params) => {
 });
 
 // Handle workspace symbol search
-connection.onWorkspaceSymbol(async (params) => {
+connection.onWorkspaceSymbol(async (params, token) => {
     if (!serverInitialized) return [];
 
     try {
-        return await workspaceSymbolProvider.provideWorkspaceSymbols(params.query);
+        return await workspaceSymbolProvider.provideWorkspaceSymbols(params.query, token);
     } catch (error) {
         logger.error(`❌ Error providing workspace symbols: ${error instanceof Error ? error.message : String(error)}`);
         return [];

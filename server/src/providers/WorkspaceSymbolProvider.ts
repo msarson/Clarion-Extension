@@ -6,6 +6,8 @@ import { SolutionManager } from '../solution/solutionManager';
 import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from './ClarionDocumentSymbolProvider';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer } from '../ClarionTokenizer';
+import { CancellationToken } from 'vscode-languageserver';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WorkspaceSymbolProvider");
@@ -28,13 +30,18 @@ export class WorkspaceSymbolProvider {
         this.symbolProvider = new ClarionDocumentSymbolProvider();
     }
 
-    public async provideWorkspaceSymbols(query: string): Promise<SymbolInformation[]> {
+    public async provideWorkspaceSymbols(query: string, token?: CancellationToken): Promise<SymbolInformation[]> {
         const results: SymbolInformation[] = [];
         const queryLower = query.toLowerCase();
         const seenUris = new Set<string>();
+        // #187 — Ctrl+T scans every (uncached) solution file with a full tokenize.
+        // Yield the event loop periodically and bail on cancellation (a superseded
+        // query) so it doesn't block hover/F12 or run to completion needlessly.
+        let scanned = 0;
 
         // 1. Search all cached documents (open files, recently tokenized)
         for (const uri of this.tokenCache.getAllCachedUris()) {
+            if (await cooperativeCheckpoint(scanned++, token)) return results;
             seenUris.add(uri);
             const tokens = this.tokenCache.getTokensByUri(uri);
             if (!tokens) continue;
@@ -46,6 +53,7 @@ export class WorkspaceSymbolProvider {
         if (solutionManager?.solution) {
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
+                    if (await cooperativeCheckpoint(scanned++, token)) return results;
                     const fullPath = path.join(project.path, sourceFile.relativePath);
                     const uri = 'file:///' + fullPath.replace(/\\/g, '/');
                     if (seenUris.has(uri)) continue;
