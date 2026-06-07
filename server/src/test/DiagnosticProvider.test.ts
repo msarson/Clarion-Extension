@@ -1573,17 +1573,14 @@ MainProc    PROCEDURE()
         });
     });
 
-    // ── Pre-#164 mirror suite — kept for historical coverage + DS-only extras ──────────────
-    // Pre-#164, the suite ABOVE used the raw-tokenizer path (no DocumentStructure),
-    // exercising the !hasSubType else branch in
-    // `validateDiscardedReturnValuesForPlainCalls`. That branch was static-confirmed
-    // DEAD in production (see #164 audit-trail commit) and removed; the suite above
-    // was migrated to DS-path so its 13 tests now exercise the production code path.
-    // This suite retains the original DS-path coverage (3 mirrors of the first suite's
-    // first-3 cases) plus the DS-only extras (shorthand-MAP-MODULE + GlobalProcedure
-    // tests) that aren't mirrored above.
+    // ── DS-only extras for validateDiscardedReturnValuesForPlainCalls ──────────────
+    // The suite ABOVE migrated to the DS-path at #164 and now runs all 13 tests
+    // through the production code path. This suite keeps only the DS-only cases
+    // that AREN'T covered above (shorthand-MAP-MODULE + GlobalProcedure). The 3
+    // original mirror tests (bare-call / void-inherit / MODULE-blocks) were
+    // removed at #173 — they duplicated the first suite's first-3 cases exactly.
 
-    suite('validateDiscardedReturnValuesForPlainCalls (DS-path — original mirror suite)', () => {
+    suite('validateDiscardedReturnValuesForPlainCalls (DS-path — DS-only extras)', () => {
 
         function discardDiagsWithDS(code: string) {
             const doc = createDocument(code);
@@ -1593,62 +1590,6 @@ MainProc    PROCEDURE()
                 /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
             );
         }
-
-        test('bare call to returning MAP procedure warns (DS path)', () => {
-            const code = `
-  MAP
-GetStatus   PROCEDURE(),LONG
-  END
-
-MainProc    PROCEDURE()
-  CODE
-  GetStatus()
-`;
-            const diags = discardDiagsWithDS(code);
-            assert.strictEqual(diags.length, 1, 'should warn once');
-        });
-
-        test('void procedure followed by returning procedure: void must not inherit return type (DS path)', () => {
-            const code = `
-  MAP
-VoidProc    PROCEDURE(STRING pText)
-Returning   PROCEDURE(),LONG
-  END
-
-MainProc    PROCEDURE()
-  CODE
-  VoidProc('test')
-  Returning()
-`;
-            const diags = discardDiagsWithDS(code);
-            assert.ok(diags.every(d => d.message.includes("'Returning'")), 'VoidProc must not warn');
-            assert.strictEqual(diags.length, 1, 'only Returning() should warn');
-        });
-
-        test('MAP with MODULE blocks plus returning proc outside MODULE warns (DS path)', () => {
-            const code = `
-  MAP
-    MODULE('kernel32')
-      cz_LoadLibrary(*CSTRING lpFileName),LONG,PASCAL,RAW
-      cz_FreeLibrary(LONG hModule),BOOL,PROC,PASCAL,RAW
-    END
-    MODULE('user32')
-      ShowWindow(LONG hWnd, LONG nCmdShow),BOOL,PASCAL,RAW
-    END
-Trace       PROCEDURE(STRING p_LogText),LONG
-VoidHelper  PROCEDURE(STRING pText)
-  END
-
-MainProc    PROCEDURE()
-  CODE
-  Trace('hello')
-  Trace('world')
-  VoidHelper('no warn')
-`;
-            const diags = discardDiagsWithDS(code);
-            assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
-            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
-        });
 
         test('shorthand MAP MODULE proc with param types but no return type must not warn (DS path)', () => {
             // PQClear(Long pResult),Raw,C,Name('PQClear'),dll(1) — the parameter type Long
