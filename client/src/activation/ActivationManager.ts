@@ -18,7 +18,7 @@ import { startLanguageServer } from '../server/LanguageServerManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("ActivationManager");
-logger.setLevel("info"); // #183 diag: trace activation → solution auto-reopen flow
+logger.setLevel("error");
 
 export interface ActivationState {
     client?: LanguageClient;

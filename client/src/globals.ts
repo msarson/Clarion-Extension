@@ -6,7 +6,7 @@ import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");
-logger.setLevel("info"); // #183 diag: trace solution auto-reopen / explicit-close gate
+logger.setLevel("error");
 
 // Interface for solution settings
 export interface ClarionSolutionSettings {
@@ -517,11 +517,6 @@ export const globalSettings = {
         // `initializeFromWorkspace` calls within one activation all
         // see the same flag value — all suppress.
         const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
-        // #183 diag: surface the gate inputs so we can see exactly why auto-reopen
-        // does or doesn't fire on activation.
-        logger.info(`🔎 [#183] auto-reopen gate: explicitlyClosed=${explicitlyClosed}, ` +
-            `currentSolution="${workspace.getConfiguration().get<string>("clarion.currentSolution", "") || '(empty)'}", ` +
-            `folderOpen=${(workspace.workspaceFolders?.length ?? 0) > 0}`);
         if (explicitlyClosed) {
             logger.info("ℹ️ Solution was explicitly closed — suppressing all auto-load (#146 hardened)");
             return;

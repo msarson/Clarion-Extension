@@ -17,7 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionInitializer");
-logger.setLevel("info"); // #183 diag: trace solution initialization on activation
+logger.setLevel("error");
 
 /**
  * Handles workspace trust and initial solution setup

@@ -16,7 +16,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionOpener");
-logger.setLevel("info"); // #183 diag: trace open/close + explicit-close flag writes
+logger.setLevel("error");
 
 /**
  * Checks whether the selected solution lives in a different folder than the current
