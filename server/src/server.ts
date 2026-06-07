@@ -657,6 +657,9 @@ connection.onSelectionRanges((params) => {
 
 // Handle CodeLens requests — return unresolved lenses (ranges + data only)
 connection.onCodeLens((params) => {
+    // #185 — reference-count CodeLens is opt-out; when disabled, emit no lenses
+    // so no reference searches run (resolveCodeLens is never called).
+    if (!serverSettings.referencesCodeLensEnabled) return [];
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
     try {
@@ -1191,6 +1194,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     defaultLookupExtensions?: string[]; // Add default lookup extensions
     undeclaredVariablesEnabled?: boolean; // #62 opt-in
     indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
+    referencesCodeLensEnabled?: boolean; // #185 opt-out
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1227,6 +1231,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
         if (params.indistinguishablePrototypesEnabled !== undefined) {
             serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
+        }
+        if (params.referencesCodeLensEnabled !== undefined) {
+            serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
         }
 
         // Always-visible startup summary of Clarion folder configuration

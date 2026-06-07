@@ -1281,6 +1281,11 @@
           "default": true,
           "description": "Enabled by default. Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. Toggling requires reloading the VS Code window (issue #121)."
         },
+        "clarion.referencesCodeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enabled by default. Shows a '… references' CodeLens above each procedure, method implementation, and CLASS, counting usages across the solution. Each lens runs a Find-All-References, which can make very large classes (e.g. StringTheory) sluggish — set to false to disable. Toggling requires reloading the VS Code window (issue #185)."
+        },
         "clarion.activeVersion": {
           "type": "string",
           "default": "",
