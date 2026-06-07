@@ -82,6 +82,39 @@ suite('#189 ReferenceIndex', () => {
         assert.strictEqual(idx.count('proc:x'), 0);
     });
 
+    test('keysReferencingFile lists the symbols with sites in a file', () => {
+        const idx = new ReferenceIndex();
+        idx.add('proc:a', site('file:///x.clw', 1));
+        idx.add('proc:b', site('file:///x.clw', 2));
+        idx.add('proc:c', site('file:///y.clw', 3));
+
+        const inX = idx.keysReferencingFile('file:///x.clw').sort();
+        assert.deepStrictEqual(inX, ['proc:a', 'proc:b']);
+        assert.deepStrictEqual(idx.keysReferencingFile('file:///y.clw'), ['proc:c']);
+        assert.deepStrictEqual(idx.keysReferencingFile('file:///none.clw'), []);
+    });
+
+    test('keysReferencingFile is case-insensitive on the URI', () => {
+        const idx = new ReferenceIndex();
+        idx.add('proc:a', site('file:///C:/P/X.clw', 1));
+        assert.deepStrictEqual(idx.keysReferencingFile('file:///c:/p/x.clw'), ['proc:a']);
+    });
+
+    test('removeSymbol drops the symbol from every file it touched', () => {
+        const idx = new ReferenceIndex();
+        idx.add('method:st.addline', site('file:///a.clw', 10));
+        idx.add('method:st.addline', site('file:///b.clw', 20));
+        idx.add('proc:other', site('file:///a.clw', 5));
+
+        idx.removeSymbol('method:st.addline');
+
+        assert.strictEqual(idx.count('method:st.addline'), 0);
+        // its keys are gone from both files, but the other symbol survives
+        assert.deepStrictEqual(idx.keysReferencingFile('file:///a.clw'), ['proc:other']);
+        assert.deepStrictEqual(idx.keysReferencingFile('file:///b.clw'), []);
+        assert.strictEqual(idx.count('proc:other'), 1);
+    });
+
     test('ready flag + clear', () => {
         const idx = new ReferenceIndex();
         assert.strictEqual(idx.isReady(), false);
