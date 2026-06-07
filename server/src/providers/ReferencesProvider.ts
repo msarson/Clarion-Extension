@@ -62,6 +62,25 @@ export class ReferencesProvider {
     }
 
     /**
+     * #186 — number of files to scan between event-loop yields. The reference
+     * search runs on the single LSP event loop, so a long scan (esp. when driven
+     * by the reference-count CodeLens resolving per method) would otherwise block
+     * interactive requests (hover/F12) until it finishes.
+     */
+    private static readonly FILES_PER_YIELD = 25;
+
+    /**
+     * #186 — yields the event loop every {@link FILES_PER_YIELD} files so a long
+     * reference scan interleaves with (rather than blocks) interactive requests.
+     * Call with a monotonically increasing per-loop counter.
+     */
+    private async yieldIfNeeded(scannedCount: number): Promise<void> {
+        if (scannedCount > 0 && scannedCount % ReferencesProvider.FILES_PER_YIELD === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+    }
+
+    /**
      * Find all references to the symbol at the given position.
      */
     public async provideReferences(
@@ -306,7 +325,9 @@ export class ReferencesProvider {
                 t.type === TokenType.Structure &&
                 t.subType === TokenType.Class
             );
+        let ycPlain = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycPlain++);
             const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
@@ -415,7 +436,9 @@ export class ReferencesProvider {
         // Pre-build set of class names that implement this interface, per-file (keyed by fileUri)
         // so MethodDeclaration filtering is fast and accurate.
         const implementingClassesByFile = new Map<string, Set<string>>();
+        let ycIfaceMap = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceMap++);
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const fileContent = fileUri === document.uri
@@ -438,7 +461,9 @@ export class ReferencesProvider {
             implementingClassesByFile.set(fileUri, implementors);
         }
 
+        let ycIfaceScan = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceScan++);
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -487,7 +512,9 @@ export class ReferencesProvider {
         logger.test(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
 
         // ── Call sites: varName.MethodName() where varName &IfaceName ──
+        let ycIfaceCall = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceCall++);
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const varNames = this.collectInterfaceVarNames(ft, ifaceName);
@@ -538,7 +565,9 @@ export class ReferencesProvider {
             (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution]') + ':\n' +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
+        let ycImpl = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycImpl++);
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -869,7 +898,9 @@ export class ReferencesProvider {
             seenLowerUris.add(lower);
             filesToSearchDeduped.push(f);
         }
+        let ycMember = 0;
         for (const fileUri of filesToSearchDeduped) {
+            await this.yieldIfNeeded(ycMember++);
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
@@ -2953,7 +2984,9 @@ export class ReferencesProvider {
         const overloadFilter = this.buildPlainSymbolOverloadFilter(syntheticInfo, document);
 
         const locations: Location[] = [];
+        let ycProc = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycProc++);
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 
@@ -2966,12 +2999,12 @@ export class ReferencesProvider {
      * Called when the current implementation file is the target of a MODULE declared
      * inside a procedure body — only files sharing that same local-MAP scope are searched.
      */
-    private findLocalMapProcedureReferences(
+    private async findLocalMapProcedureReferences(
         word: string,
         document: TextDocument,
         includeDeclaration: boolean,
         localScope: LocalMapScope
-    ): Location[] | null {
+    ): Promise<Location[] | null> {
         const graph = FileRelationshipGraph.getInstance();
         const declaringUri = `file:///${localScope.declaringFile}`;
         const filesToSearch = new Set<string>([declaringUri, document.uri]);
@@ -3003,7 +3036,9 @@ export class ReferencesProvider {
         };
 
         const locations: Location[] = [];
+        let ycLocalMap = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycLocalMap++);
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
         }
 
