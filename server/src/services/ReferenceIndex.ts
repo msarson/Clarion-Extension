@@ -73,6 +73,28 @@ export class ReferenceIndex {
         this.byFile.delete(fk);
     }
 
+    /** The symbol keys that have at least one reference site in `uri`. */
+    keysReferencingFile(uri: string): string[] {
+        const keys = this.byFile.get(this.fileKey(uri));
+        return keys ? [...keys] : [];
+    }
+
+    /** Remove a single symbol entirely (all its sites, across all files). */
+    removeSymbol(symbolKey: string): void {
+        const sites = this.bySymbol.get(symbolKey);
+        if (sites) {
+            const files = new Set(sites.map(s => this.fileKey(s.uri)));
+            for (const fk of files) {
+                const keys = this.byFile.get(fk);
+                if (keys) {
+                    keys.delete(symbolKey);
+                    if (keys.size === 0) this.byFile.delete(fk);
+                }
+            }
+        }
+        this.bySymbol.delete(symbolKey);
+    }
+
     /** O(1) reference count for a symbol key (0 if unknown). */
     count(symbolKey: string): number {
         return this.bySymbol.get(symbolKey)?.length ?? 0;

@@ -80,6 +80,7 @@ import { CompletionProvider } from './providers/CompletionProvider';
 import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
 import { SymbolFinderService } from './services/SymbolFinderService';
+import { ReferenceIndex } from './services/ReferenceIndex';
 import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
@@ -133,9 +134,18 @@ const deferredAsyncDocs = new Set<string>();
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
 
-// CodeLens reference count cache — keyed by "uri:line:char", invalidated on any document change
-const codeLensRefCache = new Map<string, { refs: Location[]; generation: number }>();
-let codeLensGeneration = 0;
+// CodeLens reference-count cache — keyed by "uri:line:char" (the symbol's declaration
+// position). `refs` is the Find-All-References result (the displayed count is always
+// refs.length, unchanged from before); `shortName` is the symbol's last dotted segment,
+// used for invalidation. Presence in the map = "resolved" (so a genuine 0-ref count is
+// distinguishable from "not yet computed").
+//
+// #189 Phase 2: invalidation is per-file, not global. `codeLensRefIndex` tracks which
+// files each cached symbol's references live in (cacheKey → site files), so editing one
+// file evicts only the counts that file can affect — counts for other files stay warm
+// across edits instead of every count recomputing on every keystroke.
+const codeLensRefCache = new Map<string, { refs: Location[]; shortName: string }>();
+const codeLensRefIndex = new ReferenceIndex();
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -683,7 +693,7 @@ connection.onCodeLensResolve(async (lens) => {
         const cached = codeLensRefCache.get(cacheKey);
 
         let refs: Location[] | null;
-        if (cached && cached.generation === codeLensGeneration) {
+        if (cached) {
             refs = cached.refs;
         } else {
             refs = await referencesProvider.provideReferences(
@@ -691,7 +701,21 @@ connection.onCodeLensResolve(async (lens) => {
                 { line: data.line, character: data.character },
                 { includeDeclaration: true }
             );
-            codeLensRefCache.set(cacheKey, { refs: refs ?? [], generation: codeLensGeneration });
+            const resolved = refs ?? [];
+            // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
+            // name-based invalidation when an edit adds a new reference (#189 Phase 2).
+            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
+            // Track which files this symbol's references live in, so a later edit to one
+            // of those files evicts this count (and only the affected counts).
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of resolved) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
         }
 
         const count = refs?.length ?? 0;
@@ -825,6 +849,49 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
     }
 }
 
+/**
+ * #189 Phase 2 — evict only the CodeLens reference counts that an edit to `document`
+ * can affect, instead of the old blunt "invalidate everything on any change". The
+ * displayed count is unchanged (still refs.length from Find-All-References); this only
+ * decides WHICH cached counts survive an edit, so switching between files keeps their
+ * counts warm rather than recomputing on every keystroke.
+ *
+ * A count can change from an edit to this file in three ways, all covered:
+ *   (a) the symbol is DECLARED here  (its own lens),
+ *   (b) a reference to it LIVES here and was removed/changed (tracked via the index),
+ *   (c) a reference to it was just ADDED here (its name now appears in the text).
+ * (c) over-approximates (names in strings/comments included) — safe, worst case is an
+ * extra recompute. Brand-new cross-file references still settle on the other file's
+ * next change; closing that fully is Phase 4 (forward extraction).
+ */
+function invalidateCodeLensForFile(document: TextDocument): void {
+    if (codeLensRefCache.size === 0) return;
+    const uriLower = document.uri.toLowerCase();
+    const toEvict = new Set<string>();
+
+    // (a) symbols declared in this file — cacheKey is `${uri}:${line}:${char}`
+    for (const key of codeLensRefCache.keys()) {
+        if (key.toLowerCase().startsWith(uriLower + ':')) toEvict.add(key);
+    }
+
+    // (b) symbols whose references live in this file (removed/changed calls)
+    for (const key of codeLensRefIndex.keysReferencingFile(document.uri)) toEvict.add(key);
+
+    // (c) symbols whose name now appears in this file (newly-added calls)
+    const names = document.getText().match(/[A-Za-z_]\w*/g);
+    if (names) {
+        const nameSet = new Set(names.map(n => n.toLowerCase()));
+        for (const [key, entry] of codeLensRefCache) {
+            if (entry.shortName && nameSet.has(entry.shortName)) toEvict.add(key);
+        }
+    }
+
+    for (const key of toEvict) {
+        codeLensRefCache.delete(key);
+        codeLensRefIndex.removeSymbol(key);
+    }
+}
+
 documents.onDidChangeContent(event => {
     try {
         const document = event.document;
@@ -840,9 +907,10 @@ documents.onDidChangeContent(event => {
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
         
-        // Any document change invalidates all CodeLens reference counts
-        codeLensGeneration++;
-        
+        // #189 Phase 2: invalidate only the CodeLens counts this edit can affect,
+        // instead of every cached count. Counts for other files stay warm.
+        invalidateCodeLensForFile(document);
+
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
