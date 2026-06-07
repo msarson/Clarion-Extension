@@ -160,7 +160,7 @@ export class RedirectionFileParserServer {
         redFileToParse = globalRedFile;
         logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
       } else {
-        logger.error("No valid redirection file found.");
+        logger.test("No valid redirection file found.");
         this.entries = [];
         return this.entries;
       }
@@ -221,7 +221,7 @@ export class RedirectionFileParserServer {
           redFileToParse = globalRedFile;
           logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
         } catch {
-          logger.error("No valid redirection file found.");
+          logger.test("No valid redirection file found.");
           this.entries = [];
           return this.entries;
         }
@@ -266,7 +266,7 @@ export class RedirectionFileParserServer {
     isFirst: boolean
   ): RedirectionEntry[] {
     if (!fs.existsSync(redFileToParse)) {
-      logger.error(`Redirection file not found: ${redFileToParse}`);
+      logger.test(`Redirection file not found: ${redFileToParse}`);
       return entries;
     }
 
@@ -391,7 +391,7 @@ export class RedirectionFileParserServer {
       try {
         await fs.promises.access(redFileToParse, fs.constants.F_OK);
       } catch {
-        logger.error(`Redirection file not found: ${redFileToParse}`);
+        logger.test(`Redirection file not found: ${redFileToParse}`);
         return entries;
       }
 

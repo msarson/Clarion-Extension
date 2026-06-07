@@ -585,7 +585,7 @@ export class DocumentManager implements Disposable {
 
         // Ensure we have the necessary metadata
         if (!location.methodName) {
-            logger.error(`Missing metadata for method implementation resolution: method=${location.methodName}`);
+            logger.test(`Missing metadata for method implementation resolution: method=${location.methodName}`);
             location.implementationResolved = true; // Mark as resolved to avoid repeated attempts
             return location;
         }

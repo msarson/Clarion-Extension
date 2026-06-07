@@ -34,7 +34,7 @@ interface ProjectOutputInfo {
 function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undefined {
     try {
         if (!fs.existsSync(cwprojPath)) {
-            logger.error(`Project file not found: ${cwprojPath}`);
+            logger.test(`Project file not found: ${cwprojPath}`);
             return undefined;
         }
 
@@ -551,7 +551,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                         return;
                     }
                 } else {
-                    logger.error(`Project directory not found: ${selectedProject.path}`);
+                    logger.test(`Project directory not found: ${selectedProject.path}`);
                     window.showErrorMessage(`Project directory not found: ${selectedProject.path}`);
                     return;
                 }
@@ -560,7 +560,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             logger.info(`📝 Checking project file: ${cwprojPath}`);
             
             if (!fs.existsSync(cwprojPath)) {
-                logger.error(`Project file not found: ${cwprojPath}`);
+                logger.test(`Project file not found: ${cwprojPath}`);
                 window.showErrorMessage(`Project file not found: ${cwprojPath}`);
                 return;
             }

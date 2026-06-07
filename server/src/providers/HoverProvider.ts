@@ -708,7 +708,7 @@ export class HoverProvider {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {
             timeoutId = setTimeout(() => {
-                logger.error(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
+                logger.test(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
                 resolve(null);
             }, 10000);
         });

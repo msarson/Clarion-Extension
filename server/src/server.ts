@@ -1231,7 +1231,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
         // Always-visible startup summary of Clarion folder configuration
         // Use logger.error so it's visible even when log level is set to "error"
-        logger.error(`\n📦 Clarion Extension — Solution Load\n` +
+        logger.test(`\n📦 Clarion Extension — Solution Load\n` +
             `  Solution : ${params.solutionFilePath || '(none)'}\n` +
             `  Version  : ${params.clarionVersion || '(unknown)'}\n` +
             `  Config   : ${params.configuration || '(none)'}\n` +
@@ -1320,7 +1320,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const projectSummary = globalSolution.projects.map((p, i) =>
                 `  [${i+1}] ${p.name}  (${p.sourceFiles.length} sources)  ${p.path}`
             ).join('\n');
-            logger.error(`\n✅ Solution ready: ${globalSolution.name}\n` +
+            logger.test(`\n✅ Solution ready: ${globalSolution.name}\n` +
                 `  Projects (${globalSolution.projects.length}):\n` +
                 (projectSummary || '  (none)'));
             
@@ -1487,7 +1487,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
 // Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
 // The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
 connection.onNotification('clarion/projectConstantsChanged', () => {
-    logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    logger.test('📥 clarion/projectConstantsChanged — re-validating all open documents');
     // Clear the version-skip cache so validateTextDocument doesn't skip documents
     // whose source hasn't changed but whose cwproj has.
     lastValidatedVersions.clear();
@@ -1888,7 +1888,7 @@ connection.onDefinition(async (params) => {
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.error(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
+        logger.test(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
     
