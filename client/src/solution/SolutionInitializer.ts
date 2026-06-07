@@ -359,7 +359,8 @@ export async function initializeSolution(
             libsrcPaths: globalSettings.libsrcPaths,
             defaultLookupExtensions: globalSettings.defaultLookupExtensions, // Add default lookup extensions
             undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled, // #62 opt-in
-            indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled // #121 opt-in
+            indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
+            referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled // #185 opt-out
         });
         logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
         

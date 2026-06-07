@@ -342,6 +342,10 @@ export const globalSettings = {
         return workspace.getConfiguration("clarion").get<boolean>("diagnostics.indistinguishablePrototypes.enabled", true);
     },
 
+    get referencesCodeLensEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("referencesCodeLens.enabled", true);
+    },
+
     get configuration() {
         return _globalClarionConfiguration;
     },
