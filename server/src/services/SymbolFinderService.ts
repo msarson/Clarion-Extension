@@ -21,6 +21,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1186,7 +1187,9 @@ export class SymbolFinderService {
         const fromDir = path.dirname(fromPath);
         const includeRe = /^\s*INCLUDE\s*\(\s*'([^']+)'/gim;
         let m: RegExpExecArray | null;
+        let scanned = 0; // #187 — yield between INCLUDE files so the walk doesn't block hover/F12
         while ((m = includeRe.exec(source)) !== null) {
+            await cooperativeCheckpoint(scanned++);
             const includeFile = m[1];
             let resolved: string | null = null;
             if (sm?.solution) {

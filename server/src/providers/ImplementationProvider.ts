@@ -27,6 +27,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -897,11 +898,15 @@ export class ImplementationProvider {
         
         logger.info(`Searching ${solutionManager.solution.projects.length} projects`);
         
-        // Get all source files from all projects
+        // Get all source files from all projects. #187 — yield the event loop
+        // periodically so this solution-wide .clw scan doesn't block interactive
+        // requests (reads + scans each file until a match is found).
+        let scanned = 0;
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
+                await cooperativeCheckpoint(scanned++);
                 const fullPath = path.join(project.path, sourceFile.relativePath);
-                
+
                 // Skip current file (already searched)
                 const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
                 if (fullPath.toLowerCase() === currentPath.toLowerCase()) {

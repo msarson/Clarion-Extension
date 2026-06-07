@@ -7,6 +7,7 @@ import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
+import { cooperativeCheckpoint } from './cooperativeScan';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../logger';
@@ -1078,10 +1079,14 @@ export class ClassMemberResolver {
             }
         }
 
-        // 3. Search all project CLW source files
+        // 3. Search all project CLW source files. #187 — yield the event loop
+        // periodically so this solution-wide scan doesn't block interactive
+        // requests (it reads + scans each .clw until a match is found).
         if (sm?.solution) {
+            let scanned = 0;
             for (const project of sm.solution.projects) {
                 for (const sf of project.sourceFiles) {
+                    await cooperativeCheckpoint(scanned++);
                     const fullPath = path.join(project.path, sf.relativePath);
                     if (!fullPath.toLowerCase().endsWith('.clw') || !fs.existsSync(fullPath)) continue;
                     const loc = this.findImplementationInFile(fullPath, className, methodName, declarationSig);
