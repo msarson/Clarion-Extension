@@ -16,7 +16,7 @@ import LoggerManager from '../logger';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger('ClassConstantsCodeActionProvider');
-logger.setLevel('warn');
+logger.setLevel('error');
 
 /**
  * Provides Code Actions (lightbulb) for adding missing class constants

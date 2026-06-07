@@ -5,7 +5,7 @@ import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
-logger.setLevel('warn');
+logger.setLevel('error');
 
 /**
  * All declaration types that the indexer recognises.

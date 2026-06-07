@@ -47,3 +47,25 @@ export function shouldUseSolutionFallback(
     if (solutions.length === 0) return false;
     return true;
 }
+
+/**
+ * Why a solution is being closed:
+ *   - 'user'   — the user ran "Close Solution"; the closed state should stick
+ *                across restarts (the #146 sticky-until-explicit-open contract).
+ *   - 'switch' — an internal close performed while opening/switching to another
+ *                solution; the close is immediately followed by an open.
+ */
+export type SolutionCloseReason = 'user' | 'switch';
+
+/**
+ * #183 — should a close operation set the sticky `SOLUTION_EXPLICITLY_CLOSED_KEY`
+ * flag? Only a user-initiated close should; an internal 'switch' close must NOT,
+ * or the subsequent open ends with the flag stuck `true` and
+ * `initializeFromWorkspace` suppresses auto-reopen on the next restart.
+ *
+ * Defaults to `'user'` so callers that omit the reason keep the conservative
+ * (sticky) #146 behaviour.
+ */
+export function shouldMarkExplicitlyClosed(reason: SolutionCloseReason = 'user'): boolean {
+    return reason === 'user';
+}

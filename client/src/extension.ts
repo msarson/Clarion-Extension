@@ -8,6 +8,7 @@ import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
@@ -33,7 +34,7 @@ import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("error");
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
@@ -270,8 +271,8 @@ export async function openClarionSolution(context: ExtensionContext) {
     await SolutionOpener.openClarionSolution(context, initializeSolution);
 }
 
-export async function closeClarionSolution(context: ExtensionContext) {
-    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+export async function closeClarionSolution(context: ExtensionContext, reason: SolutionCloseReason = 'user') {
+    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, reason);
     updateSolutionToolbar();
 }
 
@@ -300,7 +301,6 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 
 export function deactivate(): Thenable<void> | undefined {
-    // Set to info level to capture shutdown process
     logger.setLevel("error");
     logger.info("🛑 DEACTIVATE: Starting extension deactivation");
     console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());

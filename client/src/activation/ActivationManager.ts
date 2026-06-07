@@ -18,7 +18,7 @@ import { startLanguageServer } from '../server/LanguageServerManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("ActivationManager");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 export interface ActivationState {
     client?: LanguageClient;

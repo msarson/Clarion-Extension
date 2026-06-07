@@ -6,7 +6,7 @@ import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 // Interface for solution settings
 export interface ClarionSolutionSettings {
