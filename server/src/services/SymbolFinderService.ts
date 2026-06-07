@@ -20,7 +20,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
-import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1108,33 +1108,105 @@ export class SymbolFinderService {
         try {
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const solutionManager = SolutionManager.getInstance();
-            const projectPath = solutionManager?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
-
             const sdi = StructureDeclarationIndexer.getInstance();
-            await sdi.getOrBuildIndex(projectPath);
-            let definitions = sdi.find(word, projectPath);
-            if (definitions.length === 0) {
-                // Key mismatch guard: the runtime project path may differ from the pre-build path
-                // (e.g. different drive letter case, wrong project matched by basename).
-                // Fall back to searching ALL available indexes before giving up.
+            const project = solutionManager?.findProjectForFile(fromPath);
+
+            // #184 — fork on solution membership:
+            if (project) {
+                // Solution member → its project index (pre-built at solution-ready,
+                // O(1) cache hit). No INCLUDE-chain walk needed on the hot path.
+                await sdi.getOrBuildIndex(project.path);
+                let definitions = sdi.find(word, project.path);
+                if (definitions.length === 0) definitions = sdi.find(word);
+                return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
+            }
+
+            // Not a solution member (a loose / red-path file opened directly, e.g.
+            // a libsrc .clw). Resolve via the file's OWN INCLUDE chain first — the
+            // Clarion compilation model — which is bounded to the actual include
+            // set and never rescans all of libsrc (the rescan was blowing the
+            // 10s hover/F12 timeout).
+            const viaInclude = await this.findTypeViaIncludeChain(word, fromPath, document.getText(), new Set<string>());
+            if (viaInclude) return this.toIndexedTypeInfo(viaInclude);
+
+            // Then reuse any already-built index (the solution index already scans
+            // libsrcPaths) — still NO dir-keyed rebuild. Only when there are no
+            // indexes at all (genuine no-solution mode) do we build one keyed on
+            // the file's directory, as a last resort.
+            let definitions: StructureDeclarationInfo[];
+            if (sdi.hasAnyIndex()) {
+                definitions = sdi.find(word);
+            } else {
+                await sdi.getOrBuildIndex(path.dirname(fromPath));
                 definitions = sdi.find(word);
             }
-            if (definitions.length === 0) return null;
-
-            const def = definitions[0];
-            return {
-                name: def.name,
-                filePath: def.filePath,
-                line: def.line,
-                structureType: def.structureType,
-                parentName: def.parentName,
-                isType: def.isType,
-                lineContent: def.lineContent
-            };
+            return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
         } catch (e) {
             logger.error(`findIndexedTypeDeclaration error for "${word}": ${e}`);
             return null;
         }
+    }
+
+    private toIndexedTypeInfo(def: StructureDeclarationInfo): IndexedTypeInfo {
+        return {
+            name: def.name,
+            filePath: def.filePath,
+            line: def.line,
+            structureType: def.structureType,
+            parentName: def.parentName,
+            isType: def.isType,
+            lineContent: def.lineContent
+        };
+    }
+
+    /**
+     * #184 — resolve a TYPE/structure declaration by walking the document's
+     * INCLUDE chain, scanning only the files actually reachable from it. Fast and
+     * solution-independent (no libsrc-wide scan). Returns the first matching
+     * structure declaration, or null. `visited` guards against include cycles.
+     */
+    private async findTypeViaIncludeChain(
+        word: string,
+        fromPath: string,
+        source: string,
+        visited: Set<string>
+    ): Promise<StructureDeclarationInfo | null> {
+        const key = fromPath.toLowerCase();
+        if (visited.has(key)) return null;
+        visited.add(key);
+
+        // 1. This file's own declarations.
+        const wordLower = word.toLowerCase();
+        const decls = scanSourceForDeclarations(source, fromPath);
+        const match = decls.find(d => d.name.toLowerCase() === wordLower);
+        if (match) return match;
+
+        // 2. Recurse into INCLUDE'd files (redirection-resolved, else same-dir).
+        const sm = SolutionManager.getInstance();
+        const fromDir = path.dirname(fromPath);
+        const includeRe = /^\s*INCLUDE\s*\(\s*'([^']+)'/gim;
+        let m: RegExpExecArray | null;
+        while ((m = includeRe.exec(source)) !== null) {
+            const includeFile = m[1];
+            let resolved: string | null = null;
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const r = project.getRedirectionParser().findFile(includeFile);
+                    if (r?.path && fs.existsSync(r.path)) { resolved = r.path; break; }
+                }
+            }
+            if (!resolved) {
+                const candidate = path.join(fromDir, includeFile);
+                if (fs.existsSync(candidate)) resolved = candidate;
+            }
+            if (!resolved || visited.has(resolved.toLowerCase())) continue;
+
+            let incSource: string;
+            try { incSource = fs.readFileSync(resolved, 'utf-8'); } catch { continue; }
+            const nested = await this.findTypeViaIncludeChain(word, resolved, incSource, visited);
+            if (nested) return nested;
+        }
+        return null;
     }
 
     /**
