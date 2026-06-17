@@ -10,8 +10,8 @@ import { SolutionManager } from '../solution/solutionManager';
  * Issue #191 — missing-include false positive for split-class layouts.
  *
  * A `CLASS,TYPE` declared in a definition `.inc` references another class via a
- * reference member (`tc &TimeClass`). The INCLUDE for the referenced class lives
- * only in the *implementation* module (the `.clw` named by the class's
+ * reference member (`helper &HelperClass`). The INCLUDE for the referenced class
+ * lives only in the *implementation* module (the `.clw` named by the class's
  * `MODULE('...clw')` attribute), NOT in the `.inc` itself — a perfectly valid
  * Clarion split-class layout that compiles.
  *
@@ -32,7 +32,7 @@ function fileUri(p: string): string {
 }
 
 function incDocument(): TextDocument {
-    const p = path.join(tmpRoot, 'EC_FunctionsClass.inc');
+    const p = path.join(tmpRoot, 'MyClass.inc');
     return TextDocument.create(fileUri(p), 'clarion', 1, fs.readFileSync(p, 'utf-8'));
 }
 
@@ -47,28 +47,28 @@ suite('Issue #191 — missing-include companion .clw module', () => {
         IncludeVerifier.getInstance().clearCache();
 
         // The dependency class definition.
-        fs.writeFileSync(path.join(tmpRoot, 'TimeClass.inc'), [
-            'TimeClass     CLASS,TYPE',
-            'GetTicks        PROCEDURE(),LONG',
+        fs.writeFileSync(path.join(tmpRoot, 'HelperClass.inc'), [
+            'HelperClass   CLASS,TYPE',
+            'DoWork          PROCEDURE(),LONG',
             '              END',
             '',
         ].join('\r\n'));
 
-        // The definition .inc: references TimeClass by reference, names its
-        // implementation module via MODULE(), and does NOT include TimeClass.inc.
-        fs.writeFileSync(path.join(tmpRoot, 'EC_FunctionsClass.inc'), [
-            "ECFunctionsClass  CLASS,TYPE,MODULE('EC_FunctionsClass.clw'),LINK('EC_FunctionsClass.clw')",
-            'tc                  &TimeClass',
-            '                  END',
+        // The definition .inc: references HelperClass by reference, names its
+        // implementation module via MODULE(), and does NOT include HelperClass.inc.
+        fs.writeFileSync(path.join(tmpRoot, 'MyClass.inc'), [
+            "MyClass   CLASS,TYPE,MODULE('MyClass.clw'),LINK('MyClass.clw')",
+            'helper      &HelperClass',
+            '          END',
             '',
         ].join('\r\n'));
 
         // The implementation module — this is where the dependency is included.
-        fs.writeFileSync(path.join(tmpRoot, 'EC_FunctionsClass.clw'), [
+        fs.writeFileSync(path.join(tmpRoot, 'MyClass.clw'), [
             '  MEMBER',
             '',
-            "  INCLUDE('EC_FunctionsClass.inc'),ONCE",
-            "  INCLUDE('TimeClass.inc'),ONCE",
+            "  INCLUDE('MyClass.inc'),ONCE",
+            "  INCLUDE('HelperClass.inc'),ONCE",
             '',
             '  MAP',
             '  END',
@@ -85,9 +85,9 @@ suite('Issue #191 — missing-include companion .clw module', () => {
 
     test('type included only by the implementing .clw is treated as included (no false positive)', async () => {
         const iv = IncludeVerifier.getInstance();
-        const included = await iv.isClassIncluded('TimeClass.inc', incDocument());
+        const included = await iv.isClassIncluded('HelperClass.inc', incDocument());
         assert.strictEqual(included, true,
-            'TimeClass.inc is included by the companion implementation module EC_FunctionsClass.clw — must not warn');
+            'HelperClass.inc is included by the companion implementation module MyClass.clw — must not warn');
     });
 
     test('type not included anywhere still reports as missing (no blanket suppression)', async () => {
