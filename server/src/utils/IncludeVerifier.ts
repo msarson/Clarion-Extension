@@ -108,6 +108,25 @@ export class IncludeVerifier {
                 }
             }
 
+            // #191 — A definition `.inc` has no MEMBER parent, but it is never
+            // compiled alone: it is included into the implementation module(s)
+            // that implement its classes. Consult the companion `.clw` named by
+            // each CLASS's MODULE() attribute (with same-basename fallback) and
+            // check its include chain — the include legitimately lives there in
+            // the standard Clarion split-class layout.
+            const companionPaths = await this.getCompanionImplementationPaths(document, fromPath);
+            for (const clwPath of companionPaths) {
+                const clwIncludes = await this.parseIncludesFromFilePath(clwPath);
+                if (this.hasInclude(classFileName, clwIncludes)) {
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in companion module ${path.basename(clwPath)}`);
+                    return true;
+                }
+                if (await this.hasTransitiveInclude(classFileName, clwIncludes, clwPath)) {
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via companion module ${path.basename(clwPath)} transitive include`);
+                    return true;
+                }
+            }
+
             logger.debug(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
             return false;
 
@@ -115,6 +134,45 @@ export class IncludeVerifier {
             logger.error(`Error verifying include: ${error instanceof Error ? error.message : String(error)}`);
             return false; // Fail safe - don't show hover if we can't verify
         }
+    }
+
+    /**
+     * #191 — Resolves the implementation module(s) for a definition `.inc`.
+     *
+     * A `.inc` is never compiled standalone; it is included into a `.clw` MODULE
+     * that implements its classes, and the dependency includes a class member
+     * needs legitimately live in that `.clw`. Each `CLASS,...,MODULE('impl.clw')`
+     * declaration names that module; a same-basename `.clw` is tried as a
+     * fallback. The returned modules' include chains form part of the `.inc`'s
+     * effective include scope.
+     *
+     * Only applies to `.inc` documents (a `.clw` already has its own includes
+     * checked directly). Never returns the document itself.
+     */
+    private async getCompanionImplementationPaths(document: TextDocument, fromPath: string): Promise<string[]> {
+        if (!/\.inc$/i.test(fromPath)) return [];
+
+        const baseDir = path.dirname(fromPath);
+        const fromLower = fromPath.toLowerCase();
+        const paths = new Set<string>();
+
+        // 1. MODULE('...clw') attributes on this file's CLASS declarations.
+        const tokens = this.tokenCache.getTokens(document);
+        for (const t of tokens) {
+            if (t.referencedFile &&
+                t.value?.toUpperCase() === 'MODULE' &&
+                /\.clw$/i.test(t.referencedFile)) {
+                const resolved = await this.resolveIncludePath(t.referencedFile, baseDir);
+                if (resolved && resolved.toLowerCase() !== fromLower) paths.add(resolved);
+            }
+        }
+
+        // 2. Same-basename .clw fallback (e.g. StringTheory.inc -> StringTheory.clw).
+        const sameBaseName = path.basename(fromPath).replace(/\.inc$/i, '.clw');
+        const resolvedSame = await this.resolveIncludePath(sameBaseName, baseDir);
+        if (resolvedSame && resolvedSame.toLowerCase() !== fromLower) paths.add(resolvedSame);
+
+        return [...paths];
     }
 
     /**
