@@ -1203,6 +1203,11 @@ export class ReferencesProvider {
             });
         }
 
+        // #193 — additively key PRE-bearing structure members as `prefix:field` so a
+        // prefixed base (`PRE:Field`) resolves. Runs after the bare-label walks so the
+        // alias keys sit alongside (never replace) the existing bare keys.
+        this.applyStructurePrefixKeying(tokens, tokensByLine, procScopes, moduleScope);
+
         return { procScopes, moduleScope };
     }
 
@@ -1212,23 +1217,106 @@ export class ReferencesProvider {
      * `target` map.
      */
     private captureLabelType(label: Token, lineTokens: Token[], target: Map<string, string>): void {
-        const idx = lineTokens.indexOf(label);
-        if (idx < 0 || idx + 1 >= lineTokens.length) return;
-        const next = lineTokens[idx + 1];
         if (!label.label) return;
-        const nameLower = label.label.toLowerCase();
+        const declType = this.resolveLabelDeclaredType(label, lineTokens);
+        if (declType !== undefined) {
+            target.set(label.label.toLowerCase(), declType);
+        }
+    }
+
+    /**
+     * Determine the declared-type string for a column-0 Label by inspecting the next
+     * significant token on its line (with a `label.dataType` fallback). Returns
+     * `undefined` when no type can be derived. Extracted from `captureLabelType` so
+     * the PRE-group prefix-keying pass can capture the same type for its alias key.
+     */
+    private resolveLabelDeclaredType(label: Token, lineTokens: Token[]): string | undefined {
+        const idx = lineTokens.indexOf(label);
+        if (idx < 0 || idx + 1 >= lineTokens.length) return undefined;
+        const next = lineTokens[idx + 1];
 
         // Class-typed (`inst MyClass`), Type-keyword (`count LONG`), Reference (`mgr &MyClass`).
         if (next.type === TokenType.Type ||
             next.type === TokenType.Variable ||
             next.type === TokenType.Label) {
-            target.set(nameLower, next.value);
+            return next.value;
         } else if (next.type === TokenType.ReferenceVariable) {
-            const stripped = next.value.startsWith('&') ? next.value.slice(1) : next.value;
-            target.set(nameLower, stripped);
+            return next.value.startsWith('&') ? next.value.slice(1) : next.value;
         } else if (label.dataType) {
-            target.set(nameLower, label.dataType);
+            return label.dataType;
         }
+        return undefined;
+    }
+
+    /**
+     * #193 — PRE-group prefix-keying. Clarion structures (GROUP/RECORD/FILE/QUEUE)
+     * may carry a `PRE(prefix)` attribute; their member fields are then addressable
+     * as `prefix:field`. The base var-type walk keys those members by bare label only,
+     * so a prefixed base (`PRE:Field`) cannot be resolved. This pass scans every
+     * PRE-bearing Structure token and ADDITIVELY keys each member field as
+     * `prefix:field` in whichever scope already holds its bare label (the proc scope
+     * containing the member, else module scope). Additive → bare-label lookups are
+     * byte-identical; only new colon-keys are added.
+     *
+     * The prefix value is read BY POSITION (the token after the PRE attribute's `(`),
+     * never by token-type: a prefix that collides with a keyword (e.g. `PRE`) tokenizes
+     * as Attribute, while a non-colliding one (e.g. `QUE`) tokenizes as Variable —
+     * type-gating would silently miss the latter.
+     */
+    private applyStructurePrefixKeying(
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>,
+        procScopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>,
+        moduleScope: Map<string, string>
+    ): void {
+        for (const structToken of tokens) {
+            if (structToken.type !== TokenType.Structure) continue;
+            if (structToken.finishesAt === undefined || structToken.finishesAt <= structToken.line) continue;
+
+            const prefix = this.extractStructurePrefix(structToken, tokensByLine);
+            if (!prefix) continue;
+            const prefixLower = prefix.toLowerCase();
+
+            // Member fields: column-0 Labels strictly between the structure line and its END.
+            for (let line = structToken.line + 1; line < structToken.finishesAt; line++) {
+                const lineTokens = tokensByLine.get(line);
+                if (!lineTokens) continue;
+                for (const cand of lineTokens) {
+                    if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                    const declType = this.resolveLabelDeclaredType(cand, lineTokens);
+                    if (declType === undefined) continue;
+                    const aliasKey = `${prefixLower}:${cand.label.toLowerCase()}`;
+                    const target = procScopes.find(s => line >= s.startLine && line <= s.endLine)?.varTypes
+                        ?? moduleScope;
+                    // Set-if-absent: a literal/explicit colon-label declaration (e.g. a var
+                    // literally named `LOC:Name`) is authoritative over a PRE-alias and is
+                    // already keyed by the bare walk that ran before this pass — never clobber
+                    // it. Clarion precedence: explicit declaration wins over the prefix alias.
+                    if (!target.has(aliasKey)) {
+                        target.set(aliasKey, declType);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Extract a PRE-bearing structure's prefix value. Walks the structure's
+     * declaration line for a `PRE` Attribute token followed by `(`, then returns the
+     * token immediately after the `(` BY POSITION (regardless of its token-type — see
+     * `applyStructurePrefixKeying`). Returns `undefined` when there is no PRE attribute.
+     */
+    private extractStructurePrefix(structToken: Token, tokensByLine: Map<number, Token[]>): string | undefined {
+        const lineTokens = tokensByLine.get(structToken.line);
+        if (!lineTokens) return undefined;
+        for (let i = 0; i < lineTokens.length - 2; i++) {
+            const t = lineTokens[i];
+            if (t.type === TokenType.Attribute && t.value.toUpperCase() === 'PRE' &&
+                lineTokens[i + 1].type === TokenType.Delimiter && lineTokens[i + 1].value === '(') {
+                return lineTokens[i + 2].value;
+            }
+        }
+        return undefined;
     }
 
     /**

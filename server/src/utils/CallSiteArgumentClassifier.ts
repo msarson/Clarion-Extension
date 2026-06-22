@@ -318,17 +318,23 @@ export class CallSiteArgumentClassifier {
     /**
      * Recognises a slice/index shape `<base> [ ... ]` and, when present, returns the
      * base NAME (the tokens before `[`, for resolver lookup) plus the index of the
-     * opening `[`. Returns `null` when no slice shape is present. Three base forms
-     * (#181 item 3 + #192 — token shapes confirmed empirically in Phase A):
+     * opening `[`. Returns `null` when no slice shape is present. Four base forms
+     * (#181 item 3 + #192 + #193 — token shapes confirmed empirically in Phase A):
      *
-     *   - bare variable: `Variable '[' … ']'`                        → base = first.value
-     *   - dotted:        `StructureField '[' … ']'`                  → base = first.value ("SELF.field")
-     *   - prefixed:      `(Attribute|Variable) ':' Variable '[' … ']'` → base = "PRE:Field"
+     *   - bare variable:        `Variable '[' … ']'`                        → base = first.value
+     *   - dotted:               `StructureField '[' … ']'`                  → base = first.value ("SELF.field")
+     *   - 3-token prefixed:     `(Attribute|Variable) ':' Variable '[' … ']'` → base = "PRE:Field"
+     *   - collapsed prefixed:   `StructurePrefix '[' … ']'`                  → base = first.value ("QUE:QText")
      *
      * The base name is ONLY the tokens before `[`; the index/slice content is never
-     * swept into it (`SELF.field[i]` resolves "SELF.field", not "SELF.fieldi"). The
-     * prefix token is an Attribute (not a Variable) at the token level, so the
-     * prefixed head spans three tokens and `[` sits at index 3.
+     * swept into it (`SELF.field[i]` resolves "SELF.field", not "SELF.fieldi").
+     *
+     * Prefixed bases tokenize ASYMMETRICALLY at the call site (#193): when the prefix
+     * collides with a keyword (e.g. `PRE`) it splits into three tokens
+     * (`Attribute ':' Variable`), but a non-colliding prefix (e.g. `QUE`) collapses to
+     * a single `StructurePrefix` token whose value is already the colon-joined
+     * "QUE:QText". The 3-token form is matched explicitly; the collapsed form is folded
+     * into the bare/dotted head union below (identical handling — base = first.value).
      */
     private sliceAccess(significant: Token[]): { baseName: string; openIdx: number } | null {
         const close = significant[significant.length - 1];
@@ -336,7 +342,7 @@ export class CallSiteArgumentClassifier {
 
         const first = significant[0];
 
-        // Prefixed head: (Attribute|Variable) ':' Variable '[' … ']'.
+        // 3-token prefixed head: (Attribute|Variable) ':' Variable '[' … ']'.
         if (significant.length >= 6 &&
             (first.type === TokenType.Attribute || first.type === TokenType.Variable) &&
             significant[1].type === TokenType.Delimiter && significant[1].value === ':' &&
@@ -345,9 +351,13 @@ export class CallSiteArgumentClassifier {
             return { baseName: significant.slice(0, 3).map(t => t.value).join(''), openIdx: 3 };
         }
 
-        // Bare-variable or dotted head: <base> '[' … ']'.
+        // Bare-variable / dotted / collapsed-prefixed head: <base> '[' … ']'.
+        // StructurePrefix covers the collapsed "QUE:QText" form (#193) — its value is
+        // already the full colon-joined base name, so it shares first.value handling.
         if (significant.length >= 4 &&
-            (first.type === TokenType.Variable || first.type === TokenType.StructureField) &&
+            (first.type === TokenType.Variable ||
+             first.type === TokenType.StructureField ||
+             first.type === TokenType.StructurePrefix) &&
             significant[1].type === TokenType.Delimiter && significant[1].value === '[') {
             return { baseName: first.value, openIdx: 1 };
         }
