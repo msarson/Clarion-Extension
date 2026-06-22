@@ -32,6 +32,37 @@ function pathToUri(absPath: string): string {
 }
 
 /**
+ * Canonical key for a file, given either a `file://` URI or a raw path (#196
+ * follow-up). Decodes percent-escapes, lowercases (Windows is case-insensitive)
+ * and normalizes separators, so `file:///f%3A/X.clw`, `file:///f:/X.clw` and
+ * `F:\X.clw` all collapse to the same key.
+ */
+export function canonicalFileKey(uriOrPath: string): string {
+    const raw = /^file:\/\//i.test(uriOrPath) ? uriToPath(uriOrPath) : uriOrPath;
+    return raw.toLowerCase().replace(/\\/g, '/');
+}
+
+/**
+ * Merge a TextEdit into a multi-file `changes` map keyed by URI, collapsing entries
+ * that point at the SAME physical file under different URI spellings (#196).
+ *
+ * `collectAllDeclarationEdits` keys edits by `liveUri` (encoded `f%3A`) for cached
+ * files but `pathToUri` (un-encoded `f:`) for disk files, and its callers then merge
+ * the diagnostic's own decl site under yet another spelling (`document.uri` vs
+ * `pathToUri(parentPath)`). Keyed by the raw string the same file can land under two
+ * keys → two edits at the same decl line → VS Code rejects them as overlapping
+ * ("Failed to apply edits"). This reuses any existing key for the same file and
+ * dedupes edits by start line (decl/impl edits are one-per-line).
+ */
+export function addEditToChanges(changes: { [uri: string]: TextEdit[] }, fileUri: string, edit: TextEdit): void {
+    const target = canonicalFileKey(fileUri);
+    const key = Object.keys(changes).find(k => canonicalFileKey(k) === target) ?? fileUri;
+    if (!changes[key]) changes[key] = [];
+    if (changes[key].some(e => e.range.start.line === edit.range.start.line)) return;
+    changes[key].push(edit);
+}
+
+/**
  * Resolve a bare CLW filename to an absolute path using the redirection parser,
  * falling back to resolving relative to a sibling file's directory.
  *
@@ -231,14 +262,15 @@ export class MapDeclarationCodeActionProvider {
 
         // Action 1: update ALL declarations to match implementation
         const allDeclChanges = this.collectAllDeclarationEdits(data.procName, implFilePath, implParams);
-        // Ensure the diagnostic's own decl site is included (covers proc-level MAP, not in FRG)
+        // Ensure the diagnostic's own decl site is included (covers proc-level MAP, not in FRG).
+        // addEditToChanges collapses against whatever spelling collectAllDeclarationEdits
+        // already used for this file, so we never double-key the same file (#196).
         const diagDeclUri = isSameFile ? document.uri : pathToUri(parentPath);
-        if (!(allDeclChanges[diagDeclUri] ?? []).some(e => e.range.start.line === data.declLine)) {
-            if (!allDeclChanges[diagDeclUri]) allDeclChanges[diagDeclUri] = [];
-            allDeclChanges[diagDeclUri].push(
-                TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
-            );
-        }
+        addEditToChanges(
+            allDeclChanges,
+            diagDeclUri,
+            TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
+        );
         const declFileCount = Object.keys(allDeclChanges).length;
         actions.push({
             title: declFileCount > 1
@@ -350,13 +382,14 @@ export class MapDeclarationCodeActionProvider {
 
         // Action 2: update ALL declarations to match implementation
         const allDeclChanges = this.collectAllDeclarationEdits(data.procName, clwPath, implParams);
-        // Ensure the current document's decl site is included (handles self-loop and proc-level MAP)
-        if (!(allDeclChanges[document.uri] ?? []).some(e => e.range.start.line === data.declLine)) {
-            if (!allDeclChanges[document.uri]) allDeclChanges[document.uri] = [];
-            allDeclChanges[document.uri].push(
-                TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
-            );
-        }
+        // Ensure the current document's decl site is included (handles self-loop and proc-level MAP).
+        // addEditToChanges collapses against the spelling collectAllDeclarationEdits already
+        // used for this file, so we never double-key the same file (#196).
+        addEditToChanges(
+            allDeclChanges,
+            document.uri,
+            TextEdit.replace(Range.create(data.declLine, declSpan.start, data.declLine, declSpan.end), implParams)
+        );
         const declFileCount = Object.keys(allDeclChanges).length;
         actions.push({
             title: declFileCount > 1
@@ -429,8 +462,9 @@ export class MapDeclarationCodeActionProvider {
                     const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
                     if (!declSpan) continue;
 
-                    if (!changes[fileUri]) changes[fileUri] = [];
-                    changes[fileUri].push(
+                    addEditToChanges(
+                        changes,
+                        fileUri,
                         TextEdit.replace(
                             Range.create(declToken.line, declSpan.start, declToken.line, declSpan.end),
                             newParams
