@@ -319,11 +319,6 @@ connection.onNotification((method, params) => {
 // Create the text documents manager
 const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
-// #196: give RenameProvider live document versions for `documentChanges` so VS Code
-// applies each rename edit against the version it was computed for (open cross-file
-// files carry their real version; closed files resolve to null = best-effort).
-renameProvider.setDocumentVersionResolver((uri) => documents.get(uri)?.version ?? null);
-
 // Add event listener to filter out XML files
 documents.onDidOpen((event) => {
     try {
