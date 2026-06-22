@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { WorkspaceEdit, TextEdit, TextDocumentEdit } from 'vscode-languageserver-protocol';
 import { TokenCache } from '../TokenCache';
 import { RenameProvider } from '../providers/RenameProvider';
 import { SolutionManager } from '../solution/solutionManager';
@@ -12,6 +13,14 @@ function createDocument(content: string, uri: string = 'file:///test.clw'): Text
 
 function seedCache(document: TextDocument): void {
     TokenCache.getInstance().getTokens(document);
+}
+
+/** Extract the TextEdits for a given uri from a #196 documentChanges WorkspaceEdit. */
+function editsForUri(edit: WorkspaceEdit | null, uri: string): TextEdit[] {
+    for (const c of edit?.documentChanges ?? []) {
+        if (TextDocumentEdit.is(c) && c.textDocument.uri === uri) return c.edits as TextEdit[];
+    }
+    return [];
 }
 
 /**
@@ -418,9 +427,9 @@ suite('RenameProvider', () => {
 
             const edit = await provider.provideRename(doc, { line: 3, character: 3 }, 'Index');
             assert.ok(edit !== null, 'Should return a WorkspaceEdit');
-            assert.ok(edit!.changes, 'WorkspaceEdit should have changes');
+            assert.ok(edit!.documentChanges, 'WorkspaceEdit should have documentChanges');
 
-            const fileEdits = edit!.changes![doc.uri];
+            const fileEdits = editsForUri(edit, doc.uri);
             assert.ok(fileEdits && fileEdits.length >= 3,
                 `Expected at least 3 edits for Counter, got ${fileEdits?.length ?? 0}`);
 
@@ -461,7 +470,7 @@ suite('RenameProvider', () => {
 
             const edit = await provider.provideRename(doc, { line: 4, character: 5 }, 'TotalCount');
             assert.ok(edit !== null, 'Should return a WorkspaceEdit for global variable');
-            const fileEdits = edit!.changes![doc.uri];
+            const fileEdits = editsForUri(edit, doc.uri);
             assert.ok(fileEdits && fileEdits.length >= 2,
                 `Expected at least 2 edits, got ${fileEdits?.length ?? 0}`);
             assert.ok(
@@ -481,8 +490,8 @@ suite('RenameProvider', () => {
             seedCache(doc);
 
             const edit = await provider.provideRename(doc, { line: 3, character: 3 }, 'Renamed');
-            assert.ok(edit?.changes);
-            const edits = edit!.changes![doc.uri];
+            assert.ok(edit?.documentChanges);
+            const edits = editsForUri(edit, doc.uri);
             assert.ok(edits && edits.length > 0);
 
             // Each edit range should span exactly "MyVar" (5 chars)
@@ -552,9 +561,9 @@ suite('RenameProvider', () => {
             const clwDoc = seed195();
             const pos = { line: 2, character: GETNOW_COL + 1 };
             const edit = await provider.provideRename(clwDoc, pos, 'GetTime');
-            assert.ok(edit?.changes, 'provideRename must return a WorkspaceEdit');
-            const incEdits = edit!.changes![incUri] ?? [];
-            const clwEdits = edit!.changes![clwUri] ?? [];
+            assert.ok(edit?.documentChanges, 'provideRename must return a WorkspaceEdit');
+            const incEdits = editsForUri(edit, incUri);
+            const clwEdits = editsForUri(edit, clwUri);
             assert.ok(incEdits.length > 0, 'declaration (.inc) must be rewritten');
             assert.ok(clwEdits.length > 0, 'implementation (.clw) must be rewritten');
             assert.ok([...incEdits, ...clwEdits].every(e => e.newText === 'GetTime'),
@@ -594,6 +603,72 @@ suite('RenameProvider', () => {
             assert.ok(range, 'prepareRename must return a range for a plain local');
             assert.strictEqual(doc.getText(range!), 'Counter',
                 'non-dotted symbol range must be returned in full (no narrowing)');
+        });
+    });
+
+    // ─── #196 — rename apply: versioned documentChanges + dedup ──────────────────
+    // Mark: rename a method at its impl point with a TYPED name → "Failed to apply
+    // edits" (intermittent; PARTIAL — the .inc decl applied, the active .clw impl
+    // edit was rejected). Two independently-correct fixes: (A) emit VERSIONED
+    // documentChanges (not unversioned `changes`) so VS Code applies each edit against
+    // the document version it was computed for; (B) DEDUPE overlapping/duplicate
+    // ranges per uri (a WorkspaceEdit must never contain overlapping edits — VS Code
+    // rejects that file's edits while still applying others, the partial-rename tell).
+    suite('#196 — rename apply: documentChanges + dedup', () => {
+        test('provideRename emits versioned documentChanges (not unversioned changes)', async () => {
+            const doc = createDocument([
+                'MyProc PROCEDURE',
+                '  Counter  LONG',
+                'CODE',
+                '  Counter = 0',
+                '  Counter += 1',
+            ].join('\n'));
+            seedCache(doc);
+
+            const edit = await provider.provideRename(doc, { line: 3, character: 3 }, 'Index');
+            assert.ok(edit, 'provideRename must return a WorkspaceEdit');
+            assert.ok(edit!.documentChanges, 'must emit documentChanges (versioned), not legacy changes');
+            assert.strictEqual(edit!.changes, undefined, 'must NOT emit unversioned changes');
+            const tde = (edit!.documentChanges as TextDocumentEdit[]).find(
+                c => TextDocumentEdit.is(c) && c.textDocument.uri === doc.uri);
+            assert.ok(tde, 'documentChanges must include the active document');
+            assert.strictEqual(tde!.textDocument.version, doc.version,
+                'active document edit must carry its live version');
+        });
+
+        test('dedupes duplicate + overlapping ranges per uri (no overlapping edits in the WorkspaceEdit)', async () => {
+            const doc = createDocument([
+                'MyProc PROCEDURE',
+                '  Counter  LONG',
+                'CODE',
+                '  Counter = 0',
+            ].join('\n'));
+            seedCache(doc);
+
+            // Stub provideReferences to return the SAME location 3× (one a fresh object
+            // with identical coords) — mirrors FAR surfacing the active impl via both
+            // live tokens AND a sourceFiles walk → duplicate/overlapping ranges.
+            const dupRange = { start: { line: 3, character: 2 }, end: { line: 3, character: 9 } };
+            (provider as any).referencesProvider = {
+                provideReferences: async () => [
+                    { uri: doc.uri, range: dupRange },
+                    { uri: doc.uri, range: dupRange },
+                    { uri: doc.uri, range: { start: { line: 3, character: 2 }, end: { line: 3, character: 9 } } },
+                ],
+            };
+
+            const edit = await provider.provideRename(doc, { line: 3, character: 3 }, 'Index');
+            assert.ok(edit?.documentChanges, 'must return documentChanges');
+            const edits = editsForUri(edit, doc.uri);
+            assert.strictEqual(edits.length, 1,
+                `duplicate/overlapping ranges must collapse to ONE edit; got ${edits.length}`);
+            // General invariant: no two edits for a uri overlap.
+            for (let i = 1; i < edits.length; i++) {
+                const prev = edits[i - 1].range, cur = edits[i].range;
+                const overlaps = cur.start.line < prev.end.line ||
+                    (cur.start.line === prev.end.line && cur.start.character < prev.end.character);
+                assert.ok(!overlaps, 'WorkspaceEdit must not contain overlapping ranges');
+            }
         });
     });
 });
