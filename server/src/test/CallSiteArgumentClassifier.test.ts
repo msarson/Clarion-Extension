@@ -449,4 +449,99 @@ suite('CallSiteArgumentClassifier (10ea5a80 Phase B)', () => {
             assert.deepStrictEqual(result, [], 'empty parens should yield empty arg array');
         });
     });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // (C) Slice-expression inference — RED pin for #181 item 3
+    //     (SetValue overload over-count, task 32b59484)
+    // ───────────────────────────────────────────────────────────────────────
+    //
+    // BUG: a substring-slice argument such as `blobField[0:128]` currently
+    // falls into the 'unknown' bucket (no slice handling in classifyMultiToken),
+    // leaving inferredType undefined → the overload resolver's conservative
+    // match-all path counts the call toward EVERY SetValue overload, including
+    // the class-typed SetValue(StringTheory). Over-count.
+    //
+    // CONTRACT (Bob-locked 2026-06-22): the discriminator is BASE-TYPE resolution
+    // (string-typed base → any index/slice of it yields STRING), NOT bracket-
+    // content shape — Phase A proved the tokenizer collapses `ident:ident` slices
+    // (`someStringField[a:b]`) into a single StructurePrefix token, byte-identical
+    // to a prefix array-subscript `arr[LOC:I]`, so colon-presence alone cannot
+    // tell them apart. A standalone Delimiter(':') (numeric slices `[0:128]`)
+    // remains as a secondary fallback when the base cannot be resolved.
+    //
+    // Post-fix expectation (this whole suite is RED until Eve's GREEN):
+    //   - `<stringBase>[ ... ]`  → inferredType === 'STRING'   (both [0:128] and [a:b])
+    //   - `<nonStringBase>[i]`   → NOT retyped to STRING        (non-X regression guard)
+    //   - `<unresolvedBase>[0:128]` (standalone colon) → 'STRING' via fallback
+    suite('slice-expr inference (#181 item 3 — base-type discriminator)', () => {
+
+        function tokenize(source: string): Token[] {
+            const doc = TextDocument.create('file:///slice.clw', 'clarion', 1, source);
+            return new ClarionTokenizer(doc.getText()).tokenize();
+        }
+
+        /** Classify the single argument of the first call to `name` in `src`. */
+        function classifyFirstArg(src: string, name: string, ctx?: ClassifierContext): ArgClassification {
+            const full = ["  PROGRAM", "  CODE", "  " + src].join('\n');
+            const tokens = tokenize(full);
+            let idx = -1;
+            for (let i = 0; i < tokens.length; i++) {
+                const v = tokens[i].value.toLowerCase();
+                if (v === name.toLowerCase() || v.endsWith('.' + name.toLowerCase())) { idx = i; break; }
+            }
+            assert.ok(idx >= 0, `tokenizer must produce a '${name}' call token for: ${src}`);
+            const args = classifier.classifyArguments(tokens, idx, ctx)!;
+            assert.ok(args && args.length === 1,
+                `expected exactly one classified arg for: ${src}; got ${args ? args.length : 'null'}`);
+            return args[0];
+        }
+
+        // Resolver: string-typed for the named string fields, non-string for arrays.
+        const stringBases = new Set(['blobfield', 'somestringfield', 'svalue', 'buf']);
+        const ctx: ClassifierContext = {
+            resolveSymbolType: (name) => {
+                const n = name.toLowerCase();
+                if (stringBases.has(n)) return 'STRING';
+                if (n === 'arr') return 'LONG';   // array of LONG — non-string element
+                return undefined;
+            }
+        };
+
+        test('numeric slice — blobField[0:128] with STRING base → inferredType STRING', () => {
+            const a = classifyFirstArg("Foo(blobField[0:128])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `substring slice of a STRING base must infer STRING; got kind='${a.kind}' inferredType='${a.inferredType}'. ` +
+                `Pre-fix: slice falls to 'unknown'/undefined → conservative match-all over-counts SetValue(StringTheory).`);
+        });
+
+        test('var:var slice — someStringField[a:b] (StructurePrefix-collapsed) with STRING base → inferredType STRING', () => {
+            // Phase A: `a:b` collapses to a single StructurePrefix token, so this
+            // slice is byte-identical to a prefix array-subscript at the token
+            // level. Base-type resolution is the only signal that disambiguates.
+            const a = classifyFirstArg("Foo(someStringField[a:b])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `ident:ident substring slice of a STRING base must infer STRING; got kind='${a.kind}' inferredType='${a.inferredType}'. ` +
+                `colon-presence alone cannot catch this (StructurePrefix collapse) — base-type discriminator must.`);
+        });
+
+        test('non-X regression guard — arr[i] with non-string base must NOT be retyped to STRING', () => {
+            // Single subscript of a non-string array. Indexing it yields the
+            // element type (LONG here), never STRING. The fix must leave this
+            // alone (un-retyped) so it does not get force-counted toward a
+            // STRING overload.
+            const a = classifyFirstArg("Foo(arr[i])", 'Foo', ctx);
+            assert.notStrictEqual(a.inferredType, 'STRING',
+                `array-element access on a non-string base must NOT be retyped to STRING; got inferredType='${a.inferredType}'. ` +
+                `This is the non-X sentinel: the slice fix must key on base type, not 'has brackets'.`);
+        });
+
+        test('standalone-colon fallback — blobField[0:128] with UNRESOLVED base → STRING via colon signal', () => {
+            // When the base cannot be resolved, a standalone Delimiter(':') inside
+            // the brackets is an almost-certain string slice — secondary fallback.
+            const noResolver: ClassifierContext = { resolveSymbolType: () => undefined };
+            const a = classifyFirstArg("Foo(blobField[0:128])", 'Foo', noResolver);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `standalone-colon numeric slice must infer STRING even when base is unresolved; got inferredType='${a.inferredType}'.`);
+        });
+    });
 });
