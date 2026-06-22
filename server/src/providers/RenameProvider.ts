@@ -95,6 +95,23 @@ export class RenameProvider {
             }
         }
 
+        // #195 part 2: rename targets the LAST dotted segment (the method/field name).
+        // For a cursor on the after-dot segment, getWordRangeAtPosition returns the
+        // full qualified `Class.Method` (correct for hover/definition/FAR, wrong for
+        // rename — VS Code would seed the rename box with the whole dotted name and
+        // rewrite the class prefix too). Narrow HERE, RenameProvider-locally — never in
+        // the shared helper, which other consumers depend on. Cursor-on-class-part
+        // already yields just the class (no dot), so this only fires past the dot and
+        // the narrowed range always contains the cursor. provideRename is unaffected
+        // (it recomputes from the position via FAR ranges, not from this range).
+        const lastDot = word.lastIndexOf('.');
+        if (lastDot >= 0) {
+            return {
+                start: { line: wordRange.start.line, character: wordRange.start.character + lastDot + 1 },
+                end: wordRange.end,
+            };
+        }
+
         return wordRange;
     }
 

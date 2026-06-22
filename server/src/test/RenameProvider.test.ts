@@ -567,5 +567,33 @@ suite('RenameProvider', () => {
             assert.strictEqual(implEdit.range.end.character - implEdit.range.start.character, 'GetNow'.length,
                 'impl edit must span exactly GetNow (6 chars), not the dotted name');
         });
+
+        // PART 2 BUG PIN — prepareRename must narrow the dotted impl word to just the
+        // method segment so VS Code's rename box targets 'GetNow', not the full
+        // 'MyFunctionsClass.GetNow' (pre-part-2 it returned the whole dotted range).
+        test('prepareRename narrows the dotted impl word to the method segment (GetNow)', async () => {
+            const clwDoc = seed195();
+            const pos = { line: 2, character: GETNOW_COL + 1 };
+            const range = await provider.prepareRename(clwDoc, pos);
+            assert.ok(range, 'prepareRename must return a range');
+            assert.strictEqual(clwDoc.getText(range!), 'GetNow',
+                'rename box must target ONLY the method segment, not the full MyFunctionsClass.GetNow');
+        });
+
+        // Non-regression: a plain (non-dotted) symbol's range is returned unchanged —
+        // the narrowing only fires when the cursor word contains a '.'.
+        test('non-regression — plain non-dotted symbol range is unchanged', async () => {
+            const doc = createDocument([
+                'MyProc PROCEDURE',
+                '  Counter  LONG',
+                'CODE',
+                '  Counter = 0',
+            ].join('\n'));
+            seedCache(doc);
+            const range = await provider.prepareRename(doc, { line: 3, character: 4 });
+            assert.ok(range, 'prepareRename must return a range for a plain local');
+            assert.strictEqual(doc.getText(range!), 'Counter',
+                'non-dotted symbol range must be returned in full (no narrowing)');
+        });
     });
 });
