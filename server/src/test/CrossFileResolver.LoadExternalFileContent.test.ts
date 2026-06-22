@@ -69,4 +69,45 @@ suite('CrossFileResolver.loadExternalFileContent (#117 B1)', () => {
         const r = CrossFileResolver.loadExternalFileContent(cache, 'file:///empty.clw', 'Z:/does/not/exist.clw');
         assert.strictEqual(r, '');
     });
+
+    // ── #197 — live-doc-first tier (4th param `getLiveText(fsPath)`) ──────────────
+    // Open+dirty cross-file files: onDidChangeContent clears the cache → getDocumentText
+    // null → the loader fell to STALE saved disk. New FIRST tier sources the live editor
+    // buffer via getLiveText, keyed by FSPATH (reuses server.ts:475 getOpenDocumentContent;
+    // path-normalized → dodges the #196 f%3A/f: URI-drift).
+
+    test('live tier — getLiveText(fsPath) wins over BOTH cache and disk', () => {
+        const p = tmpFile('livewin', 'ON_DISK');
+        try {
+            const cache = fakeCache(new Map([['file:///x.clw', 'CACHED']]));
+            const r = CrossFileResolver.loadExternalFileContent(cache, 'file:///x.clw', p, (fsPath) => (fsPath === p ? 'LIVE' : undefined));
+            assert.strictEqual(r, 'LIVE');
+        } finally {
+            fs.unlinkSync(p);
+        }
+    });
+
+    test('live tier — empty live buffer "" is returned as-is (?? not ||), no fall-through to cache/disk', () => {
+        const cache = fakeCache(new Map([['file:///x.clw', 'CACHED']]));
+        const r = CrossFileResolver.loadExternalFileContent(cache, 'file:///x.clw', 'Z:/does/not/exist.clw', () => '');
+        assert.strictEqual(r, '');
+    });
+
+    test('live tier — getLiveText returning null/undefined falls through to cache then disk', () => {
+        const cache = fakeCache(new Map([['file:///x.clw', 'CACHED']]));
+        const r = CrossFileResolver.loadExternalFileContent(cache, 'file:///x.clw', 'Z:/does/not/exist.clw', () => undefined);
+        assert.strictEqual(r, 'CACHED');
+    });
+
+    test('live tier — resolver is keyed by FSPATH, not uri', () => {
+        const p = tmpFile('keyfs', 'ON_DISK');
+        try {
+            const seen: string[] = [];
+            const cache = fakeCache(new Map());
+            CrossFileResolver.loadExternalFileContent(cache, 'file:///x.clw', p, (arg) => { seen.push(arg); return undefined; });
+            assert.deepStrictEqual(seen, [p], 'getLiveText must be called with the fsPath, not the uri');
+        } finally {
+            fs.unlinkSync(p);
+        }
+    });
 });

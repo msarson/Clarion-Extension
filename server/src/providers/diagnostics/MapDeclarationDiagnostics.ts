@@ -48,7 +48,8 @@ function resolveClwPath(bareFilename: string): string | null {
  */
 export async function validateMissingMapDeclarations(
     tokens: Token[],
-    document: TextDocument
+    document: TextDocument,
+    getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Only relevant for MEMBER files
     const memberToken = tokens.find(t =>
@@ -159,7 +160,7 @@ export async function validateMissingMapDeclarations(
                 // #117 B1: shared cache-first/disk-fallback content load. Downstream
                 // unchanged — TextDocument + cached async getTokens. undefined => skip
                 // this include (matches the prior readFileSync-throws -> catch path).
-                const incContent = CrossFileResolver.loadExternalFileContent(tokenCache, incUri, incPath);
+                const incContent = CrossFileResolver.loadExternalFileContent(tokenCache, incUri, incPath, getOpenDocumentContent);
                 if (incContent === undefined) continue;
                 const incDoc = TextDocument.create(incUri, 'clarion', 1, incContent);
                 const incTokens = await tokenCache.getTokens(incDoc);
@@ -288,7 +289,7 @@ export async function validateMissingMapDeclarations(
                     // #117 B1: shared cache-first/disk-fallback content load (V2b is a
                     // TEXT/line read, not a tokenize). undefined => skip this proc's
                     // signature check (the prior readFileSync-throws was caught below).
-                    const parentText = CrossFileResolver.loadExternalFileContent(tokenCache, resultLiveUri, result.file);
+                    const parentText = CrossFileResolver.loadExternalFileContent(tokenCache, resultLiveUri, result.file, getOpenDocumentContent);
                     if (parentText === undefined) continue;
                     const parentLines = parentText.split('\n');
                     const declLine = parentLines[result.line] ?? '';

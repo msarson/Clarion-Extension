@@ -96,9 +96,10 @@ export class DiagnosticProvider {
     /** Async pass: warn when a procedure implementation has no MAP declaration in the parent file. Closes #89 */
     public static async validateMissingMapDeclarations(
         tokens: Token[],
-        document: TextDocument
+        document: TextDocument,
+        getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return validateMissingMapDeclarations(tokens, document);
+        return validateMissingMapDeclarations(tokens, document, getOpenDocumentContent);
     }
 
     /** Async pass: warn when a MAP/MODULE declaration has no implementation in the referenced CLW. Closes #89 */

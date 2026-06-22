@@ -61,10 +61,19 @@ export class CrossFileResolver {
     public static loadExternalFileContent(
         tokenCache: TokenCache,
         uri: string | undefined,
-        fsPath: string
+        fsPath: string,
+        getLiveText?: (fsPath: string) => string | null | undefined
     ): string | undefined {
         try {
-            return (uri ? tokenCache.getDocumentText(uri) : undefined) ?? fs.readFileSync(fsPath, 'utf8');
+            // #197 live-doc-first tier: prefer the live editor buffer for OPEN files
+            // (keyed by FSPATH so it reuses the server's getOpenDocumentContent(absPath)
+            // resolver and is robust to URI-encoding drift). Falls through to the
+            // TokenCache text, then disk. `??` so an empty live buffer ('') is returned
+            // as-is rather than masking it with stale disk. Open+dirty files clear the
+            // cache (onDidChangeContent) → without this tier the loader read stale disk.
+            return getLiveText?.(fsPath)
+                ?? (uri ? tokenCache.getDocumentText(uri) : undefined)
+                ?? fs.readFileSync(fsPath, 'utf8');
         } catch {
             return undefined;
         }
