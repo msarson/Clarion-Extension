@@ -678,5 +678,47 @@ suite('RenameProvider', () => {
                 assert.ok(!overlaps, 'WorkspaceEdit must not contain overlapping ranges');
             }
         });
+
+        // REAL ROOT CAUSE (Mark's live #196-DIAG log, f:/Playground/TestIncInClw):
+        // FAR returned the SAME .clw under TWO uri spellings — `file:///f%3A/…` (encoded
+        // colon, VS Code's canonical active-doc form) AND `file:///f:/…` (un-encoded, from
+        // the sourceFiles disk walk) — each with the identical impl range. Keyed by the
+        // raw uri string those are two groups → two documentChanges for one physical file
+        // → VS Code (which resolves both to one resource) saw overlapping edits → rejected
+        // the .clw while the .inc (single edit) applied. The grouping key MUST normalize
+        // the uri to a path so mixed encodings collapse to ONE documentChange.
+        test('same file under different uri encodings (f%3A vs f:) collapses to ONE edit', async () => {
+            const encodedUri = 'file:///f%3A/Playground/TestIncInClw/MyFunctionsClass.clw'; // active doc form
+            const rawUri     = 'file:///f:/Playground/TestIncInClw/MyFunctionsClass.clw';   // disk-walk form
+            const doc = createDocument([
+                "  MEMBER",
+                "  INCLUDE('MyFunctionsClass.inc'),ONCE",
+                'MyFunctionsClass.RetrieveCurrentTime   PROCEDURE()',
+                '  CODE',
+                '  RETURN',
+            ].join('\n'), encodedUri);
+            seedCache(doc);
+
+            const implRange = { start: { line: 2, character: 17 }, end: { line: 2, character: 36 } };
+            (provider as any).referencesProvider = {
+                provideReferences: async () => [
+                    { uri: encodedUri, range: implRange },
+                    { uri: rawUri, range: { start: { line: 2, character: 17 }, end: { line: 2, character: 36 } } },
+                ],
+            };
+
+            const edit = await provider.provideRename(doc, { line: 2, character: 19 }, 'GetNow');
+            assert.ok(edit?.documentChanges, 'must return documentChanges');
+            const tdes = edit!.documentChanges as TextDocumentEdit[];
+
+            // Exactly ONE documentChange for the .clw, regardless of the two uri spellings.
+            assert.strictEqual(tdes.length, 1,
+                `mixed-encoding uris for one file must collapse to ONE documentChange; got ${tdes.length}`);
+            assert.strictEqual(tdes[0].edits.length, 1,
+                `the collapsed group must hold ONE edit (no overlapping duplicate); got ${tdes[0].edits.length}`);
+            // Emits under the active document's exact spelling (the encoded form).
+            assert.strictEqual(tdes[0].textDocument.uri, encodedUri,
+                'should emit under the active document uri spelling');
+        });
     });
 });
