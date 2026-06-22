@@ -606,16 +606,23 @@ suite('RenameProvider', () => {
         });
     });
 
-    // ─── #196 — rename apply: versioned documentChanges + dedup ──────────────────
+    // ─── #196 — rename apply: documentChanges (NULL version) + dedup ─────────────
     // Mark: rename a method at its impl point with a TYPED name → "Failed to apply
-    // edits" (intermittent; PARTIAL — the .inc decl applied, the active .clw impl
-    // edit was rejected). Two independently-correct fixes: (A) emit VERSIONED
-    // documentChanges (not unversioned `changes`) so VS Code applies each edit against
-    // the document version it was computed for; (B) DEDUPE overlapping/duplicate
-    // ranges per uri (a WorkspaceEdit must never contain overlapping edits — VS Code
-    // rejects that file's edits while still applying others, the partial-rename tell).
-    suite('#196 — rename apply: documentChanges + dedup', () => {
-        test('provideRename emits versioned documentChanges (not unversioned changes)', async () => {
+    // edits" (PARTIAL — the .inc decl applied, the active .clw impl edit was rejected).
+    //
+    // The fix has TWO parts, and the FIRST attempt got one of them backwards:
+    //   (A) emit `documentChanges` (modern, ordered) with version === NULL — i.e.
+    //       UNVERSIONED. An earlier attempt attached the LSP document version, but
+    //       VS Code's text-model version (model.getVersionId()) is a DIFFERENT counter
+    //       that diverges across undo/redo, so the versioned edit for the OPEN .clw was
+    //       rejected (version mismatch) while the closed .inc (no version) applied —
+    //       reproducing the exact partial-rename symptom. Null version = "apply without
+    //       a version check", which is correct for a synchronously-computed rename.
+    //   (B) DEDUPE overlapping/duplicate ranges per uri (a WorkspaceEdit must never
+    //       contain overlapping edits — VS Code rejects that file's edits while still
+    //       applying others, the partial-rename tell).
+    suite('#196 — rename apply: documentChanges (null version) + dedup', () => {
+        test('provideRename emits UNVERSIONED documentChanges (version null, not legacy changes)', async () => {
             const doc = createDocument([
                 'MyProc PROCEDURE',
                 '  Counter  LONG',
@@ -627,13 +634,14 @@ suite('RenameProvider', () => {
 
             const edit = await provider.provideRename(doc, { line: 3, character: 3 }, 'Index');
             assert.ok(edit, 'provideRename must return a WorkspaceEdit');
-            assert.ok(edit!.documentChanges, 'must emit documentChanges (versioned), not legacy changes');
+            assert.ok(edit!.documentChanges, 'must emit documentChanges, not legacy changes');
             assert.strictEqual(edit!.changes, undefined, 'must NOT emit unversioned changes');
             const tde = (edit!.documentChanges as TextDocumentEdit[]).find(
                 c => TextDocumentEdit.is(c) && c.textDocument.uri === doc.uri);
             assert.ok(tde, 'documentChanges must include the active document');
-            assert.strictEqual(tde!.textDocument.version, doc.version,
-                'active document edit must carry its live version');
+            assert.strictEqual(tde!.textDocument.version, null,
+                'edit version MUST be null — a concrete version is rejected by VS Code when its ' +
+                'model version (a separate counter) has diverged via undo/redo, which was the bug');
         });
 
         test('dedupes duplicate + overlapping ranges per uri (no overlapping edits in the WorkspaceEdit)', async () => {
