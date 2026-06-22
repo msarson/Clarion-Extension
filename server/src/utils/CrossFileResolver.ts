@@ -44,6 +44,33 @@ export class CrossFileResolver {
     }
 
     /**
+     * #117 B1 — behavior-neutral cross-file CONTENT loader shared by the diagnostics
+     * providers. Prefers live TokenCache text (open files with unsaved edits) over
+     * disk, falls back to `fs.readFileSync`, and fails open (returns `undefined`) on
+     * any error. This dedupes ONLY the cache-first/disk-fallback content load — each
+     * caller keeps its own downstream (StructureDiagnostics: `new ClarionTokenizer().
+     * tokenize()` sync; MapDeclarationDiagnostics V2a: `TextDocument` + cached
+     * `tokenCache.getTokens()` async; V2b: `.split('\n')` line read). A `Token[]`
+     * helper could NOT be behavior-neutral across those three downstreams.
+     *
+     * Static (over a passed `tokenCache`) so callers needn't hold a CrossFileResolver
+     * instance. CrossFileResolver's own equivalent idiom (the `getDocumentText(uri) ??
+     * fs.readFileSync` reads in resolveMapDeclaration / global-variable lookups) can
+     * migrate onto this later — separate follow-up, not #117 B1.
+     */
+    public static loadExternalFileContent(
+        tokenCache: TokenCache,
+        uri: string | undefined,
+        fsPath: string
+    ): string | undefined {
+        try {
+            return (uri ? tokenCache.getDocumentText(uri) : undefined) ?? fs.readFileSync(fsPath, 'utf8');
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
      * Resolves a filename to an absolute path using RedirectionParser
      * Tries solution-wide redirection first, then falls back to relative path
      * @param filename Unresolved filename (from MEMBER, MODULE, INCLUDE, etc.)

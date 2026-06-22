@@ -156,7 +156,11 @@ export async function validateMissingMapDeclarations(
             if (!incPath) continue;
             try {
                 const incUri = pathToCanonicalUri(incPath);
-                const incContent = tokenCache.getDocumentText(incUri) ?? fs.readFileSync(incPath, 'utf8');
+                // #117 B1: shared cache-first/disk-fallback content load. Downstream
+                // unchanged — TextDocument + cached async getTokens. undefined => skip
+                // this include (matches the prior readFileSync-throws -> catch path).
+                const incContent = CrossFileResolver.loadExternalFileContent(tokenCache, incUri, incPath);
+                if (incContent === undefined) continue;
                 const incDoc = TextDocument.create(incUri, 'clarion', 1, incContent);
                 const incTokens = await tokenCache.getTokens(incDoc);
 
@@ -281,8 +285,11 @@ export async function validateMissingMapDeclarations(
                         const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
                         return uriPath === normalizedResultPath;
                     });
-                    const parentText = (resultLiveUri && tokenCache.getDocumentText(resultLiveUri))
-                        ?? fs.readFileSync(result.file, 'utf8');
+                    // #117 B1: shared cache-first/disk-fallback content load (V2b is a
+                    // TEXT/line read, not a tokenize). undefined => skip this proc's
+                    // signature check (the prior readFileSync-throws was caught below).
+                    const parentText = CrossFileResolver.loadExternalFileContent(tokenCache, resultLiveUri, result.file);
+                    if (parentText === undefined) continue;
                     const parentLines = parentText.split('\n');
                     const declLine = parentLines[result.line] ?? '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);

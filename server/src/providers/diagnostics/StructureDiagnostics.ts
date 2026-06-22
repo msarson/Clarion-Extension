@@ -5,6 +5,7 @@ import * as nodePath from 'path';
 import { ClarionTokenizer, Token, TokenType } from '../../ClarionTokenizer';
 import { ViewDescriptorParser } from '../../tokenizer/ViewDescriptorParser';
 import { TokenCache } from '../../TokenCache';
+import { CrossFileResolver } from '../../utils/CrossFileResolver';
 
 interface StructureStackItem {
     token: Token;
@@ -636,8 +637,12 @@ class FileResolver {
         const cachedTokens = this.tokenCache.getTokensByUri(uri);
         if (cachedTokens) return cachedTokens;
 
+        // #117 B1: shared cache-first/disk-fallback content load (was an inline
+        // `getDocumentText(uri) ?? fs.readFileSync` here). Downstream stays exactly
+        // as before — sync direct tokenize, undefined on any failure.
+        const content = CrossFileResolver.loadExternalFileContent(this.tokenCache, uri, candidate);
+        if (content === undefined) return undefined;
         try {
-            const content = this.tokenCache.getDocumentText(uri) ?? fs.readFileSync(candidate, 'utf8');
             return new ClarionTokenizer(content).tokenize();
         } catch {
             return undefined;
