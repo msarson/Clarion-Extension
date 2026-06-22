@@ -229,7 +229,7 @@ export class CallSiteArgumentClassifier {
         const first = significant[0];
         const second = significant[1];
 
-        // Substring slice / array index: `<bareVariable> [ ... ]` (#181 item 3).
+        // Substring slice / array index: `<base> [ ... ]` (#181 item 3 + #192).
         // Discriminator is BASE-TYPE resolution, not bracket-content shape: Phase A
         // proved the tokenizer collapses `ident:ident` slices (`field[a:b]`) into a
         // single StructurePrefix token, byte-identical to a prefix array-subscript
@@ -238,16 +238,19 @@ export class CallSiteArgumentClassifier {
         // base yields STRING. A substring slice is an addressable STRING lvalue, so we
         // reuse the `variable` kind (matches STRING base or `*STRING` ref form) rather
         // than adding a new ArgKind — keeps the fix to the classifier, no resolver edits.
-        // Bare-variable base only (Bob scope lock); dotted/prefixed bases are follow-up.
-        if (this.looksLikeSliceAccess(significant)) {
-            const baseType = ctx?.resolveSymbolType?.(first.value, line, character);
+        // Base forms recognised (#192 widened from bare-variable-only): bare variable,
+        // dotted (`SELF.field[a:b]`, one StructureField token), and prefixed
+        // (`PRE:Field[a:b]`, a three-token [Attribute|Variable ':' Variable] head).
+        const slice = this.sliceAccess(significant);
+        if (slice) {
+            const baseType = ctx?.resolveSymbolType?.(slice.baseName, line, character);
             if (baseType && this.isStringLikeType(baseType)) {
                 return { kind: 'variable', inferredType: 'STRING', rawText, line, character };
             }
             // Secondary fallback: when the base cannot be resolved, a standalone
             // Delimiter(':') inside the brackets (numeric slice `[0:128]`) is an
             // almost-certain substring slice → STRING.
-            if (!baseType && this.hasStandaloneColon(significant)) {
+            if (!baseType && this.hasStandaloneColon(significant, slice.openIdx)) {
                 return { kind: 'variable', inferredType: 'STRING', rawText, line, character };
             }
             // Resolved non-string base (e.g. `arr[i]` LONG element) or unresolved
@@ -313,25 +316,56 @@ export class CallSiteArgumentClassifier {
     }
 
     /**
-     * Recognises the bare-variable slice/index shape `<Variable> [ ... ]`: a single
-     * Variable base immediately followed by a `[`, with the slice closed by `]`.
-     * Bare-variable only — dotted/prefixed bases (`SELF.field[a:b]`, `PRE:Field[a:b]`)
-     * are out of scope (#181 item 3 follow-up) and naturally excluded by the
-     * `Variable`-typed base guard.
+     * Recognises a slice/index shape `<base> [ ... ]` and, when present, returns the
+     * base NAME (the tokens before `[`, for resolver lookup) plus the index of the
+     * opening `[`. Returns `null` when no slice shape is present. Three base forms
+     * (#181 item 3 + #192 — token shapes confirmed empirically in Phase A):
+     *
+     *   - bare variable: `Variable '[' … ']'`                        → base = first.value
+     *   - dotted:        `StructureField '[' … ']'`                  → base = first.value ("SELF.field")
+     *   - prefixed:      `(Attribute|Variable) ':' Variable '[' … ']'` → base = "PRE:Field"
+     *
+     * The base name is ONLY the tokens before `[`; the index/slice content is never
+     * swept into it (`SELF.field[i]` resolves "SELF.field", not "SELF.fieldi"). The
+     * prefix token is an Attribute (not a Variable) at the token level, so the
+     * prefixed head spans three tokens and `[` sits at index 3.
      */
-    private looksLikeSliceAccess(significant: Token[]): boolean {
-        if (significant.length < 4) return false; // base + '[' + >=1 index token + ']'
-        const base = significant[0];
-        const open = significant[1];
+    private sliceAccess(significant: Token[]): { baseName: string; openIdx: number } | null {
         const close = significant[significant.length - 1];
-        return base.type === TokenType.Variable &&
-               open.type === TokenType.Delimiter && open.value === '[' &&
-               close.type === TokenType.Delimiter && close.value === ']';
+        if (!(close.type === TokenType.Delimiter && close.value === ']')) return null;
+
+        const first = significant[0];
+
+        // Prefixed head: (Attribute|Variable) ':' Variable '[' … ']'.
+        if (significant.length >= 6 &&
+            (first.type === TokenType.Attribute || first.type === TokenType.Variable) &&
+            significant[1].type === TokenType.Delimiter && significant[1].value === ':' &&
+            significant[2].type === TokenType.Variable &&
+            significant[3].type === TokenType.Delimiter && significant[3].value === '[') {
+            return { baseName: significant.slice(0, 3).map(t => t.value).join(''), openIdx: 3 };
+        }
+
+        // Bare-variable or dotted head: <base> '[' … ']'.
+        if (significant.length >= 4 &&
+            (first.type === TokenType.Variable || first.type === TokenType.StructureField) &&
+            significant[1].type === TokenType.Delimiter && significant[1].value === '[') {
+            return { baseName: first.value, openIdx: 1 };
+        }
+
+        return null;
     }
 
-    /** True when a standalone `:` Delimiter appears among the slice tokens (numeric slice `[0:128]`). */
-    private hasStandaloneColon(significant: Token[]): boolean {
-        return significant.some(t => t.type === TokenType.Delimiter && t.value === ':');
+    /**
+     * True when a standalone `:` Delimiter appears INSIDE the brackets (numeric slice
+     * `[0:128]`). Scans only tokens after the opening `[` (`openIdx`), so a prefix
+     * colon (`PRE:Field`) outside the brackets is never mistaken for a slice colon.
+     */
+    private hasStandaloneColon(significant: Token[], openIdx: number): boolean {
+        for (let i = openIdx + 1; i < significant.length; i++) {
+            const t = significant[i];
+            if (t.type === TokenType.Delimiter && t.value === ':') return true;
+        }
+        return false;
     }
 
     /** STRING-family base test (handles parameterised forms like `STRING(256)`). */
