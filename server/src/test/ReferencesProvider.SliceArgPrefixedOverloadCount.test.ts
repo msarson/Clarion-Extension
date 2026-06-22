@@ -7,7 +7,8 @@ import { setServerInitialized } from '../serverState';
 /**
  * RED pin for #193 (task 47df530a, items 1-2) — re-enables the prefixed-base slice
  * FAR pin DEFERRED from #192. Bidirectional reference-count pins (GROUP + QUEUE
- * prefixes) + blast-radius regression sentinels for the additive PRE-group keying.
+ * prefixes, 3-char AND >3-char) + blast-radius regression sentinels for the additive
+ * PRE-group keying.
  *
  * BUG (the #192 deferral): #192 widened the CLASSIFIER to recognise a prefixed-base
  * slice `PRE:Field[a:b]` and extract base name "PRE:Field", but the var-type index
@@ -23,10 +24,9 @@ import { setServerInitialized } from '../serverState';
  *                          PRE collides with a keyword so it stays split)
  *   - `QUE:QText[a:b]`  → StructurePrefix("QUE:QText") '[' …            (SINGLE token;
  *                          QUE is not a keyword so `ident:ident` collapses)
- * So the #192 classifier (head union = Variable|StructureField|prefixed-3-token) greens
- * the GROUP pin via the resolution-side keying alone, but the QUEUE pin ALSO needs a
- * minimal classifier extension (fold StructurePrefix into the slice-head union, PM-
- * approved). Both stay in scope per the no-half-capability ruling.
+ * The collapse is PREFIX-LENGTH-INDEPENDENT (empirically: CUST:CName, ORDHDR:Total
+ * collapse identically) — pinned below by the CUST (4-char) bidirectional pin so a
+ * future length assumption can't regress it.
  *
  * #193 fix: (Eve item 3) generalize PRE() capture to GROUP/RECORD/FILE/QUEUE; key those
  * fields ADDITIVELY as both "field" AND "prefix:field"; prefix-aware lookup; + fold
@@ -52,12 +52,14 @@ import { setServerInitialized } from '../serverState';
  *   (S2) non-PRE GROUP field strField[a:b] (bare label) must STAY STRING-resolvable
  *        (excluded from StringTheory) — additive keying must not perturb bare-label walk.
  *   (S3) non-string QUEUE base QUE:QLong[a:b] (single StructurePrefix head) must STAY
- *        counted toward SetValue(StringTheory) — pins that the NEW StructurePrefix
- *        slice-head branch keys on base-TYPE, not "is a StructurePrefix slice". Green
- *        before AND after Eve's classifier edit (non-string base falls through either way).
+ *        counted toward SetValue(StringTheory) — pins the StructurePrefix slice-head
+ *        branch keys on base-TYPE, not "is a StructurePrefix slice".
+ *   (S4) non-string LONG-prefix base CUST:CNum[a:b] (4-char, single StructurePrefix)
+ *        must STAY counted toward StringTheory — length-independent non-X guard.
  *
- * RED today: the two BUG PINs (GROUP line 20, QUEUE line 23) fail (over-count). The
- * STRING-side sentinels + S1/S2/S3 pass now and must stay green through Eve's GREEN.
+ * RED-history: the two 3-char BUG PINs (GROUP line 24, QUEUE line 27) were the original
+ * RED (committed d461472/d4e41eb before Eve's GREEN). With Eve's GREEN active they pass;
+ * the CUST (4-char) pin proves length-independence (green = proven; red = length bug).
  */
 
 function createDocument(content: string, uri: string): TextDocument {
@@ -75,26 +77,32 @@ const SLICE_FIXTURE = [
     "DoWork   PROCEDURE()",                                        // line 3
     "        END",                                                 // line 4
     "",                                                            // line 5
-    "MyGroup GROUP,PRE(PRE)",                                      // line 6 — PRE group
+    "MyGroup GROUP,PRE(PRE)",                                      // line 6 — PRE group (3-char)
     "Field      STRING(256)",                                      // line 7 — PRE:Field (STRING)
     "LongField  LONG",                                             // line 8 — PRE:LongField (non-string)
     "        END",                                                 // line 9
     "PlainGrp GROUP",                                              // line 10 — NON-PRE group
     "strField   STRING(256)",                                      // line 11 — bare-label STRING field
     "        END",                                                 // line 12
-    "MyQueue QUEUE,PRE(QUE)",                                      // line 13 — PRE queue
+    "MyQueue QUEUE,PRE(QUE)",                                      // line 13 — PRE queue (3-char)
     "QText      STRING(256)",                                      // line 14 — QUE:QText (STRING)
     "QLong      LONG",                                             // line 15 — QUE:QLong (non-string)
     "        END",                                                 // line 16
-    "",                                                            // line 17
-    "StringTheory.DoWork PROCEDURE()",                            // line 18
-    "  CODE",                                                      // line 19
-    "  SELF.SetValue(PRE:Field[a:b])",                            // line 20 — item1 BUG PIN: GROUP STRING prefixed
-    "  SELF.SetValue(PRE:LongField[a:b])",                        // line 21 — S1: non-string GROUP prefixed
-    "  SELF.SetValue(strField[a:b])",                            // line 22 — S2: non-PRE bare field
-    "  SELF.SetValue(QUE:QText[a:b])",                           // line 23 — item1 BUG PIN: QUEUE STRING prefixed
-    "  SELF.SetValue(QUE:QLong[a:b])",                           // line 24 — S3: non-string QUEUE prefixed
-    "  RETURN",                                                    // line 25
+    "CustGrp GROUP,PRE(CUST)",                                     // line 17 — PRE group (4-char prefix)
+    "CName      STRING(256)",                                      // line 18 — CUST:CName (STRING)
+    "CNum       LONG",                                             // line 19 — CUST:CNum (non-string)
+    "        END",                                                 // line 20
+    "",                                                            // line 21
+    "StringTheory.DoWork PROCEDURE()",                            // line 22
+    "  CODE",                                                      // line 23
+    "  SELF.SetValue(PRE:Field[a:b])",                            // line 24 — BUG PIN: GROUP STRING prefixed (3-char)
+    "  SELF.SetValue(PRE:LongField[a:b])",                        // line 25 — S1: non-string GROUP prefixed
+    "  SELF.SetValue(strField[a:b])",                            // line 26 — S2: non-PRE bare field
+    "  SELF.SetValue(QUE:QText[a:b])",                           // line 27 — BUG PIN: QUEUE STRING prefixed (3-char)
+    "  SELF.SetValue(QUE:QLong[a:b])",                           // line 28 — S3: non-string QUEUE prefixed
+    "  SELF.SetValue(CUST:CName[a:b])",                          // line 29 — BUG PIN: 4-char prefix STRING (length-independence)
+    "  SELF.SetValue(CUST:CNum[a:b])",                           // line 30 — S4: non-string 4-char prefix
+    "  RETURN",                                                    // line 31
 ].join('\n');
 
 const SLICE_URI = 'file:///193-prefixed-slice.clw';
@@ -113,7 +121,7 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         TokenCache.getInstance().clearTokens(SLICE_URI);
     });
 
-    // ── item 1: prefixed FAR pin — GROUP base (bidirectional) ──────────────
+    // ── item 1: prefixed FAR pin — GROUP base, 3-char (bidirectional) ──────
     test('BUG PIN (item 1, GROUP) — PRE:Field[a:b] must NOT count toward SetValue(StringTheory) overload', async () => {
         const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
         seedCache(doc);
@@ -124,8 +132,8 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            !lines.includes(20),
-            'expected line 20 (GROUP prefixed STRING-slice SELF.SetValue(PRE:Field[a:b])) NOT in StringTheory-overload result; ' +
+            !lines.includes(24),
+            'expected line 24 (GROUP prefixed STRING-slice SELF.SetValue(PRE:Field[a:b])) NOT in StringTheory-overload result; ' +
             'got lines=[' + lines.join(',') + '] — over-counting until #193 keys PRE-group fields as prefix:field'
         );
     });
@@ -140,13 +148,13 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            lines.includes(20),
-            'expected line 20 (GROUP prefixed STRING-slice) IN the STRING-overload result; ' +
+            lines.includes(24),
+            'expected line 24 (GROUP prefixed STRING-slice) IN the STRING-overload result; ' +
             'got lines=[' + lines.join(',') + '] — if absent, the call site is not being surfaced (machinery gap)'
         );
     });
 
-    // ── item 1: prefixed FAR pin — QUEUE base (single StructurePrefix head) ──
+    // ── item 1: prefixed FAR pin — QUEUE base, 3-char (single StructurePrefix head) ──
     test('BUG PIN (item 1, QUEUE) — QUE:QText[a:b] must NOT count toward SetValue(StringTheory) overload', async () => {
         const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
         seedCache(doc);
@@ -156,8 +164,8 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            !lines.includes(23),
-            'expected line 23 (QUEUE prefixed STRING-slice SELF.SetValue(QUE:QText[a:b])) NOT in StringTheory-overload result; ' +
+            !lines.includes(27),
+            'expected line 27 (QUEUE prefixed STRING-slice SELF.SetValue(QUE:QText[a:b])) NOT in StringTheory-overload result; ' +
             'got lines=[' + lines.join(',') + '] — QUEUE base collapses to a single StructurePrefix token; needs the classifier ' +
             'slice-head extension + prefix-keying to resolve (Bob: QUEUE in scope, no half-capability)'
         );
@@ -172,9 +180,44 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            lines.includes(23),
-            'expected line 23 (QUEUE prefixed STRING-slice) IN the STRING-overload result; ' +
+            lines.includes(27),
+            'expected line 27 (QUEUE prefixed STRING-slice) IN the STRING-overload result; ' +
             'got lines=[' + lines.join(',') + '] — QUEUE prefixed slice call site must be surfaced'
+        );
+    });
+
+    // ── item 1: LENGTH-INDEPENDENCE pin — 4-char prefix, single StructurePrefix head ──
+    test('BUG PIN (item 1, 4-char prefix) — CUST:CName[a:b] must NOT count toward SetValue(StringTheory) overload', async () => {
+        const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 2, character: 0 },
+            { includeDeclaration: true });
+        const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        // CUST (4 chars, non-keyword) collapses to a single StructurePrefix token just
+        // like QUE (3 chars). The fix is length-independent (extractStructurePrefix
+        // returns the full identifier; keying is `${prefix}:${field}`; '3-token' is
+        // TOKEN count not char count) — this pin proves it. RED here = a length bug.
+        assert.ok(
+            !lines.includes(29),
+            'expected line 29 (4-char-prefix STRING-slice SELF.SetValue(CUST:CName[a:b])) NOT in StringTheory-overload result; ' +
+            'got lines=[' + lines.join(',') + '] — if present, prefix-keying/collapse handling has a prefix-length assumption'
+        );
+    });
+
+    test('SILENT-EXCLUSION SENTINEL (item 1, 4-char prefix) — CUST:CName[a:b] MUST count toward SetValue(STRING) overload', async () => {
+        const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 1, character: 0 },
+            { includeDeclaration: true });
+        const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(
+            lines.includes(29),
+            'expected line 29 (4-char-prefix STRING-slice) IN the STRING-overload result; ' +
+            'got lines=[' + lines.join(',') + '] — 4-char-prefix collapsed slice call site must be surfaced'
         );
     });
 
@@ -188,8 +231,8 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            lines.includes(21),
-            'expected line 21 (non-string GROUP prefixed slice PRE:LongField[a:b]) STILL counted toward StringTheory; ' +
+            lines.includes(25),
+            'expected line 25 (non-string GROUP prefixed slice PRE:LongField[a:b]) STILL counted toward StringTheory; ' +
             'got lines=[' + lines.join(',') + '] — a non-string prefixed base must NOT be over-retyped to STRING by the prefix-keying'
         );
     });
@@ -203,13 +246,13 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
         assert.ok(
-            !lines.includes(22),
-            'expected line 22 (non-PRE bare field slice strField[a:b]) NOT in StringTheory-overload result; ' +
+            !lines.includes(26),
+            'expected line 26 (non-PRE bare field slice strField[a:b]) NOT in StringTheory-overload result; ' +
             'got lines=[' + lines.join(',') + '] — additive prefix-keying must not break bare-label field resolution'
         );
     });
 
-    test('REGRESSION S3 (item 2) — non-string QUEUE base QUE:QLong[a:b] (single StructurePrefix head) must STAY counted toward StringTheory (new branch keys on base-TYPE)', async () => {
+    test('REGRESSION S3 (item 2) — non-string QUEUE base QUE:QLong[a:b] (single StructurePrefix head) must STAY counted toward StringTheory (branch keys on base-TYPE)', async () => {
         const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
         seedCache(doc);
 
@@ -217,14 +260,25 @@ suite('ReferencesProvider.SliceArgPrefixedOverloadCount (#193 items 1-2 — 47df
             { includeDeclaration: true });
         const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
 
-        // QUE:QLong collapses to a single StructurePrefix token (QUE not a keyword) and
-        // resolves LONG (non-string) → must NOT be retyped to STRING → stays match-all →
-        // counted toward StringTheory. Guards Eve's new StructurePrefix slice-head branch
-        // against keying on shape ("is a StructurePrefix slice") instead of base type.
         assert.ok(
-            lines.includes(24),
-            'expected line 24 (non-string QUEUE prefixed slice QUE:QLong[a:b]) STILL counted toward StringTheory; ' +
+            lines.includes(28),
+            'expected line 28 (non-string QUEUE prefixed slice QUE:QLong[a:b]) STILL counted toward StringTheory; ' +
             'got lines=[' + lines.join(',') + '] — the StructurePrefix slice-head branch must key on base TYPE, not slice shape'
+        );
+    });
+
+    test('REGRESSION S4 (item 2) — non-string 4-char-prefix base CUST:CNum[a:b] must STAY counted toward StringTheory (length-independent non-X guard)', async () => {
+        const doc = createDocument(SLICE_FIXTURE, SLICE_URI);
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 2, character: 0 },
+            { includeDeclaration: true });
+        const lines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+
+        assert.ok(
+            lines.includes(30),
+            'expected line 30 (non-string 4-char-prefix slice CUST:CNum[a:b]) STILL counted toward StringTheory; ' +
+            'got lines=[' + lines.join(',') + '] — a non-string base must NOT be over-retyped to STRING regardless of prefix length'
         );
     });
 });
