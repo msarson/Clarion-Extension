@@ -562,13 +562,28 @@ export class SymbolFinderService {
             try {
                 const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
                 const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
-                if (fs.existsSync(resolvedPath)) {
-                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                    const parentDoc = TextDocument.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContents);
-                    const parentTokens = this.tokenCache.getTokens(parentDoc);
-                    const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
-                    if (parentResult) return parentResult;
+                const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+
+                // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
+                // the parent PROGRAM may be open in the editor (unsaved edits) or seeded by
+                // an in-memory test fixture; consult the token cache first and read disk only
+                // on a miss (matches the FAR family's 671d7cd8 discipline).
+                let parentTokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                let parentDoc: TextDocument | null = null;
+                if (parentTokens) {
+                    const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                    if (cachedText !== null) {
+                        parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                    }
                 }
+                if (!parentTokens || !parentDoc) {
+                    if (!fs.existsSync(resolvedPath)) return null;
+                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
+                    parentTokens = this.tokenCache.getTokens(parentDoc);
+                }
+                const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
+                if (parentResult) return parentResult;
             } catch (err) {
                 logger.error(`Error reading MEMBER parent file for prefixed field: ${err}`);
             }
