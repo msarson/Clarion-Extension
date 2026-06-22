@@ -500,7 +500,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
             timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
             timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
-            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document)),
+            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),
             timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
             timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
             timeIt('ifaceImpl', DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)),
