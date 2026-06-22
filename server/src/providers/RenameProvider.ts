@@ -78,8 +78,14 @@ export class RenameProvider {
         // any non-empty result means provideRename will succeed, so the symbol is renameable.
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
+            // #195: includeDeclaration MUST be true — for a class method renamed at
+            // its impl point with no external callers, the ONLY refs are the decl
+            // (.inc) + impl (.clw). With includeDeclaration:false both are stripped →
+            // 0 → false "not renameable", even though provideRename (which uses
+            // includeDeclaration:true, line below) would succeed. The pre-flight must
+            // not be stricter than the operation it gates.
             const locations = await this.referencesProvider.provideReferences(
-                document, position, { includeDeclaration: false }
+                document, position, { includeDeclaration: true }
             );
             if (!locations || locations.length === 0) {
                 throw new ResponseError(
