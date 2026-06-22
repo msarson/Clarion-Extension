@@ -493,4 +493,79 @@ suite('RenameProvider', () => {
             }
         });
     });
+
+    // ─── #195 — rename a class method AT ITS IMPL POINT with NO external callers ───
+    // Mark repro (FAR-confirmed): MyFunctionsClass.GetNow declared in .inc +
+    // implemented in .clw, NO call sites. prepareRename's findSymbol misses (the
+    // word is the dotted cross-file 'MyFunctionsClass.GetNow') and its fallback used
+    // includeDeclaration:FALSE → decl(.inc)+impl(.clw) both stripped → 0 → threw
+    // 'symbol not found or not renameable', even though provideRename
+    // (includeDeclaration:TRUE) would have succeeded. The pre-flight was stricter
+    // than the op it gates. Fix: RenameProvider.ts:82 false→true. (441ffec3)
+    suite('#195 — class method rename at impl point, no callers', () => {
+        const projectDir = 'f:/Rename195';
+        const incUri = `file:///${projectDir}/MyFunctionsClass.inc`;
+        const clwUri = `file:///${projectDir}/MyFunctionsClass.clw`;
+        const IMPL_LINE = 'MyFunctionsClass.GetNow PROCEDURE()';
+        const GETNOW_COL = IMPL_LINE.indexOf('GetNow'); // boundary proving the prefix is preserved
+
+        function seed195(): TextDocument {
+            const incDoc = createDocument([
+                'MyFunctionsClass CLASS,TYPE',
+                'GetNow             PROCEDURE(),LONG',
+                '                   END',
+            ].join('\n'), incUri);
+            seedCache(incDoc);
+            const clwDoc = createDocument([
+                "  MEMBER()",
+                "  INCLUDE('MyFunctionsClass.inc'),ONCE",
+                IMPL_LINE,                 // line 2 — impl; cursor lands here
+                '  CODE',
+                '  RETURN',
+            ].join('\n'), clwUri);
+            seedCache(clwDoc);
+            (SolutionManager as any).instance = {
+                solution: { projects: [{
+                    path: projectDir,
+                    sourceFiles: [{ relativePath: 'MyFunctionsClass.clw' }, { relativePath: 'MyFunctionsClass.inc' }],
+                    getRedirectionParser: () => null
+                }]},
+                getEquatesTokens: () => [], getEquatesPath: () => null,
+                getProjectPathForFile: () => projectDir, getProjectCwprojForFile: () => null, findProjectForFile: () => null
+            };
+            return clwDoc;
+        }
+
+        // BUG PIN — prepareRename currently THROWS 'not renameable' here (RED).
+        test('prepareRename at the impl point returns a Range (does not throw) for a no-caller method', async () => {
+            const clwDoc = seed195();
+            const pos = { line: 2, character: GETNOW_COL + 1 };
+            const range = await provider.prepareRename(clwDoc, pos);
+            assert.ok(range !== null,
+                'prepareRename must accept a no-caller class method at its impl point — decl+impl are the only refs, ' +
+                'so the pre-flight must include the declaration (it must not be stricter than provideRename)');
+        });
+
+        // GUARD — provideRename (already includeDeclaration:TRUE) rewrites GetNow at
+        // BOTH decl(.inc) + impl(.clw), preserving the MyFunctionsClass. prefix.
+        test('provideRename rewrites GetNow at decl + impl, preserving the class prefix', async () => {
+            const clwDoc = seed195();
+            const pos = { line: 2, character: GETNOW_COL + 1 };
+            const edit = await provider.provideRename(clwDoc, pos, 'GetTime');
+            assert.ok(edit?.changes, 'provideRename must return a WorkspaceEdit');
+            const incEdits = edit!.changes![incUri] ?? [];
+            const clwEdits = edit!.changes![clwUri] ?? [];
+            assert.ok(incEdits.length > 0, 'declaration (.inc) must be rewritten');
+            assert.ok(clwEdits.length > 0, 'implementation (.clw) must be rewritten');
+            assert.ok([...incEdits, ...clwEdits].every(e => e.newText === 'GetTime'),
+                'all edits replace with the new name');
+            // Prefix preserved: the impl edit spans exactly GetNow, NOT MyFunctionsClass.GetNow.
+            const implEdit = clwEdits.find(e => e.range.start.line === 2)!;
+            assert.ok(implEdit, 'impl line must have an edit');
+            assert.strictEqual(implEdit.range.start.character, GETNOW_COL,
+                'impl edit must start at GetNow (the MyFunctionsClass. prefix is preserved)');
+            assert.strictEqual(implEdit.range.end.character - implEdit.range.start.character, 'GetNow'.length,
+                'impl edit must span exactly GetNow (6 chars), not the dotted name');
+        });
+    });
 });
