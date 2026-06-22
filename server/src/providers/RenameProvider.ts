@@ -1,4 +1,4 @@
-import { Range, WorkspaceEdit, TextEdit, ResponseError, ErrorCodes } from 'vscode-languageserver-protocol';
+import { Range, WorkspaceEdit, TextEdit, TextDocumentEdit, ResponseError, ErrorCodes } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -29,6 +29,12 @@ export class RenameProvider {
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private referencesProvider: ReferencesProvider;
+    /**
+     * Resolves a document's live version for `documentChanges` (#196). Injected from
+     * the server's TextDocuments manager so cross-file OPEN files carry their real
+     * version; returns null/undefined for closed files (unversioned, best-effort).
+     */
+    private documentVersionResolver?: (uri: string) => number | null | undefined;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -36,6 +42,11 @@ export class RenameProvider {
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
         this.referencesProvider = new ReferencesProvider();
+    }
+
+    /** Wire a live-version resolver (server's documents manager) for documentChanges. */
+    public setDocumentVersionResolver(resolver: (uri: string) => number | null | undefined): void {
+        this.documentVersionResolver = resolver;
     }
 
     /**
@@ -145,14 +156,59 @@ export class RenameProvider {
 
         logger.debug(`[RENAME] Renaming "${oldName}" → "${newName}" across ${locations.length} location(s)`);
 
-        // Build WorkspaceEdit: group TextEdits by file URI
-        const changes: { [uri: string]: TextEdit[] } = {};
+        // Group reference ranges by file URI.
+        const rangesByUri = new Map<string, Range[]>();
         for (const loc of locations) {
-            if (!changes[loc.uri]) changes[loc.uri] = [];
-            changes[loc.uri].push(TextEdit.replace(loc.range, newName));
+            const arr = rangesByUri.get(loc.uri);
+            if (arr) arr.push(loc.range); else rangesByUri.set(loc.uri, [loc.range]);
         }
 
-        return { changes };
+        // #196: emit VERSIONED `documentChanges` (not unversioned `changes`) and DEDUPE
+        // overlapping/duplicate ranges per uri. A WorkspaceEdit must never contain
+        // overlapping edits for one document — VS Code rejects that whole file's edits
+        // ("failed to apply edits") while still applying others (the partial-rename
+        // symptom). FAR can surface a method location more than once (e.g. the active
+        // impl found via both live tokens and a sourceFiles walk); versions let VS Code
+        // apply each edit against the document version it was computed for.
+        const versionFor = (uri: string): number | null => {
+            const resolved = this.documentVersionResolver?.(uri);
+            if (resolved !== undefined && resolved !== null) return resolved;
+            // The active document is the authoritative live version for its own uri.
+            return uri === document.uri ? document.version : null;
+        };
+
+        const documentChanges: TextDocumentEdit[] = [];
+        for (const [uri, ranges] of rangesByUri) {
+            const edits = this.dedupeRanges(ranges).map(r => TextEdit.replace(r, newName));
+            documentChanges.push(TextDocumentEdit.create({ uri, version: versionFor(uri) }, edits));
+        }
+
+        return { documentChanges };
+    }
+
+    /**
+     * Remove duplicate/overlapping ranges (#196). Sorted by start position, drop any
+     * range whose start falls before the previous kept range's end — for rename, all
+     * ranges span the same identifier length, so an overlap is effectively a duplicate.
+     */
+    private dedupeRanges(ranges: Range[]): Range[] {
+        const sorted = [...ranges].sort((a, b) =>
+            a.start.line - b.start.line ||
+            a.start.character - b.start.character ||
+            a.end.line - b.end.line ||
+            a.end.character - b.end.character);
+        const kept: Range[] = [];
+        for (const r of sorted) {
+            const prev = kept[kept.length - 1];
+            if (prev && this.isBefore(r.start, prev.end)) continue; // overlaps/duplicates prev → drop
+            kept.push(r);
+        }
+        return kept;
+    }
+
+    /** True when position `a` is strictly before position `b`. */
+    private isBefore(a: { line: number; character: number }, b: { line: number; character: number }): boolean {
+        return a.line < b.line || (a.line === b.line && a.character < b.character);
     }
 
     // -------------------------------------------------------------------------
