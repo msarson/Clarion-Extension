@@ -184,6 +184,7 @@ All notable changes to the Clarion Extension are documented here.
 **Infrastructure**
 
 - 🔧 **Multiterminal session-start hook portable across clones** (#110): `.claude/settings.json` project-shared settings + `.claude/hooks/session-start.ps1` are now tracked. Previously the hook script was caught by the broad `*.ps1` ignore rule, leaving cloned repos without session-start wiring. `.gitignore` now carries `!.claude/hooks/*.ps1`. `.claude/settings.local.json` stays gitignored as the per-machine slot.
+- 🔒 **Dependabot security bumps** (dev/build tooling, no runtime impact): `esbuild` 0.28.0→0.28.1 (dev-server arbitrary file read on Windows, GHSA-g7r4-m6w7-qqqr) and `js-yaml` 4.1.1→4.2.0 (merge-key quadratic DoS, GHSA-h67p-54hq-rp68); `brace-expansion` already at the patched 5.0.6 on this branch. `npm audit` clean.
 
 ---
 
