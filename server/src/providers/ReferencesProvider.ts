@@ -24,6 +24,29 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
 
+/**
+ * Canonical dedup key for a reference location (#196 follow-up).
+ *
+ * The same physical file reaches FAR under two URI spellings — `file:///f%3A/…`
+ * (encoded drive colon, VS Code's canonical active-doc form) and `file:///f:/…`
+ * (un-encoded, from the manual `file:///${path}` construction used by the
+ * sourceFiles/disk-walk collectors). Keyed by the raw string they look distinct,
+ * so the same reference survives twice — which is the duplicate RenameProvider had
+ * to clean up downstream in #196. DECODE (so `%3A` → `:`) and lowercase (Windows
+ * paths are case-insensitive) before keying so both spellings collapse here, at the
+ * source, for every consumer. decodeURIComponent can throw on a malformed escape;
+ * fall back to the lowercased raw uri in that case.
+ */
+export function canonicalLocationKey(uri: string, line: number): string {
+    let normUri: string;
+    try {
+        normUri = decodeURIComponent(uri).toLowerCase();
+    } catch {
+        normUri = uri.toLowerCase();
+    }
+    return `${normUri}:${line}`;
+}
+
 type OverloadFilter = {
     minArgs: number;
     maxArgs: number;
@@ -524,10 +547,11 @@ export class ReferencesProvider {
             }
         }
 
-        // Deduplicate by uri+line
+        // Deduplicate by uri+line — canonicalize the uri so mixed encodings
+        // (file:///f%3A/… vs file:///f:/…) for the same file collapse (#196).
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = `${loc.uri}:${loc.range.start.line}`;
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -914,11 +938,13 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
-        // Deduplicate by uri+line (case-insensitive on uri — same file in different case
-        // shapes from FRG-derived vs project-scan-derived URI sources should collapse).
+        // Deduplicate by uri+line. Canonicalize the uri (decode + lowercase) so the
+        // same file in different case OR encoding shapes — FRG-derived (encoded) vs
+        // project-scan-derived (un-encoded file:///f:/…) — collapses (#196). A prior
+        // version lowercased but did NOT decode, so f%3a ≠ f: still slipped through.
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = `${loc.uri.toLowerCase()}:${loc.range.start.line}`;
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
