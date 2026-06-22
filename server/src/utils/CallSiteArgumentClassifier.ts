@@ -229,6 +229,32 @@ export class CallSiteArgumentClassifier {
         const first = significant[0];
         const second = significant[1];
 
+        // Substring slice / array index: `<bareVariable> [ ... ]` (#181 item 3).
+        // Discriminator is BASE-TYPE resolution, not bracket-content shape: Phase A
+        // proved the tokenizer collapses `ident:ident` slices (`field[a:b]`) into a
+        // single StructurePrefix token, byte-identical to a prefix array-subscript
+        // `arr[LOC:I]`, so colon-presence alone cannot tell a string slice from an
+        // array index. Resolving the base type does: any index/slice of a STRING-like
+        // base yields STRING. A substring slice is an addressable STRING lvalue, so we
+        // reuse the `variable` kind (matches STRING base or `*STRING` ref form) rather
+        // than adding a new ArgKind — keeps the fix to the classifier, no resolver edits.
+        // Bare-variable base only (Bob scope lock); dotted/prefixed bases are follow-up.
+        if (this.looksLikeSliceAccess(significant)) {
+            const baseType = ctx?.resolveSymbolType?.(first.value, line, character);
+            if (baseType && this.isStringLikeType(baseType)) {
+                return { kind: 'variable', inferredType: 'STRING', rawText, line, character };
+            }
+            // Secondary fallback: when the base cannot be resolved, a standalone
+            // Delimiter(':') inside the brackets (numeric slice `[0:128]`) is an
+            // almost-certain substring slice → STRING.
+            if (!baseType && this.hasStandaloneColon(significant)) {
+                return { kind: 'variable', inferredType: 'STRING', rawText, line, character };
+            }
+            // Resolved non-string base (e.g. `arr[i]` LONG element) or unresolved
+            // single subscript: leave to the fall-through buckets — never retype to
+            // STRING (non-X regression guard).
+        }
+
         // Negative numeric literal: `-` operator + Number.
         if (first.type === TokenType.Operator && first.value === '-' &&
             second && second.type === TokenType.Number && significant.length === 2) {
@@ -284,6 +310,34 @@ export class CallSiteArgumentClassifier {
         }
 
         return { kind: 'unknown', rawText, line, character };
+    }
+
+    /**
+     * Recognises the bare-variable slice/index shape `<Variable> [ ... ]`: a single
+     * Variable base immediately followed by a `[`, with the slice closed by `]`.
+     * Bare-variable only — dotted/prefixed bases (`SELF.field[a:b]`, `PRE:Field[a:b]`)
+     * are out of scope (#181 item 3 follow-up) and naturally excluded by the
+     * `Variable`-typed base guard.
+     */
+    private looksLikeSliceAccess(significant: Token[]): boolean {
+        if (significant.length < 4) return false; // base + '[' + >=1 index token + ']'
+        const base = significant[0];
+        const open = significant[1];
+        const close = significant[significant.length - 1];
+        return base.type === TokenType.Variable &&
+               open.type === TokenType.Delimiter && open.value === '[' &&
+               close.type === TokenType.Delimiter && close.value === ']';
+    }
+
+    /** True when a standalone `:` Delimiter appears among the slice tokens (numeric slice `[0:128]`). */
+    private hasStandaloneColon(significant: Token[]): boolean {
+        return significant.some(t => t.type === TokenType.Delimiter && t.value === ':');
+    }
+
+    /** STRING-family base test (handles parameterised forms like `STRING(256)`). */
+    private isStringLikeType(type: string): boolean {
+        const base = type.trim().toUpperCase().split('(')[0].trim();
+        return base === 'STRING' || base === 'CSTRING' || base === 'PSTRING' || base === 'ASTRING';
     }
 
     private looksLikeDottedAccess(significant: Token[]): boolean {
