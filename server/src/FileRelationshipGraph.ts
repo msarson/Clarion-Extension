@@ -287,6 +287,23 @@ export class FileRelationshipGraph {
                         containingProcedure = grandParent.label;
                     }
                 }
+            } else if (token.referencedFile && token.value.toUpperCase() === 'MODULE') {
+                // #198: On a CLASS declaration line MODULE tokenizes as an Attribute (and
+                // LINK as a Function) — NOT a Structure — so the MODULE-Structure branch
+                // above misses them, yet the tokenizer DID resolve their referencedFile.
+                // Emit a CLASS_MODULE edge so the relationship (and its document link)
+                // exists when the file is OPEN, matching the cold/regex path. A LINK to the
+                // same file is surfaced as a link via DocumentLinkProvider's per-line
+                // basename match against this edge, so it needs no separate edge.
+                const classToken = tokens.find(t =>
+                    t.line === token.line &&
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'CLASS'
+                );
+                if (classToken) {
+                    edgeType = 'CLASS_MODULE';
+                    containingClass = classToken.label;
+                }
             }
 
             if (!edgeType) continue;
@@ -332,7 +349,10 @@ export class FileRelationshipGraph {
         const programRe  = /^\s*PROGRAM\b/i;
         const includeRe  = /\bINCLUDE\s*\(\s*'([^']+)'\s*(?:,\s*'[^']*'\s*)?\)/ig;
         const moduleRe   = /\bMODULE\s*\(\s*'([^']+)'\s*\)/ig;
-        const classRe    = /\bCLASS\s*\(/i;
+        // #198: a CLASS attribute may be `CLASS,TYPE,MODULE(...)` (no paren after CLASS)
+        // as well as `CLASS('Parent')`. Match CLASS as a word so a MODULE on a CLASS line
+        // is typed CLASS_MODULE in the cold path too (parity with the warm/token path).
+        const classRe    = /\bCLASS\b/i;
         // MAP context: track whether we are inside a MAP block
         const mapOpenRe  = /\bMAP\b/i;
         const mapCloseRe = /\bEND\b/i;
