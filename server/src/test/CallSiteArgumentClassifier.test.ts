@@ -544,4 +544,123 @@ suite('CallSiteArgumentClassifier (10ea5a80 Phase B)', () => {
                 `standalone-colon numeric slice must infer STRING even when base is unresolved; got inferredType='${a.inferredType}'.`);
         });
     });
+
+    // ───────────────────────────────────────────────────────────────────────
+    // (D) Slice-expression inference — dotted + prefixed bases (#192 / e0988953)
+    //     Follow-up to #181 item 3: widen the bare-variable slice discriminator
+    //     to dotted (SELF.field[a:b]) and prefixed (PRE:Field[a:b]) bases.
+    // ───────────────────────────────────────────────────────────────────────
+    //
+    // BUG (pre-fix): looksLikeSliceAccess hard-gates base.type===TokenType.Variable,
+    // so a slice whose base is dotted or prefixed never reaches the STRING-inference
+    // path → it falls to the 'unknown' bucket (inferredType undefined) → the overload
+    // resolver's conservative match-all over-counts the call toward SetValue(StringTheory).
+    //
+    // PHASE A (empirical, real ClarionTokenizer) — token shapes for `Foo(<expr>)`:
+    //   - DOTTED   SELF.field[a:b]  → StructureField("SELF.field") [ StructurePrefix("a:b") ]
+    //                                 base is a SINGLE StructureField token, '[' at idx 1.
+    //   - DOTTED   SELF.field[0:128]→ StructureField("SELF.field") [ Number : Number ]
+    //   - DOTTED   SELF.field[i]    → StructureField("SELF.field") [ Variable("i") ]
+    //   - PREFIXED PRE:Field[a:b]   → Attribute("PRE") Delimiter(":") Variable("Field") [ ... ]
+    //                                 base spans 3 tokens, '[' at idx 3.
+    //
+    // EXTRACTION CONTRACT (decided in Phase A — for Eve's item-4 GREEN):
+    //   - base name = ONLY the tokens before '['. Dotted → first.value ("SELF.field");
+    //     prefixed → join significant[0..2] ("PRE:Field"). joinDotPath over the FULL
+    //     significant array is UNSAFE — it sweeps an index Variable("i") into the name
+    //     (→ "SELF.fieldi"); test `SELF.field[i]` below pins that the index is excluded.
+    //
+    // Resolver is a stub here (unit isolation): the FAR-integration coverage that exercises
+    // the real var-type index lives in ReferencesProvider.SliceArgDottedPrefixed*.test.ts.
+    // NOTE: prefixed base-type resolution is a real-index gap (PRE-group fields are keyed
+    // by bare label "field", not "pre:field") — these unit tests prove the CLASSIFIER
+    // extraction contract independent of that; the prefixed FAR pin is gated on a
+    // resolver decision (see task e0988953 continuation notes, fork A/B).
+    suite('slice-expr inference — dotted + prefixed bases (#192)', () => {
+
+        function tokenize(source: string): Token[] {
+            const doc = TextDocument.create('file:///slice192.clw', 'clarion', 1, source);
+            return new ClarionTokenizer(doc.getText()).tokenize();
+        }
+
+        /** Classify the single argument of the first call to `name` in `src`. */
+        function classifyFirstArg(src: string, name: string, ctx?: ClassifierContext): ArgClassification {
+            const full = ["  PROGRAM", "  CODE", "  " + src].join('\n');
+            const tokens = tokenize(full);
+            let idx = -1;
+            for (let i = 0; i < tokens.length; i++) {
+                const v = tokens[i].value.toLowerCase();
+                if (v === name.toLowerCase() || v.endsWith('.' + name.toLowerCase())) { idx = i; break; }
+            }
+            assert.ok(idx >= 0, `tokenizer must produce a '${name}' call token for: ${src}`);
+            const args = classifier.classifyArguments(tokens, idx, ctx)!;
+            assert.ok(args && args.length === 1,
+                `expected exactly one classified arg for: ${src}; got ${args ? args.length : 'null'}`);
+            return args[0];
+        }
+
+        // Resolver stub: dotted string class field + prefixed string group field are STRING;
+        // their non-string siblings are LONG; everything else unresolved.
+        const ctx: ClassifierContext = {
+            resolveSymbolType: (name) => {
+                const n = name.toLowerCase();
+                if (n === 'self.field' || n === 'pre:field') return 'STRING';
+                if (n === 'self.longfield' || n === 'pre:longfield') return 'LONG';
+                return undefined;
+            }
+        };
+
+        // ── item 1: dotted base ────────────────────────────────────────────
+        test('dotted var:var — SELF.field[a:b] with STRING base → inferredType STRING', () => {
+            const a = classifyFirstArg("Foo(SELF.field[a:b])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `dotted ident:ident substring slice of a STRING base must infer STRING; got kind='${a.kind}' inferredType='${a.inferredType}'. ` +
+                `Pre-fix: base is a single StructureField token → looksLikeSliceAccess (Variable-only gate) rejects → 'unknown'.`);
+        });
+
+        test('dotted single-subscript — SELF.field[i] with STRING base → STRING (pins base = tokens before "[" only)', () => {
+            // Index `i` is a Variable token; if base extraction sweeps the full
+            // significant array (e.g. joinDotPath) it becomes "SELF.fieldi" → resolver
+            // miss → wrong. Correct extraction stops at '[' → "SELF.field" → STRING.
+            const a = classifyFirstArg("Foo(SELF.field[i])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `string-base single-subscript must infer STRING and must NOT sweep the index var into the base name; ` +
+                `got kind='${a.kind}' inferredType='${a.inferredType}'.`);
+        });
+
+        test('dotted numeric slice — SELF.field[0:128] with STRING base → STRING', () => {
+            const a = classifyFirstArg("Foo(SELF.field[0:128])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `dotted numeric substring slice of a STRING base must infer STRING; got kind='${a.kind}' inferredType='${a.inferredType}'.`);
+        });
+
+        // ── item 2: prefixed base ──────────────────────────────────────────
+        test('prefixed var:var — PRE:Field[a:b] with STRING base → inferredType STRING', () => {
+            const a = classifyFirstArg("Foo(PRE:Field[a:b])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `prefixed ident:ident substring slice of a STRING base must infer STRING; got kind='${a.kind}' inferredType='${a.inferredType}'. ` +
+                `Pre-fix: base spans 3 tokens [Attribute(':')Variable], first is Attribute not Variable → no path matches → 'unknown'.`);
+        });
+
+        test('prefixed numeric slice — PRE:Field[0:128] with STRING base → STRING', () => {
+            const a = classifyFirstArg("Foo(PRE:Field[0:128])", 'Foo', ctx);
+            assert.strictEqual(a.inferredType, 'STRING',
+                `prefixed numeric substring slice of a STRING base must infer STRING (via base-type resolution, not the colon fallback); ` +
+                `got kind='${a.kind}' inferredType='${a.inferredType}'.`);
+        });
+
+        // ── item 3: non-X regression sentinels ─────────────────────────────
+        test('non-X sentinel — dotted NON-string base SELF.longField[i] must NOT be retyped to STRING', () => {
+            const a = classifyFirstArg("Foo(SELF.longField[i])", 'Foo', ctx);
+            assert.notStrictEqual(a.inferredType, 'STRING',
+                `array/element access on a non-string dotted base must NOT be retyped to STRING; got inferredType='${a.inferredType}'. ` +
+                `The fix must key on base type, not 'has dotted base + brackets'.`);
+        });
+
+        test('non-X sentinel — prefixed NON-string base PRE:LongField[i] must NOT be retyped to STRING', () => {
+            const a = classifyFirstArg("Foo(PRE:LongField[i])", 'Foo', ctx);
+            assert.notStrictEqual(a.inferredType, 'STRING',
+                `array/element access on a non-string prefixed base must NOT be retyped to STRING; got inferredType='${a.inferredType}'.`);
+        });
+    });
 });
