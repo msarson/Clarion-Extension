@@ -145,31 +145,39 @@ export class RenameProvider {
 
         logger.debug(`[RENAME] Renaming "${oldName}" → "${newName}" across ${locations.length} location(s)`);
 
-        // Group reference ranges by file URI.
-        const rangesByUri = new Map<string, Range[]>();
+        // #196: Group reference ranges by NORMALIZED file path — NOT by the raw URI
+        // string. FAR can surface the same physical file under different URI spellings
+        // (observed: the active impl came back as both `file:///f%3A/…` (encoded colon,
+        // VS Code's canonical form) AND `file:///f:/…` (un-encoded, from the sourceFiles
+        // disk walk)). Keyed by the raw string those look like two files, so we emitted
+        // TWO documentChanges entries for the one `.clw`, each with the identical range.
+        // VS Code resolves both URIs to the same resource → sees two edits at the same
+        // span → OVERLAPPING edits → rejects that whole file's edits ("failed to apply
+        // edits") while the single-edit `.inc` applied. That is the partial-rename bug.
+        // Normalizing the key collapses the dupes into one group; dedupeRanges then folds
+        // the identical ranges into a single edit.
+        const groups = new Map<string, { uri: string; ranges: Range[] }>();
         for (const loc of locations) {
-            const arr = rangesByUri.get(loc.uri);
-            if (arr) arr.push(loc.range); else rangesByUri.set(loc.uri, [loc.range]);
+            const key = this.uriToPath(loc.uri).toLowerCase(); // Windows paths are case-insensitive
+            const existing = groups.get(key);
+            if (existing) {
+                existing.ranges.push(loc.range);
+                // Prefer the active document's exact URI spelling as the emit URI.
+                if (loc.uri === document.uri) existing.uri = loc.uri;
+            } else {
+                groups.set(key, { uri: loc.uri, ranges: [loc.range] });
+            }
         }
 
-        // #196: emit `documentChanges` (modern form, ordered per-file) and DEDUPE
-        // overlapping/duplicate ranges per uri. A WorkspaceEdit must never contain
-        // overlapping edits for one document — VS Code rejects that whole file's edits
-        // ("failed to apply edits") while still applying others (the partial-rename
-        // symptom). FAR can surface a method location more than once (e.g. the active
-        // impl found via both live tokens and a sourceFiles walk).
-        //
-        // The version is intentionally `null` (UNVERSIONED — "apply without a version
-        // check"). Do NOT attach a concrete document version here: VS Code's internal
-        // text-model version (`model.getVersionId()`) is a DIFFERENT counter from the
-        // LSP document version and the two diverge (notably across undo/redo). A
-        // versioned edit whose number doesn't match VS Code's live model is rejected —
-        // which manifested as the active (open) `.clw` impl edit failing while the
-        // closed `.inc` declaration edit (no version → no check) applied. Null version
-        // is the LSP-correct way to say "this edit was computed synchronously; just
-        // apply it."
+        // Emit `documentChanges` (modern, ordered per-file). The version is intentionally
+        // `null` (UNVERSIONED — "apply without a version check"). Do NOT attach a concrete
+        // document version: VS Code's internal text-model version (`model.getVersionId()`)
+        // is a DIFFERENT counter from the LSP document version and the two diverge (notably
+        // across undo/redo); a versioned edit whose number doesn't match VS Code's live
+        // model is rejected. Null version is the LSP-correct way to say "this edit was
+        // computed synchronously; just apply it."
         const documentChanges: TextDocumentEdit[] = [];
-        for (const [uri, ranges] of rangesByUri) {
+        for (const { uri, ranges } of groups.values()) {
             const edits = this.dedupeRanges(ranges).map(r => TextEdit.replace(r, newName));
             documentChanges.push(TextDocumentEdit.create({ uri, version: null }, edits));
         }
