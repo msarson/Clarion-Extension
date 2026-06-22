@@ -6,6 +6,7 @@ import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { DocumentStructure } from '../../DocumentStructure';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
@@ -207,9 +208,34 @@ function validateCrossFilePlainCalls(
 
 // ─── Exported validation functions ───────────────────────────────────────────
 
+/**
+ * #163 — true when `token` is nested (at any depth) inside a MAP or CLASS structure,
+ * per the DocumentStructure parent index. Replaces the bespoke running
+ * `inMapOrClass`/`mapClassDepth` scan that distinguished procedure DECLARATIONS
+ * (inside MAP/CLASS) from IMPLEMENTATIONS (top-level / Class.Method impls, which sit
+ * after the CLASS END and so have no MAP/CLASS ancestor).
+ */
+function isInsideMapOrClass(structure: DocumentStructure, token: Token): boolean {
+    let parent = structure.getParent(token);
+    while (parent) {
+        if (parent.type === TokenType.Structure &&
+            (parent.value.toUpperCase() === 'MAP' || parent.value.toUpperCase() === 'CLASS')) {
+            return true;
+        }
+        parent = structure.getParent(parent);
+    }
+    return false;
+}
+
 export function validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
+
+    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership
+    // (replaces the bespoke depth tracking below). Fresh instance + single process(),
+    // mirroring AttributeDiagnostics/ClassDiagnostics.
+    const structure = new DocumentStructure(tokens);
+    structure.process();
 
     const declarationsWithReturnTypes: Array<{
         name: string;
@@ -327,29 +353,15 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
     }
 
     for (const decl of declarationsWithReturnTypes) {
-        let inMapOrClass = false;
-        let mapClassDepth = 0;
-
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
 
-            if (token.type === TokenType.Structure &&
-                (token.value.toUpperCase() === 'MAP' || token.value.toUpperCase() === 'CLASS')) {
-                inMapOrClass = true;
-                mapClassDepth++;
-            }
-
-            if (token.value.toUpperCase() === 'END' && token.type === TokenType.EndStatement) {
-                if (mapClassDepth > 0) {
-                    mapClassDepth--;
-                    if (mapClassDepth === 0) inMapOrClass = false;
-                }
-            }
-
-            if (inMapOrClass) continue;
-
             if ((TokenHelper.isProcedureOrFunction(token) || token.type === TokenType.Routine) &&
                 (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
+
+                // #163 — skip DECLARATIONs (nested in MAP/CLASS); only IMPLEMENTATIONs
+                // reach the RETURN-statement analysis below. Was: inMapOrClass/mapClassDepth.
+                if (isInsideMapOrClass(structure, token)) continue;
 
                 let fullName = '';
                 if (i > 0 && (tokens[i - 1].type === TokenType.Label || tokens[i - 1].type === TokenType.Variable)) {
