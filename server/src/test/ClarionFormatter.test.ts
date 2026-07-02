@@ -835,3 +835,52 @@ suite('ClarionFormatter – Bug 6: CLASS keyword aligns with type column in loca
         );
     });
 });
+
+// =============================================================================
+// Issue #200 – Document range formatting
+// =============================================================================
+suite('ClarionFormatter – Issue #200: range formatting', () => {
+    test('[RED] formatRange returns only the formatted selected line span', () => {
+        const code = [
+            'Main PROCEDURE()',
+            'x LONG',
+            '  CODE',
+            'IF x = 1',
+            'x = 2',
+            'END',
+            '  RETURN',
+        ].join('\n');
+
+        const tokens = new ClarionTokenizer(code).tokenize();
+        const formatter = new ClarionFormatter(tokens, code, { indentSize: 4 });
+        const replacement = formatter.formatRange(3, 5);
+        const expectedSlice = formatter
+            .format()
+            .split(/\r?\n/)
+            .slice(3, 6)
+            .join('\n');
+
+        assert.strictEqual(
+            replacement,
+            expectedSlice,
+        );
+    });
+
+    test('[RED] formatRange returns null when selected line span is already formatted', () => {
+        const code = [
+            'Main PROCEDURE()',
+            'x LONG',
+            '  CODE',
+            '    IF x = 1',
+            '        x = 2',
+            '    END',
+            '    RETURN',
+        ].join('\n');
+
+        const tokens = new ClarionTokenizer(code).tokenize();
+        const formatter = new ClarionFormatter(tokens, code, { indentSize: 4 });
+        const replacement = formatter.formatRange(3, 5);
+
+        assert.strictEqual(replacement, null);
+    });
+});
