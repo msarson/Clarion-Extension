@@ -5,6 +5,8 @@ import { Hover, Location } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
 import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { DocumentLinkProvider } from '../providers/DocumentLinkProvider';
+import { FileRelationshipGraph, FileEdge } from '../FileRelationshipGraph';
 import {
     NoSolutionFixture,
     buildNoSolutionFixture,
@@ -23,8 +25,9 @@ import {
  * drive the LSP entry-points end-to-end so that a regression like that fails
  * fast at test time, not in audit.
  *
- * B1 ships Hover / Definition / Implementation. B2 (DocumentLink) is deferred
- * behind d7e34cc5 (FRG no-solution-mode build) per #139 open question 1.
+ * B1 shipped Hover / Definition / Implementation. #172 closes the deferred
+ * B2 surface by pinning DocumentLink entry-point behaviour in no-solution mode
+ * using test-seeded FRG edges.
  *
  * **Bidirectional-pin shape** per `feedback_bidirectional_pin_assertion`:
  *   - Positive: result truthy AND result evidence matches expected fixture file
@@ -43,6 +46,7 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
 
     teardown(() => {
         teardownNoSolutionFixture(fix);
+        FileRelationshipGraph.getInstance().reset();
         fix = null;
     });
 
@@ -403,6 +407,74 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
                     );
                 }
             }
+        });
+    });
+
+    suite('DocumentLinkProvider.provideDocumentLinks on INCLUDE filename', () => {
+        test('returns INCLUDE document link to libsrc target when no solution is loaded', () => {
+            const sourceBody =
+                "  PROGRAM\n" +
+                "  INCLUDE('MyClass.inc')\n" +
+                "  CODE\n" +
+                "  RETURN\n";
+
+            fix = buildNoSolutionFixture({
+                libsrcs: [{ 'MyClass.inc': '! decoy content\n' }],
+                sourceFile: { filename: 'MyProg.clw', content: sourceBody }
+            });
+
+            const frg = FileRelationshipGraph.getInstance();
+            frg.reset();
+            frg.seedEdgesForTest([
+                {
+                    type: 'INCLUDE',
+                    fromFile: fix.sourceFile!,
+                    toFile: path.join(fix.libsrcDirs[0], 'MyClass.inc'),
+                    fromLine: 1
+                } as FileEdge
+            ]);
+
+            const provider = new DocumentLinkProvider();
+            const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, sourceBody);
+            const links = provider.provideDocumentLinks(sourceDoc);
+
+            assert.ok(links.length >= 1, 'provideDocumentLinks must return at least one link for INCLUDE in no-solution mode');
+
+            const includeLink = links.find(link =>
+                !!link.target && path.basename(fsPathFromUri(link.target)).toLowerCase() === 'myclass.inc'
+            );
+            assert.ok(includeLink, 'at least one returned link must target MyClass.inc');
+
+            const resultPath = fsPathFromUri(includeLink!.target!);
+            const libsrcDir = path.normalize(fix.libsrcDirs[0]).toLowerCase();
+            assert.ok(
+                path.normalize(resultPath).toLowerCase().startsWith(libsrcDir),
+                `resolved link target must be inside libsrc dir (expected prefix: ${libsrcDir}, got: ${resultPath})`
+            );
+        });
+
+        test('returns empty list when source has no INCLUDE file references (regression sentinel)', () => {
+            const sourceBody =
+                "  PROGRAM\n" +
+                "x LONG\n" +
+                "  CODE\n" +
+                "x = 1\n" +
+                "  RETURN\n";
+
+            fix = buildNoSolutionFixture({
+                libsrcs: [{ 'MyClass.inc': '! decoy content\n' }],
+                sourceFile: { filename: 'MyProg.clw', content: sourceBody }
+            });
+
+            const frg = FileRelationshipGraph.getInstance();
+            frg.reset();
+            frg.seedEdgesForTest([]); // Mark FRG as built while keeping zero references.
+
+            const provider = new DocumentLinkProvider();
+            const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, sourceBody);
+            const links = provider.provideDocumentLinks(sourceDoc);
+
+            assert.strictEqual(links.length, 0, 'provider must not fabricate links when no INCLUDE file references exist');
         });
     });
 });
