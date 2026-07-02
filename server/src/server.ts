@@ -17,6 +17,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 import {
     DocumentFormattingParams,
+    DocumentRangeFormattingParams,
     DocumentSymbolParams,
     DocumentSymbol,
     FoldingRangeParams,
@@ -223,6 +224,7 @@ connection.onInitialize((params) => {
             capabilities: {
                 textDocumentSync: TextDocumentSyncKind.Incremental,
                 documentFormattingProvider: true,
+                documentRangeFormattingProvider: true,
                 documentSymbolProvider: true,
                 foldingRangeProvider: true,
                 colorProvider: true,
@@ -1053,6 +1055,58 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
         return [];
     } catch (error) {
         logger.error(`❌ [DEBUG] Error formatting document: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
+connection.onDocumentRangeFormatting((params: DocumentRangeFormattingParams): TextEdit[] => {
+    try {
+        logger.info(`📐 [DEBUG] Received onDocumentRangeFormatting request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for range formatting: ${params.textDocument.uri}`);
+            return [];
+        }
+
+        const uri = document.uri;
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onDocumentRangeFormatting: ${uri}`);
+            return [];
+        }
+
+        const text = document.getText();
+        const tokens = getTokens(document);
+        const formatter = new ClarionFormatter(tokens, text, {
+            formattingOptions: params.options
+        });
+
+        if (document.lineCount === 0) {
+            return [];
+        }
+
+        const startLine = Math.max(0, Math.min(params.range.start.line, document.lineCount - 1));
+        const rawEndLine = params.range.end.character === 0
+            ? params.range.end.line - 1
+            : params.range.end.line;
+        const endLine = Math.max(startLine, Math.min(rawEndLine, document.lineCount - 1));
+        const replacement = formatter.formatRange(startLine, endLine);
+        if (replacement === null) {
+            return [];
+        }
+
+        const eol = text.includes('\r\n') ? '\r\n' : '\n';
+        const hasNextLine = endLine + 1 < document.lineCount;
+        const startOffset = document.offsetAt(Position.create(startLine, 0));
+        const endOffset = hasNextLine
+            ? document.offsetAt(Position.create(endLine + 1, 0))
+            : text.length;
+
+        return [TextEdit.replace(
+            Range.create(document.positionAt(startOffset), document.positionAt(endOffset)),
+            hasNextLine ? replacement + eol : replacement
+        )];
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error range-formatting document: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
 });

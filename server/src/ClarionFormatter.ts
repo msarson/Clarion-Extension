@@ -351,6 +351,32 @@ class ClarionFormatter {
         return formattedLines.join(eol);
     }
 
+    public formatRange(startLine: number, endLine: number): string | null {
+        if (startLine < 0 || endLine < 0 || endLine < startLine) {
+            return null;
+        }
+
+        const originalLines = this.text.split(/\r?\n/);
+        if (originalLines.length === 0) {
+            return null;
+        }
+
+        const safeStart = Math.min(startLine, originalLines.length - 1);
+        const safeEnd = Math.min(endLine, originalLines.length - 1);
+        if (safeEnd < safeStart) {
+            return null;
+        }
+
+        const formattedText = this.format();
+        const formattedLines = formattedText.split(/\r?\n/);
+        const eol = this.text.includes('\r\n') ? '\r\n' : '\n';
+
+        const originalRange = originalLines.slice(safeStart, safeEnd + 1).join(eol);
+        const formattedRange = formattedLines.slice(safeStart, safeEnd + 1).join(eol);
+
+        return originalRange === formattedRange ? null : formattedRange;
+    }
+
     public formatDocument(): string {
         return this.format();
     }
