@@ -28,7 +28,12 @@ logger.setLevel("error");
  */
 export class DiagnosticProvider {
 
-    public static validateDocument(document: TextDocument, tokens?: Token[], caller?: string): Diagnostic[] {
+    public static validateDocument(
+        document: TextDocument,
+        tokens?: Token[],
+        caller?: string,
+        getOpenDocumentContent?: (absPath: string) => string | null
+    ): Diagnostic[] {
         const perfStart = performance.now();
 
         if (!tokens) {
@@ -42,7 +47,7 @@ export class DiagnosticProvider {
             ...validateFileStructures(tokens, document),
             ...validateCaseStructures(tokens, document),
             ...validateExecuteStructures(tokens, document),
-            ...validateViewProjectFields(tokens, document),
+            ...validateViewProjectFields(tokens, document, getOpenDocumentContent),
             // #181: class-interface-implementation moved to the async pass — it
             // resolves cross-file interfaces via the INCLUDE chain (MemberLocator).
             // See DiagnosticProvider.validateClassInterfaceImplementation + the

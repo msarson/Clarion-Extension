@@ -2520,6 +2520,18 @@ MyView VIEW(Customer)
             return validateViewProjectFields(tokens, doc);
         }
 
+        function viewProjectDiagsAtPathWithResolver(
+            clwBaseName: string,
+            code: string,
+            getOpenDocumentContent: (absPath: string) => string | null
+        ) {
+            const clwPath = path.join(tempDir, clwBaseName);
+            const uri = 'file:///' + clwPath.replace(/\\/g, '/');
+            const doc = TextDocument.create(uri, 'clarion', 2, code);
+            const tokens = new ClarionTokenizer(code).tokenize();
+            return validateViewProjectFields(tokens, doc, getOpenDocumentContent);
+        }
+
         test('FROM file declared in INCLUDEd .inc — resolves cross-file', () => {
             writeIncFile('files.inc',
                 `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
@@ -2596,6 +2608,50 @@ MyView VIEW(SomeFile)
        END
 `;
             assert.strictEqual(viewProjectDiagsAtPath('childD.clw', code).length, 0);
+        });
+
+        test('#199 — JOIN include load uses live open-document resolver (open+dirty include)', () => {
+            const includePath = writeIncFile('files4.inc',
+                `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id    LONG
+     END
+     END
+`);
+            const liveIncludeText = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+Record RECORD
+Id       LONG
+LiveOnly LONG
+     END
+     END
+`;
+            const normalizedTarget = includePath.toLowerCase().replace(/\\/g, '/');
+            const resolver = (absPath: string): string | null =>
+                absPath.toLowerCase().replace(/\\/g, '/') === normalizedTarget ? liveIncludeText : null;
+
+            const code = `  MEMBER('parent.clw')
+  INCLUDE('files4.inc')
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id)
+       JOIN(Orders, Ord:LiveOnly, Ord:Missing)
+       END
+`;
+            const diags = viewProjectDiagsAtPathWithResolver('childE.clw', code, resolver);
+            assert.strictEqual(diags.length, 1, `expected only the genuine miss; got: ${JSON.stringify(diags.map(d => d.message))}`);
+            assert.ok(diags[0].message.includes("'Ord:Missing'"), `expected missing field warning; got: ${diags[0].message}`);
         });
     });
 });

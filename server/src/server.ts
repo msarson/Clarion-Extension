@@ -398,10 +398,21 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
 
+        // Provide a live-document getter so both sync and async cross-file diagnostics
+        // can read open files even when the TokenCache entry was cleared.
+        const getOpenDocumentContent = (absPath: string): string | null => {
+            const normalizedPath = absPath.toLowerCase().replace(/\\/g, '/');
+            for (const doc of documents.all()) {
+                const docPath = decodeURIComponent(doc.uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
+                if (docPath === normalizedPath) return doc.getText();
+            }
+            return null;
+        };
+
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
         const syncStart = Date.now();
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller, getOpenDocumentContent);
         const syncMs = Date.now() - syncStart;
 
         // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
@@ -472,16 +483,6 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // Async pass: detect discarded return values via cross-file type resolution
         const memberLocator = new MemberLocatorService();
-        // Provide a live-document getter so validateMissingImplementations can read
-        // open files even when the TokenCache has been cleared (e.g. structure-affecting edit).
-        const getOpenDocumentContent = (absPath: string): string | null => {
-            const normalizedPath = absPath.toLowerCase().replace(/\\/g, '/');
-            for (const doc of documents.all()) {
-                const docPath = decodeURIComponent(doc.uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
-                if (docPath === normalizedPath) return doc.getText();
-            }
-            return null;
-        };
         // 6b40d7da Phase B (#115): undeclared-variable validator runs in this async
         // pass for cross-file scope resolution via SymbolFinderService.
         const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
