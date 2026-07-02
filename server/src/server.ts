@@ -1089,7 +1089,18 @@ connection.onDocumentRangeFormatting((params: DocumentRangeFormattingParams): Te
             ? params.range.end.line - 1
             : params.range.end.line;
         const endLine = Math.max(startLine, Math.min(rawEndLine, document.lineCount - 1));
-        const replacement = formatter.formatRange(startLine, endLine);
+        let replacement = formatter.formatRange(startLine, endLine);
+
+        // Some clients report selection end at column 0 of the *next* line; others use
+        // the final selected line with non-zero character. If the normalized range no-ops,
+        // retry once with the raw end-line interpretation to avoid false "no change".
+        if (replacement === null) {
+            const altEndLine = Math.max(startLine, Math.min(params.range.end.line, document.lineCount - 1));
+            if (altEndLine !== endLine) {
+                replacement = formatter.formatRange(startLine, altEndLine);
+            }
+        }
+
         if (replacement === null) {
             return [];
         }
