@@ -1,6 +1,5 @@
-import { workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
+import { commands, workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
-import { refreshSolutionTreeView } from '../views/ViewManager';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
@@ -23,9 +22,8 @@ export async function showClarionQuickOpen(): Promise<void> {
     const solutionInfo = solutionCache.getSolutionInfo();
 
     if (!solutionInfo) {
-        // Refresh the solution tree view to show the "Open Solution" button
-        await refreshSolutionTreeView();
-        vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
+        // No solution loaded: defer to VS Code's native Quick Open behavior.
+        await commands.executeCommand('workbench.action.quickOpen');
         return;
     }
 
