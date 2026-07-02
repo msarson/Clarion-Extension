@@ -146,18 +146,22 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.6 (2026-04-23) — Missing Include Diagnostics & Bug Fixes
+### Latest: v0.9.7 (2026-07-02) — No-Solution UX, Formatting, and Diagnostics
 
-#### 🩺 Missing INCLUDE & DefineConstants Diagnostics
-Variables declared with a user-defined class type now show a **Warning** squiggle when the type's `.inc` file isn't included. A code action (`Ctrl+.`) inserts the `INCLUDE`,ONCE statement — optionally in the current file or the MEMBER parent. A companion **Information** diagnostic fires when the include is present but required `Link()`/`DLL()` project constants are missing from the `.cwproj`, with a QuickPick code action to add them. The include verifier walks the **full transitive include chain** (any depth, cycle-safe) to avoid false positives from transitively-included types.
+#### 🧭 No-solution workflow improvements
+- `clarion.quickOpen` now falls back to VS Code's native Quick Open when no solution is loaded.
+- The extension stays dormant in non-Clarion workspaces (no status bar/LSP startup until Clarion context exists).
+- Version/session behavior is now clearer and more stable across solutions via the newer version-reconciliation flow.
 
-#### 🧙 New Solution Wizard
-Create a minimal Clarion solution (`.sln`, `.cwproj`, `.clw`) from the Solution View `+` button or `Clarion: New Solution` in the command palette. Clarion version and configuration are auto-detected.
+#### 📐 Formatting and navigation quality
+- Added **Format Selection** support via `documentRangeFormattingProvider` (range formatting with full-document context).
+- Interface/class implementation diagnostics now handle inherited implementations and overload differentiation by parameter count.
+- `MODULE(...)` / `LINK(...)` references on CLASS lines are now clickable document links.
 
-#### 🐛 Key Bug Fixes
-- `token:function` equate identifiers no longer reset `inCodeSection`, preventing false-positive `BREAK used outside LOOP` diagnostics
-- Blank-label `ITEMIZE` blocks (e.g. in `XMLType.inc`) no longer cause false-positive missing-include warnings
-- Settings no longer write redundant legacy individual keys alongside the `solutions` array
+#### ⚡ Reliability and performance polish
+- Cross-file diagnostics now read **live open+dirty buffers** for include-based checks (avoids stale-disk false positives).
+- CodeLens reference counts are warmed more aggressively and invalidated more precisely to reduce repeated full scans.
+- Additional rename/reference URI-normalization hardening reduces duplicate-edit collisions.
 
 **[See full changelog →](CHANGELOG.md)**
 
@@ -250,4 +254,3 @@ Search for any procedure, class, or label across all files in the solution.
 Special thanks to:
 - **fushnisoft** - Original Clarion syntax highlighting
 - The Clarion community for feedback and testing
-
