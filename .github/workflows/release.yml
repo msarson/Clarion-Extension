@@ -101,6 +101,8 @@ jobs:
         run: vsce publish --pat ${{ secrets.VSCE_PAT }}
 
       - name: Create next version branch
+        env:
+          HUSKY: 0
         run: |
           git checkout master
           git checkout -b version-${{ inputs.next_version }}
