@@ -2,8 +2,11 @@ import { SignatureHelp, SignatureInformation, ParameterInformation, Position } f
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ArgClassification } from '../utils/CallSiteArgumentClassifier';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
@@ -54,7 +57,7 @@ export class SignatureHelpProvider {
                 return null;
             }
 
-            const { methodName, prefix, parameterIndex, isClassMethod } = methodCallInfo;
+            const { methodName, prefix, parameterIndex, isClassMethod, argSegments } = methodCallInfo;
             logger.info(`Method call detected: ${prefix ? prefix + '.' : ''}${methodName}, parameter index: ${parameterIndex}`);
 
             // 🚀 FAST PATH: Get cached tokens for instant signature help
@@ -106,9 +109,30 @@ export class SignatureHelpProvider {
                 logger.info(`  [${idx}] ${sig.label}`);
             });
 
-            // Select the best signature based on current parameter count
-            const activeSignature = this.selectActiveSignature(signatures, parameterIndex);
-            logger.info(`Selected signature ${activeSignature} as active`);
+            // #126 — partial-arg classification path: pick activeSignature by typing
+            // the partial args against each candidate's param shape. Falls back to
+            // legacy paramCount-only `selectActiveSignature` when no segments classify
+            // (empty call shape, etc.).
+            let activeSignature: number;
+            const partialArgs = argSegments.map(s => this.classifyArgText(s));
+            const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
+            if (hasClassifiableArgs) {
+                // Reshape each SignatureInformation.label (`methodName(...)`) into a
+                // synthetic `PROCEDURE(...)` so `findActiveOverloadByPartialArgs`'s
+                // `extractParameterTypes` (which expects PROCEDURE/FUNCTION) accepts it.
+                const procShapedSigs = signatures.map(s => {
+                    const label = typeof s.label === 'string' ? s.label : '';
+                    const parenIdx = label.indexOf('(');
+                    return parenIdx >= 0 ? `PROCEDURE${label.slice(parenIdx)}` : label;
+                });
+                const { activeIndex } = this.overloadResolver.findActiveOverloadByPartialArgs(
+                    partialArgs, procShapedSigs);
+                activeSignature = activeIndex;
+                logger.info(`Partial-arg classification picked active ${activeSignature} (from ${partialArgs.length} arg(s))`);
+            } else {
+                activeSignature = this.selectActiveSignature(signatures, parameterIndex);
+                logger.info(`Selected signature ${activeSignature} as active (paramCount-only fallback)`);
+            }
 
             return {
                 signatures,
@@ -130,6 +154,7 @@ export class SignatureHelpProvider {
         prefix: string | null;
         parameterIndex: number;
         isClassMethod: boolean;
+        argSegments: string[];
     } | null {
         // Find the last unclosed opening parenthesis
         let parenDepth = 0;
@@ -168,13 +193,67 @@ export class SignatureHelpProvider {
         // Count parameters (commas at depth 0)
         const afterParen = line.substring(lastOpenParen + 1);
         const parameterIndex = this.countParameters(afterParen);
+        const argSegments = this.splitArgSegments(afterParen);
 
         return {
             methodName,
             prefix,
             parameterIndex,
-            isClassMethod
+            isClassMethod,
+            argSegments,
         };
+    }
+
+    /**
+     * #126 — split the inside-paren text into per-position arg segments
+     * (split-on-comma-at-depth-0). Trailing empty segment is preserved when
+     * the user just typed a comma so `findActiveOverloadByPartialArgs` sees
+     * the right paramCount filter (e.g. `Foo('Hello',` → ["'Hello'", ""]).
+     */
+    private splitArgSegments(text: string): string[] {
+        const segments: string[] = [];
+        let current = '';
+        let depth = 0;
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '(' || char === '<') {
+                depth++;
+                current += char;
+            } else if (char === ')' || char === '>') {
+                depth--;
+                current += char;
+            } else if (char === ',' && depth === 0) {
+                segments.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        if (segments.length > 0 || current.trim() !== '') {
+            segments.push(current);
+        }
+        return segments;
+    }
+
+    /**
+     * #126 — text-based arg classifier for partial-arg shapes the user is
+     * mid-typing. The CallSiteArgumentClassifier's token-based pipeline
+     * needs a closed `(...)` shape; signature help fires while the user is
+     * typing, so we classify the raw segment text via simple heuristics
+     * sufficient for picking the active overload.
+     */
+    private classifyArgText(text: string): ArgClassification {
+        const trimmed = text.trim();
+        if (trimmed === '') {
+            return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
+        }
+        if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
+            return { kind: 'literal_string', rawText: trimmed, line: 0, character: 0 };
+        }
+        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            return { kind: 'literal_numeric', rawText: trimmed, line: 0, character: 0 };
+        }
+        return { kind: 'variable', rawText: trimmed, line: 0, character: 0 };
     }
 
     /**
@@ -262,14 +341,29 @@ export class SignatureHelpProvider {
 
         logger.info(`Resolved class name: ${className}`);
 
-        // Use MemberLocatorService — handles inheritance, current-file classes, and INC files
-        const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
-        const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
+        // #126 — use the MEMBER → PROGRAM → recursive-INCLUDE walker (#128 substrate)
+        // for cross-file overload enumeration. Prior `enumerateMembersInClass` missed
+        // MEMBER files where the class reached scope only via PROGRAM's INCLUDE chain.
+        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(
+            className, methodName, document, tokens
+        );
 
-        logger.info(`Found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+        // Fallback for legacy paths (e.g. SELF inside a class where the substrate
+        // returns empty because the class is in the same file but accessed differently):
+        // if the substrate finds nothing, keep the pre-#126 behaviour so we don't
+        // regress SELF-in-class hover/signature for files the substrate doesn't cover.
+        if (candidates.length === 0) {
+            const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
+            const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
+            logger.info(`Fallback enumeration: found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+            return matchingMembers.map(m =>
+                this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+            );
+        }
 
-        return matchingMembers.map(m =>
-            this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+        logger.info(`Found ${candidates.length} overload(s) for ${className}.${methodName} via substrate walker`);
+        return candidates.map(c =>
+            this.createSignatureInformation(methodName, c.signature, this.overloadResolver.countParametersInDeclaration(c.signature))
         );
     }
 
@@ -357,6 +451,13 @@ export class SignatureHelpProvider {
                 // Fall through to check for user-defined procedures
             }
         }
+
+        // Check if it's a container structure (WINDOW, APPLICATION)
+        const containerSig = this.getContainerStructureSignature(methodName);
+        if (containerSig) {
+            logger.info(`Found container structure: ${methodName}`);
+            return [containerSig];
+        }
         
         // If we didn't check data type first, check it now as fallback
         if (!checkDataTypeFirst && this.dataTypeService.hasDataType(methodName)) {
@@ -368,10 +469,19 @@ export class SignatureHelpProvider {
             }
         }
         
-        // Otherwise, find procedure declarations in MAP
-        const procedures = this.findProcedureInMap(methodName, tokens, document);
+        // Otherwise, find procedure declarations in MAP (current file first)
+        let procedures = this.findProcedureInMap(methodName, tokens, document);
+
+        // If not found locally, search the program file's MAP via the FileRelationshipGraph
+        if (procedures.length === 0) {
+            const programDoc = this.getProgramFileDocument(document);
+            if (programDoc) {
+                const programTokens = this.tokenCache.getTokens(programDoc);
+                procedures = this.findProcedureInMap(methodName, programTokens, programDoc);
+            }
+        }
         
-        return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount));
+        return procedures.map(proc => this.createSignatureInformation(methodName, proc.signature, proc.paramCount, proc.parameters));
     }
 
     /**
@@ -538,37 +648,74 @@ export class SignatureHelpProvider {
         procName: string,
         tokens: Token[],
         document: TextDocument
-    ): { signature: string; paramCount: number }[] {
-        const procedures: { signature: string; paramCount: number }[] = [];
-        
+    ): { signature: string; paramCount: number; parameters?: ProcedureParameter[] }[] {
+        const procedures: { signature: string; paramCount: number; parameters?: ProcedureParameter[] }[] = [];
+
         // Use DocumentStructure to get MAP declarations
         const documentStructure = this.tokenCache.getStructure(document);
         const mapDeclarations = documentStructure.findMapDeclarations(procName);
-        
+
         // Get document content for extracting signatures
         const content = document.getText();
         const lines = content.split('\n');
-        
+
         // Extract signatures from found declarations
         for (const declToken of mapDeclarations) {
             const line = lines[declToken.line];
             if (line) {
                 const signature = line.trim();
                 const paramCount = this.overloadResolver.countParametersInDeclaration(signature);
-                
+
                 // Check for duplicates before adding
-                const isDuplicate = procedures.some(p => 
+                const isDuplicate = procedures.some(p =>
                     p.signature === signature && p.paramCount === paramCount
                 );
-                
+
                 if (!isDuplicate) {
-                    procedures.push({ signature, paramCount });
+                    procedures.push({ signature, paramCount, parameters: declToken.parameters });
                     logger.info(`Found MAP declaration: ${signature}`);
                 }
             }
         }
-        
+
         return procedures;
+    }
+
+    /**
+     * Get the TextDocument for the program file of a MEMBER file, using the
+     * FileRelationshipGraph for O(1) lookup. Falls back to scanning MEMBER tokens.
+     * Returns null if this document is already a PROGRAM or the program file is not found.
+     */
+    private getProgramFileDocument(document: TextDocument): TextDocument | null {
+        const graph = FileRelationshipGraph.getInstance();
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+
+        let programPath: string | undefined;
+        if (graph.isBuilt) {
+            programPath = graph.getProgramFile(currentPath);
+        } else {
+            // Fallback while graph is building — scan MEMBER token
+            const tokens = this.tokenCache.getCachedTokens(document);
+            programPath = tokens.find(t =>
+                t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+            )?.referencedFile;
+        }
+
+        if (!programPath) return null;
+
+        const uri = 'file:///' + programPath.replace(/\\/g, '/');
+        const cached = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentText(uri.toLowerCase());
+        if (cached !== null) {
+            return TextDocument.create(uri, 'clarion', 1, cached);
+        }
+
+        try {
+            if (!fs.existsSync(programPath)) return null;
+            const content = fs.readFileSync(programPath, 'utf-8');
+            return TextDocument.create(uri, 'clarion', 1, content);
+        } catch {
+            return null;
+        }
     }
 
     /**
@@ -604,38 +751,56 @@ export class SignatureHelpProvider {
     }
 
     /**
-     * Creates a SignatureInformation object from a signature string
+     * Creates a SignatureInformation object from a signature string.
+     * When `structured` is provided (typically from `Token.parameters` populated
+     * by ClarionTokenizer), it's used directly — bypassing the regex extraction
+     * fallback. Without it, falls back to a regex-based parse of the signature
+     * line (e.g. for cross-file paths that read raw source from disk).
      */
-    private createSignatureInformation(methodName: string, signature: string, paramCount: number): SignatureInformation {
-        // Extract parameters from signature
-        const match = signature.match(/PROCEDURE\s*\(([^)]*)\)/i);
+    private createSignatureInformation(
+        methodName: string,
+        signature: string,
+        paramCount: number,
+        structured?: ProcedureParameter[]
+    ): SignatureInformation {
         const parameters: ParameterInformation[] = [];
 
-        if (match && match[1]) {
-            const paramList = match[1].trim();
-            if (paramList !== '') {
-                // Split by comma at depth 0
-                const params = this.splitParameters(paramList);
-                
-                for (const param of params) {
-                    const trimmed = param.trim();
-                    // Strip optional-parameter angle brackets: <Key K> → Key K
-                    const stripped = trimmed.replace(/^<(.*)>$/, '$1').trim();
-                    // Extract parameter name and type
-                    const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
-                    if (paramMatch) {
-                        const type = paramMatch[1].trim();
-                        const name = paramMatch[2];
-                        parameters.push({
-                            label: `${type} ${name}`,
-                            documentation: undefined
-                        });
-                    } else {
-                        // Fallback: use stripped form (without angle brackets) as label
-                        parameters.push({
-                            label: stripped || trimmed,
-                            documentation: undefined
-                        });
+        if (structured) {
+            for (const p of structured) {
+                parameters.push({
+                    label: this.formatStructuredParameterLabel(p),
+                    documentation: undefined,
+                });
+            }
+        } else {
+            // Extract parameters from signature (handles both PROCEDURE and FUNCTION)
+            const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+            if (match && match[1]) {
+                const paramList = match[1].trim();
+                if (paramList !== '') {
+                    // Split by comma at depth 0
+                    const params = this.splitParameters(paramList);
+
+                    for (const param of params) {
+                        const trimmed = param.trim();
+                        // Strip optional-parameter angle brackets: <Key K> → Key K
+                        const stripped = trimmed.replace(/^<(.*)>$/, '$1').trim();
+                        // Extract parameter name and type
+                        const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*[=>].*)?$/i);
+                        if (paramMatch) {
+                            const type = paramMatch[1].trim();
+                            const name = paramMatch[2];
+                            parameters.push({
+                                label: `${type} ${name}`,
+                                documentation: undefined
+                            });
+                        } else {
+                            // Fallback: use stripped form (without angle brackets) as label
+                            parameters.push({
+                                label: stripped || trimmed,
+                                documentation: undefined
+                            });
+                        }
                     }
                 }
             }
@@ -647,6 +812,34 @@ export class SignatureHelpProvider {
         return {
             label,
             documentation: undefined,
+            parameters
+        };
+    }
+
+    /** Formats a single structured ProcedureParameter as a human-readable label. */
+    private formatStructuredParameterLabel(p: ProcedureParameter): string {
+        const typePart = p.typeArg !== undefined ? `${p.type}(${p.typeArg})` : p.type;
+        const byRef = p.byRef ? '*' : '';
+        const core = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        return p.optional ? `<${core}>` : core;
+    }
+
+    /**
+     * Creates a SignatureInformation object for a container structure (WINDOW, APPLICATION)
+     */
+    private getContainerStructureSignature(name: string): SignatureInformation | null {
+        const ctrl = this.controlService.getContainerStructure(name);
+        if (!ctrl || !ctrl.params || ctrl.params.length === 0) return null;
+
+        const parameters: ParameterInformation[] = ctrl.params.map(p => ({
+            label: p.optional ? `[${p.name}]` : p.name,
+            documentation: p.description
+        }));
+
+        const paramLabels = ctrl.params.map(p => p.optional ? `[${p.name}]` : p.name).join(', ');
+        return {
+            label: `${ctrl.name}(${paramLabels})`,
+            documentation: ctrl.description,
             parameters
         };
     }

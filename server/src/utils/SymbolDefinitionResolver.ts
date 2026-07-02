@@ -207,7 +207,7 @@ export class SymbolDefinitionResolver {
             const token = tokens[i];
             
             // Check if this is a scope-defining token (procedure, routine, etc.)
-            if ((token.type === TokenType.Procedure || 
+            if ((TokenHelper.isProcedureOrFunction(token) ||
                  token.subType === TokenType.Routine) &&
                 token.line < inner.line &&
                 (!token.finishesAt || token.finishesAt > inner.line)) {

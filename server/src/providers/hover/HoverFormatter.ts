@@ -2,13 +2,29 @@ import { Hover, Location } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { TokenCache } from '../../TokenCache';
 import * as path from 'path';
 import * as fs from 'fs';
+
+/**
+ * #125 — read a file's text, preferring in-memory cache over disk. Used to
+ * render hover content for documents that haven't been written to disk yet
+ * (test fixtures, unsaved buffers). Falls through to `fs.readFileSync` on
+ * cache miss for production hover from on-disk files.
+ */
+function readCachedOrDiskFile(fileUri: string): string {
+    const cached = TokenCache.getInstance().getDocumentText(fileUri)
+        ?? TokenCache.getInstance().getDocumentTextByUriCaseInsensitive(fileUri);
+    if (cached !== null && cached !== undefined) return cached;
+    const diskPath = decodeURIComponent(fileUri.replace('file:///', ''));
+    return fs.readFileSync(diskPath, 'utf-8');
+}
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
 import { PropEntry } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
+import { KeywordEntry } from '../../utils/KeywordService';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -157,8 +173,7 @@ export class HoverFormatter {
 
         let declSnippet: string | null = null;
         try {
-            const declUri = decodeURIComponent(info.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declContent = readCachedOrDiskFile(info.file);
             const declLine = declContent.split('\n')[info.line];
             if (declLine) declSnippet = declLine.trim();
         } catch {
@@ -795,6 +810,19 @@ export class HoverFormatter {
 
     /** Formats hover for a compiler directive (e.g. EQUATE, INCLUDE, COMPILE). */
     public formatDirective(entry: DirectiveEntry): Hover {
+        let content = `**${entry.name}**\n\n`;
+        content += `_${entry.category}_\n\n`;
+        if (entry.description) {
+            content += `${entry.description}\n\n`;
+        }
+        content += `**Syntax:** \`\`\`clarion\n${entry.syntax}\n\`\`\``;
+        return {
+            contents: { kind: 'markdown', value: content.trim() }
+        };
+    }
+
+    /** Formats hover for a language keyword (e.g. IF, CASE, PROCEDURE, SELF). */
+    public formatKeyword(entry: KeywordEntry): Hover {
         let content = `**${entry.name}**\n\n`;
         content += `_${entry.category}_\n\n`;
         if (entry.description) {

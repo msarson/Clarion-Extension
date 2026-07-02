@@ -1,5 +1,5 @@
 import { commands, Uri, window, ExtensionContext, workspace, window as vscodeWindow } from 'vscode';
-import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget } from '../globals';
+import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
@@ -9,6 +9,7 @@ import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { DocumentManager } from '../documentManager';
+import { shouldMarkExplicitlyClosed, SolutionCloseReason } from '../utils/SolutionFallbackPolicy';
 import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache, configNameFromFull } from '../utils/SlnCacheUtils';
 import * as path from 'path';
@@ -91,9 +92,14 @@ async function switchToSolutionWorkspaceIfNeeded(
 export async function openSolutionFromList(
     context: ExtensionContext,
     initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>,
-    closeClarionSolution: (context: ExtensionContext) => Promise<void>
+    closeClarionSolution: (context: ExtensionContext, reason?: SolutionCloseReason) => Promise<void>
 ) {
     try {
+        // #146 sticky-until-open semantics — clear the explicit-close flag.
+        // User opening a solution is the explicit "I want to load something"
+        // signal that reverses any prior close intent.
+        await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+
         // Get the list of solutions from workspace settings
         const config = workspace.getConfiguration("clarion");
         const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
@@ -138,7 +144,10 @@ export async function openSolutionFromList(
         // Check if a solution is already open
         if (globalSolutionFile) {
             logger.info(`🔄 Closing current solution before opening: ${selectedItem.solution.solutionFile}`);
-            await closeClarionSolution(context);
+            // #183 — 'switch' close: do NOT mark explicitly-closed; we're about to
+            // open another solution, so the flag must stay clear or the next
+            // restart's auto-reopen is suppressed.
+            await closeClarionSolution(context, 'switch');
         }
         
         // Open the selected solution
@@ -179,6 +188,21 @@ export async function openClarionSolution(
     initializeSolution: (context: ExtensionContext, refreshDocs: boolean) => Promise<void>
 ) {
     try {
+        // #146 sticky-until-open semantics — clear the explicit-close flag.
+        // User opening a solution is the explicit "I want to load something"
+        // signal that reverses any prior close intent.
+        await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+
+        // #132 / dd87633f B3 — solution-open guard. Require a Clarion version
+        // before proceeding (so `globalSettings.libsrcPaths`, redirectionPath,
+        // macros are populated by the time the solution tries to use them).
+        // Fires the `clarion.setActiveVersion` picker if version is empty.
+        const hasVersion = await ensureActiveClarionVersion();
+        if (!hasVersion) {
+            window.showWarningMessage("Clarion version is required to open a solution. Solution open cancelled.");
+            return;
+        }
+
         // ✅ If no folder is open, let user pick solution and we'll open its folder
         if (!workspace.workspaceFolders) {
             const solutionUris = await window.showOpenDialog({
@@ -418,21 +442,36 @@ export async function openClarionSolution(
 export async function closeClarionSolution(
     context: ExtensionContext,
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
-    documentManager: DocumentManager | undefined
+    documentManager: DocumentManager | undefined,
+    reason: SolutionCloseReason = 'user'
 ) {
     try {
-        logger.info("🔄 Closing Clarion solution...");
-        
+        logger.info(`🔄 Closing Clarion solution... (reason=${reason})`);
+
         const target = getClarionConfigTarget();
         if (target && workspace.workspaceFolders) {
             const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-            
+
             // Clear solution-related settings from folder settings
             await config.update("solutionFile", "", target);
-            
+
             // Clear the current solution setting
             await config.update("currentSolution", "", target);
             logger.info("✅ Cleared current solution setting");
+        }
+
+        // #146 / #183: only a user-initiated close marks the solution as
+        // explicitly closed (sticky until the user explicitly opens a solution,
+        // suppressing ALL auto-load paths in initializeFromWorkspace). An
+        // internal 'switch' close — performed while opening another solution —
+        // must NOT set the flag, otherwise the subsequent open ends with it
+        // stuck `true` and auto-reopen is suppressed on the next restart (#183).
+        if (shouldMarkExplicitlyClosed(reason)) {
+            await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, true);
+            logger.info("✅ Set solutionExplicitlyClosed workspaceState flag (#146)");
+        } else {
+            await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
+            logger.info("ℹ️ Internal 'switch' close — cleared solutionExplicitlyClosed flag (#183)");
         }
         
         // Reset global variables

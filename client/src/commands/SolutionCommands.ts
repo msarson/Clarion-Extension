@@ -1,5 +1,6 @@
 import { commands, window as vscodeWindow, workspace, Uri, Disposable, ExtensionContext } from 'vscode';
-import { globalSolutionFile } from '../globals';
+import { globalSolutionFile, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
+import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
@@ -94,6 +95,10 @@ export function registerSolutionOpeningCommands(
                 if (currentFolder && currentFolder.toLowerCase() === actualSolutionFolder.toLowerCase()) {
                     // Already in the correct folder - just open the solution
                     logger.info(`✅ Already in correct folder, opening solution directly`);
+                    // #183 — opening a solution reverses any prior explicit-close intent,
+                    // so the sticky flag must be cleared or the next restart suppresses
+                    // auto-reopen (SmartSolutionOpener doesn't clear it itself).
+                    await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
                     await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 } else {
                     // Different folder - need to switch folders
@@ -117,10 +122,13 @@ export function registerSolutionOpeningCommands(
             
             try {
                 const success = await SmartSolutionOpener.openDetectedSolution(solutionPath, preSelected);
-                
+
                 logger.debug(`SmartSolutionOpener returned: ${success}`);
-                
+
                 if (success) {
+                    // #183 — opening a solution reverses any prior explicit-close intent;
+                    // clear the sticky flag so this solution auto-reopens on next restart.
+                    await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
                     // Global variables are already set by SmartSolutionOpener, no need to reload
                     logger.debug(`Solution opened successfully. Current globals:
                         - globalSolutionFile: ${globalSolutionFile || 'not set'}
@@ -202,6 +210,8 @@ export function registerMiscSolutionCommands(
     // Register commands that work without folder
     const commandsAlwaysAvailable = [
         { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
+        // #132 / dd87633f B2 — solution-free version-selector command.
+        { id: "clarion.setActiveVersion", handler: async () => ClarionExtensionCommands.setActiveVersionCommand() },
         { id: "clarion.debugSolutionHistory", handler: async () => {
             const refs = await GlobalSolutionHistory.getReferences();
             const valid = await GlobalSolutionHistory.getValidReferences();

@@ -19,7 +19,8 @@
     "vscode": "^1.97.0"
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onLanguage:clarion",
+    "workspaceContains:**/*.{clw,inc,equ,int,app,sln,cwproj}"
   ],
   "main": "./out/client/src/extension.js",
   "icon": "images/sv57x57.png",
@@ -495,6 +496,10 @@
       {
         "command": "clarion.addImplementation",
         "title": "Clarion: Add Method Implementation"
+      },
+      {
+        "command": "clarion.setActiveVersion",
+        "title": "Clarion: Set Active Version"
       }
     ],
     "menus": {
@@ -808,7 +813,7 @@
     "viewsWelcome": [
       {
         "view": "solutionView",
-        "contents": "Initializing Clarion Extension...\n\nPlease wait while the extension loads.",
+        "contents": "No Clarion solution is currently open.\n\n[Open Solution](command:clarion.openSolution)\n\nClick the button above to open a `.sln` file or pick from recently-used solutions.",
         "when": "!clarion.solutionOpen"
       }
     ],
@@ -1265,6 +1270,45 @@
           "type": "boolean",
           "default": true,
           "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
+        },
+        "clarion.diagnostics.undeclaredVariables.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enabled by default. Raises a Warning on assignments whose left-hand side identifier cannot be resolved to any declaration in the current file. v1 only checks bare-identifier LHS of assignments — prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked. Set to false if false-positives surface in your codebase. Toggling requires reloading the VS Code window (issue #62)."
+        },
+        "clarion.diagnostics.indistinguishablePrototypes.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enabled by default. Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. Toggling requires reloading the VS Code window (issue #121)."
+        },
+        "clarion.referencesCodeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enabled by default. Shows a '… references' CodeLens above each procedure, method implementation, and CLASS, counting usages across the solution. Each lens runs a Find-All-References, which can make very large classes (e.g. StringTheory) sluggish — set to false to disable. Toggling requires reloading the VS Code window (issue #185)."
+        },
+        "clarion.activeVersion": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Active Clarion version (e.g. 'Clarion 11.1'). User-scoped (global) so version-derived state (libsrcPaths, redirectionPath, macros) is populated independently of any open solution. Set via the Clarion version status-bar item or the picker in the Clarion Tools pane. See #132."
+        },
+        "clarion.activePropertiesFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Path to the ClarionProperties.xml file that backs `clarion.activeVersion`. User-scoped (global). Persists across VS Code restarts. See #132."
+        },
+        "clarion.versionMigrated": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Internal one-shot flag: true after the first-run migration auto-promotes a legacy `solutions[].version` to `clarion.activeVersion`. Prevents re-running the migration. Do not edit manually. See #132."
+        },
+        "clarion.solutionVersionMemoryBackfilled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Internal one-shot flag: true after the first-run L3 backfill seeds per-solution version memory from legacy `solutions[].version` entries. Prevents re-running the backfill. Do not edit manually. See #141."
         }
       }
     }
@@ -1275,14 +1319,16 @@
     "compile": "npm run compile:dev",
     "compile:dev": "tsc -b && npm run copy-data",
     "compile:release": "tsc -b && npm run copy-data",
-    "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json'); fs.copyFileSync('server/src/data/clarion-properties.json','out/server/src/data/clarion-properties.json'); fs.copyFileSync('server/src/data/clarion-events.json','out/server/src/data/clarion-events.json'); fs.copyFileSync('server/src/data/clarion-directives.json','out/server/src/data/clarion-directives.json');\"",
+    "copy-data": "node -e \"const fs=require('fs'),path=require('path'); fs.mkdirSync('out/server/src/data',{recursive:true}); fs.copyFileSync('server/src/data/clarion-builtins.json','out/server/src/data/clarion-builtins.json'); fs.copyFileSync('server/src/data/clarion-attributes.json','out/server/src/data/clarion-attributes.json'); fs.copyFileSync('server/src/data/clarion-controls.json','out/server/src/data/clarion-controls.json'); fs.copyFileSync('server/src/data/clarion-datatypes.json','out/server/src/data/clarion-datatypes.json'); fs.copyFileSync('server/src/data/clarion-properties.json','out/server/src/data/clarion-properties.json'); fs.copyFileSync('server/src/data/clarion-events.json','out/server/src/data/clarion-events.json'); fs.copyFileSync('server/src/data/clarion-directives.json','out/server/src/data/clarion-directives.json'); fs.copyFileSync('server/src/data/clarion-keywords.json','out/server/src/data/clarion-keywords.json');\"",
     "package": "npm run compile:dev && vsce package",
     "package:release": "npm run compile:release && vsce package --allow-star-activation",
     "watch": "tsc -b -w",
     "test": "npm run test:server",
+    "pretest:server": "rimraf out/server/src/test && tsc -b",
     "test:server": "mocha",
     "test:client": "mocha --config .mocharc-client.json",
-    "test:all": "npm run compile:dev && npm run test:server && npm run test:client"
+    "test:all": "npm run compile:dev && npm run test:server && npm run test:client",
+    "prepare": "husky install"
   },
   "devDependencies": {
     "@types/mocha": "^8.2.2",
@@ -1294,6 +1340,7 @@
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.0",
     "eslint": "^9.21.0",
+    "husky": "^9.1.7",
     "mocha": "^11.0.0",
     "rimraf": "^6.0.1",
     "typescript": "^4.2.4"

@@ -174,16 +174,23 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             } as any;
         }
 
-        test('no completions when line does not end with dot', async function () {
+        test('no class member completions when line does not end with dot', async function () {
             this.timeout(10000);
             const params = makeParams(0, '  SELF');
             const items = await provider.onCompletion(params, doc);
-            assert.strictEqual(items.length, 0);
+            // Word completion may return keywords/builtins, but no dot-triggered class member items
+            const memberItems = items.filter(i =>
+                i.kind === 2 /* Method */ || i.kind === 5 /* Field */ || i.kind === 10 /* Property */
+            );
+            assert.strictEqual(memberItems.length, 0);
         });
 
         test('no completions inside a comment', async function () {
             this.timeout(10000);
-            const params = makeParams(0, '  ! SELF.');
+            // Line 4 (0-based) in completion-test.clw is "! Base class with different access levels"
+            // makeParams uses lineText.length only for cursor character position;
+            // using '! x' puts the cursor at char 3, which is inside the comment on that line.
+            const params = makeParams(4, '! x');
             const items = await provider.onCompletion(params, doc);
             assert.strictEqual(items.length, 0);
         });

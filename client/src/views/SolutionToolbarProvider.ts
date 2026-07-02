@@ -7,14 +7,27 @@ import LoggerManager from '../utils/LoggerManager';
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
 
+export interface GraphStatus {
+    status: 'building' | 'built';
+    fileCount?: number;
+    edgeCount?: number;
+    durationMs?: number;
+}
+
 export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     public static readonly viewId = 'clarionSolutionToolbar';
 
     private _view?: vscode.WebviewView;
     private readonly _extensionUri: vscode.Uri;
+    private _graphStatus: GraphStatus | undefined;
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
+    }
+
+    public setGraphStatus(status: GraphStatus): void {
+        this._graphStatus = status;
+        this.update();
     }
 
     resolveWebviewView(
@@ -31,11 +44,16 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
-        webviewView.onDidChangeVisibility(() => {
-            if (webviewView.visible) {
-                webviewView.webview.html = this._getHtml(webviewView.webview);
-            }
-        });
+        // #148 — the prior `onDidChangeVisibility(() => visible && reassign html)`
+        // handler is removed: re-assigning `webview.html` on every visibility
+        // flip re-ran the webview lifecycle (including service-worker
+        // registration) and produced the deterministic
+        // `InvalidStateError: Could not register service worker` Mark hit on
+        // every load post-#132 B3. Combined with `retainContextWhenHidden: true`
+        // in `ViewManager.registerSolutionToolbar`, the webview state now
+        // survives hide-flips without re-render. Explicit re-renders still
+        // happen via `update()` (called from `setGraphStatus` etc.) when the
+        // content actually needs to change.
 
         webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
@@ -57,32 +75,76 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'buildAndDebug':
                     vscode.commands.executeCommand('clarion.startDebugging', true);
                     break;
+                case 'setActiveVersion':
+                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point.
+                    vscode.commands.executeCommand('clarion.setActiveVersion');
+                    break;
             }
         });
 
         logger.info("✅ Solution toolbar webview resolved");
     }
 
-    /** Re-renders the webview with current solution state. */
+    /**
+     * #148 Option 8 — propagate state changes to the webview via postMessage
+     * instead of re-assigning `webview.html`. Re-assigning html re-ran VS
+     * Code's webview lifecycle (iframe teardown + recreate + service-worker
+     * re-registration) which caused the deterministic `InvalidStateError`
+     * Mark reported. The initial html is set ONCE in `resolveWebviewView`;
+     * all subsequent updates flow through the inline `message` listener,
+     * which patches the DOM in place — no lifecycle churn.
+     *
+     * Trace confirmed: every `[#148-trace] update()` log line correlated
+     * 1:1 with an `InvalidStateError` from `HostMessaging.channel.port1.
+     * onmessage`. Hypothesis was load-bearing.
+     *
+     * #141 Q9 directive #2 — `solutionLoaded` field gates toolbar Build/Run/
+     * Debug button visibility in the webview. "Open in IDE" + "Set Active
+     * Version" buttons remain visible regardless (meaningful in both modes).
+     */
     public update(): void {
         if (this._view) {
-            this._view.webview.html = this._getHtml(this._view.webview);
+            this._view.webview.postMessage({
+                command: 'updateContent',
+                summaryRows: this._getSummaryRows(),
+                solutionLoaded: !!globalSolutionFile,
+            });
         }
     }
 
     private _getSummaryRows(): { label: string; value: string }[] {
-        if (!globalSolutionFile) {
-            return [{ label: 'Solution', value: 'No solution open' }];
-        }
-
         const rows: { label: string; value: string }[] = [];
+
+        // #132 / dd87633f B3 — Clarion version row always shows (even without
+        // a solution open). Falls back to "Not set — click to choose" when
+        // empty so the user has a discoverable entry point.
+        //
+        // #141 Q9 directive #3 + Q4 three-layer storage — when the L1 default
+        // (settings.json `clarion.activeVersion`) differs from the L2 effective
+        // active (in-memory `globalClarionVersion` for this instance), surface
+        // BOTH so the user can see "I'm using C6 in this instance, but C11 is
+        // my default for first-time-seen solutions and no-solution-mode."
+        // When they match (or the default isn't set yet), show just the
+        // effective active.
+        const effectiveVersion = globalClarionVersion;
+        const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
+        let versionLabel: string;
+        if (!effectiveVersion) {
+            versionLabel = 'Not set — use Set Version';
+        } else if (defaultVersion && defaultVersion !== effectiveVersion) {
+            versionLabel = `${effectiveVersion} (default: ${defaultVersion})`;
+        } else {
+            versionLabel = effectiveVersion;
+        }
+        rows.push({ label: 'Clarion', value: versionLabel });
+
+        if (!globalSolutionFile) {
+            rows.push({ label: 'Solution', value: 'No solution open' });
+            return rows;
+        }
 
         const slnName = path.basename(globalSolutionFile, '.sln');
         rows.push({ label: 'Solution', value: slnName });
-
-        if (globalClarionVersion) {
-            rows.push({ label: 'Clarion', value: globalClarionVersion });
-        }
 
         const config = globalSettings.configuration;
         if (config) {
@@ -104,6 +166,19 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        if (this._graphStatus) {
+            if (this._graphStatus.status === 'building') {
+                const count = this._graphStatus.fileCount ?? 0;
+                rows.push({ label: 'Graph', value: `Building… (${count} files)` });
+            } else {
+                const files = this._graphStatus.fileCount ?? 0;
+                const edges = this._graphStatus.edgeCount ?? 0;
+                const ms = this._graphStatus.durationMs;
+                const time = ms !== undefined ? ` ${ms}ms` : '';
+                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}` });
+            }
+        }
+
         return rows;
     }
 
@@ -114,14 +189,31 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         const summaryRows = this._getSummaryRows();
         const summaryHtml = summaryRows.map(r =>
-            `<tr><td class="lbl">${r.label}</td><td class="val">${r.value}</td></tr>`
+            `<tr><td class="lbl">${escapeHtml(r.label)}</td><td class="val">${escapeHtml(r.value)}</td></tr>`
         ).join('');
+
+        // #141 Q9 directive #2 — initial render must honour solution-loaded
+        // state. Without this, the data-solution-only toolbar buttons would
+        // briefly render visible in no-solution mode until the first
+        // postMessage update() fires + the listener toggles them off.
+        const initialSolutionLoaded = !!globalSolutionFile;
+        const initialHiddenAttr = initialSolutionLoaded ? '' : ' style="display:none"';
+
+        // #148 — nonce-based CSP per VS Code webview guidance. `'unsafe-inline'`
+        // on script-src was the source of the deterministic SW registration
+        // race after the initial visibility-flip handler removal didn't fix it.
+        // `'strict-dynamic'` says "trust only scripts authorized by nonce" —
+        // explicit allowlist, no host-source ambiguity. Inline event handlers
+        // (onclick="...") are NOT covered by nonce, so the buttons use
+        // `data-cmd` attributes + a single `addEventListener` loop inside
+        // the nonce-tagged script.
+        const nonce = getNonce();
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}' 'strict-dynamic'; style-src ${webview.cspSource} 'unsafe-inline'; connect-src 'none';">
 <style>
   body {
     margin: 0;
@@ -184,22 +276,94 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div class="toolbar">
-    <button title="Open Solution in Clarion IDE" onclick="send('openInClarionIDE')"><img src="${iconUri}" /></button>
+    <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
+    <div class="sep" data-solution-only${initialHiddenAttr}></div>
+    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;</button>
+    <div class="sep" data-solution-only${initialHiddenAttr}></div>
+    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>▶&#xFE0E;</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;▶&#xFE0E;</button>
+    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>🐛&#xFE0E;</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;🐛&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Build solution" onclick="send('build')">🔨&#xFE0E;</button>
-    <div class="sep"></div>
-    <button title="Run (Ctrl+F5)" onclick="send('run')">▶&#xFE0E;</button>
-    <button title="Build &amp; Run" onclick="send('buildAndRun')">🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" onclick="send('startDebugging')">🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" onclick="send('buildAndDebug')">🔨&#xFE0E;🐛&#xFE0E;</button>
+    <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    function send(cmd) { vscode.postMessage({ command: cmd }); }
+
+    // Button click → postMessage to extension host (existing).
+    document.querySelectorAll('button[data-cmd]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        vscode.postMessage({ command: btn.dataset.cmd });
+      });
+    });
+
+    // #148 Option 8 — extension-host → webview message listener. Replaces the
+    // prior html-reassign update pattern that triggered VS Code's webview
+    // lifecycle teardown + SW re-registration race. The DOM is patched in
+    // place; no iframe churn.
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = String(s);
+      return div.innerHTML;
+    }
+
+    // #141 Q9 directive #2 — toolbar gating helper. Solution-only elements
+    // (marked with data-solution-only) hide when no solution is open.
+    // "Open in IDE" and "Set Active Version" buttons are NOT marked because
+    // they're meaningful in both modes.
+    function applySolutionLoaded(loaded) {
+      document.querySelectorAll('[data-solution-only]').forEach(function(el) {
+        el.style.display = loaded ? '' : 'none';
+      });
+    }
+
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.command === 'updateContent') {
+        const tbody = document.querySelector('table tbody');
+        if (tbody && Array.isArray(e.data.summaryRows)) {
+          tbody.innerHTML = e.data.summaryRows.map(function(r) {
+            return '<tr><td class="lbl">' + escapeHtml(r.label) +
+                   '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
+          }).join('');
+        }
+        if (typeof e.data.solutionLoaded === 'boolean') {
+          applySolutionLoaded(e.data.solutionLoaded);
+        }
+      }
+    });
   </script>
 </body>
 </html>`;
     }
+}
+
+/**
+ * #148 — Cryptographically-random 32-char nonce for CSP `'nonce-...'` source.
+ * Standard VS Code webview helper pattern.
+ */
+function getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
+
+/**
+ * #148 Option 8 — XSS hardening for summary-row cell content. `summaryRows`
+ * includes user-supplied strings (solution names, project names, version
+ * labels) — prior `${r.label}` / `${r.value}` template interpolation was
+ * vulnerable. Used in initial server-side render only; client-side message
+ * handler has its own `escapeHtml` (DOM-based `textContent` round-trip).
+ */
+function escapeHtml(s: string): string {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }

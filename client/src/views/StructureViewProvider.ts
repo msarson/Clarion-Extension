@@ -68,6 +68,8 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _symbolRequestTimeoutMs: number = 10000; // Wait 10s before falling back to cached
     private _lastKnownSymbols: DocumentSymbol[] = [];   // Shown while server is busy
     private _retryTimeout: NodeJS.Timeout | null = null; // Scheduled retry after timeout
+    private _consecutiveTimeouts: number = 0;            // Retry backoff counter; reset on success or editor change
+    private static readonly _maxConsecutiveTimeouts: number = 3;
 
     // Centralized element tracking registry
     private registry = new SymbolElementRegistry();
@@ -87,6 +89,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             this.activeEditor = editor;
             this._lastKnownSymbols = []; // Stale symbols from previous file are invalid
+            this._consecutiveTimeouts = 0; // Reset backoff counter for the new document
             if (this._retryTimeout) { clearTimeout(this._retryTimeout); this._retryTimeout = null; }
             if (this.documentChangeDebounceTimeout) { clearTimeout(this.documentChangeDebounceTimeout); this.documentChangeDebounceTimeout = null; }
             if (this.documentChangeMaxWaitTimeout) { clearTimeout(this.documentChangeMaxWaitTimeout); this.documentChangeMaxWaitTimeout = null; }
@@ -730,6 +733,11 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         
         if (!this.activeEditor) return [];
 
+        // Skip LSP call entirely for non-file documents (e.g. output channels, settings)
+        if (this.activeEditor.document.uri.scheme !== 'file') {
+            return [];
+        }
+
         // Skip LSP call entirely for non-Clarion documents (e.g. output channels, settings)
         const fileExt = path.extname(this.activeEditor.document.uri.fsPath).toLowerCase();
         const clarionExtensions = globalSettings.fileSearchExtensions;
@@ -805,15 +813,22 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             }
 
             if (symbols === undefined) {
-                logger.error(`❌ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms for ${this.activeEditor?.document.fileName} — showing cached symbols (${this._lastKnownSymbols.length}), retrying in 5s`);
-                // Schedule a single retry so the view recovers once the server catches up
-                if (this._retryTimeout) clearTimeout(this._retryTimeout);
-                this._retryTimeout = setTimeout(() => {
-                    this._retryTimeout = null;
-                    this._onDidChangeTreeData.fire();
-                }, 5000);
+                this._consecutiveTimeouts++;
+                if (this._consecutiveTimeouts <= StructureViewProvider._maxConsecutiveTimeouts) {
+                    const retryDelay = Math.min(5000 * this._consecutiveTimeouts, 30000);
+                    logger.error(`❌ executeDocumentSymbolProvider timed out after ${this._symbolRequestTimeoutMs}ms for ${this.activeEditor?.document.fileName} — showing cached symbols (${this._lastKnownSymbols.length}), retry ${this._consecutiveTimeouts}/${StructureViewProvider._maxConsecutiveTimeouts} in ${retryDelay}ms`);
+                    if (this._retryTimeout) clearTimeout(this._retryTimeout);
+                    this._retryTimeout = setTimeout(() => {
+                        this._retryTimeout = null;
+                        this._onDidChangeTreeData.fire();
+                    }, retryDelay);
+                } else {
+                    logger.error(`❌ executeDocumentSymbolProvider timed out ${this._consecutiveTimeouts} times for ${this.activeEditor?.document.fileName} — stopped retrying; will resume when document changes`);
+                }
                 return this._lastKnownSymbols;
             }
+
+            this._consecutiveTimeouts = 0; // Reset on successful response
 
             const symbolsTime = performance.now() - symbolsStart;
             perfLogger.info(`📊 PERF: executeDocumentSymbolProvider: ${symbolsTime.toFixed(2)}ms, returned ${symbols?.length || 0} symbols`);

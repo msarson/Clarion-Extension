@@ -8,6 +8,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("FileDefinitionResolver");
@@ -140,6 +141,22 @@ export class FileDefinitionResolver {
             );
         }
 
+        // No-solution-mode tier (#113 site A): when solutionManager is null, walk
+        // serverSettings.libsrcPaths via resolveFileInNoSolutionMode. Gated on
+        // !solutionManager because in solution-loaded mode the redirection parser
+        // above (line 119+) already walks libsrc as its own Tier 3
+        // (redirectionFileParserServer.ts:672+); re-probing here would be redundant.
+        if (!solutionManager) {
+            const noSolutionHit = resolveFileInNoSolutionMode(fileName, documentUri);
+            if (noSolutionHit) {
+                logger.info(`Found file via no-solution resolver: ${noSolutionHit.path} (source: ${noSolutionHit.source})`);
+                return Location.create(
+                    `file:///${noSolutionHit.path.replace(/\\/g, '/')}`,
+                    { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+                );
+            }
+        }
+
         logger.info(`File not found: ${fileName}`);
         return null;
     }
@@ -196,6 +213,15 @@ export class FileDefinitionResolver {
                 const relativePath = path.join(currentDir, includeFileName);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = path.resolve(relativePath);
+                }
+            }
+
+            // No-solution-mode tier (#113 site B): libsrcPaths walk when no solution.
+            if (!resolvedPath && !solutionManager) {
+                const fromUri = `file:///${fromPath.replace(/\\/g, '/')}`;
+                const noSolutionHit = resolveFileInNoSolutionMode(includeFileName, fromUri);
+                if (noSolutionHit) {
+                    resolvedPath = noSolutionHit.path;
                 }
             }
 
@@ -258,6 +284,15 @@ export class FileDefinitionResolver {
                 }
             }
 
+            // No-solution-mode tier (#113 site C): libsrcPaths walk when no solution.
+            if (!resolvedPath && !solutionManager) {
+                const fromUri = `file:///${fromPath.replace(/\\/g, '/')}`;
+                const noSolutionHit = resolveFileInNoSolutionMode(memberFileName, fromUri);
+                if (noSolutionHit) {
+                    resolvedPath = noSolutionHit.path;
+                }
+            }
+
             if (resolvedPath && fs.existsSync(resolvedPath)) {
                 const result = await this.findDefinitionInIncludes(word, resolvedPath, visited);
                 if (result) {
@@ -270,46 +305,4 @@ export class FileDefinitionResolver {
         return null;
     }
 
-    /**
-     * Searches for a global definition across all files in the solution
-     */
-    public async findGlobalDefinition(word: string, documentUri: string): Promise<Location | null> {
-        logger.info(`Searching for global definition of ${word}`);
-
-        const SolutionManager = require('../solution/solutionManager').SolutionManager;
-        const solutionManager = SolutionManager.getInstance();
-        
-        if (!solutionManager || !solutionManager.solution) {
-            logger.info('No solution loaded');
-            return null;
-        }
-
-        // Search across all projects in the solution
-        for (const project of solutionManager.solution.projects) {
-            logger.info(`Searching in project: ${project.name}`);
-            
-            // Search in project source files
-            for (const sourceFile of project.sourceFiles) {
-                if (!fs.existsSync(sourceFile)) continue;
-
-                const content = fs.readFileSync(sourceFile, 'utf8');
-                const lines = content.split('\n');
-
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    // Check if line starts with the word (label/definition at column 0)
-                    if (line.trim().toLowerCase().startsWith(word.toLowerCase())) {
-                        logger.info(`Found global definition in ${sourceFile} at line ${i}`);
-                        return Location.create(
-                            `file:///${sourceFile.replace(/\\/g, '/')}`,
-                            { start: { line: i, character: 0 }, end: { line: i, character: line.length } }
-                        );
-                    }
-                }
-            }
-        }
-
-        logger.info(`No global definition found for ${word}`);
-        return null;
-    }
 }

@@ -1,6 +1,5 @@
-import { workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
+import { commands, workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
-import { refreshSolutionTreeView } from '../views/ViewManager';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
@@ -23,9 +22,8 @@ export async function showClarionQuickOpen(): Promise<void> {
     const solutionInfo = solutionCache.getSolutionInfo();
 
     if (!solutionInfo) {
-        // Refresh the solution tree view to show the "Open Solution" button
-        await refreshSolutionTreeView();
-        vscodeWindow.showInformationMessage("No solution is currently open. Use the 'Open Solution' button in the Solution View.");
+        // No solution loaded: defer to VS Code's native Quick Open behavior.
+        await commands.executeCommand('workbench.action.quickOpen');
         return;
     }
 
@@ -51,7 +49,11 @@ export async function showClarionQuickOpen(): Promise<void> {
 
             if (!seenFiles.has(fullPath)) {
                 seenFiles.add(fullPath);
-                seenBaseNames.add(baseName); // Track the base filename
+                // Only claim this basename if the path actually exists on disk.
+                // If it doesn't exist, the redirection scan may find the real location.
+                if (fs.existsSync(fullPath)) {
+                    seenBaseNames.add(baseName);
+                }
                 allFiles.push({
                     label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
                     description: project.name,
@@ -163,7 +165,22 @@ export async function showClarionQuickOpen(): Promise<void> {
 
     if (selectedFile) {
         try {
-            const doc = await workspace.openTextDocument(selectedFile.path);
+            let filePath = selectedFile.path;
+
+            // If the stored path doesn't exist on disk, resolve via redirection
+            if (!fs.existsSync(filePath)) {
+                const baseName = path.basename(filePath);
+                logger.info(`🔍 Path not found on disk, resolving via redirection: ${baseName}`);
+                const resolved = await solutionCache.findFileWithExtension(baseName);
+                if (resolved && fs.existsSync(resolved)) {
+                    logger.info(`✅ Resolved via redirection: ${resolved}`);
+                    filePath = resolved;
+                } else {
+                    logger.warn(`⚠️ Could not resolve file via redirection: ${baseName}`);
+                }
+            }
+
+            const doc = await workspace.openTextDocument(filePath);
             await vscodeWindow.showTextDocument(doc);
         } catch (error) {
             vscodeWindow.showErrorMessage(`Failed to open file: ${selectedFile.path}`);

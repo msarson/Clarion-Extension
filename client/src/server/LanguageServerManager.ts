@@ -1,4 +1,4 @@
-import { workspace, window as vscodeWindow, ExtensionContext, Location, Position } from 'vscode';
+import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
@@ -181,6 +181,24 @@ export async function startLanguageServer(
             logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
             if (structureViewProvider) {
                 structureViewProvider.refresh();
+            }
+        });
+
+        // Re-invoke the doc-link provider per visible Clarion editor on
+        // solution-ready. Uses `vscode.executeDocumentLinkProvider` so the
+        // refresh runs without touching document content — no dirty-flag flip.
+        // Audit trail for the framing pivot (away from LSP capability backport)
+        // lives in GH #160.
+        client.onNotification('clarion/refreshDocumentLinks', async () => {
+            logger.info(`🔗 Received clarion/refreshDocumentLinks; re-invoking document-link provider on visible editors`);
+            for (const editor of vscodeWindow.visibleTextEditors) {
+                if (editor.document.languageId === 'clarion') {
+                    try {
+                        await commands.executeCommand('vscode.executeDocumentLinkProvider', editor.document.uri);
+                    } catch (err) {
+                        logger.warn(`⚠️ doc-link refresh failed for ${editor.document.uri.toString()}: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                }
             }
         });
 

@@ -1,6 +1,9 @@
 import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
+import { SolutionManager } from '../solution/solutionManager';
+import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { WordCompletionProvider } from './WordCompletionProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { MemberEnumItem } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
@@ -31,6 +34,13 @@ export class CompletionProvider {
     private chainedResolver = new ChainedPropertyResolver();
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
+    private wordCompletion: WordCompletionProvider;
+
+    constructor() {
+        const solutionManager = SolutionManager.getInstance();
+        const scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.wordCompletion = new WordCompletionProvider(this.tokenCache, scopeAnalyzer);
+    }
 
     /**
      * Main entry point — called by connection.onCompletion.
@@ -55,7 +65,12 @@ export class CompletionProvider {
             if (eventCompletions) return eventCompletions;
 
             // Ensure the trigger is actually '.'
-            if (!lineText.trimEnd().endsWith('.')) return [];
+            if (!lineText.trimEnd().endsWith('.')) {
+                const partialMatch = lineText.match(/[\w:]+$/);
+                const partial = partialMatch ? partialMatch[0] : '';
+                logger.info(`CompletionProvider: word trigger, partial="${partial}"`);
+                return await this.wordCompletion.provide(document, position, partial);
+            }
 
             // Extract the chain before the dot (e.g. "SELF", "oKanban", "SELF.Order")
             const chain = this.extractChainBeforeDot(lineText);
@@ -305,13 +320,18 @@ export class CompletionProvider {
 
     /** Returns true if the cursor appears to be inside a Clarion comment or string. */
     private isInCommentOrString(lineText: string): boolean {
-        // Clarion comments start with '!'
-        const commentIdx = lineText.indexOf('!');
-        if (commentIdx !== -1 && commentIdx < lineText.length - 1) return true;
-        // Basic string check: odd number of single quotes before cursor
-        const singleQuotes = (lineText.match(/'/g) || []).length;
-        if (singleQuotes % 2 !== 0) return true;
-        return false;
+        // Walk the text to correctly handle '!' / '|' inside string literals.
+        // '!' starts a line comment; '|' is line-continuation — everything after it is a comment.
+        let inString = false;
+        for (const ch of lineText) {
+            if (inString) {
+                if (ch === "'") inString = false;
+            } else {
+                if (ch === "'") inString = true;
+                else if (ch === '!' || ch === '|') return true;
+            }
+        }
+        return inString;
     }
 
     /**

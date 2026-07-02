@@ -1,9 +1,45 @@
 {
   "directives": [
     {
+      "name": "COMPILE",
+      "syntax": "COMPILE(terminator [,expression])",
+      "description": "Compiler directive that includes a block of source code in compilation. Expression parameter is optional - if omitted, always compiles code. If provided (typically an EQUATE), compiles code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "EQUATE",
+      "syntax": "label EQUATE([constant] | picture | type | label)",
+      "description": "Assigns a label to a constant value, picture token, data type, or another label. Creates compile-time constant that uses no runtime memory. Used for readability and maintainability (e.g., TRUE EQUATE(1), PI EQUATE(3.1415927)). Cannot equate to itself. In ITEMIZE structure, value parameter is optional.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "INCLUDE",
+      "syntax": "INCLUDE(filename [,section])",
+      "description": "Compiler directive that includes source code from another file. Section parameter is optional - if omitted, includes entire file. If provided, includes only the specified SECTION. Extension .CLW assumed if omitted.",
+      "category": "Compiler Directive"
+    },
+    {
       "name": "ITEMIZE",
       "syntax": "[label] ITEMIZE([seed]) [,PRE()]\n  equates\nEND",
       "description": "Declares an enumerated data structure. Each EQUATE inside auto-increments by 1 from the previous (or from seed). Equates are referenced with the PRE prefix or the ITEMIZE label. If no value and no seed, the first equate defaults to 1.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "MEMBER",
+      "syntax": "MEMBER([program])",
+      "description": "Compiler directive that identifies this source file as a MEMBER module. Program parameter is optional - omit for single-program applications, specify for multi-program solutions. Must appear at top of file before any MAP.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "OMIT",
+      "syntax": "OMIT(terminator [,expression])",
+      "description": "Compiler directive that omits a block of source code from compilation. Expression parameter is optional - if omitted, always omits code. If provided (typically an EQUATE), omits code conditionally when expression is TRUE. Block ends at the line containing the terminator string.",
+      "category": "Compiler Directive"
+    },
+    {
+      "name": "PRAGMA",
+      "syntax": "PRAGMA(string)",
+      "description": "Compiler directive that sends project system statements from source code. Format: PRAGMA('project(statement)'), PRAGMA('compile(options)'), or PRAGMA('link(options)'). Dynamically adds pragma settings to project. Commonly used to control compilation, linking, and optimization settings from within code.",
       "category": "Compiler Directive"
     },
     {
@@ -14,4 +50,3 @@
     }
   ]
 }
-

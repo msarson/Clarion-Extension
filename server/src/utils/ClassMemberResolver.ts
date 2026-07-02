@@ -7,6 +7,7 @@ import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
+import { cooperativeCheckpoint } from './cooperativeScan';
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../logger';
@@ -1031,14 +1032,46 @@ export class ClassMemberResolver {
 
             if (sm?.solution) {
                 for (const project of sm.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(implFileName, currentPath);
+                    const resolved = project.getRedirectionParser().findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         const loc = this.findImplementationInFile(resolved.path, className, methodName, declarationSig);
                         if (loc) return loc;
                     }
                 }
             }
-            // Fallback: same directory as the declaration file
+            // ─── Sibling-dir fallback (cluster-canonical site, task 6253f9d5) ──
+            // Load-bearing for two real production scenarios that the canonical
+            // resolution chain (FRG class-module index + RedirectionParser) cannot
+            // reach today:
+            //
+            //   1. **No-solution-open mode** — user opens a single .clw without
+            //      loading the workspace as a Clarion solution. SolutionManager.solution
+            //      is null and FRG.isBuilt is false; both upstream blocks bail. The
+            //      sibling-dir fallback is the only working path for findImplementationCrossFile.
+            //
+            //   2. **Cross-directory .inc/.clw siblings outside the project's .red
+            //      search paths** — declaration file lives in a directory the project's
+            //      redirection chain doesn't enumerate, but the impl .clw sits next to
+            //      the .inc on disk. The parser's own Layer-2 sibling-probe
+            //      (incDirsScope.ts) keys on the active editor's directory, not the
+            //      declaration file's directory — different surface.
+            //
+            // Cluster invariant — DO NOT MODIFY THIS SITE IN ISOLATION. Three companion
+            // sites implement the same pattern with the same load-bearing intent; they
+            // move together to avoid silent-asymmetry inside the codebase (e.g. dropping
+            // this fallback while leaving the others would silently break Go-to-
+            // Implementation in no-solution mode but not the parallel features):
+            //
+            //   - `server/src/providers/ImplementationProvider.ts:867-876`
+            //   - `server/src/providers/diagnostics/MapDeclarationDiagnostics.ts:145-149`
+            //   - `server/src/providers/MapDeclarationCodeActionProvider.ts:36-65`
+            //     (`resolveClwPath` sibling fallback)
+            //
+            // Phase A investigation: `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`
+            // Audit origin: `8c874d32` (file-finding-audit-2026-05-09.md, Open Question #3).
+            // Future cleanup: when `0075728c` lands a server-side standalone resolver
+            // for no-solution-open mode, revisit ALL four sites in unison (drop, or
+            // route through the new resolver) — see Phase A report's "Follow-ups".
             const directPath = path.join(path.dirname(declPath), implFileName);
             if (fs.existsSync(directPath)) {
                 const loc = this.findImplementationInFile(directPath, className, methodName, declarationSig);
@@ -1046,10 +1079,14 @@ export class ClassMemberResolver {
             }
         }
 
-        // 3. Search all project CLW source files
+        // 3. Search all project CLW source files. #187 — yield the event loop
+        // periodically so this solution-wide scan doesn't block interactive
+        // requests (it reads + scans each .clw until a match is found).
         if (sm?.solution) {
+            let scanned = 0;
             for (const project of sm.solution.projects) {
                 for (const sf of project.sourceFiles) {
+                    await cooperativeCheckpoint(scanned++);
                     const fullPath = path.join(project.path, sf.relativePath);
                     if (!fullPath.toLowerCase().endsWith('.clw') || !fs.existsSync(fullPath)) continue;
                     const loc = this.findImplementationInFile(fullPath, className, methodName, declarationSig);

@@ -1,8 +1,7 @@
 import { window, workspace, ConfigurationTarget, Uri, commands } from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
-import { parseString } from 'xml2js';
 import { DocumentManager } from './documentManager';
+import { ClarionInstallationDetector, ClarionCompilerVersion } from './utils/ClarionInstallationDetector';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './utils/LoggerManager';
 const logger = LoggerManager.getLogger("ExtensionCommands");
@@ -14,15 +13,6 @@ logger.setLevel("error");
 
 
 
-
-// Define the ClarionVersionProperties interface
-interface ClarionVersionProperties {
-  clarionVersion: string;
-  path: string;
-  redirectionFile: string;
-  macros: Record<string, string>;
-  libsrc: string;
-}
 
 export class ClarionExtensionCommands {
 
@@ -68,8 +58,10 @@ export class ClarionExtensionCommands {
       // ✅ Save the properties file path
       await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
 
-      // ✅ Parse available versions from the selected file
-      const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(selectedFilePath);
+      // ✅ Parse available versions from the selected file (single XML-parse
+      // pathway — ClarionInstallationDetector; #136)
+      const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(selectedFilePath);
+      const versionProperties = installation?.compilerVersions ?? [];
 
       if (versionProperties.length === 0) {
         window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
@@ -77,7 +69,7 @@ export class ClarionExtensionCommands {
       }
 
       // ✅ Prompt user to select a version
-      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.clarionVersion), {
+      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.name), {
         placeHolder: "Select a Clarion version",
       });
 
@@ -87,7 +79,7 @@ export class ClarionExtensionCommands {
       }
 
       // ✅ Find the selected version's properties
-      const selectedVersionProps = versionProperties.find((v) => v.clarionVersion === versionSelection);
+      const selectedVersionProps = versionProperties.find((v) => v.name === versionSelection);
       if (!selectedVersionProps) {
         window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
         return;
@@ -109,6 +101,233 @@ export class ClarionExtensionCommands {
 
 
   /**
+   * #132 / dd87633f B1 — public, composed entry point that parses a
+   * ClarionProperties.xml + applies the matching version's properties to
+   * `globalSettings.*`. Solution-free. Callable from `setActiveClarionVersion`
+   * in `globals.ts` so version-derived state (libsrcPaths / redirectionPath /
+   * macros / redirectionFile) can be populated without any solution context.
+   *
+   * Returns true when the named version was found in the properties file.
+   */
+  public static async loadVersionGlobalSettings(propertiesFile: string, version: string): Promise<boolean> {
+    try {
+      const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(propertiesFile);
+      const selectedVersionProps = installation?.compilerVersions.find(v => v.name === version);
+      if (!selectedVersionProps) {
+        return false;
+      }
+      this.updateGlobalSettings(selectedVersionProps);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * #132 / dd87633f B2 + #134 / 972b3040 — solution-free command handler for
+   * `clarion.setActiveVersion`.
+   *
+   * Two-stage picker (terminology lock: Installation = installed Clarion IDE
+   * with its own ClarionProperties.xml; Compile Target = entry inside one
+   * Installation's `Clarion.Versions` XML block):
+   *
+   *   Stage 1 — pick a Compile Target inside the active Clarion Installation,
+   *             with a "↩ Switch Clarion installation…" sentinel at the bottom.
+   *   Stage 2 — pick a Clarion Installation (from `ClarionInstallationDetector
+   *             .detectInstallations()`). Fires when no Installation is active
+   *             OR when the user selects the Stage-1 sentinel.
+   *
+   * First-run (no active Installation) → skips Stage 1, jumps straight to
+   * Stage 2, then loops into Stage 1 with the picked Installation.
+   * `detectInstallations()` empty → falls back to manual `showOpenDialog` on
+   * ClarionProperties.xml as an escape-hatch (preserves the legacy entry
+   * point under non-default install layouts).
+   * Cancel from either stage → no state change.
+   *
+   * Does NOT touch solution-bound state. The version status-bar refresh fires
+   * inside `setActiveClarionVersion` (B1 entry point) on success.
+   */
+  static async setActiveVersionCommand(): Promise<void> {
+    try {
+      // Lazy imports to avoid circular-import pitfalls with globals.ts.
+      const globals = await import('./globals');
+      const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
+      const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
+      const { buildCompileTargetItems, buildInstallationItems, buildSetAsDefaultFooterItem } = await import('./utils/VersionPickerItems');
+      const { SettingsStorageManager } = await import('./utils/SettingsStorageManager');
+
+      const installations = await ClarionInstallationDetector.detectInstallations();
+      logger.info(`🔍 Discovered ${installations.length} Clarion installation(s)`);
+
+      if (installations.length === 0) {
+        window.showInformationMessage(
+          "No Clarion installations auto-discovered under %APPDATA%/SoftVelocity/Clarion. Browse for a ClarionProperties.xml manually…"
+        );
+        await ClarionExtensionCommands.setActiveVersionViaFilePicker();
+        return;
+      }
+
+      const activePropertiesPath = globalClarionPropertiesFile || null;
+      const activeCompileTargetName = globalClarionVersion || null;
+
+      let currentInstallation = installations.find(i => i.propertiesPath === activePropertiesPath) ?? null;
+
+      // Loop allows Stage-1 "↩ Switch installation…" to bounce back into Stage 2.
+      // Bounded by user-cancel at either stage.
+      while (true) {
+        // Stage 2 — pick Installation if none is active for this loop iteration.
+        if (!currentInstallation) {
+          const installItems = buildInstallationItems(installations, activePropertiesPath);
+          const pickedInstall = await window.showQuickPick(installItems, {
+            placeHolder: "Pick Clarion installation",
+          });
+          if (!pickedInstall) return; // user cancelled — no state change
+          currentInstallation = installations.find(i => i.propertiesPath === pickedInstall.propertiesPath) ?? null;
+          if (!currentInstallation) {
+            // Defensive — should never happen since installItems was built from `installations`.
+            window.showErrorMessage("Selected installation could not be resolved.");
+            return;
+          }
+        }
+
+        // Stage 1 — pick Compile Target.
+        const targetItems = buildCompileTargetItems(currentInstallation, activeCompileTargetName);
+
+        // #141 Q6 — append "Set as default for new solutions" footer item when
+        // there's a concrete effective version to promote. The footer reads
+        // the CURRENT effective active (not the user's stage-1 hover) — picking
+        // it sets that as L1 default without changing L2 state.
+        const installationLabel = `Clarion ${currentInstallation.ideVersion} installation`;
+        const currentDefaultCompileTargetName = workspace.getConfiguration('clarion').get<string>('activeVersion') || null;
+        const setAsDefaultItem = buildSetAsDefaultFooterItem(
+          activeCompileTargetName,
+          installationLabel,
+          currentDefaultCompileTargetName
+        );
+        if (setAsDefaultItem) {
+          targetItems.push(setAsDefaultItem);
+        }
+
+        const pickedTarget = await window.showQuickPick(targetItems, {
+          placeHolder: `Compile target for Clarion ${currentInstallation.ideVersion} Installation`,
+        });
+        if (!pickedTarget) return; // user cancelled — no state change
+
+        if (pickedTarget.isSwitchInstallation) {
+          // Loop back to Stage 2.
+          currentInstallation = null;
+          continue;
+        }
+
+        // #141 Q6 — "Set as default for new solutions" picked: write L1
+        // default from the CURRENT effective active (not the user's pick item,
+        // which carries no targetName). L2 effective active stays put — Q4
+        // cross-instance bubble isolation preserved.
+        if (pickedTarget.isSetAsDefault) {
+          if (!activeCompileTargetName || !globalClarionPropertiesFile) {
+            window.showWarningMessage(
+              "No current Clarion version to set as default. Pick a compile target first."
+            );
+            return;
+          }
+          const ok = await SettingsStorageManager.setDefaultVersion(
+            activeCompileTargetName,
+            globalClarionPropertiesFile
+          );
+          if (ok) {
+            window.showInformationMessage(
+              `'${activeCompileTargetName}' is now your default Clarion version for new solutions.`
+            );
+          }
+          return;
+        }
+
+        // Apply the picked Compile Target.
+        const applied = await setActiveClarionVersion(pickedTarget.targetName!, currentInstallation.propertiesPath);
+        if (!applied) {
+          window.showErrorMessage(
+            `Compile target '${pickedTarget.targetName}' could not be applied (not found in ${currentInstallation.propertiesPath}).`
+          );
+          return;
+        }
+
+        window.showInformationMessage(
+          `Active compile target: '${pickedTarget.targetName}' (Clarion ${currentInstallation.ideVersion} Installation).`
+        );
+        return;
+      }
+    } catch (error) {
+      window.showErrorMessage(`Error setting active Clarion version: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * #134 / 972b3040 — escape-hatch fallback fired when
+   * `ClarionInstallationDetector.detectInstallations()` returns no
+   * Installations (non-default install layout / first-time setup before any
+   * Clarion is installed in %APPDATA%/SoftVelocity/Clarion).
+   *
+   * Same final outcome as the auto-discovered flow: picks a Compile Target
+   * inside the user-selected ClarionProperties.xml and routes through
+   * `setActiveClarionVersion`. Uses the detector's own
+   * `parseInstallationFromPropertiesPath` so the QuickPick item-builders
+   * (`buildCompileTargetItems`) can be reused.
+   */
+  private static async setActiveVersionViaFilePicker(): Promise<void> {
+    const globals = await import('./globals');
+    const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
+    const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
+    const { buildCompileTargetItems } = await import('./utils/VersionPickerItems');
+
+    const appDataPath = process.env.APPDATA;
+    const defaultDir = globalClarionPropertiesFile
+      ? Uri.file(path.dirname(globalClarionPropertiesFile))
+      : (appDataPath ? Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion")) : undefined);
+
+    const selectedFileUri = await window.showOpenDialog({
+      defaultUri: defaultDir,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      openLabel: "Select ClarionProperties.xml",
+      filters: { XML: ["xml"] },
+    });
+    if (!selectedFileUri || selectedFileUri.length === 0) {
+      window.showWarningMessage("No ClarionProperties.xml file selected.");
+      return;
+    }
+    const selectedFilePath = selectedFileUri[0].fsPath;
+
+    const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(selectedFilePath);
+    if (!installation || installation.compilerVersions.length === 0) {
+      window.showErrorMessage("No Clarion compile targets found in the selected ClarionProperties.xml file.");
+      return;
+    }
+
+    const activeCompileTargetName = globalClarionVersion || null;
+    // Strip the switch-Installation sentinel — the escape-hatch has no
+    // Installation list to switch to.
+    const targetItems = buildCompileTargetItems(installation, activeCompileTargetName)
+      .filter(item => !item.isSwitchInstallation);
+
+    const pickedTarget = await window.showQuickPick(targetItems, {
+      placeHolder: `Compile target for Clarion ${installation.ideVersion} Installation`,
+    });
+    if (!pickedTarget) {
+      window.showWarningMessage("No compile target selected. Keeping previous selection.");
+      return;
+    }
+
+    const applied = await setActiveClarionVersion(pickedTarget.targetName!, selectedFilePath);
+    if (!applied) {
+      window.showErrorMessage(`Compile target '${pickedTarget.targetName}' could not be applied.`);
+      return;
+    }
+    window.showInformationMessage(
+      `Active compile target: '${pickedTarget.targetName}' (Clarion ${installation.ideVersion} Installation).`
+    );
+  }
+
+  /**
    * Updates the global Clarion settings to reflect the specified version properties.
    *
    * @param selectedVersionProps - The Clarion version properties that will be used
@@ -118,7 +337,7 @@ export class ClarionExtensionCommands {
    * This method adjusts the global redirection file, its directory path, macros, and LIBSRC paths
    * to match the specified version's configuration. It logs the updated settings for reference.
    */
-  private static updateGlobalSettings(selectedVersionProps: ClarionVersionProperties | undefined) {
+  private static updateGlobalSettings(selectedVersionProps: ClarionCompilerVersion | undefined) {
 
     if (selectedVersionProps) {
       globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
@@ -129,59 +348,6 @@ export class ClarionExtensionCommands {
 
     }
   }
-
-  /**
-   * Asynchronously parses the specified XML file to retrieve all available Clarion versions.
-   *
-   * @param filePath - The full path to the XML file containing Clarion version properties.
-   * @returns A promise that resolves to an array of ClarionVersionProperties objects, each representing
-   *          a discovered Clarion version along with its associated configuration data.
-   */
-  private static async parseAvailableVersions(filePath: string): Promise<ClarionVersionProperties[]> {
-    const xmlContent = fs.readFileSync(filePath, 'utf-8');
-    let versions: ClarionVersionProperties[] = [];
-
-    parseString(xmlContent, (err: Error | null, result: any) => {
-      if (!err && result?.ClarionProperties?.Properties) {
-        const propertiesArray = result.ClarionProperties.Properties;
-
-        for (const properties of propertiesArray) {
-          if (properties.$.name === 'Clarion.Versions') {
-            for (const versionProperty of properties.Properties) {
-              const versionName = versionProperty.$.name;
-              if (!versionName.includes("Clarion.NET")) {
-                const versionProps: ClarionVersionProperties = {
-                  clarionVersion: versionName,
-                  path: versionProperty.path?.[0]?.$.value || '',
-                  redirectionFile: ClarionExtensionCommands.extractRedirectionFile(versionProperty.Properties),
-                  macros: ClarionExtensionCommands.extractMacros(versionProperty.Properties),
-                  libsrc: versionProperty.libsrc?.[0]?.$.value || ''
-                };
-
-                versions.push(versionProps);
-              }
-            }
-            break; // Exit loop after finding Clarion.Versions
-          }
-        }
-      }
-    });
-
-    return versions;
-  }
-
-  /**
-   * Retrieves the value of the "RedirectionFile" property from a given array
-   * of property objects. If the property is not found, returns an empty string.
-   *
-   * @param properties - The array of property objects to search.
-   * @returns The value of the "RedirectionFile" property or an empty string if it's absent.
-   */
-  private static extractRedirectionFile(properties: any[]): string {
-    const redirectionFileProperty = properties.find((p: any) => p.$.name === 'RedirectionFile');
-    return redirectionFileProperty?.Name?.[0]?.$.value || '';
-  }
-
 
   /**
    * Extracts macro definitions from a given properties object, typically derived
@@ -364,31 +530,6 @@ export class ClarionExtensionCommands {
 
 
 
-  /**
-   * Asynchronously updates the workspace configurations for Clarion.
-   *
-   * This method retrieves the Clarion properties file path and selected version from
-   * the user's workspace settings. It parses available versions and updates the global
-   * settings if a matching version is found. Any errors are logged.
-   *
-   * @throws {Error} If there is a problem reading or parsing the properties file, or
-   * if updating the configuration fails for any reason.
-   */
-  static async updateWorkspaceConfigurations() {
-    try {
-      const clarionFilePath = workspace.getConfiguration().get<string>('clarion.propertiesFile');
-      if (clarionFilePath) {
-        const versionProperties = await ClarionExtensionCommands.parseAvailableVersions(clarionFilePath);
-        const selectedVersion = workspace.getConfiguration().get<string>('selectedClarionVersion');
-        if (selectedVersion) {
-          const selectedVersionProps = versionProperties.find(v => v.clarionVersion === selectedVersion);
-          ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
-        }
-      }
-    } catch (error) {
-      logger.info(String(error));
-    }
-  }
   static async followLink(documentManager: DocumentManager) {
     const editor = window.activeTextEditor;
     if (editor) {

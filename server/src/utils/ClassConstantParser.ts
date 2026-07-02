@@ -30,6 +30,11 @@ export class ClassConstantParser {
     
     // Pattern: DLL(ConstantName)
     private static readonly DLL_PATTERN = /DLL\s*\(\s*(\w+)\s*\)/gi;
+
+    /** Clarion compiler-predefined symbols — never need a project constant entry. */
+    private static readonly CLARION_BUILTIN_CONSTANTS = new Set([
+        'DLL_MODE', '_DLL_MODE_', 'DEMO', '_DEMO_'
+    ]);
     
     // Pattern: CLASS definition start (with or without opening paren)
     private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\b/i;
@@ -123,6 +128,10 @@ export class ClassConstantParser {
         while ((linkMatch = linkPattern.exec(classDefinition)) !== null) {
             const relatedFile = linkMatch[1];
             const constantName = linkMatch[2];
+
+            // Skip numeric literals (e.g., LINK('file',1)) and Clarion built-ins
+            if (/^\d+$/.test(constantName)) continue;
+            if (ClassConstantParser.CLARION_BUILTIN_CONSTANTS.has(constantName.toUpperCase())) continue;
             
             constants.push({
                 name: constantName,
@@ -138,6 +147,10 @@ export class ClassConstantParser {
         const dllPattern = new RegExp(ClassConstantParser.DLL_PATTERN.source, 'gi');
         while ((dllMatch = dllPattern.exec(classDefinition)) !== null) {
             const constantName = dllMatch[1];
+
+            // Skip numeric literals (e.g., DLL(0)) and Clarion built-ins
+            if (/^\d+$/.test(constantName)) continue;
+            if (ClassConstantParser.CLARION_BUILTIN_CONSTANTS.has(constantName.toUpperCase())) continue;
             
             constants.push({
                 name: constantName,

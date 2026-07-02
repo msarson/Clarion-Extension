@@ -249,10 +249,86 @@ export class TokenHelper {
     }
 
     /**
+     * Returns the String token containing the cursor when it sits inside the
+     * FIRST string-literal argument of a file-reference statement (INCLUDE /
+     * MODULE / MEMBER / LINK) on the cursor line — i.e. the filename position
+     * of `INCLUDE('foo.inc')` and siblings. Returns null otherwise.
+     *
+     * Used by `DefinitionProvider.provideDefinition` (#171) to make a precise
+     * exception to the `isPositionInString` guard so F12 on a file-ref filename
+     * routes through `FileDefinitionResolver` instead of bailing because the
+     * filename happens to live inside a single-quoted string. The caller reads
+     * `.value` off the returned token to extract the filename (stripping the
+     * surrounding quote chars) rather than going through the heuristic word-
+     * extraction path designed for identifier-shaped tokens.
+     *
+     * The detector deliberately scopes to the **FIRST** string after the
+     * file-ref token so two-arg forms like `INCLUDE('foo.inc'),SECTION('bar')`
+     * still bail at the SECTION arg (cursor in 2nd string → null). The
+     * `referencedFile` token property is populated by the tokenizer for all
+     * four statement types (`TokenTypes.ts:117`); 9 existing callers in
+     * `MemberLocatorService` / `SymbolFinderService` / `DefinitionProvider`
+     * already rely on it. No tokenizer changes.
+     *
+     * Returns null (caller bails per existing guard) when:
+     *   - No file-ref token on the cursor line
+     *   - Cursor is in a string but it's not the FIRST string after the
+     *     file-ref token (e.g. SECTION arg)
+     *   - File-ref token's first string arg can't be located (defensive)
+     *
+     * Range convention matches `isPositionInString`: `[t.start, t.start + length]`
+     * inclusive on both bounds.
+     */
+    public static getFileRefArgStringToken(tokens: Token[], line: number, character: number): Token | null {
+        const fileRefTokens = tokens.filter(t =>
+            t.line === line &&
+            t.referencedFile !== undefined &&
+            t.referencedFile.length > 0
+        );
+        if (fileRefTokens.length === 0) return null;
+
+        for (const fileRef of fileRefTokens) {
+            const firstStringAfter = tokens.find(t =>
+                t.line === line &&
+                t.type === TokenType.String &&
+                t.start > fileRef.start
+            );
+            if (!firstStringAfter) continue;
+            if (
+                firstStringAfter.start <= character &&
+                character <= firstStringAfter.start + firstStringAfter.value.length
+            ) {
+                return firstStringAfter;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Boolean wrapper over `getFileRefArgStringToken` — same contract, returns
+     * just whether the cursor is in a file-ref filename position. Use when the
+     * caller doesn't need the matched token (e.g. tests, guard checks).
+     */
+    public static isInsideFileRefArg(tokens: Token[], line: number, character: number): boolean {
+        return this.getFileRefArgStringToken(tokens, line, character) !== null;
+    }
+
+    /**
+     * True for any callable declaration token (Procedure or Function).
+     * In modern Clarion both can return values; the distinction is a legacy
+     * tokenizer artifact, so callers asking "is this a callable declaration?"
+     * must accept both. Use this anywhere a per-file check on `t.type` is
+     * filtering for callable declarations.
+     */
+    public static isProcedureOrFunction(token: Token): boolean {
+        return token.type === TokenType.Procedure || token.type === TokenType.Function;
+    }
+
+    /**
      * Case-insensitive string comparison (optimized to avoid unnecessary allocations)
      * 🚀 PERFORMANCE: Only allocates uppercase strings once, not in tight loops
      * @param a First string
-     * @param b Second string  
+     * @param b Second string
      * @returns true if strings are equal (case-insensitive)
      */
     public static equalsIgnoreCase(a: string, b: string): boolean {

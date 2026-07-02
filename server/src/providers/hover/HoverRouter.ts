@@ -11,6 +11,7 @@ import { AttributeService } from '../../utils/AttributeService';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
+import { KeywordService } from '../../utils/KeywordService';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -30,6 +31,7 @@ export class HoverRouter {
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
     private directiveService = DirectiveService.getInstance();
+    private keywordService = KeywordService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -101,6 +103,14 @@ export class HoverRouter {
         const directiveHover = this.handleDirective(word);
         if (directiveHover) return directiveHover;
 
+        // 9.8 Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.) —
+        // entries previously living in clarion-builtins.json under issue #77
+        // moved to clarion-keywords.json. Routing intentionally sits next to
+        // directives and ahead of builtins so a misclassified entry can't be
+        // shadowed by an unrelated function with the same name.
+        const languageKeywordHover = this.handleKeyword(word);
+        if (languageKeywordHover) return languageKeywordHover;
+
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
         const builtinHover = this.handleBuiltin(word, line, wordRange, document, position, tokens);
         if (builtinHover) return builtinHover;
@@ -113,8 +123,22 @@ export class HoverRouter {
      * Handle special keywords (MODULE, TO, ELSE, PROCEDURE, HIDE, DISABLE, TYPE)
      */
     private handleSpecialKeywords(context: HoverContext): Hover | null {
-        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext } = context;
+        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext, documentStructure } = context;
         const upperWord = word.toUpperCase();
+
+        if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
+            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure);
+            if (containerHover) return containerHover;
+        }
+
+        if (upperWord === 'VIEW') {
+            const viewHover = this.handleViewKeyword(position, tokens, documentStructure);
+            if (viewHover) return viewHover;
+        }
+
+        if (upperWord === 'PROGRAM' || upperWord === 'MEMBER') {
+            return this.contextHandler.handleProgramOrMemberKeyword(word, documentStructure);
+        }
 
         if (upperWord === 'MODULE') {
             return this.contextHandler.handleModuleKeyword(isInMapBlock);
@@ -143,6 +167,115 @@ export class HoverRouter {
         }
 
         return null;
+    }
+
+    /**
+     * Renders a structured hover for a WINDOW / APPLICATION / REPORT keyword.
+     * Pulls the descriptor populated by `DocumentStructure.populateWindowDescriptors`
+     * and formats title, geometry, MDI mode, icon, and residual attributes.
+     * Returns null when the cursor isn't on a container Structure token whose
+     * descriptor has been built (e.g. cursor lands on the keyword text but the
+     * token type is something else entirely).
+     */
+    private handleContainerKeyword(
+        keyword: string,
+        position: { line: number; character: number },
+        tokens: Token[],
+        documentStructure: { getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined }
+    ): Hover | null {
+        // Find the Structure token at this cursor position whose value matches the keyword.
+        const containerToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === keyword &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!containerToken) return null;
+
+        const desc = documentStructure.getWindowDescriptor(containerToken);
+        if (!desc) return null;
+
+        const lines: string[] = [];
+        const labelText = containerToken.label ? `${containerToken.label} ` : '';
+        lines.push(`**${labelText}${keyword}**`);
+        if (desc.title) lines.push(`*${desc.title}*`);
+
+        const meta: string[] = [];
+        if (desc.at) {
+            const geom = typeof desc.at === 'string'
+                ? `AT(${desc.at})`
+                : `${desc.at.w}×${desc.at.h} @ (${desc.at.x},${desc.at.y})`;
+            meta.push(`📐 ${geom}`);
+        }
+        if (desc.mdi) {
+            meta.push(desc.mdiChild ? '🪟 MDI child' : '🪟 MDI parent');
+        }
+        if (desc.systemMenu) meta.push('System menu');
+        if (desc.statusBar) meta.push('Status bar');
+        if (desc.icon) meta.push(`Icon: \`${desc.icon}\``);
+        if (meta.length) {
+            lines.push('');
+            lines.push(meta.join(' · '));
+        }
+
+        if (desc.attributes.length) {
+            lines.push('');
+            lines.push(`**Attributes:** ${desc.attributes.map(a => `\`${a}\``).join(', ')}`);
+        }
+
+        const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
+        return { contents: content };
+    }
+
+    /**
+     * Renders a hover for a VIEW keyword. Pulls the descriptor populated by
+     * `DocumentStructure.populateViewDescriptors` and formats the source file,
+     * projected field count, and JOIN summary. Returns null when the cursor
+     * isn't on a VIEW Structure token whose descriptor has been built.
+     */
+    private handleViewKeyword(
+        position: { line: number; character: number },
+        tokens: Token[],
+        documentStructure: { getViewDescriptor(t: Token): import('../../tokenizer/ViewDescriptorParser').ViewDescriptor | undefined }
+    ): Hover | null {
+        const viewToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'VIEW' &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!viewToken) return null;
+
+        const desc = documentStructure.getViewDescriptor(viewToken);
+        if (!desc) return null;
+
+        const lines: string[] = [];
+        const labelText = viewToken.label ? `${viewToken.label} ` : '';
+        lines.push(`**${labelText}VIEW**`);
+        if (desc.from) lines.push(`*Source file:* \`${desc.from}\``);
+
+        const fieldCount = desc.projectedFields.length;
+        if (fieldCount > 0) {
+            const preview = desc.projectedFields.slice(0, 6).join(', ');
+            const more = fieldCount > 6 ? `, …${fieldCount - 6} more` : '';
+            lines.push('');
+            lines.push(`**Projected fields (${fieldCount}):** ${preview}${more}`);
+        }
+
+        if (desc.joins.length) {
+            lines.push('');
+            const joinLines = desc.joins.map(j => {
+                const side = j.side ? `${j.side} JOIN` : 'JOIN';
+                return `- ${side} \`${j.joinedFile}\``;
+            });
+            lines.push(`**Joins (${desc.joins.length}):**`);
+            lines.push(joinLines.join('\n'));
+        }
+
+        const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
+        return { contents: content };
     }
 
     /**
@@ -239,6 +372,16 @@ export class HoverRouter {
         if (!entry) return null;
         logger.info(`Found compiler directive: ${word}`);
         return this.formatter.formatDirective(entry);
+    }
+
+    /**
+     * Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.).
+     */
+    private handleKeyword(word: string): Hover | null {
+        const entry = this.keywordService.getKeyword(word);
+        if (!entry) return null;
+        logger.info(`Found language keyword: ${word}`);
+        return this.formatter.formatKeyword(entry);
     }
 
     /**

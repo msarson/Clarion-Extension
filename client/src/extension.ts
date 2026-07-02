@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
@@ -5,8 +6,9 @@ import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
-import { globalSolutionFile } from './globals';
+import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
@@ -32,7 +34,7 @@ import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
 
 const logger = LoggerManager.getLogger("Extension");
-logger.setLevel("error"); // PERF: Only log errors to reduce overhead
+logger.setLevel("error");
 let client: LanguageClient | undefined;
 // clientReady is now managed by LanguageClientManager
 let treeView: TreeView<TreeNode> | undefined;
@@ -55,7 +57,29 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
-    
+
+    // Per-session log file — truncates on activate so each session is fresh.
+    // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log
+    // (or extension log dir when no workspace is open).
+    const wsRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const logBaseDir = wsRoot ?? context.logUri.fsPath;
+    LoggerManager.initFileSink(path.join(logBaseDir, '.clarion-debug', 'client.log'));
+
+    // #148 — register the Actions-pane webview provider EARLY, before any
+    // awaits in the activation flow. The view's `visibility: "visible"`
+    // contribution in package.json triggers VS Code to start setting up the
+    // webview iframe + service worker as soon as the view container is
+    // available. If our provider isn't registered yet when VS Code tries to
+    // resolve the view, VS Code's SW registration hits an `InvalidStateError`
+    // (the SW tries to attach to a half-set-up document). #132 B3 widened
+    // the activation chain (added `activateClarionVersionState` + LSP server
+    // start awaits) enough to expose this latent race deterministically.
+    //
+    // The provider only depends on `context.extensionUri` (immediately
+    // available); no need to wait on globalState/solution/LSP/folder-settings
+    // before registering. Existing late-call at line ~141 removed.
+    registerSolutionToolbar(context);
+
     const state: ActivationManager.ActivationState = {
         client,
         treeView,
@@ -66,8 +90,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
         diagnosticCollection
     };
     
+    logger.info(`⏱️ [STARTUP] Client activation started at ${new Date().toISOString()}`);
     logger.info("🚀 ========== ACTIVATION START ==========");
     
+    // #132 / dd87633f B3 — first-run version migration + on-activation
+    // status-bar paint. Solution-free; runs once per activation. Auto-promotes
+    // a legacy `solutions[].version` to User-scope `clarion.activeVersion`
+    // (gated by `clarion.versionMigrated`) and refreshes the version status
+    // bar item from the User-scope value.
+    //
+    // #141 B3 — `context` is passed through so the L3 backfill (legacy
+    // `solutions[].version` → `solutionVersionMemory` globalState seed) can
+    // run on first post-#141 activation. Gated by a separate flag from
+    // `versionMigrated` so pre-#141 users who already have L1 set still get
+    // their per-solution intent preserved.
+    try {
+        await activateClarionVersionState(context);
+    } catch (err) {
+        logger.warn(`⚠️ Clarion-version activation failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Non-fatal — extension continues activating.
+    }
+
     // Phase 1-5: Core initialization
     await ActivationManager.initializeGlobalState(context);
     await ActivationManager.checkConflictingExtensions(context);
@@ -86,7 +129,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         return;
     }
     
-    await ActivationManager.loadFolderSettings(hasFolder);
+    await ActivationManager.loadFolderSettings(hasFolder, context);
     
     // Phase 11: Register commands
     logger.info("🔄 Phase 11: Registering commands...");
@@ -125,8 +168,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     solutionTreeDataProvider = solutionTreeResult.provider;
     context.subscriptions.push(treeView);
 
-    registerSolutionToolbar(context);
-    
+    // #148 — `registerSolutionToolbar(context)` moved to the top of activate(),
+    // right after logger setup, to avoid VS Code's webview SW registration
+    // racing against our late-registration in the original flow.
+
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;
     structureViewProvider = structureViewResult.provider;
@@ -190,6 +235,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     }
     
     const activationDuration = Date.now() - activationStartTime;
+    logger.info(`⏱️ [STARTUP] Client activation complete in ${activationDuration}ms`);
     logger.info(`✅ Extension activation completed in ${activationDuration}ms`);
 }
 
@@ -225,8 +271,8 @@ export async function openClarionSolution(context: ExtensionContext) {
     await SolutionOpener.openClarionSolution(context, initializeSolution);
 }
 
-export async function closeClarionSolution(context: ExtensionContext) {
-    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager);
+export async function closeClarionSolution(context: ExtensionContext, reason: SolutionCloseReason = 'user') {
+    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, reason);
     updateSolutionToolbar();
 }
 
@@ -255,7 +301,6 @@ export { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 
 
 export function deactivate(): Thenable<void> | undefined {
-    // Set to info level to capture shutdown process
     logger.setLevel("error");
     logger.info("🛑 DEACTIVATE: Starting extension deactivation");
     console.log("🛑 DEACTIVATE: Starting extension deactivation at " + new Date().toISOString());

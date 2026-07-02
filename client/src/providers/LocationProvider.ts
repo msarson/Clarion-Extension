@@ -70,48 +70,45 @@ export class LocationProvider {
         const matches = this.getRegexMatches(document, pattern);
         if (!matches) return null;
 
-        const locations: ClarionLocation[] = [];
         const customMatches: CustomRegExpMatch[] = matches;
         customMatches.sort((a, b) => a.lineIndex - b.lineIndex);
 
-        // Add a per-operation cache for getFullPath
+        // Per-operation cache for getFullPath — shared across all parallel resolutions
         const pathCache: Map<string, string | null> = new Map();
 
-        logger.info(`Found ${customMatches.length} matches for pattern in ${document.uri.fsPath}`);
+        // Resolve all unique filenames in parallel to avoid sequential server roundtrips.
+        // Sequential resolution of N files × 300-500ms each causes multi-second startup hangs.
+        const uniqueFileNames = [...new Set(customMatches.map(m => m[1]))];
+        await Promise.all(uniqueFileNames.map(fileName =>
+            this.getFullPath(fileName, document.uri.fsPath, pathCache)
+        ));
+        // pathCache is now populated for all unique filenames; the loop below reads from it synchronously.
 
+        const locations: ClarionLocation[] = [];
         for (const match of customMatches) {
             try {
-                // Extract the filename from the match
                 const matchedFileName = match[1];
-                logger.info(`Processing match: ${matchedFileName} in ${document.uri.fsPath}`);
-
-                // Get the full path using the server-side redirection, with cache
+                // getFullPath will return instantly from pathCache (pre-populated above)
                 const fileName = await this.getFullPath(matchedFileName, document.uri.fsPath, pathCache);
 
                 let resolvedFileName: string | null = null;
                 let sectionLineNumber = 0;
                 
                 if (!fileName) {
-                    logger.info(`Could not resolve path for: ${matchedFileName}`);
                     // Try relative path as fallback
                     const documentDir = path.dirname(document.uri.fsPath);
                     const relativePath = path.join(documentDir, matchedFileName);
                     if (fs.existsSync(relativePath)) {
                         resolvedFileName = relativePath;
-                        logger.info(`✅ Found file using relative path: ${relativePath}`);
-                        // Try to find section line number if file exists
                         const sectionName = match[2] || '';
                         sectionLineNumber = this.findSectionLineNumber(relativePath, sectionName);
                     } else {
-                        logger.info(`❌ File not found even with relative path: ${relativePath}`);
-                        continue; // Skip this match - don't create a link for non-existent files
+                        continue; // Skip — file not resolvable
                     }
                 } else if (!fs.existsSync(fileName)) {
-                    logger.info(`❌ File does not exist: ${fileName}`);
-                    continue; // Skip this match - don't create a link for non-existent files
+                    continue; // Skip — resolved path doesn't exist on disk
                 } else {
                     resolvedFileName = fileName;
-                    // Try to find section line number if file exists
                     const sectionName = match[2] || '';
                     sectionLineNumber = this.findSectionLineNumber(fileName, sectionName);
                 }
@@ -120,24 +117,20 @@ export class LocationProvider {
                 const valueStart = match.index + match[0].indexOf(valueToFind);
                 const valueEnd = valueStart + valueToFind.length;
 
-                const location: ClarionLocation = {
+                locations.push({
                     fullFileName: resolvedFileName,
                     sectionLineLocation: new Position(sectionLineNumber, 0),
                     linePosition: new Position(match.lineIndex, valueStart),
                     linePositionEnd: new Position(match.lineIndex, valueEnd),
                     statementType: '',
                     result: match,
-                    sectionName: match[2] || undefined, // Store the section name if present
-                };
-
-                locations.push(location);
-                logger.info(`Added location for ${resolvedFileName}`);
+                    sectionName: match[2] || undefined,
+                });
             } catch (error) {
                 logger.error(`Error processing match: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
 
-        logger.info(`Returning ${locations.length} locations for document ${document.uri.fsPath}`);
         return locations;
     }
 

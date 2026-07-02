@@ -20,7 +20,8 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
-import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -300,7 +301,7 @@ export class SymbolFinderService {
                 // findProcedureDeclaration (step 5) with the correct scope and type.
                 const isProcDecl = tokens.some(t =>
                     t.line === labelToken.line &&
-                    t.type === TokenType.Procedure &&
+                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     (t.subType === TokenType.MapProcedure ||
                      t.subType === TokenType.GlobalProcedure ||
                      t.subType === TokenType.MethodDeclaration)
@@ -338,7 +339,7 @@ export class SymbolFinderService {
                     if (found) {
                         const isProcDecl = tokens.some(t =>
                             t.line === found.line &&
-                            t.type === TokenType.Procedure &&
+                            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                             (t.subType === TokenType.MapProcedure ||
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
@@ -364,7 +365,7 @@ export class SymbolFinderService {
             if (scopeToken.subType === TokenType.MethodImplementation) {
                 logger.info(`Scope is MethodImplementation — searching GlobalProcedure scopes for "${searchText}"`);
                 const globalProcs = tokens.filter(t =>
-                    t.type === TokenType.Procedure &&
+                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of globalProcs) {
@@ -387,7 +388,7 @@ export class SymbolFinderService {
                         // Skip MAP/global procedure declarations — they are not local variables
                         const isProcDecl = tokens.some(t =>
                             t.line === found.line &&
-                            t.type === TokenType.Procedure &&
+                            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                             (t.subType === TokenType.MapProcedure ||
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
@@ -561,13 +562,28 @@ export class SymbolFinderService {
             try {
                 const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
                 const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
-                if (fs.existsSync(resolvedPath)) {
-                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                    const parentDoc = TextDocument.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, 'clarion', 1, parentContents);
-                    const parentTokens = this.tokenCache.getTokens(parentDoc);
-                    const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
-                    if (parentResult) return parentResult;
+                const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+
+                // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
+                // the parent PROGRAM may be open in the editor (unsaved edits) or seeded by
+                // an in-memory test fixture; consult the token cache first and read disk only
+                // on a miss (matches the FAR family's 671d7cd8 discipline).
+                let parentTokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                let parentDoc: TextDocument | null = null;
+                if (parentTokens) {
+                    const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                    if (cachedText !== null) {
+                        parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                    }
                 }
+                if (!parentTokens || !parentDoc) {
+                    if (!fs.existsSync(resolvedPath)) return null;
+                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
+                    parentTokens = this.tokenCache.getTokens(parentDoc);
+                }
+                const parentResult = this.findPrefixedFieldInTokens(prefixUpper, fieldName, parentTokens, parentDoc.uri);
+                if (parentResult) return parentResult;
             } catch (err) {
                 logger.error(`Error reading MEMBER parent file for prefixed field: ${err}`);
             }
@@ -808,23 +824,33 @@ export class SymbolFinderService {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
         const resolvedPath = path.resolve(currentFileDir, parentFile);
-        
+        const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+
         logger.info(`Searching parent file: ${resolvedPath}`);
-        
-        if (!fs.existsSync(resolvedPath)) {
-            logger.warn(`Parent file not found: ${resolvedPath}`);
-            return null;
+
+        // Cache-first lookup — parent may be open in editor (with unsaved
+        // edits) or seeded by an in-memory test fixture. Disk read happens
+        // only when the cache misses; matches the FAR family's `671d7cd8`
+        // discipline.
+        let parentTokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+        let parentDoc: TextDocument | null = null;
+        if (parentTokens) {
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+            if (cachedText !== null) {
+                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+            }
         }
-        
+
         try {
-            const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-            const parentDoc = TextDocument.create(
-                `file:///${resolvedPath.replace(/\\/g, '/')}`,
-                'clarion',
-                1,
-                parentContents
-            );
-            const parentTokens = this.tokenCache.getTokens(parentDoc);
+            if (!parentTokens || !parentDoc) {
+                if (!fs.existsSync(resolvedPath)) {
+                    logger.warn(`Parent file not found: ${resolvedPath}`);
+                    return null;
+                }
+                const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
+                parentTokens = this.tokenCache.getTokens(parentDoc);
+            }
             
             const firstCodeToken = parentTokens.find(t => 
                 t.type === TokenType.Keyword && 
@@ -1029,8 +1055,11 @@ export class SymbolFinderService {
      */
     findProcedureDeclaration(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
         const wordLower = word.toLowerCase();
+        // Accept both Procedure-typed and Function-typed tokens — modern Clarion treats
+        // PROCEDURE and FUNCTION as the same construct (both can return values); the
+        // token-type split is a tokenizer artifact, not a language distinction.
         const procToken = tokens.find(t =>
-            t.type === TokenType.Procedure &&
+            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
             (t.subType === TokenType.MapProcedure || t.subType === TokenType.GlobalProcedure) &&
             t.label?.toLowerCase() === wordLower
         );
@@ -1047,7 +1076,7 @@ export class SymbolFinderService {
         // Find the innermost containing procedure scope (MethodImplementation or GlobalProcedure)
         const containingScope = tokens
             .filter(t =>
-                t.type === TokenType.Procedure &&
+                (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                 (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation) &&
                 t.line < procToken.line &&
                 (t.finishesAt === undefined || t.finishesAt >= procToken.line)
@@ -1095,33 +1124,107 @@ export class SymbolFinderService {
         try {
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const solutionManager = SolutionManager.getInstance();
-            const projectPath = solutionManager?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
-
             const sdi = StructureDeclarationIndexer.getInstance();
-            await sdi.getOrBuildIndex(projectPath);
-            let definitions = sdi.find(word, projectPath);
-            if (definitions.length === 0) {
-                // Key mismatch guard: the runtime project path may differ from the pre-build path
-                // (e.g. different drive letter case, wrong project matched by basename).
-                // Fall back to searching ALL available indexes before giving up.
+            const project = solutionManager?.findProjectForFile(fromPath);
+
+            // #184 — fork on solution membership:
+            if (project) {
+                // Solution member → its project index (pre-built at solution-ready,
+                // O(1) cache hit). No INCLUDE-chain walk needed on the hot path.
+                await sdi.getOrBuildIndex(project.path);
+                let definitions = sdi.find(word, project.path);
+                if (definitions.length === 0) definitions = sdi.find(word);
+                return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
+            }
+
+            // Not a solution member (a loose / red-path file opened directly, e.g.
+            // a libsrc .clw). Resolve via the file's OWN INCLUDE chain first — the
+            // Clarion compilation model — which is bounded to the actual include
+            // set and never rescans all of libsrc (the rescan was blowing the
+            // 10s hover/F12 timeout).
+            const viaInclude = await this.findTypeViaIncludeChain(word, fromPath, document.getText(), new Set<string>());
+            if (viaInclude) return this.toIndexedTypeInfo(viaInclude);
+
+            // Then reuse any already-built index (the solution index already scans
+            // libsrcPaths) — still NO dir-keyed rebuild. Only when there are no
+            // indexes at all (genuine no-solution mode) do we build one keyed on
+            // the file's directory, as a last resort.
+            let definitions: StructureDeclarationInfo[];
+            if (sdi.hasAnyIndex()) {
+                definitions = sdi.find(word);
+            } else {
+                await sdi.getOrBuildIndex(path.dirname(fromPath));
                 definitions = sdi.find(word);
             }
-            if (definitions.length === 0) return null;
-
-            const def = definitions[0];
-            return {
-                name: def.name,
-                filePath: def.filePath,
-                line: def.line,
-                structureType: def.structureType,
-                parentName: def.parentName,
-                isType: def.isType,
-                lineContent: def.lineContent
-            };
+            return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
         } catch (e) {
             logger.error(`findIndexedTypeDeclaration error for "${word}": ${e}`);
             return null;
         }
+    }
+
+    private toIndexedTypeInfo(def: StructureDeclarationInfo): IndexedTypeInfo {
+        return {
+            name: def.name,
+            filePath: def.filePath,
+            line: def.line,
+            structureType: def.structureType,
+            parentName: def.parentName,
+            isType: def.isType,
+            lineContent: def.lineContent
+        };
+    }
+
+    /**
+     * #184 — resolve a TYPE/structure declaration by walking the document's
+     * INCLUDE chain, scanning only the files actually reachable from it. Fast and
+     * solution-independent (no libsrc-wide scan). Returns the first matching
+     * structure declaration, or null. `visited` guards against include cycles.
+     */
+    private async findTypeViaIncludeChain(
+        word: string,
+        fromPath: string,
+        source: string,
+        visited: Set<string>
+    ): Promise<StructureDeclarationInfo | null> {
+        const key = fromPath.toLowerCase();
+        if (visited.has(key)) return null;
+        visited.add(key);
+
+        // 1. This file's own declarations.
+        const wordLower = word.toLowerCase();
+        const decls = scanSourceForDeclarations(source, fromPath);
+        const match = decls.find(d => d.name.toLowerCase() === wordLower);
+        if (match) return match;
+
+        // 2. Recurse into INCLUDE'd files (redirection-resolved, else same-dir).
+        const sm = SolutionManager.getInstance();
+        const fromDir = path.dirname(fromPath);
+        const includeRe = /^\s*INCLUDE\s*\(\s*'([^']+)'/gim;
+        let m: RegExpExecArray | null;
+        let scanned = 0; // #187 — yield between INCLUDE files so the walk doesn't block hover/F12
+        while ((m = includeRe.exec(source)) !== null) {
+            await cooperativeCheckpoint(scanned++);
+            const includeFile = m[1];
+            let resolved: string | null = null;
+            if (sm?.solution) {
+                for (const project of sm.solution.projects) {
+                    const r = project.getRedirectionParser().findFile(includeFile);
+                    if (r?.path && fs.existsSync(r.path)) { resolved = r.path; break; }
+                }
+            }
+            if (!resolved) {
+                const candidate = path.join(fromDir, includeFile);
+                if (fs.existsSync(candidate)) resolved = candidate;
+            }
+            if (!resolved || visited.has(resolved.toLowerCase())) continue;
+
+            let incSource: string;
+            try { incSource = fs.readFileSync(resolved, 'utf-8'); } catch { continue; }
+            const nested = await this.findTypeViaIncludeChain(word, resolved, incSource, visited);
+            if (nested) return nested;
+        }
+        return null;
     }
 
     /**

@@ -1,4 +1,5 @@
 import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
+import * as path from 'path';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
@@ -12,6 +13,10 @@ logger.setLevel("error");
  */
 let configStatusBarItem: StatusBarItem;
 let buildProjectStatusBarItem: StatusBarItem;
+// #132 / dd87633f B2 — version status bar item at priority 101 (one slot LEFT
+// of the build-config item at priority 100, since higher priority sits further
+// left on Left-aligned status bars).
+let versionStatusBarItem: StatusBarItem;
 
 /**
  * Updates the configuration status bar with the current Clarion configuration
@@ -36,6 +41,54 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
     if (currentConfig !== configuration) {
         logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);
         await SettingsStorageManager.updateActiveConfiguration(configuration);
+    }
+}
+
+/**
+ * #132 / dd87633f B2 — render the active Clarion version on the status bar
+ * (priority 101, one slot left of the build-config item at 100).
+ *
+ * #133 / a09de932 — label reads as compile-target intent ("Compile: …") with
+ * the IDE folder name (parent dir of the active ClarionProperties.xml) so the
+ * "running Clarion 11, compiling as Clarion 6" case is unambiguous. Tooltip
+ * carries the full properties-file path for trust/debugging.
+ *
+ * #141 Q9 directive (reverses dd87633f B2's solution-free posture) — the
+ * version status bar is now solution-gated. When no solution is loaded the
+ * status bar item hides; the no-solution-mode surface for version state is
+ * the Actions pane detail area per the other Q9 directive (separate B2 item).
+ * Caller passes `solutionLoaded: false` to force-hide regardless of args.
+ *
+ * Pass undefined/empty for either arg, OR solutionLoaded=false, to HIDE the
+ * item; pass valid version + propertiesFile + solutionLoaded=true to show.
+ */
+export function updateVersionStatusBar(
+    version: string | undefined,
+    propertiesFile: string | undefined,
+    solutionLoaded: boolean = true
+): void {
+    if (!versionStatusBarItem) {
+        versionStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 101);
+        versionStatusBarItem.command = 'clarion.setActiveVersion';
+    }
+    if (!version || !propertiesFile || !solutionLoaded) {
+        versionStatusBarItem.hide();
+        return;
+    }
+    const ideDir = path.basename(path.dirname(propertiesFile));
+    versionStatusBarItem.text = `$(symbol-package) Compile: ${version} (from ${ideDir})`;
+    versionStatusBarItem.tooltip = `Compile target: ${version}\nFrom: ${propertiesFile}\nClick to change`;
+    versionStatusBarItem.show();
+}
+
+/**
+ * #141 Q9 — explicit hide entry for solution-close lifecycle (mirror of
+ * `hideConfigurationStatusBar` + `hideBuildProjectStatusBar`). Wired into
+ * `SolutionOpener.closeClarionSolution` post-#146-merge rebase.
+ */
+export function hideVersionStatusBar(): void {
+    if (versionStatusBarItem) {
+        versionStatusBarItem.hide();
     }
 }
 
@@ -123,5 +176,8 @@ export function disposeStatusBars(): void {
     }
     if (buildProjectStatusBarItem) {
         buildProjectStatusBarItem.dispose();
+    }
+    if (versionStatusBarItem) {
+        versionStatusBarItem.dispose();
     }
 }

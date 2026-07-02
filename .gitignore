@@ -15,6 +15,11 @@ StringTheory.clw
 dev/
 ai/
 
+# Claude Code / MultiTerminal harness — kept per-machine, never tracked
+.claude/
+.mcp.json
+.mcp.json.bak
+
 # PowerShell scripts
 *.ps1
 
@@ -26,3 +31,6 @@ antlr-grammar/**/*.tokens
 
 # ANTLR generated files (server integration)
 server/src/generated/
+
+# Per-session diagnostic log sink (truncated each session by LoggerManager)
+.clarion-debug/

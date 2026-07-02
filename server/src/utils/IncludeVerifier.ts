@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -39,10 +40,21 @@ interface PathCache {
  * in the current file or its MEMBER parent
  */
 export class IncludeVerifier {
-    private tokenCache = TokenCache.getInstance();
+    private static instance: IncludeVerifier | undefined;
     private includeCache = new Map<string, IncludeCache>(); // URI -> IncludeCache
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     private static readonly CACHE_DURATION = 60000; // 60 seconds
+
+    private constructor() {}
+
+    public static getInstance(): IncludeVerifier {
+        if (!IncludeVerifier.instance) {
+            IncludeVerifier.instance = new IncludeVerifier();
+        }
+        return IncludeVerifier.instance;
+    }
+
+    private tokenCache = TokenCache.getInstance();
 
     /**
      * Verifies if a class file is included and accessible in the given document
@@ -52,57 +64,115 @@ export class IncludeVerifier {
      */
     async isClassIncluded(classFileName: string, document: TextDocument): Promise<boolean> {
         try {
-            logger.error(`⏱️ [IV] isClassIncluded start: "${classFileName}" in ${document.uri.split('/').pop()}`);
+            logger.debug(`⏱️ [IV] isClassIncluded start: "${classFileName}" in ${document.uri.split('/').pop()}`);
 
             // Get includes from current file
             const t0 = Date.now();
             const currentIncludes = await this.getIncludesForFile(document);
-            logger.error(`⏱️ [IV] getIncludesForFile (current) took ${Date.now() - t0}ms → ${currentIncludes.length} includes`);
+            logger.debug(`⏱️ [IV] getIncludesForFile (current) took ${Date.now() - t0}ms → ${currentIncludes.length} includes`);
             
             // Check if class file is in current file's direct includes
             if (this.hasInclude(classFileName, currentIncludes)) {
-                logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in current file`);
+                logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in current file`);
                 return true;
             }
 
             // Check one level of transitive includes (e.g. MSSQL2DriverClass.Inc → DriverClass.Inc)
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             if (await this.hasTransitiveInclude(classFileName, currentIncludes, fromPath)) {
-                logger.error(`⏱️ [IV] ✅ Found "${classFileName}" via transitive include`);
+                logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via transitive include`);
                 return true;
             }
 
             // Not found - check MEMBER parent
             const t1 = Date.now();
-            logger.error(`⏱️ [IV] "${classFileName}" not in current file — checking MEMBER parent...`);
+            logger.debug(`⏱️ [IV] "${classFileName}" not in current file — checking MEMBER parent...`);
             const memberParent = await this.getMemberParentDocument(document);
-            logger.error(`⏱️ [IV] getMemberParentDocument took ${Date.now() - t1}ms → ${memberParent ? memberParent.uri.split('/').pop() : 'null'}`);
+            logger.debug(`⏱️ [IV] getMemberParentDocument took ${Date.now() - t1}ms → ${memberParent ? memberParent.uri.split('/').pop() : 'null'}`);
             
             if (memberParent) {
                 const t2 = Date.now();
                 const parentIncludes = await this.getIncludesForFile(memberParent);
-                logger.error(`⏱️ [IV] getIncludesForFile (parent) took ${Date.now() - t2}ms → ${parentIncludes.length} includes`);
+                logger.debug(`⏱️ [IV] getIncludesForFile (parent) took ${Date.now() - t2}ms → ${parentIncludes.length} includes`);
                 
                 if (this.hasInclude(classFileName, parentIncludes)) {
-                    logger.error(`⏱️ [IV] ✅ Found "${classFileName}" in MEMBER parent`);
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in MEMBER parent`);
                     return true;
                 }
 
                 // Check transitive includes of MEMBER parent
                 const parentPath = decodeURIComponent(memberParent.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
                 if (await this.hasTransitiveInclude(classFileName, parentIncludes, parentPath)) {
-                    logger.error(`⏱️ [IV] ✅ Found "${classFileName}" via MEMBER parent transitive include`);
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via MEMBER parent transitive include`);
                     return true;
                 }
             }
 
-            logger.error(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
+            // #191 — A definition `.inc` has no MEMBER parent, but it is never
+            // compiled alone: it is included into the implementation module(s)
+            // that implement its classes. Consult the companion `.clw` named by
+            // each CLASS's MODULE() attribute (with same-basename fallback) and
+            // check its include chain — the include legitimately lives there in
+            // the standard Clarion split-class layout.
+            const companionPaths = await this.getCompanionImplementationPaths(document, fromPath);
+            for (const clwPath of companionPaths) {
+                const clwIncludes = await this.parseIncludesFromFilePath(clwPath);
+                if (this.hasInclude(classFileName, clwIncludes)) {
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in companion module ${path.basename(clwPath)}`);
+                    return true;
+                }
+                if (await this.hasTransitiveInclude(classFileName, clwIncludes, clwPath)) {
+                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via companion module ${path.basename(clwPath)} transitive include`);
+                    return true;
+                }
+            }
+
+            logger.debug(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
             return false;
 
         } catch (error) {
             logger.error(`Error verifying include: ${error instanceof Error ? error.message : String(error)}`);
             return false; // Fail safe - don't show hover if we can't verify
         }
+    }
+
+    /**
+     * #191 — Resolves the implementation module(s) for a definition `.inc`.
+     *
+     * A `.inc` is never compiled standalone; it is included into a `.clw` MODULE
+     * that implements its classes, and the dependency includes a class member
+     * needs legitimately live in that `.clw`. Each `CLASS,...,MODULE('impl.clw')`
+     * declaration names that module; a same-basename `.clw` is tried as a
+     * fallback. The returned modules' include chains form part of the `.inc`'s
+     * effective include scope.
+     *
+     * Only applies to `.inc` documents (a `.clw` already has its own includes
+     * checked directly). Never returns the document itself.
+     */
+    private async getCompanionImplementationPaths(document: TextDocument, fromPath: string): Promise<string[]> {
+        if (!/\.inc$/i.test(fromPath)) return [];
+
+        const baseDir = path.dirname(fromPath);
+        const fromLower = fromPath.toLowerCase();
+        const paths = new Set<string>();
+
+        // 1. MODULE('...clw') attributes on this file's CLASS declarations.
+        const tokens = this.tokenCache.getTokens(document);
+        for (const t of tokens) {
+            if (t.referencedFile &&
+                t.value?.toUpperCase() === 'MODULE' &&
+                /\.clw$/i.test(t.referencedFile)) {
+                const resolved = await this.resolveIncludePath(t.referencedFile, baseDir);
+                if (resolved && resolved.toLowerCase() !== fromLower) paths.add(resolved);
+            }
+        }
+
+        // 2. Same-basename .clw fallback (e.g. StringTheory.inc -> StringTheory.clw).
+        const sameBaseName = path.basename(fromPath).replace(/\.inc$/i, '.clw');
+        const resolvedSame = await this.resolveIncludePath(sameBaseName, baseDir);
+        if (resolvedSame && resolvedSame.toLowerCase() !== fromLower) paths.add(resolvedSame);
+
+        return [...paths];
     }
 
     /**
@@ -356,11 +426,11 @@ export class IncludeVerifier {
             );
 
             if (!memberToken || !memberToken.referencedFile) {
-                logger.error(`⏱️ [IV] getMemberParentDocument: no MEMBER token in ${document.uri.split('/').pop()}`);
+                logger.debug(`⏱️ [IV] getMemberParentDocument: no MEMBER token in ${document.uri.split('/').pop()}`);
                 return null;
             }
 
-            logger.error(`⏱️ [IV] getMemberParentDocument: resolving "${memberToken.referencedFile}"`);
+            logger.debug(`⏱️ [IV] getMemberParentDocument: resolving "${memberToken.referencedFile}"`);
 
             // Resolve path: try redirection parser first, then local directory fallback
             const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -383,16 +453,16 @@ export class IncludeVerifier {
             }
 
             if (!resolvedPath) {
-                logger.error(`⏱️ [IV] getMemberParentDocument: MEMBER file not found: ${memberToken.referencedFile}`);
+                logger.debug(`⏱️ [IV] getMemberParentDocument: MEMBER file not found: ${memberToken.referencedFile}`);
                 return null;
             }
 
             // Read and create document
             const t0 = Date.now();
             const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
-            logger.error(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
+            logger.debug(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
             const parentDoc = TextDocument.create(
-                `file:///${resolvedPath.replace(/\\/g, '/')}`,
+                pathToCanonicalUri(resolvedPath),
                 'clarion',
                 1,
                 parentContents
@@ -401,7 +471,7 @@ export class IncludeVerifier {
             // Check for empty member (has MEMBER or CODE keyword)
             const t1 = Date.now();
             const parentTokens = this.tokenCache.getTokens(parentDoc);
-            logger.error(`⏱️ [IV] tokenize parent "${path.basename(resolvedPath)}" took ${Date.now() - t1}ms (${parentTokens.length} tokens)`);
+            logger.debug(`⏱️ [IV] tokenize parent "${path.basename(resolvedPath)}" took ${Date.now() - t1}ms (${parentTokens.length} tokens)`);
             const hasEmptyMemberMarker = parentTokens.some(t =>
                 t.start === 0 && 
                 t.type === TokenType.Keyword &&
@@ -409,7 +479,7 @@ export class IncludeVerifier {
             );
 
             if (hasEmptyMemberMarker) {
-                logger.error(`⏱️ [IV] MEMBER parent has empty member marker - skipping include scan`);
+                logger.debug(`⏱️ [IV] MEMBER parent has empty member marker - skipping include scan`);
                 return null;
             }
 

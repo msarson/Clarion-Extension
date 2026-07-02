@@ -15,7 +15,9 @@ import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
@@ -23,7 +25,9 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -162,12 +166,14 @@ export class ImplementationProvider {
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
                     
+                    const localScope = getLocalMapScope(document.uri);
                     // Use CrossFileResolver to find MAP declaration in parent file
                     const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                         word,
                         memberToken.referencedFile,
                         document,
-                        line
+                        line,
+                        localScope?.containingProcedure
                     );
                     
                     if (memberResult) {
@@ -212,8 +218,9 @@ export class ImplementationProvider {
 
         // 3. Check if this is a MAP procedure declaration (inside MAP block)
         // OR a MODULE procedure declaration (inside MODULE block in INCLUDE file)
-        const isInMap = documentStructure.isInMapBlock(position.line);
-        const isInModule = !isInMap && this.isInModuleBlock(position.line, tokens);
+        const containerCtx = documentStructure.getStructureContextAt(position.line);
+        const isInMap = containerCtx.inMap;
+        const isInModule = !isInMap && containerCtx.inModule;
         
         if (isInMap || isInModule) {
             // Use ClarionPatterns.MAP_PROCEDURE_DECLARATION which handles both PROCEDURE and FUNCTION
@@ -314,20 +321,52 @@ export class ImplementationProvider {
     }
 
     /**
-     * Check if a line is inside a MODULE block
-     */
-    private isInModuleBlock(line: number, tokens: Token[]): boolean {
-        const moduleBlocks = TokenHelper.findModuleStructures(tokens).filter(t =>
-            t.line <= line &&
-            t.finishesAt !== undefined &&
-            t.finishesAt >= line
-        );
-        return moduleBlocks.length > 0;
-    }
-
-    /**
      * Find method implementation (class methods or method calls)
      */
+    /**
+     * #125 — when a typed-variable dot-access call→impl lookup targets an
+     * overloaded method, classify the call's args and pick the matching
+     * overload before falling through to paramCount-only `resolveDotAccess`.
+     * Returns the picked decl as a ClassMemberInfo-shape for downstream
+     * `findImplementationCrossFile` lookup; returns null to signal
+     * "fall through to existing paramCount-only path" when:
+     *   - the variable type can't be resolved to a class,
+     *   - the classifier can't find the call's `(...)`,
+     *   - fewer than 2 candidates locally,
+     *   - `matchedAll=true` (un-disambiguatable).
+     */
+    private async tryArgClassifyResolve(
+        document: TextDocument,
+        callInfo: { objectName: string; methodName: string; paramCount: number },
+        callLine: number
+    ): Promise<{ type: string; className: string; line: number; file: string } | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document);
+        if (!varTypeInfo?.isClass) return null;
+        const className = varTypeInfo.typeName;
+
+        const lowerMethod = callInfo.methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, callInfo.methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        const picked = candidates[matchedIndex];
+        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file };
+    }
+
     private async findMethodImplementation(
         document: TextDocument,
         position: Position,
@@ -354,15 +393,23 @@ export class ImplementationProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
+                            // #182 — arg-classification overlay: re-point at the matching
+                            // overload's declaration so both the returned decl and the impl
+                            // lookup target the arg-matched overload, not the paramCount one.
+                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
+                            const declInfo = picked
+                                ? { ...chainedInfo, line: picked.line, file: picked.file }
+                                : chainedInfo;
                             // For methods, try to find the implementation; for properties just return declaration
-                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
-                                    chainedInfo.className, memberName, document, paramCount, null, line,
-                                    chainedInfo.file
+                                    declInfo.className, memberName, document, paramCount, null,
+                                    picked?.signature ?? line, declInfo.file
                                 );
                                 if (implLoc) return implLoc;
                             }
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
                         }
                     }
                 }
@@ -380,14 +427,20 @@ export class ImplementationProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            if (chainedInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            // #182 — arg-classification overlay (var-chain variant).
+                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
+                            const declInfo = picked
+                                ? { ...chainedInfo, line: picked.line, file: picked.file }
+                                : chainedInfo;
+                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
-                                    chainedInfo.className, memberName, document, paramCount, null, line,
-                                    chainedInfo.file
+                                    declInfo.className, memberName, document, paramCount, null,
+                                    picked?.signature ?? line, declInfo.file
                                 );
                                 if (implLoc) return implLoc;
                             }
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
                         }
                     }
                 }
@@ -408,13 +461,18 @@ export class ImplementationProvider {
                     const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
                     if (parentInfo) {
                         logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
+                        // #182 — arg-classification overlay: pick the matching overload by
+                        // argument type and target its implementation via the matched decl
+                        // signature, instead of the paramCount-only call line.
+                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             parentInfo.parentClassName,
                             callInfo.methodName,
                             document,
                             callInfo.paramCount,
                             parentInfo.moduleFile ?? null,
-                            line
+                            picked?.signature ?? line
                         );
                         if (impl) return impl;
                     }
@@ -428,13 +486,16 @@ export class ImplementationProvider {
                         callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
                     );
                     if (memberInfo && memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                        // #182 — arg-classification overlay (symmetric with PARENT/Definition).
+                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             memberInfo.className,
                             callInfo.methodName,
                             document,
                             callInfo.paramCount,
                             null,
-                            line,
+                            picked?.signature ?? line,
                             memberInfo.file
                         );
                         if (impl) return impl;
@@ -444,6 +505,20 @@ export class ImplementationProvider {
 
                 // Typed variable: st.GetValue() where st is declared as "st StringTheory"
                 {
+                    // #125 — arg-classify overlay for typed-var dot-access call→impl resolution.
+                    const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
+                    if (argClassifyInfo) {
+                        if (argClassifyInfo.type.toUpperCase().includes('PROCEDURE')) {
+                            const impl = await this.memberResolver.findImplementationCrossFile(
+                                argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document
+                            );
+                            if (impl) {
+                                logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
+                                return impl;
+                            }
+                        }
+                        return Location.create(argClassifyInfo.file, Range.create(argClassifyInfo.line, 0, argClassifyInfo.line, 0));
+                    }
                     const memberInfo = await this.memberLocator.resolveDotAccess(
                         callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
                     );
@@ -739,7 +814,7 @@ export class ImplementationProvider {
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile, currentPath);
+                    const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLocation = this.searchFileForMethodImplementation(
@@ -755,14 +830,15 @@ export class ImplementationProvider {
                     }
                 }
             } else {
-                // No solution open - try relative path
-                const currentDir = path.dirname(currentPath);
-                const relativeModulePath = path.join(currentDir, moduleFile);
-                
-                if (fs.existsSync(relativeModulePath)) {
-                    logger.info(`Found module file at: ${relativeModulePath} (no solution open)`);
+                // No solution open — walk localDir + libsrcPaths via no-solution resolver
+                // (#113 site D). Previously localDir-only; now also reaches libsrcPaths
+                // for moduleFile hints pointing at library-hosted classes.
+                // Symmetric with MethodHoverResolver.ts (site F).
+                const resolved = resolveFileInNoSolutionMode(moduleFile, currentDocument.uri);
+                if (resolved) {
+                    logger.info(`Found module file at: ${resolved.path} (no solution open, source: ${resolved.source})`);
                     const implLocation = this.searchFileForMethodImplementation(
-                        relativeModulePath,
+                        resolved.path,
                         className,
                         methodName,
                         paramCount,
@@ -802,17 +878,35 @@ export class ImplementationProvider {
         // Fallback: Search all solution files
         const solutionManager = SolutionManager.getInstance();
         if (!solutionManager || !solutionManager.solution) {
+            // No-solution hail-mary (#113 site E): try `${className}.clw` via the
+            // no-solution resolver. Covers library classes living in libsrcPaths
+            // (e.g. StringTheory) when no moduleFile hint was provided.
+            // Symmetric with MethodHoverResolver.ts (site G).
+            const resolved = resolveFileInNoSolutionMode(`${className}.clw`, currentDocument.uri);
+            if (resolved) {
+                logger.info(`Trying ${className}.clw via no-solution resolver: ${resolved.path} (source: ${resolved.source})`);
+                const implLocation = this.searchFileForMethodImplementation(
+                    resolved.path, className, methodName, paramCount, declarationSignature
+                );
+                if (implLocation) {
+                    return implLocation;
+                }
+            }
             logger.info(`No solution manager available for cross-file search`);
             return null;
         }
         
         logger.info(`Searching ${solutionManager.solution.projects.length} projects`);
         
-        // Get all source files from all projects
+        // Get all source files from all projects. #187 — yield the event loop
+        // periodically so this solution-wide .clw scan doesn't block interactive
+        // requests (reads + scans each file until a match is found).
+        let scanned = 0;
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
+                await cooperativeCheckpoint(scanned++);
                 const fullPath = path.join(project.path, sourceFile.relativePath);
-                
+
                 // Skip current file (already searched)
                 const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
                 if (fullPath.toLowerCase() === currentPath.toLowerCase()) {
@@ -861,7 +955,7 @@ export class ImplementationProvider {
             if (sm?.solution) {
                 for (const project of sm.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(implFileName, currentPath);
+                    const resolved = redirectionParser.findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         logger.info(`Redirection resolved ${implFileName} → ${resolved.path}`);
                         const implLocation = this.searchFileForMethodImplementation(
@@ -872,7 +966,14 @@ export class ImplementationProvider {
                 }
             }
 
-            // No solution / redirection failed — fall back to same directory as declaration
+            // ─── Sibling-dir fallback (cluster site 2 of 4, task 6253f9d5) ─────
+            // No solution / redirection failed — fall back to same directory as
+            // declaration. Load-bearing for no-solution-open mode + cross-directory
+            // siblings outside the project's .red search paths. Move in unison with
+            // the cluster-canonical site at `ClassMemberResolver.ts:~1041` and the
+            // two companions in `MapDeclarationDiagnostics.ts:145` +
+            // `MapDeclarationCodeActionProvider.ts:resolveClwPath`. Phase A audit:
+            // `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
             const declDir = path.dirname(declFilePath);
             const directPath = path.join(declDir, implFileName);
             if (fs.existsSync(directPath)) {
@@ -900,22 +1001,16 @@ export class ImplementationProvider {
     ): Location | null {
         const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
 
-        // Fast path: use cached tokens to find MethodImplementation candidates
+        // Fast path: use cached tokens + DocumentStructure index to find MethodImplementation candidates.
+        // Two-part label only (ClassName.MethodName) to avoid false positives with 3-part interface
+        // implementations (ClassName.InterfaceName.MethodName).
         const cachedTokens = this.tokenCache.getTokensByUri(fileUri);
         if (cachedTokens && cachedTokens.length > 0) {
-            const matchesLabel = (lbl: string): boolean => {
-                const parts = lbl.split('.');
-                // Require exactly 2 parts (ClassName.MethodName) to avoid false positives
-                // with 3-part interface implementations (ClassName.InterfaceName.MethodName)
-                return parts.length === 2 &&
-                    parts[0].toUpperCase() === className.toUpperCase() &&
-                    parts[1].toUpperCase() === methodName.toUpperCase();
-            };
-            const tokenCandidates = cachedTokens.filter(t =>
-                t.type === TokenType.Procedure &&
-                t.subType === TokenType.MethodImplementation &&
-                t.label !== undefined &&
-                matchesLabel(t.label)
+            const structure = this.tokenCache.getStructureByUri(fileUri);
+            const qualifiedName = `${className}.${methodName}`;
+            const indexedCandidates = structure?.findMethodImplementations(qualifiedName) ?? [];
+            const tokenCandidates = indexedCandidates.filter(t =>
+                t.label !== undefined && t.label.split('.').length === 2
             );
 
             if (tokenCandidates.length === 1) {

@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
@@ -21,9 +22,10 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 /**
  * Provides goto definition functionality for Clarion files
@@ -65,7 +67,27 @@ export class DefinitionProvider {
                 return null;
             }
 
-            // Don't navigate on words inside string literals
+            // #171 — INCLUDE-aware exception to the string-position guard.
+            // F12 on the filename inside INCLUDE / MODULE / MEMBER / LINK
+            // (`'MyClass.inc'` lives in a single-quoted string) should route
+            // through `FileDefinitionResolver`, not bail like other string
+            // positions. We extract the filename directly from the matched
+            // String token's `value` (stripping the surrounding quote chars)
+            // because `getWordRangeAtPosition` was designed for identifier-
+            // shaped tokens and doesn't reliably recover filename-with-ext from
+            // inside a string. The detector scopes precisely to the FIRST
+            // string-arg after a file-ref token, so two-arg forms like
+            // `INCLUDE('foo.inc'),SECTION('bar')` still bail correctly at the
+            // SECTION arg.
+            const fileRefStr = TokenHelper.getFileRefArgStringToken(tokens, position.line, position.character);
+            if (fileRefStr) {
+                const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
+                return await this.fileResolver.findFileDefinition(filename, document.uri);
+            }
+
+            // Don't navigate on words inside string literals (the file-ref
+            // exception above is the only case where a cursor inside a string
+            // routes anywhere useful).
             if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
                 return null;
             }
@@ -95,7 +117,7 @@ export class DefinitionProvider {
                 let typeArgMatch: RegExpExecArray | null;
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
-                        logger.error(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
+                        logger.test(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
                         return this.findClassTypeDefinition(word, document);
                     }
                 }
@@ -126,7 +148,21 @@ export class DefinitionProvider {
                     if (hasParentheses && (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith('self'))) {
                         // This is a method call - find the declaration
                         logger.info(`F12 on method call: ${beforeDot}.${methodName}()`);
-                        
+
+                        // #131 — arg-classification overlay for SELF.Method(args), symmetric
+                        // with the typed-var branch below. SELF resolves to the enclosing
+                        // class; classify the call args and pick the matching overload before
+                        // the paramCount-only fallback (which can't disambiguate same-arity
+                        // overloads that differ only by argument type).
+                        const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
+                        if (selfClass) {
+                            const argResolved = this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
+                            if (argResolved) {
+                                logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
+                                return argResolved;
+                            }
+                        }
+
                         // Count parameters for overload resolution
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         logger.info(`Method call has ${paramCount} parameters`);
@@ -145,6 +181,20 @@ export class DefinitionProvider {
                     if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
                         // PARENT.Method() — look up the method starting from the parent class
                         logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
+
+                        // #131 — arg-classification overlay for PARENT.Method(args). Resolve
+                        // the parent class name, then pick the matching overload by argument
+                        // shape before the paramCount-only fallback (which otherwise picks the
+                        // first-declared overload regardless of argument type).
+                        const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+                        if (parentInfo?.parentClassName) {
+                            const argResolved = this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
+                            if (argResolved) {
+                                logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
+                                return argResolved;
+                            }
+                        }
+
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
                         if (memberInfo) {
@@ -155,6 +205,23 @@ export class DefinitionProvider {
 
                     // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
                     if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                        // #131 — arg-classification overlay for chained calls like
+                        // SELF.inner.SetValue(args). Resolve the chain to the class that
+                        // owns the final member, then pick the matching overload by argument
+                        // shape before the paramCount-only step-3 lookup (which can't
+                        // disambiguate same-arity overloads). Symmetric with the SELF /
+                        // PARENT / typed-var branches.
+                        if (hasParentheses) {
+                            const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                            if (finalClass) {
+                                const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                if (argResolved) {
+                                    logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
+                                    return argResolved;
+                                }
+                            }
+                        }
+
                         const paramCount = hasParentheses
                             ? this.memberResolver.countParametersInCall(line, methodName)
                             : undefined;
@@ -182,6 +249,22 @@ export class DefinitionProvider {
                     if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
                         // Multi-segment variable chain: variable.property.method
                         if (beforeDot.includes('.')) {
+                            // #131 — arg-classification overlay for typed-var chained calls
+                            // like outer.inner.SetValue(args). Same gap and same fix as the
+                            // SELF/PARENT chained branch above: resolve the chain's final
+                            // class, then pick the matching overload by argument shape before
+                            // the paramCount-only fallback.
+                            if (hasParentheses) {
+                                const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                                if (finalClass) {
+                                    const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                    if (argResolved) {
+                                        logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
+                                        return argResolved;
+                                    }
+                                }
+                            }
+
                             const paramCount = hasParentheses
                                 ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                 : undefined;
@@ -199,6 +282,19 @@ export class DefinitionProvider {
                             const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
                             if (classType) {
                                 logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
+                                // #125 — arg-classification overlay: when the typed-var call has
+                                // overloaded candidates in the current file, classify the args and
+                                // pick the matching overload. Falls through to paramCount-only on
+                                // empty candidates or matchedAll fallback (preserves UX for cross-
+                                // file classes / un-disambiguatable calls).
+                                if (hasParentheses) {
+                                    const argClassifyResult = this.tryArgClassifyResolve(
+                                        tokens, document, classType, methodName, position.line);
+                                    if (argClassifyResult) {
+                                        logger.info(`✅ Arg-classify resolved typed-var "${methodName}" in "${classType}" to line ${argClassifyResult.range.start.line}`);
+                                        return argClassifyResult;
+                                    }
+                                }
                                 const paramCount = hasParentheses
                                     ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
@@ -304,11 +400,13 @@ export class DefinitionProvider {
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
                     
+                    const localScope = getLocalMapScope(document.uri);
                     const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                         word,
                         memberToken.referencedFile,
                         document,
-                        line
+                        line,
+                        localScope?.containingProcedure
                     );
                     if (memberResult) {
                         logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
@@ -418,12 +516,14 @@ export class DefinitionProvider {
                     if (memberToken?.referencedFile) {
                         logger.info(`File has MEMBER('${memberToken.referencedFile}'), searching parent file for MAP declaration`);
                         
+                        const localScope = getLocalMapScope(document.uri);
                         // Use CrossFileResolver to find MAP declaration
                         const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                             tokenAtPosition.label,
                             memberToken.referencedFile,
                             document,
-                            line
+                            line,
+                            localScope?.containingProcedure
                         );
                         if (memberResult) {
                             return memberResult.location;
@@ -456,7 +556,7 @@ export class DefinitionProvider {
                 // A local class method can access the parameters of the procedure that declares the class.
                 if (containingProc.subType === TokenType.MethodImplementation) {
                     const outerProcs = tokens.filter(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure
                     );
                     for (const gp of outerProcs) {
@@ -1166,7 +1266,7 @@ export class DefinitionProvider {
                 // data sections — local class method implementations share their parent procedure's locals.
                 if (currentScope.subType === TokenType.MethodImplementation) {
                     const globalProcs = tokens.filter(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure
                     );
                     for (const gp of globalProcs) {
@@ -1507,7 +1607,7 @@ export class DefinitionProvider {
                     // PREFIX-CHECK: Get the symbol to check if it's a structure field with prefix requirements
                     const symbolTokens = this.tokenCache.getTokens(document);
                     if (!symbolTokens || symbolTokens.length === 0) {
-                        logger.error(`PREFIX-CHECK: No tokens found for document ${document.uri}`);
+                        logger.test(`PREFIX-CHECK: No tokens found for document ${document.uri}`);
                         // Don't return early - continue to check if this is a structure field
                         // If we can't get symbols, we can't validate, so skip this match
                         continue;
@@ -1647,191 +1747,6 @@ export class DefinitionProvider {
         return match ? match[1] : null;
     }
 
-    
-    /**
-     * Recursively searches for a definition in INCLUDE files and falls back to MEMBER files
-     * @param word The word to find
-     * @param fromPath The file path to start searching from
-     * @param visited Optional set of already visited files to prevent cycles
-     * @returns A Location if found, null otherwise
-     */
-    private async findDefinitionInIncludes(word: string, fromPath: string, visited?: Set<string>): Promise<Location | null> {
-        fromPath = decodeURIComponent(fromPath);
-        // Initialize visited set if not provided
-        if (!visited) {
-            visited = new Set<string>();
-        }
-
-        // Prevent revisiting the same file
-        if (visited.has(fromPath)) {
-            logger.info(`Already visited ${fromPath}, skipping to prevent cycles`);
-            return null;
-        }
-
-        // Mark this file as visited
-        visited.add(fromPath);
-        logger.info(`Searching for definition of '${word}' in file: ${fromPath}`);
-
-        // Get the SolutionManager instance
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager) {
-            logger.warn("No SolutionManager instance available");
-            return null;
-        }
-
-        // Find the project for this file
-        const project = solutionManager.findProjectForFile(fromPath);
-        if (!project) {
-            logger.warn(`No project found for file: ${fromPath}`);
-            return null;
-        }
-
-        // Create a TextDocument for the file
-        const fileContents = await project.readFileContents(fromPath);
-        if (!fileContents) {
-            logger.warn(`Could not read file contents: ${fromPath}`);
-            return null;
-        }
-
-        const fileUri = `file:///${fromPath.replace(/\\/g, "/")}`;
-        const document = TextDocument.create(fileUri, "clarion", 1, fileContents);
-
-        // Tokenize the file
-        const tokens = this.tokenCache.getTokens(document);
-
-        // First, check if the word is defined in this file
-        const labelToken = tokens.find(token =>
-            token.start === 0 &&
-            token.type === TokenType.Label &&
-            token.value.toLowerCase() === word.toLowerCase()
-        );
-
-        if (labelToken) {
-            logger.info(`Found label definition for '${word}' in ${fromPath} at line ${labelToken.line}`);
-            
-            // NOTE: We cannot perform scope checking here because we don't have:
-            // 1. The reference document (where F12 was pressed)
-            // 2. The reference position
-            // This recursive function only searches files, it doesn't validate scope.
-            // Scope checking needs to happen at the call site where we have the reference context.
-            
-            return Location.create(document.uri, {
-                start: { line: labelToken.line, character: 0 },
-                end: { line: labelToken.line, character: labelToken.value.length }
-            });
-        }
-
-        // INCLUDE Search Logic
-        // Find all INCLUDE statements in the file, searching bottom-up
-        const includeTokens = tokens.filter(token =>
-            token.value.toUpperCase().includes('INCLUDE') &&
-            token.value.includes("'")
-        );
-
-        // Process includes in reverse order (bottom-up)
-        for (let i = includeTokens.length - 1; i >= 0; i--) {
-            const includeToken = includeTokens[i];
-            
-            // Extract the include filename from the token value
-            const match = includeToken.value.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!match || !match[1]) continue;
-            
-            const includeFileName = match[1];
-            logger.info(`Found INCLUDE statement for '${includeFileName}' at line ${includeToken.line}`);
-            
-            // Use the project's redirection parser to resolve the actual file path
-            const redirectionParser = project.getRedirectionParser();
-            const resolvedPath = redirectionParser.findFile(includeFileName);
-            
-            if (resolvedPath && resolvedPath.path && fs.existsSync(resolvedPath.path)) {
-                logger.info(`Resolved INCLUDE file path: ${resolvedPath.path} (source: ${resolvedPath.source})`);
-                
-                // Recursively search in the included file
-                const result = await this.findDefinitionInIncludes(word, resolvedPath.path, visited);
-                if (result) {
-                    logger.info(`Found definition in included file: ${resolvedPath.path}`);
-                    return result;
-                }
-            } else {
-                logger.warn(`Could not resolve INCLUDE file: ${includeFileName}`);
-            }
-        }
-
-        // MEMBER Fallback Logic
-        // If no definition found in includes, check for MEMBER statements
-        const memberFileName = this.getMemberFileName(tokens);
-        if (memberFileName) {
-            logger.info(`Found MEMBER reference to '${memberFileName}'`);
-            
-            // Resolve the member file path
-            const redirectionParser = project.getRedirectionParser();
-            const resolvedMember = redirectionParser.findFile(memberFileName);
-            
-            if (resolvedMember && resolvedMember.path && fs.existsSync(resolvedMember.path) && !visited.has(resolvedMember.path)) {
-                logger.info(`Resolved MEMBER file path: ${resolvedMember.path} (source: ${resolvedMember.source})`);
-                
-                // Recursively search in the member file
-                const result = await this.findDefinitionInIncludes(word, resolvedMember.path, visited);
-                if (result) {
-                    logger.info(`Found definition in member file: ${resolvedMember.path}`);
-                    return result;
-                }
-            } else {
-                logger.warn(`Could not resolve MEMBER file: ${memberFileName}`);
-            }
-        }
-
-        logger.info(`No definition found for '${word}' in ${fromPath} or its includes/members`);
-        return null;
-    }
-
-    /**
-     * Finds the definition location for a file reference
-     */
-    private async findFileDefinition(fileName: string, documentUri: string): Promise<Definition | null> {
-        logger.info(`Finding definition for file: ${fileName}`);
-
-        // Clean up the fileName - remove quotes and other non-filename characters
-        fileName = fileName.replace(/['"()]/g, '').trim();
-
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager) {
-            logger.warn('No solution manager instance available');
-            return null;
-        }
-
-        // Extract the document path from the URI
-        const documentPath = documentUri.replace('file:///', '').replace(/\//g, '\\');
-        logger.info(`Document path: ${documentPath}`);
-
-        // Use the SolutionManager's findFileWithExtension method which now returns path and source
-        const result = await solutionManager.findFileWithExtension(fileName);
-        let filePath = '';
-
-        if (result && result.path) {
-            filePath = result.path;
-            logger.info(`Found file: ${filePath} (source: ${result.source})`);
-        } else if (!path.extname(fileName)) {
-            // If no extension was provided and no file was found, try with server's defaultLookupExtensions
-            // This is now handled by the SolutionManager's findFileWithExtension method
-            logger.info(`No file found with name ${fileName}, SolutionManager should have tried with default extensions`);
-        }
-
-        if (!filePath || !fs.existsSync(filePath)) {
-            logger.warn(`File not found: ${fileName}`);
-            return null;
-        }
-
-        // Convert file path to URI format
-        const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-
-        // Return the location at the beginning of the file
-        return Location.create(fileUri, {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 0 }
-        });
-    }
-
     /**
      * Finds parameter definition in a procedure/method signature
      * Handles formats like: ProcName PROCEDURE(LONG pLen, STRING pName=default)
@@ -1956,6 +1871,51 @@ export class DefinitionProvider {
     /**
      * Finds a class member in a specific class type
      */
+    /**
+     * #125 — when a typed-variable dot-access call has overloaded candidates in
+     * the current file, classify the call's args and pick the matching overload
+     * via `MethodOverloadResolver.findOverloadByArgClassifications`. Returns
+     * `null` to signal "fall through to existing paramCount-only path" when:
+     *   - the classifier can't find the call's `(...)` on this line,
+     *   - the class has fewer than 2 candidates locally (single overload — no
+     *     disambiguation needed; or zero — cross-file lookup needed),
+     *   - the resolver returns `matchedAll=true` (un-disambiguatable; conservative
+     *     fallback preserves UX per `feedback_silent_regression_pushback`).
+     */
+    private tryArgClassifyResolve(
+        tokens: Token[],
+        document: TextDocument,
+        className: string,
+        methodName: string,
+        callLine: number
+    ): Location | null {
+        // The call site's name token is either:
+        //   - a bare identifier matching methodName (`Foo(...)`)
+        //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
+        //     shape for `prefix.method` style calls). Either way, the classifier just
+        //     needs the token immediately before `(`.
+        const lowerMethod = methodName.toLowerCase();
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === callLine && (
+                t.value.toLowerCase() === lowerMethod ||
+                t.value.toLowerCase().endsWith('.' + lowerMethod)
+            ));
+        if (callNameIdx < 0) return null;
+
+        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
+        if (!args) return null;
+
+        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
+        if (candidates.length < 2) return null;
+
+        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
+            args, candidates.map(c => c.signature));
+        if (matchedAll || matchedIndex < 0) return null;
+
+        const picked = candidates[matchedIndex];
+        return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
+    }
+
     private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
         logger.info(`Looking for member ${memberName} in class/structure ${className}`);
 
@@ -2186,7 +2146,7 @@ export class DefinitionProvider {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {
             timeoutId = setTimeout(() => {
-                logger.error(`⏱️ [DEF] findClassTypeDefinition timed out for "${word}" — index build too slow`);
+                logger.test(`⏱️ [DEF] findClassTypeDefinition timed out for "${word}" — index build too slow`);
                 resolve(null);
             }, 10000);
         });
@@ -2203,7 +2163,7 @@ export class DefinitionProvider {
             if (!info) return null;
 
             const uri = `file:///${info.filePath.replace(/\\/g, '/')}`;
-            logger.error(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
+            logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
             return Location.create(uri, Range.create(info.line, 0, info.line, 0));
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);

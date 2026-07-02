@@ -1,21 +1,30 @@
 import * as controlsData from '../data/clarion-controls.json';
 
+export interface ControlParam {
+    name: string;
+    description: string;
+    optional: boolean;
+}
+
 export interface ControlDefinition {
     name: string;
     description: string;
     syntax: string;
     commonAttributes: string[];
+    params?: ControlParam[];
 }
 
 interface ControlData {
     windowControls: ControlDefinition[];
     reportControls: ControlDefinition[];
+    containerStructures: ControlDefinition[];
 }
 
 export class ControlService {
     private static instance: ControlService;
     private windowControls: Map<string, ControlDefinition> = new Map();
     private reportControls: Map<string, ControlDefinition> = new Map();
+    private containerStructures: Map<string, ControlDefinition> = new Map();
 
     private constructor() {
         this.loadControls();
@@ -42,6 +51,11 @@ export class ControlService {
             for (const control of controlData.reportControls) {
                 const normalizedName = control.name.toUpperCase();
                 this.reportControls.set(normalizedName, control);
+            }
+
+            // Load container structures (WINDOW, APPLICATION, REPORT)
+            for (const ctrl of (controlData.containerStructures ?? [])) {
+                this.containerStructures.set(ctrl.name.toUpperCase(), ctrl);
             }
         } catch (error) {
             console.error('Failed to load control definitions:', error);
@@ -116,6 +130,20 @@ export class ControlService {
      */
     public getReportControlNames(): string[] {
         return Array.from(this.reportControls.keys());
+    }
+
+    /**
+     * Get all container structures (WINDOW, APPLICATION, REPORT)
+     */
+    public getAllContainerStructures(): ControlDefinition[] {
+        return Array.from(this.containerStructures.values());
+    }
+
+    /**
+     * Get a single container structure definition by name
+     */
+    public getContainerStructure(name: string): ControlDefinition | undefined {
+        return this.containerStructures.get(name.toUpperCase());
     }
 
     /**

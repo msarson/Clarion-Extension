@@ -11,14 +11,15 @@ import LoggerManager from '../utils/LoggerManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
-import { setGlobalClarionSelection } from '../globals';
+import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
+import { shouldRestoreSolutionFromHistory } from '../utils/SolutionFallbackPolicy';
 import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("ActivationManager");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 export interface ActivationState {
     client?: LanguageClient;
@@ -140,13 +141,16 @@ export function checkFolderTrust(hasFolder: boolean, isTrusted: boolean): boolea
     return true;
 }
 
-export async function loadFolderSettings(hasFolder: boolean): Promise<void> {
+export async function loadFolderSettings(hasFolder: boolean, context: ExtensionContext): Promise<void> {
     logger.info("🔄 Phase 10: Loading folder settings...");
     if (hasFolder) {
         logger.info("   - Calling globalSettings.initializeFromWorkspace()...");
         try {
             const { globalSettings } = await import('../globals');
-            await globalSettings.initializeFromWorkspace();
+            // #141 B1 — context is now required for the workspaceState
+            // explicit-close flag read (#146) and the L1→L2 default-version
+            // init at activation.
+            await globalSettings.initializeFromWorkspace(context);
             logger.info("   - initializeFromWorkspace() completed successfully");
         } catch (error) {
             logger.error("   - ❌ Error in initializeFromWorkspace():", error);
@@ -216,10 +220,23 @@ export async function setupFolderDependentFeatures(
         if (!isRefreshingRef.value) {
             await refreshOpenDocuments(state.documentManager);
 
+            // #146 audit (#169): the GlobalSolutionHistory restore below was bypassing
+            // the explicit-close gate that initializeFromWorkspace honours at
+            // globals.ts:561. Mirror that early-return so the only auto-open trigger
+            // in this function respects the same flag.
+            const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+            if (explicitlyClosed) {
+                logger.info("ℹ️ Solution was explicitly closed — suppressing GlobalSolutionHistory restore (#146 audit)");
+                return;
+            }
+
             // If workspace settings don't have a solution file, check global history
-            // for a match on the current workspace folder (happens after a cross-folder switch)
-            if (!globalSolutionFile && workspace.workspaceFolders?.length) {
-                const currentFolder = workspace.workspaceFolders[0].uri.fsPath;
+            // for a match on the current workspace folder (happens after a cross-folder
+            // switch). Gate via the pure policy (#169/#104) so the decision is
+            // unit-testable and stays in lock-step with the explicit-close flag.
+            const hasWorkspaceFolder = (workspace.workspaceFolders?.length ?? 0) > 0;
+            if (shouldRestoreSolutionFromHistory(explicitlyClosed, globalSolutionFile, hasWorkspaceFolder)) {
+                const currentFolder = workspace.workspaceFolders![0].uri.fsPath;
                 const refs = await GlobalSolutionHistory.getValidReferences();
                 const match = refs.find(r => r.folderPath.toLowerCase() === currentFolder.toLowerCase());
                 if (match) {
@@ -239,15 +256,22 @@ export async function setupFolderDependentFeatures(
                 
                 if (state.client) {
                     logger.info("⏳ Waiting for language client to be ready before initializing solution...");
-                    
-                    if (isClientReady()) {
-                        logger.info("✅ Language client is already ready. Proceeding with solution initialization...");
-                        await workspaceHasBeenTrusted(context, disposables);
-                    } else {
-                        getClientReadyPromise().then(async () => {
-                            logger.info("✅ Language client is ready. Proceeding with solution initialization...");
+                    const doInit = async () => {
+                        try {
+                            logger.info(`⏱️ [STARTUP] workspaceHasBeenTrusted starting`);
                             await workspaceHasBeenTrusted(context, disposables);
-                        }).catch(error => {
+                            logger.info(`⏱️ [STARTUP] workspaceHasBeenTrusted complete`);
+                        } catch (error) {
+                            logger.error(`❌ Error in workspaceHasBeenTrusted: ${error instanceof Error ? error.message : String(error)}`);
+                            vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
+                        }
+                    };
+                    // Always fire asynchronously so activate() completes and the tree is created immediately
+                    if (isClientReady()) {
+                        logger.info("✅ Language client is already ready. Firing solution initialization in background...");
+                        doInit(); // intentionally NOT awaited
+                    } else {
+                        getClientReadyPromise().then(doInit).catch(error => {
                             logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
                             vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client failed to start.");
                         });

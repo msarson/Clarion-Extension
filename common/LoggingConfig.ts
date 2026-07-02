@@ -53,11 +53,13 @@ export class LoggingConfig {
     static readonly RELEASE_LOG_LEVEL: "debug" | "info" | "warn" | "error" = "error";
     
     /**
-     * Log level for development builds
-     * More verbose to help with debugging during development
-     * Set to "debug" to enable performance logging (perf())
+     * Log level for development builds.
+     * Pinned to "error" for now so loggers that don't explicitly setLevel() stay
+     * quiet (the error channel should carry only true errors). Bump a specific
+     * module via its own setLevel("info"/"test"/...) when debugging, or raise this
+     * to "debug" to re-enable verbose dev logging + perf().
      */
-    static readonly DEV_LOG_LEVEL: "debug" | "info" | "warn" | "error" = "debug";
+    static readonly DEV_LOG_LEVEL: "debug" | "info" | "warn" | "error" = "error";
     
     /**
      * Gets the appropriate default log level based on current mode

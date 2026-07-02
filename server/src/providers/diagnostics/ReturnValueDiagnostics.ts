@@ -5,10 +5,19 @@ import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenCache } from '../../TokenCache';
+import { TokenHelper } from '../../utils/TokenHelper';
+import { DocumentStructure } from '../../DocumentStructure';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
 logger.setLevel("error");
+
+// #158 Phase B Priority 1 — per-call-site perf instrumentation for
+// validateDiscardedReturnValues. Set level to "perf" to emit; flip to
+// "error" at final commit.
+// #158 — level set to "error" post-investigation. Flip to "perf" for
+// future investigations (single-character toggle).
+const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "error");
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
@@ -19,7 +28,7 @@ function getCodeBlockRanges(
 
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
-        if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
+        if (!TokenHelper.isProcedureOrFunction(t) && t.type !== TokenType.Routine) continue;
         if (!t.executionMarker) continue;
 
         const sub = t.subType;
@@ -199,9 +208,34 @@ function validateCrossFilePlainCalls(
 
 // ─── Exported validation functions ───────────────────────────────────────────
 
+/**
+ * #163 — true when `token` is nested (at any depth) inside a MAP or CLASS structure,
+ * per the DocumentStructure parent index. Replaces the bespoke running
+ * `inMapOrClass`/`mapClassDepth` scan that distinguished procedure DECLARATIONS
+ * (inside MAP/CLASS) from IMPLEMENTATIONS (top-level / Class.Method impls, which sit
+ * after the CLASS END and so have no MAP/CLASS ancestor).
+ */
+function isInsideMapOrClass(structure: DocumentStructure, token: Token): boolean {
+    let parent = structure.getParent(token);
+    while (parent) {
+        if (parent.type === TokenType.Structure &&
+            (parent.value.toUpperCase() === 'MAP' || parent.value.toUpperCase() === 'CLASS')) {
+            return true;
+        }
+        parent = structure.getParent(parent);
+    }
+    return false;
+}
+
 export function validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
+
+    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership
+    // (replaces the bespoke depth tracking below). Fresh instance + single process(),
+    // mirroring AttributeDiagnostics/ClassDiagnostics.
+    const structure = new DocumentStructure(tokens);
+    structure.process();
 
     const declarationsWithReturnTypes: Array<{
         name: string;
@@ -223,7 +257,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
             }
 
             for (let j = i + 1; j < tokens.length && (mapEndLine === -1 || tokens[j].line < mapEndLine); j++) {
-                if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
                     const procNameToken = tokens.find(t =>
@@ -279,7 +313,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
             }
 
             for (let j = i + 1; j < tokens.length && (classEndLine === -1 || tokens[j].line < classEndLine); j++) {
-                if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
                     const methodNameToken = tokens.find(t =>
@@ -319,29 +353,15 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
     }
 
     for (const decl of declarationsWithReturnTypes) {
-        let inMapOrClass = false;
-        let mapClassDepth = 0;
-
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
 
-            if (token.type === TokenType.Structure &&
-                (token.value.toUpperCase() === 'MAP' || token.value.toUpperCase() === 'CLASS')) {
-                inMapOrClass = true;
-                mapClassDepth++;
-            }
-
-            if (token.value.toUpperCase() === 'END' && token.type === TokenType.EndStatement) {
-                if (mapClassDepth > 0) {
-                    mapClassDepth--;
-                    if (mapClassDepth === 0) inMapOrClass = false;
-                }
-            }
-
-            if (inMapOrClass) continue;
-
-            if ((token.type === TokenType.Procedure || token.type === TokenType.Routine) &&
+            if ((TokenHelper.isProcedureOrFunction(token) || token.type === TokenType.Routine) &&
                 (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
+
+                // #163 — skip DECLARATIONs (nested in MAP/CLASS); only IMPLEMENTATIONs
+                // reach the RETURN-statement analysis below. Was: inMapOrClass/mapClassDepth.
+                if (isInsideMapOrClass(structure, token)) continue;
 
                 let fullName = '';
                 if (i > 0 && (tokens[i - 1].type === TokenType.Label || tokens[i - 1].type === TokenType.Variable)) {
@@ -373,7 +393,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                             codeLineStart = tokens[j].line;
                             break;
                         }
-                        if ((tokens[j].type === TokenType.Procedure || tokens[j].type === TokenType.Routine) &&
+                        if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                             (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
                             break;
                         }
@@ -385,7 +405,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                     for (let j = i + 1; j < tokens.length; j++) {
                         if (j !== i && tokens[j].type === TokenType.Label) {
                             if (j + 1 < tokens.length &&
-                                (tokens[j + 1].type === TokenType.Procedure || tokens[j + 1].type === TokenType.Routine) &&
+                                (TokenHelper.isProcedureOrFunction(tokens[j + 1]) || tokens[j + 1].type === TokenType.Routine) &&
                                 (tokens[j + 1].value.toUpperCase() === 'PROCEDURE' || tokens[j + 1].value.toUpperCase() === 'FUNCTION')) {
                                 procedureEndLine = tokens[j].line - 1;
                                 break;
@@ -503,59 +523,6 @@ export function validateDiscardedReturnValuesForPlainCalls(
             }
             if (!excluded.has(name)) warnableProcs.set(name, returnType);
         }
-    } else {
-        let mapClassDepth = 0;
-        for (let i = 0; i < tokens.length; i++) {
-            const t = tokens[i];
-            const val = t.value.toUpperCase();
-
-            if (t.type === TokenType.Structure && (val === 'MAP' || val === 'CLASS')) mapClassDepth++;
-            if (t.type === TokenType.EndStatement && mapClassDepth > 0) mapClassDepth--;
-
-            if (mapClassDepth === 0) continue;
-            if (t.type !== TokenType.Procedure && t.type !== TokenType.Routine) continue;
-            if (val !== 'PROCEDURE' && val !== 'FUNCTION') continue;
-
-            const nameToken = tokens.find(n =>
-                n.line === t.line && n.start === 0 && n.type === TokenType.Label
-            );
-            if (!nameToken) continue;
-
-            const name = nameToken.value.toUpperCase();
-            if (excluded.has(name)) continue;
-
-            const lineTokens = tokens.filter(tok => tok.line === t.line);
-            if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            let depth = 0, afterIdx = -1;
-            for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
-                if (tokens[k].value === '(') depth++;
-                else if (tokens[k].value === ')') {
-                    depth--;
-                    if (depth === 0) { afterIdx = k + 1; break; }
-                }
-            }
-            if (afterIdx === -1) continue;
-
-            // Guard: afterIdx must still be on the same declaration line.
-            if (afterIdx >= tokens.length || tokens[afterIdx].line !== t.line) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            const returnType = extractReturnType(tokens, afterIdx, true);
-            if (!returnType) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-            if (!excluded.has(name)) warnableProcs.set(name, returnType);
-        }
     }
 
     // Also collect GlobalProcedure subtypes defined in this file.
@@ -563,7 +530,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
     // (GlobalProcedure) that is never declared in a MAP is missed by those paths.
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
-        if (t.type !== TokenType.Procedure || t.subType !== TokenType.GlobalProcedure) continue;
+        if (!TokenHelper.isProcedureOrFunction(t) || t.subType !== TokenType.GlobalProcedure) continue;
 
         const name = (t.label ?? '').toUpperCase();
         if (!name || excluded.has(name)) continue;
@@ -624,7 +591,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
             }
 
             if (codeStart !== -1 &&
-                (t.type === TokenType.Procedure || t.type === TokenType.Routine) &&
+                (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) &&
                 (val === 'PROCEDURE' || val === 'FUNCTION' || val === 'ROUTINE') &&
                 t.line > codeStart) {
                 const labelOnLine = tokens.find(l =>
@@ -697,12 +664,34 @@ export async function validateDiscardedReturnValues(
     document: TextDocument,
     memberLocator: MemberLocatorService
 ): Promise<Diagnostic[]> {
+    const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
     const codeRanges = getCodeBlockRanges(tokens);
-    if (codeRanges.length === 0) return diagnostics;
+    if (codeRanges.length === 0) {
+        perfLogger.perf("validateDiscardedReturnValues early-exit (no code ranges)", {
+            ms: Date.now() - fnStart,
+            uri: document.uri
+        });
+        return diagnostics;
+    }
 
     const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/;
+
+    // #158 Phase B Priority 1 — per-call-site memoization. Pre-#158 this loop
+    // called `memberLocator.findMemberInClass` / `resolveDotAccess` once PER
+    // line for every dot-access call site. On hot files (StringTheory.clw,
+    // 72k tokens, hundreds of repeated `obj.method` patterns), that meant
+    // hundreds of full cross-file include-chain walks. Most call sites
+    // resolve to the same (objUpper, methodName.toUpper(), paramCount,
+    // selfContext) tuple — so cache the promise per tuple and reuse.
+    //
+    // Cache key includes `selfContext` (range.selfClassName for SELF/PARENT)
+    // because the receiver-class context can differ per code-range within
+    // the same file (e.g., two CLASSes each with their own SELF references).
+    const memberCache = new Map<string, Promise<{ type: string } | null>>();
+    let dotCallSites = 0;
+    let cacheHits = 0;
 
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
         const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
@@ -751,14 +740,27 @@ export async function validateDiscardedReturnValues(
             }
         }
 
-        let memberInfo;
+        dotCallSites++;
+
         const objUpper = objectName.toUpperCase();
-        if (objUpper === 'SELF' || objUpper === 'PARENT') {
-            if (!range.selfClassName) continue;
-            memberInfo = await memberLocator.findMemberInClass(range.selfClassName, methodName, document, paramCount);
+        const isSelfOrParent = objUpper === 'SELF' || objUpper === 'PARENT';
+        if (isSelfOrParent && !range.selfClassName) continue;
+
+        const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
+        const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
+
+        let memberInfoPromise = memberCache.get(cacheKey);
+        if (!memberInfoPromise) {
+            if (isSelfOrParent) {
+                memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
+            } else {
+                memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+            }
+            memberCache.set(cacheKey, memberInfoPromise);
         } else {
-            memberInfo = await memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+            cacheHits++;
         }
+        const memberInfo = await memberInfoPromise;
 
         if (!memberInfo) {
             logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
@@ -779,8 +781,23 @@ export async function validateDiscardedReturnValues(
         });
     }
 
+    const dotCallMs = Date.now() - fnStart;
+
+    const crossFileStart = Date.now();
     const crossFileDiags = validateCrossFilePlainCalls(tokens, document, docLines, codeRanges);
     diagnostics.push(...crossFileDiags);
+    const crossFileMs = Date.now() - crossFileStart;
+
+    perfLogger.perf("validateDiscardedReturnValues complete", {
+        total_ms: Date.now() - fnStart,
+        dotcall_loop_ms: dotCallMs,
+        crossfile_ms: crossFileMs,
+        dotcall_sites: dotCallSites,
+        cache_hits: cacheHits,
+        cache_unique_keys: memberCache.size,
+        diag_count: diagnostics.length,
+        uri: document.uri
+    });
 
     return diagnostics;
 }

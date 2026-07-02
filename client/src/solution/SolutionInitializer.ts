@@ -5,7 +5,7 @@ import { SolutionCache } from '../SolutionCache';
 import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { updateConfigurationStatusBar, updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
-import { refreshSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionTreeView, setToolbarGraphStatus } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
@@ -34,6 +34,21 @@ export async function workspaceHasBeenTrusted(
 ): Promise<void> {
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
+    // #146 sticky-until-open suppression is handled INSIDE
+    // `initializeFromWorkspace` (line 62 below). When the flag is set, that
+    // function returns early without populating `globalSolutionFile`, which
+    // naturally routes the rest of this function into the `else` branch at
+    // line ~209 (welcome-view refresh).
+    //
+    // Previously this function had an early-return defensive guard here
+    // when `explicitlyClosed=true`. That short-circuit blocked legitimate
+    // trust-init side effects (language feature registration, FRG build,
+    // file watchers, etc.) which then didn't re-fire when the user later
+    // explicitly opened a solution. Removed in favor of letting the
+    // single-source-of-truth suppression in `initializeFromWorkspace`
+    // handle the flag — the natural code flow already routes to the
+    // welcome-view branch when `globalSolutionFile` stays empty.
+
     // Read current solution directly from workspace settings
     const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
         || workspace.getConfiguration().get<string>("clarion.solutionFile", "");
@@ -41,7 +56,7 @@ export async function workspaceHasBeenTrusted(
 
     // Load settings from workspace.json
     await globalSettings.initialize();
-    await globalSettings.initializeFromWorkspace();
+    await globalSettings.initializeFromWorkspace(context);
     
     // Set environment variable for the server to use if we have a solution file
     if (solutionFileFromSettings && fs.existsSync(solutionFileFromSettings)) {
@@ -85,47 +100,31 @@ export async function workspaceHasBeenTrusted(
             }
         }
 
-        // If still missing, try defaults as a last resort
+        // If still missing — pre-#132/#141 era used to hardcode legacy defaults
+        // (`Clarion11` + `%APPDATA%\SoftVelocity\Clarion\ClarionProperties.xml`)
+        // AND write them back to workspace settings.json. That was an
+        // anti-pattern: it stomped good user state with bad legacy values when
+        // upstream version-resolution had failed for unrelated reasons (e.g.
+        // version-format mismatch between legacy `Clarion11` token and the
+        // new `Clarion 11.1.13855` installation-entry-name format from #132).
+        //
+        // Post-#141, the authoritative default lives at the User-scope
+        // `clarion.activeVersion` (L1) — workspace-scope writes here would
+        // either duplicate or contradict that source. Better to surface the
+        // missing-config diagnostic (warning fires at line ~174 below) than to
+        // silently corrupt settings with stale-format values.
+        //
+        // If recovery from missing config is needed, the proper path is the
+        // version picker (#134 two-stage) which writes the new-format value
+        // to L1 default. The warning at line ~174 already offers that as the
+        // "Configure Now" action.
         if (!globalClarionPropertiesFile || !globalClarionVersion) {
-            logger.warn("⚠️ Missing Clarion properties file or version. Attempting to use defaults...");
-            
-            // Try to find a default properties file if not set
-            if (!globalClarionPropertiesFile) {
-                const defaultPropertiesPath = path.join(process.env.APPDATA || '', 'SoftVelocity', 'Clarion', 'ClarionProperties.xml');
-                if (fs.existsSync(defaultPropertiesPath)) {
-                    logger.info(`✅ Using default properties file: ${defaultPropertiesPath}`);
-                    const target = getClarionConfigTarget();
-                    if (target && workspace.workspaceFolders) {
-                        const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-                        await config.update('propertiesFile', defaultPropertiesPath, target);
-                    }
-                    
-                    await setGlobalClarionSelection(
-                        globalSolutionFile,
-                        defaultPropertiesPath,
-                        globalClarionVersion || "Clarion11",
-                        globalSettings.configuration
-                    );
-                }
-            }
-            
-            // Set a default version if not set
-            if (!globalClarionVersion) {
-                const defaultVersion = "Clarion11";
-                logger.info(`✅ Using default Clarion version: ${defaultVersion}`);
-                const target = getClarionConfigTarget();
-                if (target && workspace.workspaceFolders) {
-                    const config = workspace.getConfiguration("clarion", workspace.workspaceFolders[0].uri);
-                    await config.update('version', defaultVersion, target);
-                }
-                
-                await setGlobalClarionSelection(
-                    globalSolutionFile,
-                    globalClarionPropertiesFile,
-                    defaultVersion,
-                    globalSettings.configuration
-                );
-            }
+            logger.warn(
+                `⚠️ Missing Clarion properties file or version after upstream load — ` +
+                `globalClarionPropertiesFile="${globalClarionPropertiesFile || 'MISSING'}", ` +
+                `globalClarionVersion="${globalClarionVersion || 'MISSING'}". ` +
+                `Surfacing diagnostic at line ~174 instead of writing legacy defaults that would stomp user state.`
+            );
         }
         
         // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
@@ -303,6 +302,51 @@ export async function initializeSolution(
         // Get the solution directory
         const solutionDir = path.dirname(globalSolutionFile);
 
+        // Register a one-shot handler for clarion/solutionReady BEFORE sending updatePaths
+        // so we never miss the notification due to a race. The handler defers refreshOpenDocuments
+        // until the server has real project data, avoiding thousands of clarion/findFile requests
+        // flooding the LSP pipe when getSolutionTree returns 0 projects on startup.
+        let solutionReadyDisposable: Disposable | null = null;
+        solutionReadyDisposable = client.onNotification('clarion/solutionReady', async (params: { solutionFilePath: string, projectCount: number }) => {
+            // Ignore stale notifications from a previous solution load
+            if (params.solutionFilePath !== globalSolutionFile) {
+                logger.warn(`⚠️ clarion/solutionReady ignored — path mismatch (got ${params.solutionFilePath}, expected ${globalSolutionFile})`);
+                return;
+            }
+            if (params.projectCount === 0) {
+                logger.warn(`⚠️ clarion/solutionReady received with 0 projects — skipping refresh`);
+                return;
+            }
+            // Dispose immediately so subsequent re-initializations register a fresh handler
+            solutionReadyDisposable?.dispose();
+            solutionReadyDisposable = null;
+
+            logger.info(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
+            const solutionCache = SolutionCache.getInstance();
+            const refreshStart = Date.now();
+            await solutionCache.refresh(true);
+            logger.info(`⏱️ [STARTUP] solutionCache.refresh(true) in solutionReady handler done in ${Date.now() - refreshStart}ms (${solutionCache.getSolutionInfo()?.projects?.length ?? 0} projects)`);
+            await refreshSolutionTreeView();
+            const deferredRdStart = Date.now();
+            solutionCache.beginActivationRefresh();
+            await refreshOpenDocuments(documentManager);
+            logger.info(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
+            SolutionCache.getInstance().markActivationComplete();
+            logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
+        });
+
+        // Track FileRelationshipGraph build progress in the Actions toolbar
+        context.subscriptions.push(
+            client.onNotification('clarion/graphStatus', (params: {
+                status: 'building' | 'built';
+                fileCount?: number;
+                edgeCount?: number;
+                durationMs?: number;
+            }) => {
+                setToolbarGraphStatus(params);
+            })
+        );
+
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
@@ -313,15 +357,18 @@ export async function initializeSolution(
             redirectionFile: globalSettings.redirectionFile,
             macros: globalSettings.macros,
             libsrcPaths: globalSettings.libsrcPaths,
-            defaultLookupExtensions: globalSettings.defaultLookupExtensions // Add default lookup extensions
+            defaultLookupExtensions: globalSettings.defaultLookupExtensions, // Add default lookup extensions
+            undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled, // #62 opt-in
+            indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
+            referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled // #185 opt-out
         });
-        logger.info("✅ Clarion paths/config/version sent to the language server.");
+        logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
         
         // Wait a moment for the server to process the notification and initialize
         // This prevents a race condition where we request the solution tree before it's built
         logger.info("⏳ Waiting for server to initialize solution...");
         await new Promise(resolve => setTimeout(resolve, 1000));
-        logger.info("✅ Server initialization delay complete");
+        logger.info(`⏱️ [STARTUP] 1s delay complete, calling reinitializeEnvironment`);
     } else {
         logger.error("❌ Language client is not available.");
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
@@ -332,9 +379,11 @@ export async function initializeSolution(
     
     // ✅ Continue initializing the solution cache and document manager
     documentManager = await reinitializeEnvironment(refreshDocs);
+    logger.info(`⏱️ [STARTUP] reinitializeEnvironment complete`);
     logger.info("✅ Environment initialized");
     
     await refreshSolutionTreeView();
+    logger.info(`⏱️ [STARTUP] refreshSolutionTreeView complete`);
     logger.info("✅ Solution tree view refreshed");
     
     registerLanguageFeatures(context, documentManager);
@@ -345,12 +394,24 @@ export async function initializeSolution(
     updateBuildProjectStatusBar(); // Update the build project status bar
     
     // Create file watchers for the solution, project, and redirection files
+    const fwStart = Date.now();
     await createSolutionFileWatchers(context, reinitializeEnvironment, documentManager);
+    logger.info(`⏱️ [STARTUP] createSolutionFileWatchers complete in ${Date.now() - fwStart}ms`);
     logger.info("✅ File watchers created");
     
-    // Force refresh all open documents to ensure links are generated
-    await refreshOpenDocuments(documentManager);
-    logger.info("✅ Open documents refreshed");
+    // Only call refreshOpenDocuments immediately if we already have project data.
+    // If the solution wasn't ready yet (0 projects), the clarion/solutionReady handler
+    // registered above will call it once the server finishes building the solution.
+    const solutionCache = SolutionCache.getInstance();
+    if ((solutionCache.getSolutionInfo()?.projects?.length ?? 0) > 0) {
+        const rdStart = Date.now();
+        await refreshOpenDocuments(documentManager);
+        logger.info(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
+        solutionCache.markActivationComplete();
+        logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
+    } else {
+        logger.info(`⏱️ [STARTUP] refreshOpenDocuments deferred — solution not ready yet (waiting for clarion/solutionReady)`);
+    }
     
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
@@ -386,16 +447,20 @@ export async function reinitializeEnvironment(
     // Initialize the solution cache with the solution file path
     if (globalSolutionFile) {
         const cacheStartTime = performance.now();
+        logger.info(`⏱️ [STARTUP] solutionCache.initialize starting`);
         const result = await solutionCache.initialize(globalSolutionFile);
         const cacheEndTime = performance.now();
+        logger.info(`⏱️ [STARTUP] solutionCache.initialize done in ${(cacheEndTime - cacheStartTime).toFixed(0)}ms (${result ? 'success' : 'failed'})`);
         logger.info(`✅ SolutionCache initialized in ${(cacheEndTime - cacheStartTime).toFixed(2)}ms (${result ? 'success' : 'failed'})`);
         
         // If initialization failed or returned empty solution, force a refresh from server
         if (!result) {
             logger.warn("⚠️ Solution cache initialization failed. Forcing refresh from server...");
             const refreshStartTime = performance.now();
+            logger.info(`⏱️ [STARTUP] solutionCache.refresh (forced) starting`);
             const refreshResult = await solutionCache.refresh(true);
             const refreshEndTime = performance.now();
+            logger.info(`⏱️ [STARTUP] solutionCache.refresh (forced) done in ${(refreshEndTime - refreshStartTime).toFixed(0)}ms`);
             logger.info(`✅ SolutionCache force refreshed in ${(refreshEndTime - refreshStartTime).toFixed(2)}ms (${refreshResult ? 'success' : 'failed'})`);
             
             if (!refreshResult) {
@@ -406,9 +471,10 @@ export async function reinitializeEnvironment(
         logger.warn("⚠️ No solution file path available. SolutionCache will not be initialized.");
     }
     
-    // Mark activation as complete in SolutionCache
-    solutionCache.markActivationComplete();
-    logger.info("✅ Marked activation as complete in SolutionCache");
+    // Mark activation as complete AFTER document refresh so that clarion/findFile
+    // server calls are suppressed during refreshOpenDocuments (prevents 100+ queued
+    // requests from blocking the LSP pipe for 5+ seconds after startup).
+    // markActivationComplete() is called by the caller after refreshOpenDocuments returns.
 
     if (documentManager) {
         logger.info("🔄 Disposing of existing DocumentManager instance...");
@@ -418,8 +484,10 @@ export async function reinitializeEnvironment(
 
     // Create a new DocumentManager (no longer needs SolutionParser)
     const dmStartTime = performance.now();
+    logger.info(`⏱️ [STARTUP] DocumentManager.create starting`);
     documentManager = await DocumentManager.create();
     const dmEndTime = performance.now();
+    logger.info(`⏱️ [STARTUP] DocumentManager.create done in ${(dmEndTime - dmStartTime).toFixed(0)}ms`);
     logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
 
     if (refreshDocs) {
@@ -432,3 +500,4 @@ export async function reinitializeEnvironment(
     
     return documentManager;
 }
+

@@ -46,7 +46,7 @@ export class DocumentHighlightProvider {
             if (t.type === TokenType.Comment || t.type === TokenType.String || t.type === TokenType.Directive) continue;
 
             // For Structure/Procedure tokens the symbol name is in t.label; for all others it's t.value
-            const tokenName = (t.type === TokenType.Structure || t.type === TokenType.Procedure)
+            const tokenName = (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t))
                 ? t.label
                 : t.value;
 
@@ -59,7 +59,7 @@ export class DocumentHighlightProvider {
             // Declaration tokens get Write kind; references get Read kind
             const isDeclaration = t.type === TokenType.Label
                 || t.type === TokenType.Structure
-                || (t.type === TokenType.Procedure && t.subType !== TokenType.Procedure);
+                || (TokenHelper.isProcedureOrFunction(t) && t.subType !== TokenType.Procedure);
 
             highlights.push(DocumentHighlight.create(range, isDeclaration
                 ? DocumentHighlightKind.Write

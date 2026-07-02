@@ -67,6 +67,8 @@ export class FileRelationshipGraph {
     public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
     public get buildStartTime(): Date | undefined { return this._buildStartTime; }
     public get buildEndTime(): Date | undefined { return this._buildEndTime; }
+    public get fileCount(): number { return this.forwardEdges.size; }
+    public get edgeCount(): number { return this.getAllEdges().length; }
 
     // ── Build ──────────────────────────────────────────────────────────────────
 
@@ -106,13 +108,13 @@ export class FileRelationshipGraph {
 
             if (batch.length === 0) continue;
 
-            // Process the batch concurrently
-            const results = await Promise.all(batch.map(f => this.processFile(f)));
-            for (const newFiles of results) {
-                for (const f of newFiles) {
-                    if (!visited.has(f)) queue.push(f);
-                }
-            }
+            // Process the batch concurrently.
+            // We intentionally do NOT enqueue the returned INCLUDE targets — recursively
+            // following include chains into library directories (libsrc etc.) can add
+            // thousands of files and make startup unresponsive on large solutions.
+            // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
+            // reverse-include lookups work for files directly referenced by project files.
+            await Promise.all(batch.map(f => this.processFile(f)));
 
             // Yield back to the event loop between batches
             await new Promise<void>(resolve => setImmediate(resolve));
@@ -123,7 +125,7 @@ export class FileRelationshipGraph {
         this._built = true;
         this._building = false;
         const edgeCount = this.getAllEdges().length;
-        logger.error(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
+        logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
     }
 
     /**
@@ -156,7 +158,7 @@ export class FileRelationshipGraph {
             }
         }
 
-        await this.processFile(filePath);
+        await this.processFile(filePath, uri);
     }
 
     /**
@@ -168,7 +170,29 @@ export class FileRelationshipGraph {
         this.classModuleIndex.clear();
         this._built = false;
         this._building = false;
-        logger.error(`🔄 [FRG] FileRelationshipGraph reset`);
+        logger.debug(`🔄 [FRG] FileRelationshipGraph reset`);
+    }
+
+    /**
+     * Test-only — seed the graph with hand-built edges and mark it as built.
+     * Used by `MultiFileFARFixture` (task `671d7cd8`) to enable cross-file Tier 6
+     * (PROGRAM-scope global receiver) test coverage without driving the full
+     * project-scan build pipeline. Each input edge's `fromFile` / `toFile` are
+     * normalised via the same `normalizePath` rule used by the production walk
+     * so test seeding produces identical key shapes.
+     *
+     * Callers should pair this with `reset()` in test teardown to restore the
+     * singleton's pre-test state.
+     */
+    public seedEdgesForTest(edges: FileEdge[]): void {
+        for (const e of edges) {
+            this.addEdge({
+                ...e,
+                fromFile: this.normalizePath(e.fromFile),
+                toFile: this.normalizePath(e.toFile)
+            });
+        }
+        this._built = true;
     }
 
     // ── Core processor ─────────────────────────────────────────────────────────
@@ -178,13 +202,17 @@ export class FileRelationshipGraph {
      * regex scan (avoids full tokenization for cold files — critical for large solutions).
      * Returns newly-discovered file paths to enqueue (INCLUDE targets).
      */
-    private async processFile(filePath: string): Promise<string[]> {
+    private async processFile(filePath: string, originalUri?: string): Promise<string[]> {
         const tokenCache = TokenCache.getInstance();
 
-        // Reconstruct URI in the same format VS Code uses so TokenCache hits
-        const uri = this.pathToUri(filePath);
+        // Try the original URI first (exact key from VS Code, preserves casing)
+        let tokens = originalUri ? tokenCache.getTokensByUri(originalUri) : null;
 
-        let tokens = tokenCache.getTokensByUri(uri);
+        if (!tokens || tokens.length === 0) {
+            // Reconstruct URI in the same format VS Code uses so TokenCache hits
+            const uri = this.pathToUri(filePath);
+            tokens = tokenCache.getTokensByUri(uri);
+        }
 
         if (!tokens || tokens.length === 0) {
             // Try alternate URI encoding (unencoded path variant)
@@ -237,13 +265,19 @@ export class FileRelationshipGraph {
                     parentToken.value.toUpperCase() === 'MAP';
 
                 if (!parentIsMap) {
-                    edgeType = 'CLASS_MODULE';
                     const classToken = tokens.find(t =>
                         t.line === token.line &&
                         t.type === TokenType.Structure &&
                         t.value.toUpperCase() === 'CLASS'
                     );
-                    containingClass = classToken?.label;
+                    if (classToken) {
+                        edgeType = 'CLASS_MODULE';
+                        containingClass = classToken.label;
+                    } else {
+                        // Root-level MODULE with no MAP parent — e.g., SV-generated INC file
+                        // where the MODULE block is not wrapped in a MAP structure.
+                        edgeType = 'MODULE';
+                    }
                 } else {
                     edgeType = 'MODULE';
                     const grandParent = parentToken.parent;
@@ -253,6 +287,23 @@ export class FileRelationshipGraph {
                         containingProcedure = grandParent.label;
                     }
                 }
+            } else if (token.referencedFile && token.value.toUpperCase() === 'MODULE') {
+                // #198: On a CLASS declaration line MODULE tokenizes as an Attribute (and
+                // LINK as a Function) — NOT a Structure — so the MODULE-Structure branch
+                // above misses them, yet the tokenizer DID resolve their referencedFile.
+                // Emit a CLASS_MODULE edge so the relationship (and its document link)
+                // exists when the file is OPEN, matching the cold/regex path. A LINK to the
+                // same file is surfaced as a link via DocumentLinkProvider's per-line
+                // basename match against this edge, so it needs no separate edge.
+                const classToken = tokens.find(t =>
+                    t.line === token.line &&
+                    t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'CLASS'
+                );
+                if (classToken) {
+                    edgeType = 'CLASS_MODULE';
+                    containingClass = classToken.label;
+                }
             }
 
             if (!edgeType) continue;
@@ -261,6 +312,9 @@ export class FileRelationshipGraph {
             if (!resolved) continue;
 
             const toFile = this.normalizePath(resolved);
+            // Skip self-referencing MODULE edges — they add no topological information
+            if (edgeType === 'MODULE' && toFile === filePath) continue;
+
             const edge: FileEdge = { type: edgeType, fromFile: filePath, toFile, fromLine: token.line, containingProcedure, containingClass };
 
             this.addEdge(edge);
@@ -295,7 +349,10 @@ export class FileRelationshipGraph {
         const programRe  = /^\s*PROGRAM\b/i;
         const includeRe  = /\bINCLUDE\s*\(\s*'([^']+)'\s*(?:,\s*'[^']*'\s*)?\)/ig;
         const moduleRe   = /\bMODULE\s*\(\s*'([^']+)'\s*\)/ig;
-        const classRe    = /\bCLASS\s*\(/i;
+        // #198: a CLASS attribute may be `CLASS,TYPE,MODULE(...)` (no paren after CLASS)
+        // as well as `CLASS('Parent')`. Match CLASS as a word so a MODULE on a CLASS line
+        // is typed CLASS_MODULE in the cold path too (parity with the warm/token path).
+        const classRe    = /\bCLASS\b/i;
         // MAP context: track whether we are inside a MAP block
         const mapOpenRe  = /\bMAP\b/i;
         const mapCloseRe = /\bEND\b/i;
@@ -344,6 +401,8 @@ export class FileRelationshipGraph {
                 const toFile = this.normalizePath(resolved);
                 const isClassAttr = classRe.test(stripped);
                 const edgeType: EdgeType = isClassAttr ? 'CLASS_MODULE' : 'MODULE';
+                // Skip self-referencing MODULE edges — they add no topological information
+                if (edgeType === 'MODULE' && toFile === filePath) continue;
                 let containingClass: string | undefined;
                 if (isClassAttr) {
                     const labelMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+CLASS\b/i.exec(stripped.trim());
@@ -398,6 +457,18 @@ export class FileRelationshipGraph {
             ?.find(e => e.type === 'MEMBER')?.toFile;
     }
 
+    /**
+     * Returns all MEMBER file paths belonging to the given PROGRAM file.
+     * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
+     * files of the cursor's file may contain cross-procedure callers (P2b,
+     * task 10ea5a80 track-(a) widening).
+     */
+    public getMemberFiles(programFilePath: string): string[] {
+        return this.reverseEdges.get(this.normalizePath(programFilePath))
+            ?.filter(e => e.type === 'MEMBER')
+            .map(e => e.fromFile) ?? [];
+    }
+
     /** Returns all files that include the given file (reverse INCLUDE). */
     public getReverseIncludes(filePath: string): FileEdge[] {
         return this.reverseEdges.get(this.normalizePath(filePath))
@@ -450,9 +521,14 @@ export class FileRelationshipGraph {
 
     /**
      * Resolve a bare filename (from token.referencedFile) to an absolute path.
-     * Uses the solution's redirection parser, falls back to relative-to-source.
+     * Delegates entirely to the redirection parser's canonical chain
+     * (3161ea89 + 2a2656b1): parser Tier 2 (project-root probe) covers the
+     * case the old per-project safety net used to handle.
+     *
+     * `fromFile` is preserved on the signature for the 6 token-walk callers
+     * but is no longer threaded into the parser call.
      */
-    private resolveFile(filename: string, fromFile: string): string | null {
+    private resolveFile(filename: string, _fromFile: string): string | null {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
 
@@ -463,15 +539,8 @@ export class FileRelationshipGraph {
                 if (resolved?.path && fs.existsSync(resolved.path)) {
                     return resolved.path;
                 }
-                // Fallback: project directory
-                const projPath = path.join(project.path, filename);
-                if (fs.existsSync(projPath)) return projPath;
             }
         }
-
-        // Fallback: relative to the source file
-        const rel = path.join(path.dirname(fromFile), filename);
-        if (fs.existsSync(rel)) return path.resolve(rel);
 
         return null;
     }

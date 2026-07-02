@@ -94,13 +94,30 @@ export class ProcedureSignatureUtils {
         // If last word is a valid type, it's the type (no variable name given)
         // Otherwise, everything except last word is the type
         const lastWord = words[words.length - 1];
-        
-        // Check if last word looks like a variable name (starts with letter, has mixed case or lowercase)
-        if (lastWord.match(/^[a-z]/i) && (lastWord !== lastWord.toUpperCase() || lastWord.length > 1)) {
+
+        // #130 — if the last word starts with a letter, treat it as the
+        // variable name. The previous heuristic also required mixed-case
+        // OR length > 1 to "protect single-letter all-uppercase TYPES"
+        // (e.g. `LONG X` was read as a 2-word type), but the probe (Alice
+        // 2026-05-14) found that defensive case is hypothetical: Clarion
+        // has no single-letter scalar types — see the enumerations at
+        // `MethodOverloadResolver.ts:1066-1076` (`isStringType` / `isNumericType`)
+        // which list every built-in scalar (STRING/CSTRING/PSTRING/ASTRING/
+        // LONG/SHORT/BYTE/ULONG/USHORT/SIGNED/UNSIGNED/REAL/SREAL/DECIMAL/
+        // PDECIMAL/DATE/TIME), all multi-letter. User-defined single-letter
+        // types in no-name param shapes hit the `words.length === 1` branch
+        // above. `LONG X` / `STRING N` / `BYTE I` are now correctly read.
+        //
+        // Substrate-symmetric to the same fix landed at
+        // `MethodOverloadResolver.ts:679` in the same #130 commit — Eve's
+        // peer-GREEN gate-4 flex into substrate-symmetry caught the parallel
+        // implementation; expanded inline per
+        // `feedback_substrate_surprise_in_scope`.
+        if (lastWord.match(/^[a-z]/i)) {
             // Last word is likely variable name, rest is type
             return words.slice(0, -1).join(' ').toUpperCase();
         }
-        
+
         // All words are the type
         return words.join(' ').toUpperCase();
     }

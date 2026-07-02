@@ -7,7 +7,6 @@ import LoggerManager from './utils/LoggerManager';
 import { globalSettings } from './globals';
 import { LanguageClientManager, isClientReady, getClientReadyPromise } from './LanguageClientManager';
 import { SolutionParser } from './SolutionParser';
-import { redirectionService } from './paths/RedirectionService';
 import { ProjectIndex } from './ProjectIndex';
 
 const logger = LoggerManager.getLogger("SolutionCache");
@@ -281,6 +280,16 @@ export class SolutionCache {
     public markActivationComplete(): void {
         this.activationInProgress = false;
         logger.info("✅ Activation marked as complete in SolutionCache");
+    }
+
+    /**
+     * Re-arms the activation guard so the next refreshOpenDocuments call
+     * (e.g. the deferred refresh triggered by clarion/solutionReady) blocks
+     * server calls while the document refresh is in progress.
+     */
+    public beginActivationRefresh(): void {
+        this.activationInProgress = true;
+        logger.info("🔄 Activation guard re-armed for deferred refresh");
     }
 
     /**
@@ -638,7 +647,7 @@ export class SolutionCache {
                             logger.warn(`[CACHE] Error computing hash for ${path.basename(cwprojPath)}: ${error instanceof Error ? error.message : String(error)}`);
                         }
                         
-                        // Process source files
+                        // Process source files — skip fs.existsSync (synchronous I/O on 3000+ files is slow)
                         if (project.sourceFiles && Array.isArray(project.sourceFiles)) {
                             for (const sourceFile of project.sourceFiles) {
                                 if (!sourceFile.name) continue;
@@ -654,14 +663,11 @@ export class SolutionCache {
                                     continue;
                                 }
                                 
-                                // Check if file exists
-                                const exists = fs.existsSync(absolutePath);
-                                
                                 projectDto.files.push({
                                     name: sourceFile.name,
                                     absolutePath: path.normalize(absolutePath),
-                                    relativePath: sourceFile.relativePath,
-                                    exists: exists
+                                    relativePath: sourceFile.relativePath
+                                    // exists: omitted — checking existence synchronously for 3000+ files causes startup hangs
                                 });
                             }
                         }
@@ -785,6 +791,13 @@ export class SolutionCache {
             this.fetchInProgress = true;
             
             try {
+                // Guard: client must be set before we can make requests
+                if (!this.client) {
+                    logger.info("⏳ Language client not yet set in SolutionCache; deferring until setLanguageClient() is called.");
+                    this.fetchInProgress = false;
+                    return false;
+                }
+
                 // Show progress notification
                 await window.withProgress({
                     location: ProgressLocation.Notification,
@@ -802,19 +815,24 @@ export class SolutionCache {
                     });
 
                     const requestStartTime = performance.now();
+                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
                         this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
                         timeoutPromise
                     ]);
                     const requestEndTime = performance.now();
+                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
 
                     if (this.solutionInfo && this.solutionInfo.projects && this.solutionInfo.projects.length > 0) {
                         logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
                         
                         // Save to in-memory cache
+                        const saveStart = performance.now();
+                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache starting`);
                         this.saveToInMemoryCache();
+                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
                         
                         // Log basic project information
                         logger.info(`📊 Solution tree structure:`);
@@ -1065,6 +1083,8 @@ export class SolutionCache {
             if (this.solutionFilePath) {
                 SolutionCache.inMemoryCache.delete(this.solutionFilePath);
             }
+            // Clear the file path resolution cache so stale paths are re-resolved
+            this.filePathCache.clear();
             logger.info("🔄 Forcing refresh from server (bypassing cache)");
             
             // Initialize directly from server, bypassing cache
@@ -1680,28 +1700,28 @@ export class SolutionCache {
         // Create a cache key that includes the source file path if provided
         const cacheKey = sourceFilePath ? `${normalizedFilename}|${sourceFilePath}` : normalizedFilename;
         
-        // Check cache first
+        // Check source-specific cache first, then global (filename-only) cache.
+        // The global cache is populated when a file resolves outside the source's own directory
+        // (e.g., libsrc files, project files), allowing cross-document cache sharing.
         if (this.filePathCache.has(cacheKey)) {
             const cachedPath = this.filePathCache.get(cacheKey)!;
             logger.info(`✅ Cache hit for ${filename}: ${cachedPath}`);
             return cachedPath;
         }
-        
-        if (!this.solutionInfo) {
-            logger.info(`❌ No solution info available when searching for ${filename}`);
-            return "";
+        if (sourceFilePath && this.filePathCache.has(normalizedFilename)) {
+            const cachedPath = this.filePathCache.get(normalizedFilename)!;
+            logger.info(`✅ Global cache hit for ${filename}: ${cachedPath}`);
+            this.filePathCache.set(cacheKey, cachedPath); // warm the source-specific key too
+            return cachedPath;
         }
-
-        if (!this.solutionFilePath || this.solutionFilePath.trim() === "") {
-            logger.info(`❌ No solution file path set when searching for ${filename}`);
-            return "";
-        }
-
-        logger.info(`🔍 Searching for file: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}`);
         
-        // Skip server lookup for system modules during initialization
-        if (this.activationInProgress && this.isLibSrcPath(filename)) {
-            logger.info(`⏩ Skipping server lookup for library file during activation: ${filename}`);
+        logger.info(`🔍 Searching for file: ${filename}${sourceFilePath ? ` (from ${sourceFilePath})` : ''}${this.solutionInfo ? '' : ' (no-solution mode)'}`);
+        
+        // Skip server lookup entirely during activation/refresh — all 113 parallel
+        // clarion/findFile requests queue on the server and block it for 5+ seconds.
+        // Files not found locally during refresh will resolve lazily on first user interaction.
+        if (this.activationInProgress) {
+            logger.info(`⏩ Skipping server lookup during activation: ${filename}`);
             return "";
         }
         
@@ -1711,10 +1731,33 @@ export class SolutionCache {
             const endTime = performance.now();
             logger.info(`✅ File found locally: ${fsResult} in ${(endTime - startTime).toFixed(2)}ms`);
             
-            // Cache the result
+            // Cache with source-specific key
             this.filePathCache.set(cacheKey, fsResult);
             
+            // Also cache globally (filename-only) if the file was NOT found in the source's
+            // own directory. This allows other documents referencing the same INCLUDE/MODULE
+            // to skip resolution entirely (libsrc, project files, etc.).
+            if (sourceFilePath) {
+                const sourceDir = path.dirname(sourceFilePath).toLowerCase();
+                const resultDir = path.dirname(fsResult).toLowerCase();
+                if (sourceDir !== resultDir) {
+                    this.filePathCache.set(normalizedFilename, fsResult);
+                }
+            } else {
+                this.filePathCache.set(normalizedFilename, fsResult);
+            }
+            
             return fsResult;
+        }
+
+        // Safety net: solution loaded but projects not ready yet (server still building) —
+        // skip the server request to prevent thousands of clarion/findFile requests flooding
+        // the LSP stdio pipe during startup, causing 50s+ hangs. Genuine no-solution mode
+        // (solutionInfo === null) proceeds to the server; the server has a dedicated
+        // no-solution-mode resolver that walks localDir + libsrcPaths.
+        if (this.solutionInfo && this.solutionInfo.projects.length === 0) {
+            logger.info(`⏩ [REFRESH] Skipping server lookup for ${filename} — solution loaded but not ready (0 projects)`);
+            return "";
         }
 
         // Only call the server if the client is ready
@@ -1733,9 +1776,14 @@ export class SolutionCache {
                     }, timeoutMs);
                 });
 
+                // Propagate sourceUri so the server's no-solution-mode resolver can compute
+                // localDir = dirname(sourceUri). Solution-loaded callers don't depend on it but
+                // sending it is harmless; the server param is optional.
+                const sourceUri = sourceFilePath ? Uri.file(sourceFilePath).toString() : undefined;
+
                 // Race between the actual request and the timeout
                 const result = await Promise.race([
-                    this.client.sendRequest<{ path: string, source: string }>('clarion/findFile', { filename }),
+                    this.client.sendRequest<{ path: string, source: string }>('clarion/findFile', { filename, sourceUri }),
                     timeoutPromise
                 ]);
 
@@ -1776,6 +1824,8 @@ export class SolutionCache {
 
         const endTime = performance.now();
         logger.info(`❌ File '${filename}' not found. (${(endTime - startTime).toFixed(2)}ms)`);
+        // Cache the negative result to avoid repeated server calls for the same unresolvable file
+        this.filePathCache.set(cacheKey, "");
         return "";
     }
     
@@ -1802,6 +1852,13 @@ export class SolutionCache {
                 logger.info(`✅ File found in same directory as source: ${localPath}`);
                 return localPath;
             }
+        }
+
+        // During activation/refresh skip the expensive 40-project loop and libsrc scan.
+        // Return "" so findFileWithExtension also skips the server call (checked separately).
+        // Files resolve lazily on first user interaction after startup.
+        if (this.activationInProgress) {
+            return "";
         }
         
         // Try in solution directory
@@ -1833,17 +1890,25 @@ export class SolutionCache {
                     return libsrcPath;
                 }
             }
-            
-            // Try using the RedirectionService with the solution directory
-            const solutionResolver = redirectionService.getResolver(solutionDir);
-            const solutionResolvedPath = solutionResolver(filename);
-            
-            if (solutionResolvedPath && fs.existsSync(solutionResolvedPath)) {
-                logger.info(`✅ File found via RedirectionService (solution): ${solutionResolvedPath}`);
-                return solutionResolvedPath;
+        }
+
+        // Check Clarion libsrc paths BEFORE scanning all projects.
+        // Standard library files (EQUATES.CLW, etc.) live in libsrc and are never in
+        // project directories. Checking 40 projects × N files first costs thousands of
+        // fs.existsSync() calls (~1-2ms each on Windows) before reaching the result.
+        // Project-specific files are caught by the same-dir and solution-dir checks above,
+        // and by the per-project loop below for redirection-mapped files.
+        const libsrcPaths = globalSettings.libsrcPaths;
+        if (libsrcPaths?.length) {
+            for (const libsrcDir of libsrcPaths) {
+                const libsrcFilePath = path.join(libsrcDir, filename);
+                if (fs.existsSync(libsrcFilePath)) {
+                    logger.info(`✅ File found in libsrc path: ${libsrcFilePath}`);
+                    return libsrcFilePath;
+                }
             }
         }
-        
+
         // Try in each project directory
         if (this.solutionInfo) {
             for (const project of this.solutionInfo.projects) {
@@ -1851,15 +1916,6 @@ export class SolutionCache {
                 if (fs.existsSync(projectPath)) {
                     logger.info(`✅ File found in project directory: ${projectPath}`);
                     return projectPath;
-                }
-                
-                // Use the RedirectionService to resolve the file
-                const resolver = redirectionService.getResolver(project.path);
-                const resolvedPath = resolver(filename);
-                
-                if (resolvedPath && fs.existsSync(resolvedPath)) {
-                    logger.info(`✅ File found via RedirectionService (project): ${resolvedPath}`);
-                    return resolvedPath;
                 }
             }
         }

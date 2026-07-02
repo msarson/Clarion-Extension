@@ -1,0 +1,622 @@
+import { CompletionItem, CompletionItemKind } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
+import { Position } from 'vscode-languageserver';
+import * as fs from 'fs';
+import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
+import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { TokenHelper } from '../utils/TokenHelper';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
+import { DataTypeService } from '../utils/DataTypeService';
+import { ControlService } from '../utils/ControlService';
+import { AttributeService } from '../utils/AttributeService';
+import LoggerManager from '../logger';
+
+const logger = LoggerManager.getLogger("WordCompletionProvider");
+logger.setLevel("error");
+
+/**
+ * Provides general word/identifier completion for Clarion.
+ *
+ * Called when the user types a partial identifier (no dot trigger).
+ * Surfaces in-scope symbols at the cursor position:
+ *   - Callable procedures: local MAP, module-level MAP, PROGRAM-file MAP, file GlobalProcedures
+ *   - Variables/Labels: procedure-local data section, routine sees parent procedure data section,
+ *     MethodImplementation sees enclosing GlobalProcedure data section, global labels
+ *   - Parameters: parsed from the PROCEDURE(...) signature
+ *   - Constants/equates
+ *
+ * MAP INCLUDE file procedures are resolved via ScopeAnalyzer.getMapTokensWithIncludes.
+ */
+export class WordCompletionProvider {
+    private tokenCache: TokenCache;
+    private scopeAnalyzer: ScopeAnalyzer;
+    private builtinService = BuiltinFunctionService.getInstance();
+    private dataTypeService = DataTypeService.getInstance();
+    private controlService = ControlService.getInstance();
+    private attributeService = AttributeService.getInstance();
+
+    constructor(tokenCache: TokenCache, scopeAnalyzer: ScopeAnalyzer) {
+        this.tokenCache = tokenCache;
+        this.scopeAnalyzer = scopeAnalyzer;
+    }
+
+    /**
+     * Returns completion candidates for the word prefix at the cursor position.
+     * @param document The active document
+     * @param position Cursor position (post-character)
+     * @param partial Word fragment already typed (empty = show all)
+     */
+    async provide(document: TextDocument, position: Position, partial: string): Promise<CompletionItem[]> {
+        try {
+            const tokens = this.tokenCache.getTokens(document);
+            if (!tokens || tokens.length === 0) return [];
+
+            const scope = this.scopeAnalyzer.getTokenScope(document, position);
+
+            // Build a set of lines that have a PROCEDURE or ROUTINE keyword on them.
+            // Label tokens on these lines are the procedure/routine *names*, not variables.
+            const procDeclLines = new Set<number>();
+            for (const t of tokens) {
+                if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
+                    procDeclLines.add(t.line);
+                }
+            }
+
+            // Accumulated candidates: key = uppercase label, value = CompletionItem.
+            // One item per label; for overloaded procedures/methods the detail field
+            // accumulates all signatures so users see every variant at completion
+            // time (#125 — Mark's "present all" framing; no args typed yet so no
+            // arg-classification possible).
+            const seen = new Map<string, CompletionItem>();
+
+            const isOverloadable = (k?: CompletionItemKind): boolean =>
+                k === CompletionItemKind.Function || k === CompletionItemKind.Method;
+
+            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => {
+                const key = label.toUpperCase();
+                if (!seen.has(key)) {
+                    const item: CompletionItem = { label, kind };
+                    if (detail) item.detail = detail;
+                    if (documentation) item.documentation = documentation;
+                    seen.set(key, item);
+                    return;
+                }
+                const existing = seen.get(key)!;
+                if (detail && existing.detail && isOverloadable(kind) && isOverloadable(existing.kind)
+                    && !existing.detail.split('\n').includes(detail)) {
+                    existing.detail = `${existing.detail}\n${detail}`;
+                } else if (detail && !existing.detail) {
+                    existing.detail = detail;
+                }
+                if (documentation && !existing.documentation) existing.documentation = documentation;
+            };
+
+            // ----------------------------------------------------------------
+            // A. Callable procedures
+            // ----------------------------------------------------------------
+            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
+
+            // ----------------------------------------------------------------
+            // B. Equates — must run before variables so user EQUATEs land as
+            //    CompletionItemKind.Constant rather than the bare Variable
+            //    entry that collectVariables would otherwise produce.
+            // ----------------------------------------------------------------
+            this.collectEquates(document, tokens, add);
+
+            // ----------------------------------------------------------------
+            // C. Variables / Labels
+            // ----------------------------------------------------------------
+            this.collectVariables(tokens, scope, procDeclLines, add);
+
+            // ----------------------------------------------------------------
+            // D. Parameters from PROCEDURE(...) signature
+            // ----------------------------------------------------------------
+            if (scope?.containingProcedure) {
+                this.collectParameters(document, scope.containingProcedure, add);
+            }
+            // If inside a routine, also collect parent procedure parameters
+            if (scope?.containingRoutine && scope.containingProcedure) {
+                this.collectParameters(document, scope.containingProcedure, add);
+            }
+
+            // ----------------------------------------------------------------
+            // E. Container structures (WINDOW, APPLICATION, REPORT) + controls
+            // — collected before keywords so richer JSON entries take priority
+            // ----------------------------------------------------------------
+            this.collectControls(seen);
+
+            // ----------------------------------------------------------------
+            // E2. Attributes — context-aware: filter by control/structure type
+            // ----------------------------------------------------------------
+            this.collectAttributes(document, position, seen);
+
+            // ----------------------------------------------------------------
+            // F. Language keywords (skipped if already in seen from JSON)
+            // ----------------------------------------------------------------
+            this.collectKeywords(seen);
+
+            // ----------------------------------------------------------------
+            // G. Built-in functions (from clarion-builtins.json)
+            // ----------------------------------------------------------------
+            this.collectBuiltins(seen);
+
+            // ----------------------------------------------------------------
+            // H. Data types (from clarion-datatypes.json)
+            // ----------------------------------------------------------------
+            this.collectDataTypes(seen);
+
+            // ----------------------------------------------------------------
+            // Filter by prefix
+            // ----------------------------------------------------------------
+            if (!partial) return Array.from(seen.values());
+            const up = partial.toUpperCase();
+            return Array.from(seen.values()).filter(c => (c.label as string).toUpperCase().startsWith(up));
+
+        } catch (err) {
+            logger.error(`WordCompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
+            return [];
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // A. Procedures
+    // -------------------------------------------------------------------------
+
+    private async collectProcedures(
+        tokens: Token[],
+        document: TextDocument,
+        containingProc: Token | undefined,
+        containingRoutine: Token | undefined,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): Promise<void> {
+        this.collectProceduresFromTokens(tokens, document, document, containingProc, add);
+
+        // Use FileRelationshipGraph to find the PROGRAM file for this MEMBER file.
+        // All procedures declared in ANY MODULE in the program's MAP are globally
+        // accessible — the module/DLL name is irrelevant for completion purposes.
+        const graph = FileRelationshipGraph.getInstance();
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programPath = graph.isBuilt
+            ? graph.getProgramFile(currentPath)
+            : this.getProgramFileFromTokens(tokens);  // fallback while graph is building
+
+        if (programPath) {
+            const result = this.getTokensForFile(programPath);
+            if (result && result.tokens.length > 0) {
+                this.collectProceduresFromTokens(result.tokens, result.doc, document, undefined, add);
+            }
+        }
+    }
+
+    /**
+     * Fallback: find program file path by scanning MEMBER token in current file tokens.
+     * Used only while the FileRelationshipGraph is still building.
+     */
+    private getProgramFileFromTokens(tokens: Token[]): string | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
+        )?.referencedFile;
+    }
+
+    /**
+     * Get tokens for a file path — from TokenCache if available, otherwise read from disk.
+     */
+    private getTokensForFile(filePath: string): { tokens: Token[], doc: TextDocument } | null {
+        const uri = 'file:///' + filePath.replace(/\\/g, '/');
+        const cached = this.tokenCache.getTokensByUri(uri) ?? this.tokenCache.getTokensByUri(uri.toLowerCase());
+        if (cached && cached.length > 0) {
+            // Build a minimal doc just for line-text lookups (text comes from cache)
+            const text = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentText(uri.toLowerCase()) ?? '';
+            const doc = TextDocument.create(uri, 'clarion', 1, text);
+            return { tokens: cached, doc };
+        }
+
+        try {
+            if (!fs.existsSync(filePath)) return null;
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const doc = TextDocument.create(uri, 'clarion', 1, content);
+            return { tokens: this.tokenCache.getTokens(doc), doc };
+        } catch {
+            return null;
+        }
+    }
+
+    private collectProceduresFromTokens(
+        tokens: Token[],
+        sourceDoc: TextDocument,
+        currentDoc: TextDocument,
+        containingProc: Token | undefined,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): void {
+        // Find all MAP tokens
+        const mapTokens = tokens.filter(t =>
+            t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP'
+        );
+
+        for (const mapToken of mapTokens) {
+            const isLocalMap = mapToken.parent !== undefined &&
+                TokenHelper.isProcedureOrFunction(mapToken.parent) &&
+                (mapToken.parent.subType === TokenType.GlobalProcedure ||
+                 mapToken.parent.subType === TokenType.MethodImplementation);
+
+            if (isLocalMap) {
+                // Only include local MAP procedures if cursor is inside the owning procedure
+                if (!containingProc || mapToken.parent!.line !== containingProc.line) continue;
+            }
+
+            // Collect MapProcedure tokens from this MAP (including INCLUDE'd MAPs)
+            const mapContent = this.scopeAnalyzer.getMapTokensWithIncludes(mapToken, currentDoc, tokens);
+            for (const t of mapContent) {
+                if (t.subType === TokenType.MapProcedure && t.label) {
+                    const info = this.extractProcedureInfo(t, sourceDoc);
+                    add(t.label, CompletionItemKind.Function, info.detail, info.documentation);
+                }
+            }
+        }
+
+        // GlobalProcedure labels in the same file
+        for (const t of tokens) {
+            if (t.subType === TokenType.GlobalProcedure && t.label) {
+                const info = this.extractProcedureInfo(t, sourceDoc);
+                add(t.label, CompletionItemKind.Function, info.detail, info.documentation);
+            }
+        }
+
+        // Class member methods (MethodDeclaration subType) — surfaces class methods
+        // for completion alongside MAP procedures + globals. Detail field accumulates
+        // overload signatures via the `add` lambda's overload-aware merge (#125).
+        for (const t of tokens) {
+            if (t.subType === TokenType.MethodDeclaration && t.label) {
+                const info = this.extractProcedureInfo(t, sourceDoc);
+                add(t.label, CompletionItemKind.Method, info.detail, info.documentation);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // B. Variables / Labels
+    // -------------------------------------------------------------------------
+
+    private collectVariables(
+        tokens: Token[],
+        scope: ReturnType<ScopeAnalyzer['getTokenScope']>,
+        procDeclLines: Set<number>,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const isLabel = (t: Token) =>
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.start === 0 &&
+            !t.isStructureField &&
+            (!t.parent || t.parent.type !== TokenType.Structure) &&
+            !procDeclLines.has(t.line);
+
+        if (!scope) return;
+
+        const containingProc = scope.containingProcedure;
+        const containingRoutine = scope.containingRoutine;
+
+        if (containingRoutine) {
+            // Routine-local data section
+            const routineEnd = containingRoutine.executionMarker?.line ?? containingRoutine.finishesAt ?? Number.MAX_SAFE_INTEGER;
+            for (const t of tokens) {
+                if (isLabel(t) && t.line > containingRoutine.line && t.line < routineEnd) {
+                    add(t.value, CompletionItemKind.Variable, t.type === TokenType.Variable ? 'variable' : undefined);
+                }
+            }
+
+            // Routines also see parent procedure locals (Clarion scope rule)
+            if (containingProc) {
+                this.collectProcLocals(tokens, containingProc, procDeclLines, add);
+            }
+            // And file-level globals/equates
+            this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+            return;
+        }
+
+        if (containingProc) {
+            // Determine if cursor is inside a local MethodImplementation
+            const isInMethodImpl = scope.containingProcedure?.subType === TokenType.MethodImplementation;
+
+            this.collectProcLocals(tokens, containingProc, procDeclLines, add);
+
+            // MethodImplementation shares the enclosing GlobalProcedure's locals
+            if (isInMethodImpl) {
+                for (const t of tokens) {
+                    if (
+                        t.subType === TokenType.GlobalProcedure &&
+                        t.finishesAt !== undefined &&
+                        containingProc.line >= t.line &&
+                        containingProc.line <= t.finishesAt
+                    ) {
+                        this.collectProcLocals(tokens, t, procDeclLines, add);
+                        break;
+                    }
+                }
+            }
+
+            // Also collect file-level labels (global equates, constants declared before first proc)
+            this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+            return;
+        }
+
+        // Global scope: collect Label tokens before the first procedure
+        this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+    }
+
+    /** Collect Label tokens before the first procedure (file-level equates, constants, globals). */
+    private collectGlobalLabels(
+        tokens: Token[],
+        procDeclLines: Set<number>,
+        isLabel: (t: Token) => boolean,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const firstProcLine = tokens.find(t =>
+            TokenHelper.isProcedureOrFunction(t) &&
+            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)
+        )?.line ?? Number.MAX_SAFE_INTEGER;
+
+        for (const t of tokens) {
+            if (isLabel(t) && t.line < firstProcLine) {
+                add(t.value, CompletionItemKind.Variable);
+            }
+        }
+    }
+
+    /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */
+    private collectProcLocals(
+        tokens: Token[],
+        proc: Token,
+        procDeclLines: Set<number>,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const codeMarkerLine = proc.executionMarker?.line ?? proc.finishesAt ?? Number.MAX_SAFE_INTEGER;
+
+        for (const t of tokens) {
+            if (
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.start === 0 &&
+                !t.isStructureField &&
+                (!t.parent || t.parent.type !== TokenType.Structure) &&
+                !procDeclLines.has(t.line) &&
+                t.line > proc.line &&
+                t.line < codeMarkerLine
+            ) {
+                add(t.value, CompletionItemKind.Variable);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C. Parameters
+    // -------------------------------------------------------------------------
+
+    private collectParameters(
+        document: TextDocument,
+        proc: Token,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        // Logical-line view from DocumentStructure (Gap P) — handles multi-line
+        // procedure signatures joined by `|` continuation, strips inline `!`-
+        // comments, and gives us a single string suitable for regex parsing
+        // without re-implementing the join in this provider.
+        const logical = this.tokenCache.getStructure(document).getLogicalLine(proc.line);
+        const procLineText = logical?.joinedText ?? document.getText({
+            start: { line: proc.line, character: 0 },
+            end: { line: proc.line, character: 2000 }
+        });
+
+        const parenOpen = procLineText.indexOf('(');
+        const parenClose = procLineText.indexOf(')', parenOpen);
+        if (parenOpen === -1 || parenClose === -1) return;
+
+        const paramString = procLineText.slice(parenOpen + 1, parenClose);
+        if (!paramString.trim()) return;
+
+        for (const param of paramString.split(',')) {
+            const stripped = param.trim().replace(/^<(.*)>$/, '$1').trim();
+            // Match: [*&]? TYPE NAME [= default]
+            const m = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
+            if (m) {
+                const paramName = m[2];
+                const paramType = m[1].trim();
+                add(paramName, CompletionItemKind.Variable, `parameter: ${paramType}`);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E2. Attributes
+    // -------------------------------------------------------------------------
+
+    private collectAttributes(document: TextDocument, position: Position, seen: Map<string, CompletionItem>): void {
+        const docStructure = this.tokenCache.getStructure(document);
+        const ctx = docStructure.getControlContextAt(position.line, position.character);
+
+        let attrs;
+        if (ctx.controlType) {
+            // Inside a control declaration — combine control-specific and generic CONTROL attrs
+            const specific = this.attributeService.getAttributesForContext(ctx.controlType);
+            const generic = this.attributeService.getAttributesForContext('CONTROL');
+            const combined = new Map<string, (typeof specific)[0]>();
+            for (const a of [...specific, ...generic]) combined.set(a.name.toUpperCase(), a);
+            attrs = Array.from(combined.values());
+        } else if (ctx.structureType) {
+            attrs = this.attributeService.getAttributesForContext(ctx.structureType);
+        } else {
+            attrs = this.attributeService.getAllAttributes();
+        }
+
+        for (const attr of attrs) {
+            const key = attr.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: attr.name,
+                    kind: CompletionItemKind.Property,
+                    detail: this.attributeService.getAttributeSignature(attr.name),
+                    documentation: attr.description,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // F. Built-in functions
+    // -------------------------------------------------------------------------
+
+    private collectBuiltins(seen: Map<string, CompletionItem>): void {
+        for (const name of this.builtinService.getAllBuiltinNames()) {
+            const key = name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: name,
+                    kind: CompletionItemKind.Function,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // G. Data types
+    // -------------------------------------------------------------------------
+
+    private collectDataTypes(seen: Map<string, CompletionItem>): void {
+        for (const dt of this.dataTypeService.getAllDataTypes()) {
+            const key = dt.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: dt.name,
+                    kind: CompletionItemKind.TypeParameter,
+                    detail: dt.description,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // H. Window / report controls
+    // -------------------------------------------------------------------------
+
+    private collectControls(seen: Map<string, CompletionItem>): void {
+        for (const ctrl of [
+            ...this.controlService.getAllContainerStructures(),
+            ...this.controlService.getAllWindowControls(),
+            ...this.controlService.getAllReportControls(),
+        ]) {
+            const key = ctrl.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: ctrl.name,
+                    kind: CompletionItemKind.Keyword,
+                    detail: ctrl.description,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E. Language keywords
+    // -------------------------------------------------------------------------
+
+    /**
+     * Block-structure keywords that always require a matching END.
+     * These get a snippet that places END on the next line so the user
+     * doesn't have to type it — but nothing else is presumed.
+     */
+    private static readonly BLOCK_STRUCTURES = new Set([
+        'ACCEPT', 'APPLICATION', 'BEGIN', 'CASE', 'CLASS', 'DETAIL',
+        'EXECUTE', 'FILE', 'FOOTER', 'FORM', 'GROUP', 'HEADER',
+        'IF', 'INTERFACE', 'ITEMIZE', 'JOIN', 'LOOP', 'MAP',
+        'MENU', 'MENUBAR', 'MODULE', 'OLE', 'OPTION', 'QUEUE',
+        'RECORD', 'REPORT', 'SECTION', 'SHEET', 'TAB', 'TOOLBAR',
+        'VIEW', 'WINDOW',
+    ]);
+
+    /** Single-line keywords — no auto-insertion beyond the word itself. */
+    private static readonly PLAIN_KEYWORDS = [
+        'BREAK', 'CYCLE', 'EXIT', 'RETURN',
+        'CODE', 'DATA',
+        'ELSE', 'ELSIF', 'OF', 'OROF', 'THEN', 'TIMES',
+        'UNTIL', 'WHILE',
+        'AND', 'NOT', 'OR', 'XOR',
+        'NEW', 'PARENT', 'SELF',
+    ];
+
+    private collectKeywords(seen: Map<string, CompletionItem>): void {
+        for (const kw of WordCompletionProvider.BLOCK_STRUCTURES) {
+            if (!seen.has(kw)) {
+                seen.set(kw, {
+                    label: kw,
+                    kind: CompletionItemKind.Keyword,
+                });
+            }
+        }
+        for (const kw of WordCompletionProvider.PLAIN_KEYWORDS) {
+            if (!seen.has(kw)) {
+                seen.set(kw, {
+                    label: kw,
+                    kind: CompletionItemKind.Keyword,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // D. Constants / equates
+    // -------------------------------------------------------------------------
+
+    /**
+     * Surface user-defined EQUATE labels (`MyConst EQUATE(42)`) as Constant
+     * completions. These tokens are tokenized as TokenType.Label, not
+     * TokenType.Constant — the latter is the lexer's literal-value class
+     * (numeric/string literals) and is intentionally not used here.
+     */
+    private collectEquates(
+        document: TextDocument,
+        _tokens: Token[],
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): void {
+        // Single source of truth: DocumentStructure.getEquates() (Gap B).
+        // Each returned token already carries `dataValue` (Gap D) and, when the
+        // EQUATE is declared inside an ITEMIZE,PRE(...) block, `prefixedEquateName`
+        // — which is the form code actually references (`Clr:Red`).
+        const structure = this.tokenCache.getStructure(document);
+        for (const t of structure.getEquates()) {
+            const label = t.prefixedEquateName ?? t.value;
+            const detail = t.dataValue !== undefined
+                ? `EQUATE(${t.dataValue})`
+                : 'EQUATE';
+            add(label, CompletionItemKind.Constant, detail);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Extract the prototype signature and optional inline comment from the token's source line.
+     * e.g. `CalculatePercentage    FUNCTION(REAL,REAL),REAL,DLL  ! Calculate Percentage`
+     *   → { detail: 'FUNCTION(REAL,REAL),REAL,DLL', documentation: 'Calculate Percentage' }
+     */
+    private extractProcedureInfo(t: Token, sourceDoc: TextDocument): { detail: string; documentation?: string } {
+        try {
+            const lineText = sourceDoc.getText({
+                start: { line: t.line, character: 0 },
+                end: { line: t.line, character: 4000 }
+            });
+            const keyword = t.value.toUpperCase();  // 'PROCEDURE' or 'FUNCTION'
+            const kwIdx = lineText.toUpperCase().indexOf(keyword);
+            if (kwIdx === -1) return { detail: keyword };
+
+            const fromKw = lineText.slice(kwIdx);
+            const commentIdx = fromKw.indexOf('!');
+            const signature = (commentIdx !== -1 ? fromKw.slice(0, commentIdx) : fromKw).trimEnd();
+            const comment = commentIdx !== -1 ? fromKw.slice(commentIdx + 1).trim() : undefined;
+            return { detail: signature || keyword, documentation: comment || undefined };
+        } catch {
+            return { detail: t.value };
+        }
+    }
+}

@@ -3,17 +3,18 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 
 /**
- * Warns when BREAK or CYCLE appears outside a LOOP or ACCEPT structure.
+ * Warns when BREAK or CYCLE appears outside a LOOP or ACCEPT structure, and
+ * when `BREAK <Label>` / `CYCLE <Label>` targets a label that is not on an
+ * enclosing labelled LOOP/ACCEPT.
  *
  * Both LOOP and ACCEPT are valid loop constructs in Clarion:
  *   - LOOP … END  (or LOOP WHILE/UNTIL)
  *   - ACCEPT … END
  *
- * BREAK and CYCLE are valid anywhere inside either construct.
- * Labeled forms (BREAK Loop1 / CYCLE Loop1) target a specific outer loop and
- * are also valid — they are skipped here since the label itself is issue #65.
+ * Labelled targets are resolved via the labelledRanges collected from
+ * structure tokens whose `label` was set by DocumentStructure (#65).
  *
- * Closes #64
+ * Closes #64; extended for the #65 label-target follow-up.
  */
 export function validateCycleBreakOutsideLoop(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
@@ -23,6 +24,9 @@ export function validateCycleBreakOutsideLoop(tokens: Token[], document: TextDoc
     // for raw tokenizer output (test path). When undefined we fall back to a
     // manual stack scan below.
     const loopRanges: { start: number; end: number }[] = [];
+    // Labelled subset — only populated when DocumentStructure has run, since
+    // token.label depends on its handleStructureToken pass.
+    const labelledRanges: { name: string; start: number; end: number }[] = [];
 
     const hasFinishesAt = tokens.some(
         t => t.type === TokenType.Structure &&
@@ -30,12 +34,24 @@ export function validateCycleBreakOutsideLoop(tokens: Token[], document: TextDoc
              t.finishesAt !== undefined
     );
 
+    // Broader signal: did DocumentStructure run at all? Any structure or
+    // procedure with finishesAt confirms it. Used to decide whether labelled
+    // BREAK/CYCLE can be validated even in files with no LOOP/ACCEPT at all.
+    const documentStructureRan = hasFinishesAt || tokens.some(t => t.finishesAt !== undefined);
+
     if (hasFinishesAt) {
         for (const t of tokens) {
             if (t.type !== TokenType.Structure) continue;
             const val = t.value.toUpperCase();
             if ((val === 'LOOP' || val === 'ACCEPT') && t.finishesAt !== undefined) {
                 loopRanges.push({ start: t.line, end: t.finishesAt });
+                if (t.label) {
+                    labelledRanges.push({
+                        name: t.label.toUpperCase(),
+                        start: t.line,
+                        end: t.finishesAt
+                    });
+                }
             }
         }
     } else {
@@ -84,12 +100,36 @@ export function validateCycleBreakOutsideLoop(tokens: Token[], document: TextDoc
         const val = t.value.toUpperCase();
         if (val !== 'BREAK' && val !== 'CYCLE') continue;
 
-        // Skip labeled forms: `BREAK Label` / `CYCLE Label`.
-        // If the next token on the same line is a Variable or Label token it is the
-        // target label — these are covered by issue #65 and skipped here.
+        // Labelled form: `BREAK Label` / `CYCLE Label`. The next token on the
+        // same line is the target label (Variable when indented per the #65
+        // promotion path, Label when at column 0). Validate that the label
+        // resolves to an enclosing labelled LOOP/ACCEPT — otherwise warn on
+        // the label token itself.
         const next = tokens[i + 1];
-        if (next && next.line === t.line &&
-            (next.type === TokenType.Variable || next.type === TokenType.Label)) {
+        const isLabelled = next && next.line === t.line &&
+            (next.type === TokenType.Variable || next.type === TokenType.Label);
+
+        if (isLabelled) {
+            // Without DocumentStructure we have no reliable way to validate a
+            // label target — preserve the prior "skip" behaviour for the raw
+            // token fallback path.
+            if (!documentStructureRan) continue;
+
+            const target = next.value.toUpperCase();
+            const matched = labelledRanges.some(r =>
+                r.name === target && t.line >= r.start && t.line <= r.end
+            );
+            if (!matched) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: {
+                        start: { line: next.line, character: next.start },
+                        end: { line: next.line, character: next.start + next.value.length }
+                    },
+                    message: `Label '${next.value}' does not refer to an enclosing LOOP or ACCEPT.`,
+                    source: 'clarion'
+                });
+            }
             continue;
         }
 

@@ -8,6 +8,7 @@ import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationInd
 import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
@@ -142,7 +143,7 @@ export class VariableHoverResolver {
             t.line < globalScopeEndLine &&
             (t.type === TokenType.Label
                 ? t.value.toLowerCase() === searchWord.toLowerCase()
-                : (t.type === TokenType.Structure || t.type === TokenType.Procedure) && t.label?.toLowerCase() === searchWord.toLowerCase()
+                : (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) && t.label?.toLowerCase() === searchWord.toLowerCase()
             )
         );
         
@@ -226,7 +227,7 @@ export class VariableHoverResolver {
         const structure = this.tokenCache.getStructure(document);
         const isClassProperty = structure.isInClassBlock(globalVar.line);
         const isInterfaceMethod = !isClassProperty && tokens.some(t =>
-            t.type === TokenType.Procedure &&
+            TokenHelper.isProcedureOrFunction(t) &&
             (t as any).subType === TokenType.InterfaceMethod &&
             t.line === globalVar.line
         );
@@ -273,6 +274,21 @@ export class VariableHoverResolver {
                     : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
             markdown.push(`${scopeIcon} ${scopeLabel}`);
         }
+
+        // Inline declared-value summary (Gap D). Reads the structured dataType / dataValue
+        // attached by ClarionTokenizer; no re-parse of source text. EQUATE renders as
+        // `Name = value`; sized scalars render as `Name : TYPE(arg)`.
+        if (globalVar.dataType !== undefined) {
+            const summary = this.renderDeclaredValueSummary(
+                globalVar.label ?? globalVar.value,
+                globalVar.dataType,
+                globalVar.dataValue
+            );
+            if (summary) {
+                markdown.push(``);
+                markdown.push(summary);
+            }
+        }
         
         const fileName = path.basename(document.uri.replace('file:///', ''));
         const lineNumber = globalVar.line + 1;
@@ -299,6 +315,26 @@ export class VariableHoverResolver {
                 value: markdown.join('\n')
             }
         };
+    }
+
+    /**
+     * Renders a one-line markdown summary for the structured declared-value pair
+     * captured by `ClarionTokenizer.populateDeclaredValues()`. Returns the empty
+     * string when nothing useful can be shown (the heading line above already
+     * shows `Name — TYPE`, so we only add value-bearing detail).
+     */
+    private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
+        const upperType = type.toUpperCase();
+        if (value !== undefined) {
+            // EQUATE — show as a value:  **MAX_ROWS** = `100`
+            if (upperType === 'EQUATE') {
+                return `**${name}** = \`${value}\``;
+            }
+            // Sized / parameterised scalar — show full type signature: **Name** : `STRING(20)`
+            return `**${name}** : \`${upperType}(${value})\``;
+        }
+        // Bare-type declaration — heading already shows the type, nothing to add.
+        return '';
     }
 
     /**

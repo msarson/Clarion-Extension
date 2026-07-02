@@ -12,16 +12,52 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
-import { serverSettings } from '../serverSettings';
+import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
+import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { buildIncDirsToScan } from './incDirsScope';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
 
-type OverloadFilter = { minArgs: number; maxArgs: number; declarationLine: number; declarationFileNorm: string };
+/**
+ * Canonical dedup key for a reference location (#196 follow-up).
+ *
+ * The same physical file reaches FAR under two URI spellings — `file:///f%3A/…`
+ * (encoded drive colon, VS Code's canonical active-doc form) and `file:///f:/…`
+ * (un-encoded, from the manual `file:///${path}` construction used by the
+ * sourceFiles/disk-walk collectors). Keyed by the raw string they look distinct,
+ * so the same reference survives twice — which is the duplicate RenameProvider had
+ * to clean up downstream in #196. DECODE (so `%3A` → `:`) and lowercase (Windows
+ * paths are case-insensitive) before keying so both spellings collapse here, at the
+ * source, for every consumer. decodeURIComponent can throw on a malformed escape;
+ * fall back to the lowercased raw uri in that case.
+ */
+export function canonicalLocationKey(uri: string, line: number): string {
+    let normUri: string;
+    try {
+        normUri = decodeURIComponent(uri).toLowerCase();
+    } catch {
+        normUri = uri.toLowerCase();
+    }
+    return `${normUri}:${line}`;
+}
+
+type OverloadFilter = {
+    minArgs: number;
+    maxArgs: number;
+    declarationLine: number;
+    declarationFileNorm: string;
+    /** Cursor's declaration signature (line text). Plain-symbol path uses this
+     *  with `MethodOverloadResolver.signaturesMatch` for type-aware decl-on-decl
+     *  filtering (fe254d6f). Optional — dot-access path doesn't populate it; its
+     *  filter remains arity-only via minArgs/maxArgs. */
+    declSignature?: string;
+};
 
 /**
  * Provides "Find All References" for Clarion symbols.
@@ -37,6 +73,7 @@ export class ReferencesProvider {
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private memberResolver: ClassMemberResolver;
+    private overloadResolver: MethodOverloadResolver;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -44,6 +81,26 @@ export class ReferencesProvider {
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
         this.memberResolver = new ClassMemberResolver();
+        this.overloadResolver = new MethodOverloadResolver();
+    }
+
+    /**
+     * #186 — number of files to scan between event-loop yields. The reference
+     * search runs on the single LSP event loop, so a long scan (esp. when driven
+     * by the reference-count CodeLens resolving per method) would otherwise block
+     * interactive requests (hover/F12) until it finishes.
+     */
+    private static readonly FILES_PER_YIELD = 25;
+
+    /**
+     * #186 — yields the event loop every {@link FILES_PER_YIELD} files so a long
+     * reference scan interleaves with (rather than blocks) interactive requests.
+     * Call with a monotonically increasing per-loop counter.
+     */
+    private async yieldIfNeeded(scannedCount: number): Promise<void> {
+        if (scannedCount > 0 && scannedCount % ReferencesProvider.FILES_PER_YIELD === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
     }
 
     /**
@@ -104,7 +161,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`🔍 [FAR] Finding references for "${word}" at ${position.line}:${position.character} in ${path.basename(decodeURIComponent(document.uri))}`);
+        logger.test(`🔍 [FAR] Finding references for "${word}" at ${position.line}:${position.character} in ${path.basename(decodeURIComponent(document.uri))}`);
 
         // Get full line text — used for pattern-based routing before symbol resolution
         const fullLine = document.getText({
@@ -123,11 +180,11 @@ export class ReferencesProvider {
             const methEnd    = methStart + methPart.length;
 
             if (position.character >= methStart && position.character <= methEnd) {
-                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
+                logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
                 return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
             }
             if (position.character >= ifaceStart && position.character <= ifaceEnd) {
-                logger.error(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
+                logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
                 return this.provideImplementsReferences(ifacePart, document);
             }
         }
@@ -140,7 +197,7 @@ export class ReferencesProvider {
             const nameStart = implementsM.index + implementsM[0].indexOf(ifaceName);
             const nameEnd   = nameStart + ifaceName.length;
             if (position.character >= nameStart && position.character <= nameEnd) {
-                logger.error(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
+                logger.test(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceName, document);
             }
         }
@@ -168,7 +225,7 @@ export class ReferencesProvider {
             });
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
-            logger.error(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
+            logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
         }
 
@@ -195,7 +252,7 @@ export class ReferencesProvider {
                     end: { line: classToken.line, character: 999 }
                 }) : '';
                 if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
-                    logger.error(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
+                    logger.test(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
                     return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
                 }
             }
@@ -210,7 +267,7 @@ export class ReferencesProvider {
             t.finishesAt >= position.line
         );
         if (enclosingInterface) {
-            logger.error(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
+            logger.test(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
             return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
         }
 
@@ -226,7 +283,7 @@ export class ReferencesProvider {
         if (ifaceDeclToken && ifaceDeclToken.label) {
             const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
             if (word.toLowerCase() === ifaceLabelLower) {
-                logger.error(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
+                logger.test(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
                 return this.provideImplementsReferences(ifaceDeclToken.label, document);
             }
         }
@@ -246,7 +303,13 @@ export class ReferencesProvider {
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
 
-        logger.error(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
+        // Build OverloadFilter for procedure / method declarations to distinguish
+        // overloads (fe254d6f). When the cursor is on an overloaded procedure decl,
+        // sibling decls + impls with non-matching signatures are filtered from the
+        // result. Type-aware via `MethodOverloadResolver.signaturesMatch` (5f7478dc).
+        const overloadFilter = this.buildPlainSymbolOverloadFilter(symbolInfo, document);
+
+        logger.test(`[FAR] Plain symbol "${searchWord}" — scope: ${symbolInfo.scope.type}, declared at ${path.basename(decodeURIComponent(symbolInfo.location.uri))}:${symbolInfo.location.line}`);
 
         // When the declaration is in a MEMBER file, also walk MAP INCLUDE files to find
         // the MODULE declaration (e.g. startproc.inc) and add it to the search list.
@@ -262,7 +325,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`[FAR] Searching ${filesToSearch.length} file(s) for "${searchWord}":\n` +
+        logger.test(`[FAR] Searching ${filesToSearch.length} file(s) for "${searchWord}":\n` +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
         // For structure field scope, collect all PRE prefixes that map to this field
@@ -285,12 +348,14 @@ export class ReferencesProvider {
                 t.type === TokenType.Structure &&
                 t.subType === TokenType.Class
             );
+        let ycPlain = 0;
         for (const fileUri of filesToSearch) {
-            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl);
+            await this.yieldIfNeeded(ycPlain++);
+            const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
 
-        logger.error(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
+        logger.test(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -346,15 +411,14 @@ export class ReferencesProvider {
             }
         }
 
-        // Scan LibSrc INC files for:
+        // Scan `.inc` files via the canonical 3-layer chain (sibling +
+        // RED-derived dirs from each project + libsrc) for:
         //   (a) classes that IMPLEMENTS(ifaceName) with a MODULE declaration → add those CLW files
         //   (b) the INC that DECLARES the interface itself (ifaceName INTERFACE) → add that INC
         // This covers both: starting from the interface declaration AND starting from an implementation.
+        // RED-derived layer added by 8f1965c3 (audit follow-up Q1).
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const dirsToScan = new Set<string>([path.dirname(currentFilePath).toLowerCase()]);
-        for (const lp of (serverSettings.libsrcPaths ?? [])) {
-            if (lp) dirsToScan.add(lp.toLowerCase());
-        }
+        const dirsToScan = buildIncDirsToScan(currentFilePath, sm);
         const implementsRe = new RegExp(`\\bIMPLEMENTS\\s*\\(\\s*${ifaceName}\\s*\\)`, 'i');
         const ifaceDeclRe  = new RegExp(`^[ \\t]*${ifaceName}[ \\t]+INTERFACE\\b`, 'im');
         for (const dir of dirsToScan) {
@@ -375,7 +439,7 @@ export class ReferencesProvider {
                         const resolved = this.resolveModuleFile(m[1], incUri);
                         if (resolved && !filesToSearch.includes(resolved)) {
                             filesToSearch.push(resolved);
-                            logger.error(`[FAR] Found implementor via LibSrc scan: ${path.basename(decodeURIComponent(resolved))} (from ${fname})`);
+                            logger.test(`[FAR] Found implementor via LibSrc scan: ${path.basename(decodeURIComponent(resolved))} (from ${fname})`);
                         }
                     }
                 }
@@ -383,19 +447,21 @@ export class ReferencesProvider {
                 // (b) INTERFACE declaration — add the INC itself so the InterfaceMethod token is found
                 if (!filesToSearch.includes(incUri) && ifaceDeclRe.test(incContent)) {
                     filesToSearch.push(incUri);
-                    logger.error(`[FAR] Found interface declaration in: ${fname}`);
+                    logger.test(`[FAR] Found interface declaration in: ${fname}`);
                 }
             }
         }
 
-        logger.error(`[FAR] Interface method "${methodName}" (${ifaceName}) — searching ${filesToSearch.length} file(s)` +
+        logger.test(`[FAR] Interface method "${methodName}" (${ifaceName}) — searching ${filesToSearch.length} file(s)` +
             (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution — using current file + MODULE fallback]') + ':\n' +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
         // Pre-build set of class names that implement this interface, per-file (keyed by fileUri)
         // so MethodDeclaration filtering is fast and accurate.
         const implementingClassesByFile = new Map<string, Set<string>>();
+        let ycIfaceMap = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceMap++);
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const fileContent = fileUri === document.uri
@@ -418,7 +484,9 @@ export class ReferencesProvider {
             implementingClassesByFile.set(fileUri, implementors);
         }
 
+        let ycIfaceScan = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceScan++);
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -464,10 +532,12 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
+        logger.test(`✅ [FAR] Interface method "${methodName}" — ${locations.length} reference(s) found`);
 
         // ── Call sites: varName.MethodName() where varName &IfaceName ──
+        let ycIfaceCall = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycIfaceCall++);
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const varNames = this.collectInterfaceVarNames(ft, ifaceName);
@@ -477,16 +547,17 @@ export class ReferencesProvider {
             }
         }
 
-        // Deduplicate by uri+line
+        // Deduplicate by uri+line — canonicalize the uri so mixed encodings
+        // (file:///f%3A/… vs file:///f:/…) for the same file collapse (#196).
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = `${loc.uri}:${loc.range.start.line}`;
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
         });
 
-        logger.error(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
+        logger.test(`✅ [FAR] Interface method "${methodName}" — ${deduped.length} reference(s) after call-site scan`);
         return deduped.length > 0 ? deduped : null;
     }
 
@@ -514,11 +585,13 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`[FAR] IMPLEMENTS("${ifaceName}") — searching ${filesToSearch.length} file(s)` +
+        logger.test(`[FAR] IMPLEMENTS("${ifaceName}") — searching ${filesToSearch.length} file(s)` +
             (sm?.solution?.projects?.length ? ` [solution: ${sm.solution.projects.length} project(s)]` : ' [no solution]') + ':\n' +
             filesToSearch.map(f => `  ${path.basename(decodeURIComponent(f))}`).join('\n'));
 
+        let ycImpl = 0;
         for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycImpl++);
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -561,7 +634,7 @@ export class ReferencesProvider {
             }
         }
 
-        logger.error(`✅ [FAR] IMPLEMENTS "${ifaceName}" — ${locations.length} reference(s) found`);
+        logger.test(`✅ [FAR] IMPLEMENTS "${ifaceName}" — ${locations.length} reference(s) found`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -712,43 +785,114 @@ export class ReferencesProvider {
         }
 
         // When a CLASS is declared in the current document with no MODULE attribute,
-        // all implementations are in the same file — searching the entire solution
-        // would scan thousands of files and hang indefinitely on large solutions.
+        // all implementations are in the same file — but cross-procedure callers
+        // can live in sibling MEMBER files. Restricting to `[document.uri]` blocks
+        // those callers (Eve test 2 RED). Widening to all project files would scan
+        // thousands of files and hang on large solutions.
+        //
+        // P2b track-(a) fix (task 10ea5a80): use FRG to widen to MEMBER siblings
+        // (and reverse-includes) when available; fall through to project scan only
+        // when FRG is empty (test fixtures without graph setup).
         const isLocalClass = !effectiveModuleFile && !!className &&
             this.isClassDeclaredInDocument(className, document);
         if (isLocalClass) {
-            logger.error(`📌 [FAR] "${className}" is a local class — restricting search to current file`);
+            logger.test(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
         }
 
         const filesToSearch = isLocalClass
-            ? [document.uri]
+            ? this.getLocalClassSearchFiles(document)
             : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
-        // Build overload filter: use the matched declaration to determine which arg-count range to accept
+        // Build overload filter: capture both arity range AND cursor decl signature.
+        // - arity range: used by call-site filters (existing behavior pre-fe254d6f).
+        // - declSignature: used for type-aware decl-on-decl filtering via
+        //   `MethodOverloadResolver.signaturesMatch` (fe254d6f Phase A B-extension).
+        //
+        // Resolution order:
+        //   1. Use resolved declarationFile + declarationLine when available (existing path).
+        //   2. Fallback: when class-body cursor route is taken and declarationFile didn't
+        //      resolve (findClassMemberInfo failed), use the cursor's own document + position
+        //      line — the cursor IS on the decl in the class-body route.
         let overloadFilter: OverloadFilter | undefined;
+        let filterDeclFile: string | null = null;
+        let filterDeclLine: number = -1;
         if (declarationFile && declarationLine >= 0) {
-            const declLineText = ClassMemberResolver.getDeclarationLineText(declarationFile, declarationLine);
-            if (declLineText && /PROCEDURE/i.test(declLineText)) {
+            filterDeclFile = declarationFile;
+            filterDeclLine = declarationLine;
+        } else if (knownClassName) {
+            // Class-body / MethodImpl-of-local-class fallback — cursor IS the decl.
+            filterDeclFile = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            filterDeclLine = position.line;
+        }
+        if (filterDeclFile && filterDeclLine >= 0) {
+            // filterDeclFile may arrive as FS-path (legacy paths) OR URI form (synthesized
+            // info from `findMemberInDocumentTokens`). Normalize once for comparisons.
+            const declHasUriPrefix = /^file:\/\/\//i.test(filterDeclFile);
+            const filterDeclFsPath = declHasUriPrefix
+                ? decodeURIComponent(filterDeclFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+                : filterDeclFile;
+            const filterDeclUri = declHasUriPrefix
+                ? filterDeclFile
+                : 'file:///' + filterDeclFile.replace(/\\/g, '/');
+            const declFileNorm = filterDeclFsPath.replace(/\\/g, '/').toLowerCase();
+
+            // Try in-memory document text first if cursor file matches; then check TokenCache
+            // for cross-file in-memory documents (cursor in MEMBER, decl in PROGRAM file —
+            // 671d7cd8 cross-file path); fall back to disk for production-loaded files.
+            let declLineText: string | null = null;
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''));
+            if (docFsPath.replace(/\\/g, '/').toLowerCase() === declFileNorm) {
+                declLineText = document.getText().split(/\r?\n/)[filterDeclLine] ?? null;
+            }
+            if (!declLineText) {
+                // Cross-file in-memory case (e.g. caller-cursor in MEMBER, decl in PROGRAM).
+                // TokenCache caches documentText for any open buffer; case-insensitive lookup
+                // bridges FRG-lowercased vs original-case URIs.
+                const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(filterDeclUri);
+                if (cachedText) {
+                    declLineText = cachedText.split(/\r?\n/)[filterDeclLine] ?? null;
+                }
+            }
+            if (!declLineText) {
+                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFsPath, filterDeclLine);
+            }
+            if (declLineText && /\bPROCEDURE\b/i.test(declLineText)) {
                 const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
                 const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
                 const minArgs = maxArgs - defaultCount;
                 overloadFilter = {
                     minArgs,
                     maxArgs,
-                    declarationLine,
-                    declarationFileNorm: declarationFile.toLowerCase()
+                    declarationLine: filterDeclLine,
+                    declarationFileNorm: filterDeclFile.toLowerCase(),
+                    declSignature: declLineText.trim()
                 };
-                logger.info(`🎯 Overload filter: args ${minArgs}–${maxArgs} (decl at line ${declarationLine} in ${declarationFile.split('/').pop()})`);
+                logger.info(`🎯 Overload filter: args ${minArgs}–${maxArgs}, sig="${overloadFilter.declSignature}" (decl at line ${filterDeclLine})`);
             }
         }
+
+        // P2b track-(b): gather all sibling overload signatures for type-aware
+        // call-site overload picking inside the matching loop. Empty / single-entry
+        // means no type-aware filtering needed (matching loop short-circuits).
+        const candidateOverloads = (className && filterDeclFile)
+            ? this.gatherClassMemberOverloads(className, memberName, filterDeclFile, document)
+            : [];
 
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const classFamily = className
             ? this.buildClassFamily(className, filesToSearch)
             : undefined;
+
+        // Phase B+ Tier 6 — load global scope from PROGRAM file via FRG so the
+        // matching loop can resolve receivers declared at PROGRAM level. Loaded
+        // ONCE per match and shared across every file in `filesToSearch`. Empty
+        // map when there's no resolvable PROGRAM file (e.g. cursor file IS the
+        // PROGRAM, or FRG not built — module scope of cursor file then carries
+        // anything the global lookup would have caught anyway).
+        const globalScope = this.loadGlobalScopeForCursor(document) ?? undefined;
 
         // --- Scan files for member usages --------------------------------
         const locations: Location[] = [];
@@ -767,8 +911,21 @@ export class ReferencesProvider {
                 Range.create(declarationLine, col, declarationLine, col + memberLen)));
         }
 
-        for (const fileUri of filesToSearch) {
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration);
+        // Dedup filesToSearch case-insensitively — multiple sources may contribute the same
+        // file with different case (FRG-lowercased + project-scan original-case). Prefer the
+        // first occurrence so cursor's-document URI wins when present.
+        const filesToSearchDeduped: string[] = [];
+        const seenLowerUris = new Set<string>();
+        for (const f of filesToSearch) {
+            const lower = f.toLowerCase();
+            if (seenLowerUris.has(lower)) continue;
+            seenLowerUris.add(lower);
+            filesToSearchDeduped.push(f);
+        }
+        let ycMember = 0;
+        for (const fileUri of filesToSearchDeduped) {
+            await this.yieldIfNeeded(ycMember++);
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
 
@@ -781,10 +938,13 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
-        // Deduplicate by uri+line (declaration may be found both by direct injection and scanner)
+        // Deduplicate by uri+line. Canonicalize the uri (decode + lowercase) so the
+        // same file in different case OR encoding shapes — FRG-derived (encoded) vs
+        // project-scan-derived (un-encoded file:///f:/…) — collapses (#196). A prior
+        // version lowercased but did NOT decode, so f%3a ≠ f: still slipped through.
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = `${loc.uri}:${loc.range.start.line}`;
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -795,6 +955,17 @@ export class ReferencesProvider {
     /**
      * Tier 2: resolve `variableName.memberName` by looking up the variable's declared type.
      * e.g. `mgr &ViewManager` → type=ViewManager → find `memberName` in ViewManager.
+     *
+     * 0c289e16 Phase B — REWIRED to consume the substrate from `10ea5a80` + `9142af9f`.
+     * Pre-rewire, this used `symbolFinder.findSymbol` + `extractClassName` and returned
+     * null for procedure-local class instances (the Mark-reported caller-cursor null
+     * symptom for FAR + F2-rename). Post-rewire, it walks `lookupVarTypeAtLine`'s full
+     * 7-tier resolution chain (routine-local → params → proc-local → SELF.field →
+     * module → global) — single substrate serving BOTH cursor sides:
+     *   - cursor-on-decl path (provideMemberReferences matching loop) — wired by 10ea5a80
+     *   - cursor-on-call-site path (this entry point)                  — wired by this commit
+     * Eliminates the silent-asymmetry where F2 from a class-method decl found global-receiver
+     * callers but F2 from the call site returned null.
      */
     private async resolveViaVariableType(
         variableName: string,
@@ -806,15 +977,101 @@ export class ReferencesProvider {
         // Must be a plain identifier (no dots), not SELF/PARENT
         if (variableName.includes('.') || /^(self|parent)$/i.test(variableName)) return null;
 
-        const symbolInfo = await this.symbolFinder.findSymbol(variableName, document, position);
-        if (!symbolInfo) return null;
+        const tokens = this.tokenCache.getTokens(document);
+        const fileVarIndex = this.buildFileVarTypeIndex(tokens);
+        const globalScope = this.loadGlobalScopeForCursor(document);
+        const rawType = this.lookupVarTypeAtLine(
+            fileVarIndex, globalScope, position.line, variableName.toLowerCase());
+        if (!rawType) return null;
 
-        const typeName = ClassMemberResolver.extractClassName(symbolInfo.type);
+        const typeName = ClassMemberResolver.extractClassName(rawType);
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
         const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document, callArgCount);
-        return info ?? null;
+        if (info) return info;
+
+        // 0c289e16 Phase B fallback — when StructureDeclarationIndexer can't find the
+        // class (no SolutionManager-loaded project, or class is in-memory only and not
+        // yet on disk), scan the cursor's own document tokens directly. Production paths
+        // hit this only when the class is local to the cursor's file — same scenario the
+        // 10ea5a80 `getLocalClassSearchFiles` widening covers from the other direction.
+        return this.findMemberInDocumentTokens(memberName, typeName, document, tokens);
+    }
+
+    /**
+     * In-document fallback for `resolveViaVariableType` when the
+     * `StructureDeclarationIndexer` lookup misses (test fixtures without
+     * SolutionManager, or classes declared in the cursor's own file before
+     * the project index has rebuilt). Scans the cursor's tokens first; if
+     * the class isn't there, walks the FRG MEMBER edge to the PROGRAM file
+     * and tries its tokens (cross-file case — cursor in MEMBER calling a
+     * class declared at PROGRAM scope).
+     */
+    private findMemberInDocumentTokens(
+        memberName: string,
+        typeName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): ChainedMemberInfo | null {
+        // Try cursor's own document first.
+        const local = this.scanTokensForClassMember(memberName, typeName, document.uri, tokens);
+        if (local) return local;
+
+        // Try the PROGRAM file (cross-file: cursor in MEMBER, class declared in PROGRAM).
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+                .replace(/\//g, '\\');
+            const programFsPath = graph.getProgramFile(docFsPath);
+            if (programFsPath) {
+                const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+                const programTokens = this.getTokensForUri(programUri);
+                if (programTokens && programTokens.length > 0) {
+                    return this.scanTokensForClassMember(memberName, typeName, programUri, programTokens);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Helper for `findMemberInDocumentTokens` — scan a single token stream for the
+     * named CLASS structure and return a synthesized `ChainedMemberInfo` for the
+     * matching member declaration. Returns null when the class or member isn't
+     * present in those tokens. `info.file` is URI form (file:///) — `Location.create`
+     * downstream consumes URIs; the overloadFilter setup's in-memory-text check
+     * tolerates URI-form via the TokenCache fallback added for `671d7cd8`.
+     */
+    private scanTokensForClassMember(
+        memberName: string,
+        typeName: string,
+        fileUri: string,
+        tokens: Token[]
+    ): ChainedMemberInfo | null {
+        const typeNameLower = typeName.toLowerCase();
+        const memberLower = memberName.toLowerCase();
+
+        const classToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            t.label?.toLowerCase() === typeNameLower &&
+            t.finishesAt !== undefined && t.finishesAt > t.line);
+        if (!classToken) return null;
+
+        const methodToken = tokens.find(t =>
+            t.subType === TokenType.MethodDeclaration &&
+            t.label?.toLowerCase() === memberLower &&
+            t.line > classToken.line &&
+            t.line < (classToken.finishesAt ?? Infinity));
+        if (!methodToken) return null;
+
+        return {
+            type: 'method',
+            className: typeName,
+            line: methodToken.line,
+            file: fileUri
+        };
     }
 
     /**
@@ -823,6 +1080,533 @@ export class ReferencesProvider {
      * Also adds any MODULE('file.clw') referenced by the enclosing CLASS declaration.
      * Class members (SELF.Order) can be used in any implementation file in the project.
      */
+    /**
+     * P2b track-(b) + Phase B+ + Tier 1 — file-level variable-type index covering
+     * Clarion's full scope model per `project_clarion_scope_model.md`:
+     *
+     *   Tier 1 (routine local data)          — DATA-section vars inside a ROUTINE,
+     *                                          own-name-scope shadowing per spec
+     *   Tier 2 (procedure parameters)        — folded into procScopes via Token.parameters
+     *   Tier 3 (procedure local data)        — col-0 Labels within proc finishesAt,
+     *                                          EXCLUDING routine-bounded lines (regression
+     *                                          fix uncovered by Tier 1 investigation —
+     *                                          routine vars must not pollute proc-local map)
+     *   Tier 4 (CLASS member data via SELF)  — when proc is a methodImpl, classFields populated
+     *   Tier 5 (module data)                 — col-0 Labels OUTSIDE any procedure scope
+     *
+     * Tier 6 (global data) is built per-file too but loaded SEPARATELY via
+     * `loadGlobalScope(programFileUri)` — the PROGRAM file may differ from the
+     * cursor's MEMBER file, so the matching loop loads it once per match and
+     * passes it into `lookupVarTypeAtLine`.
+     */
+    private buildFileVarTypeIndex(tokens: Token[]): {
+        procScopes: Array<{
+            startLine: number;
+            endLine: number;
+            varTypes: Map<string, string>;
+            classFields?: Map<string, string>;
+            enclosingClassLower?: string;
+            routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
+        }>;
+        moduleScope: Map<string, string>;
+    } {
+        const procScopes: Array<{
+            startLine: number;
+            endLine: number;
+            varTypes: Map<string, string>;
+            classFields?: Map<string, string>;
+            enclosingClassLower?: string;
+            routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
+        }> = [];
+        const moduleScope = new Map<string, string>();
+
+        const tokensByLine = new Map<number, Token[]>();
+        for (const t of tokens) {
+            const arr = tokensByLine.get(t.line);
+            if (arr) arr.push(t); else tokensByLine.set(t.line, [t]);
+        }
+
+        // Pre-compute procedure line ranges so we can identify "outside-any-procedure"
+        // lines for the module-scope walk (Tier 5).
+        const procRanges: Array<{ start: number; end: number }> = [];
+        for (const procToken of tokens) {
+            if (procToken.type === TokenType.Procedure &&
+                (procToken.subType === TokenType.GlobalProcedure ||
+                 procToken.subType === TokenType.MethodImplementation) &&
+                procToken.finishesAt !== undefined && procToken.finishesAt > procToken.line) {
+                procRanges.push({ start: procToken.line, end: procToken.finishesAt });
+            }
+        }
+        const isInsideAnyProcedure = (line: number) =>
+            procRanges.some(r => line >= r.start && line <= r.end);
+
+        // Tier 5 — Module scope: col-0 Labels OUTSIDE any procedure scope.
+        for (const t of tokens) {
+            if (t.type !== TokenType.Label || t.start !== 0 || !t.label) continue;
+            if (isInsideAnyProcedure(t.line)) continue;
+            const lineTokens = tokensByLine.get(t.line);
+            if (!lineTokens) continue;
+            this.captureLabelType(t, lineTokens, moduleScope);
+        }
+
+        // Per-procedure scope build (Tiers 2 + 3 + optional Tier 4 for methods).
+        for (const procToken of tokens) {
+            if (procToken.type !== TokenType.Procedure ||
+                (procToken.subType !== TokenType.GlobalProcedure &&
+                 procToken.subType !== TokenType.MethodImplementation) ||
+                procToken.finishesAt === undefined || procToken.finishesAt <= procToken.line) {
+                continue;
+            }
+            const startLine = procToken.line;
+            const endLine = procToken.finishesAt;
+            const varTypes = new Map<string, string>();
+
+            // Tier 2 — Procedure parameters from tokenizer's structured parameters list.
+            if (procToken.parameters) {
+                for (const p of procToken.parameters) {
+                    if (p.name) {
+                        // Strip pass-by-ref decoration from type for downstream comparisons.
+                        const cleanType = p.type ? p.type.replace(/^[*&]\s*/, '') : '';
+                        varTypes.set(p.name.toLowerCase(), cleanType);
+                    }
+                }
+            }
+
+            // Tier 1 — Routine local data: find Routine tokens with hasLocalData
+            // inside this procedure's scope. Build per-routine var-type sub-maps and
+            // collect their line ranges so the Tier 3 walk can EXCLUDE them.
+            const routineScopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }> = [];
+            for (const t of tokens) {
+                if (t.type === TokenType.Keyword &&
+                    t.subType === TokenType.Routine &&
+                    t.hasLocalData === true &&
+                    t.finishesAt !== undefined && t.finishesAt > t.line &&
+                    t.line >= startLine && t.finishesAt <= endLine) {
+                    const routineVarTypes = new Map<string, string>();
+                    for (let line = t.line + 1; line <= t.finishesAt; line++) {
+                        const lineTokens = tokensByLine.get(line);
+                        if (!lineTokens) continue;
+                        for (let k = 0; k < lineTokens.length; k++) {
+                            const cand = lineTokens[k];
+                            if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                            this.captureLabelType(cand, lineTokens, routineVarTypes);
+                        }
+                    }
+                    routineScopes.push({ startLine: t.line, endLine: t.finishesAt, varTypes: routineVarTypes });
+                }
+            }
+
+            // Tier 3 — Procedure local data: col-0 Labels within (startLine, endLine),
+            // EXCLUDING lines bounded by any routine in this procedure (regression fix —
+            // otherwise routine vars last-write-overwrite proc-local vars in the map).
+            for (let line = startLine + 1; line <= endLine; line++) {
+                if (routineScopes.some(r => line >= r.startLine && line <= r.endLine)) continue;
+                const lineTokens = tokensByLine.get(line);
+                if (!lineTokens) continue;
+                for (let k = 0; k < lineTokens.length; k++) {
+                    const cand = lineTokens[k];
+                    if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                    this.captureLabelType(cand, lineTokens, varTypes);
+                }
+            }
+
+            // Tier 4 — CLASS member data via SELF (only for methodImpls).
+            // procToken.label for methodImpl is "ClassName.MethodName" → split on '.'
+            // → look up the CLASS structure → walk its data members.
+            let classFields: Map<string, string> | undefined;
+            let enclosingClassLower: string | undefined;
+            if (procToken.subType === TokenType.MethodImplementation && procToken.label) {
+                const dotIdx = procToken.label.indexOf('.');
+                if (dotIdx > 0) {
+                    enclosingClassLower = procToken.label.substring(0, dotIdx).toLowerCase();
+                    classFields = this.gatherClassDataMembers(enclosingClassLower, tokens, tokensByLine);
+                }
+            }
+
+            procScopes.push({
+                startLine, endLine, varTypes, classFields, enclosingClassLower,
+                routineScopes: routineScopes.length > 0 ? routineScopes : undefined
+            });
+        }
+
+        // #193 — additively key PRE-bearing structure members as `prefix:field` so a
+        // prefixed base (`PRE:Field`) resolves. Runs after the bare-label walks so the
+        // alias keys sit alongside (never replace) the existing bare keys.
+        this.applyStructurePrefixKeying(tokens, tokensByLine, procScopes, moduleScope);
+
+        return { procScopes, moduleScope };
+    }
+
+    /**
+     * Helper for `buildFileVarTypeIndex`: extract the declared-type of a column-0
+     * Label by inspecting the next significant token on the same line. Mutates
+     * `target` map.
+     */
+    private captureLabelType(label: Token, lineTokens: Token[], target: Map<string, string>): void {
+        if (!label.label) return;
+        const declType = this.resolveLabelDeclaredType(label, lineTokens);
+        if (declType !== undefined) {
+            target.set(label.label.toLowerCase(), declType);
+        }
+    }
+
+    /**
+     * Determine the declared-type string for a column-0 Label by inspecting the next
+     * significant token on its line (with a `label.dataType` fallback). Returns
+     * `undefined` when no type can be derived. Extracted from `captureLabelType` so
+     * the PRE-group prefix-keying pass can capture the same type for its alias key.
+     */
+    private resolveLabelDeclaredType(label: Token, lineTokens: Token[]): string | undefined {
+        const idx = lineTokens.indexOf(label);
+        if (idx < 0 || idx + 1 >= lineTokens.length) return undefined;
+        const next = lineTokens[idx + 1];
+
+        // Class-typed (`inst MyClass`), Type-keyword (`count LONG`), Reference (`mgr &MyClass`).
+        if (next.type === TokenType.Type ||
+            next.type === TokenType.Variable ||
+            next.type === TokenType.Label) {
+            return next.value;
+        } else if (next.type === TokenType.ReferenceVariable) {
+            return next.value.startsWith('&') ? next.value.slice(1) : next.value;
+        } else if (label.dataType) {
+            return label.dataType;
+        }
+        return undefined;
+    }
+
+    /**
+     * #193 — PRE-group prefix-keying. Clarion structures (GROUP/RECORD/FILE/QUEUE)
+     * may carry a `PRE(prefix)` attribute; their member fields are then addressable
+     * as `prefix:field`. The base var-type walk keys those members by bare label only,
+     * so a prefixed base (`PRE:Field`) cannot be resolved. This pass scans every
+     * PRE-bearing Structure token and ADDITIVELY keys each member field as
+     * `prefix:field` in whichever scope already holds its bare label (the proc scope
+     * containing the member, else module scope). Additive → bare-label lookups are
+     * byte-identical; only new colon-keys are added.
+     *
+     * The prefix value is read BY POSITION (the token after the PRE attribute's `(`),
+     * never by token-type: a prefix that collides with a keyword (e.g. `PRE`) tokenizes
+     * as Attribute, while a non-colliding one (e.g. `QUE`) tokenizes as Variable —
+     * type-gating would silently miss the latter.
+     */
+    private applyStructurePrefixKeying(
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>,
+        procScopes: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>,
+        moduleScope: Map<string, string>
+    ): void {
+        for (const structToken of tokens) {
+            if (structToken.type !== TokenType.Structure) continue;
+            if (structToken.finishesAt === undefined || structToken.finishesAt <= structToken.line) continue;
+
+            const prefix = this.extractStructurePrefix(structToken, tokensByLine);
+            if (!prefix) continue;
+            const prefixLower = prefix.toLowerCase();
+
+            // Member fields: column-0 Labels strictly between the structure line and its END.
+            for (let line = structToken.line + 1; line < structToken.finishesAt; line++) {
+                const lineTokens = tokensByLine.get(line);
+                if (!lineTokens) continue;
+                for (const cand of lineTokens) {
+                    if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                    const declType = this.resolveLabelDeclaredType(cand, lineTokens);
+                    if (declType === undefined) continue;
+                    const aliasKey = `${prefixLower}:${cand.label.toLowerCase()}`;
+                    const target = procScopes.find(s => line >= s.startLine && line <= s.endLine)?.varTypes
+                        ?? moduleScope;
+                    // Set-if-absent: a literal/explicit colon-label declaration (e.g. a var
+                    // literally named `LOC:Name`) is authoritative over a PRE-alias and is
+                    // already keyed by the bare walk that ran before this pass — never clobber
+                    // it. Clarion precedence: explicit declaration wins over the prefix alias.
+                    if (!target.has(aliasKey)) {
+                        target.set(aliasKey, declType);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Extract a PRE-bearing structure's prefix value. Walks the structure's
+     * declaration line for a `PRE` Attribute token followed by `(`, then returns the
+     * token immediately after the `(` BY POSITION (regardless of its token-type — see
+     * `applyStructurePrefixKeying`). Returns `undefined` when there is no PRE attribute.
+     */
+    private extractStructurePrefix(structToken: Token, tokensByLine: Map<number, Token[]>): string | undefined {
+        const lineTokens = tokensByLine.get(structToken.line);
+        if (!lineTokens) return undefined;
+        for (let i = 0; i < lineTokens.length - 2; i++) {
+            const t = lineTokens[i];
+            if (t.type === TokenType.Attribute && t.value.toUpperCase() === 'PRE' &&
+                lineTokens[i + 1].type === TokenType.Delimiter && lineTokens[i + 1].value === '(') {
+                return lineTokens[i + 2].value;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Helper for `buildFileVarTypeIndex` Tier 4 — walks the named CLASS structure's
+     * data members (col-0 Labels inside the class body, EXCLUDING method declarations).
+     */
+    private gatherClassDataMembers(
+        classNameLower: string,
+        tokens: Token[],
+        tokensByLine: Map<number, Token[]>
+    ): Map<string, string> {
+        const fields = new Map<string, string>();
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
+                t.label?.toLowerCase() === classNameLower &&
+                t.finishesAt !== undefined && t.finishesAt > t.line) {
+                for (let line = t.line + 1; line < t.finishesAt; line++) {
+                    const lineTokens = tokensByLine.get(line);
+                    if (!lineTokens) continue;
+                    for (let k = 0; k < lineTokens.length; k++) {
+                        const cand = lineTokens[k];
+                        if (cand.type !== TokenType.Label || cand.start !== 0 || !cand.label) continue;
+                        // Skip method declarations — fields only.
+                        const next = lineTokens[k + 1];
+                        if (next && next.type === TokenType.Procedure) continue;
+                        this.captureLabelType(cand, lineTokens, fields);
+                    }
+                }
+            }
+        }
+        return fields;
+    }
+
+    /**
+     * Tier 6 — load module-level variables from a different file (typically the
+     * PROGRAM file, when the cursor's file is a MEMBER). Reuses the same module-scope
+     * walk as `buildFileVarTypeIndex`. Returns empty map if the file can't be loaded.
+     */
+    private loadGlobalScopeFromProgramFile(programFileUri: string): Map<string, string> {
+        const tokens = this.getTokensForUri(programFileUri);
+        if (!tokens || tokens.length === 0) return new Map();
+        return this.buildFileVarTypeIndex(tokens).moduleScope;
+    }
+
+    /**
+     * Tier 6 entry point — resolve the PROGRAM file for the cursor's MEMBER (via FRG)
+     * and load its module-scope vars. Returns null when FRG isn't built or when no
+     * PROGRAM-scope data is reachable.
+     *
+     * Symmetric handling of cursor-in-PROGRAM vs cursor-in-MEMBER:
+     * - Cursor-in-MEMBER: walk the FRG forward-MEMBER edge from the cursor's file to
+     *   find the PROGRAM file; load its moduleScope as globalScope.
+     * - Cursor-in-PROGRAM: cursor's file IS the program (no outgoing MEMBER edge).
+     *   For cursor-own-file scans, the matching loop's own moduleScope already covers
+     *   PROGRAM-level vars via Tier 5 — but the matching loop ALSO scans MEMBER files
+     *   reachable via reverse-MEMBER edges, and those scans need globalScope to resolve
+     *   PROGRAM-level vars. So when the cursor IS a PROGRAM (detected via reverse-MEMBER
+     *   edge presence), return the cursor file's own moduleScope as globalScope so
+     *   MEMBER-file scans can see it. Closes the cursor-in-PROGRAM silent-asymmetry bug
+     *   (`671d7cd8` discovery — symmetric to `0c289e16`'s decl-vs-call cursor-side
+     *   asymmetry, different axis).
+     */
+    private loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return null;
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+            .replace(/\//g, '\\');
+
+        const programFsPath = graph.getProgramFile(docFsPath);
+        if (programFsPath) {
+            const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+            // Self-MEMBER edge case (cursor file MEMBERs itself) — fall back to
+            // cursor's own moduleScope.
+            if (programUri.toLowerCase() === document.uri.toLowerCase()) {
+                return this.buildFileVarTypeIndex(this.tokenCache.getTokens(document)).moduleScope;
+            }
+            return this.loadGlobalScopeFromProgramFile(programUri);
+        }
+
+        // No outgoing MEMBER edge — cursor file might BE a PROGRAM. Check incoming
+        // MEMBER edges: if any sibling files reference this one as their PROGRAM,
+        // cursor IS the program. Return cursor's moduleScope so reverse-MEMBER scans
+        // (MEMBER files reached via filesToSearch widening) can resolve PROGRAM-level
+        // vars via the global tier.
+        if (graph.getMemberFiles(docFsPath).length > 0) {
+            return this.buildFileVarTypeIndex(this.tokenCache.getTokens(document)).moduleScope;
+        }
+        return null;
+    }
+
+    /**
+     * P2b track-(b) — variable-type lookup at a source line + key.
+     *
+     * Walks the tier chain in Clarion's resolution priority order:
+     *   1. (deferred — Routine Local data, task 9142af9f)
+     *   2. Procedure parameters + 3. Procedure Local data (both in `procScope.varTypes`)
+     *   4. CLASS member data via SELF (only consulted when `key` starts with "self.")
+     *   5. Module data (`moduleScope`)
+     *   6. Global data (`globalScope` from PROGRAM file)
+     *
+     * `key` is one of:
+     *   - plain identifier (`'inst'`) → searched against varTypes / moduleScope / globalScope
+     *   - SELF-prefixed (`'self.receiver'`) → searched against the procedure's classFields
+     */
+    private lookupVarTypeAtLine(
+        index: {
+            procScopes: Array<{
+                startLine: number;
+                endLine: number;
+                varTypes: Map<string, string>;
+                classFields?: Map<string, string>;
+                enclosingClassLower?: string;
+                routineScopes?: Array<{ startLine: number; endLine: number; varTypes: Map<string, string> }>;
+            }>;
+            moduleScope: Map<string, string>;
+        },
+        globalScope: Map<string, string> | null,
+        line: number,
+        key: string
+    ): string | undefined {
+        const scope = index.procScopes.find(s => line >= s.startLine && line <= s.endLine);
+
+        // SELF.field path — Tier 4 only.
+        if (key.startsWith('self.')) {
+            const fieldNameLower = key.slice('self.'.length);
+            return scope?.classFields?.get(fieldNameLower);
+        }
+
+        // Plain identifier path — full Clarion resolution priority order:
+        //   Tier 1 (routine local) → Tier 2/3 (proc params + locals) → Tier 5 (module) → Tier 6 (global)
+        // Routine-local wins over proc-local per the spec (own-name-scope shadowing).
+        if (scope?.routineScopes) {
+            const routine = scope.routineScopes.find(r => line >= r.startLine && line <= r.endLine);
+            if (routine) {
+                const routineHit = routine.varTypes.get(key);
+                if (routineHit) return routineHit;
+            }
+        }
+        if (scope) {
+            const local = scope.varTypes.get(key);
+            if (local) return local;
+        }
+        const moduleHit = index.moduleScope.get(key);
+        if (moduleHit) return moduleHit;
+        return globalScope?.get(key);
+    }
+
+    /**
+     * P2b track-(b) — gather all overload declarations for `className.memberName`
+     * from the file containing the class declaration. Used by the matching loop
+     * to type-discriminate call sites against the cursor's decl line.
+     */
+    private gatherClassMemberOverloads(
+        className: string,
+        memberName: string,
+        declFile: string,
+        document: TextDocument
+    ): Array<{ signature: string; declarationLine: number }> {
+        const result: Array<{ signature: string; declarationLine: number }> = [];
+
+        // declFile may arrive as FS-path (legacy) or URI form (synthesized info from
+        // findMemberInDocumentTokens). Normalize once.
+        const hasUriPrefix = /^file:\/\/\//i.test(declFile);
+        const declFsPath = hasUriPrefix
+            ? decodeURIComponent(declFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+            : declFile;
+        const declUri = hasUriPrefix
+            ? declFile
+            : 'file:///' + declFile.replace(/\\/g, '/');
+        const declFsNorm = declFsPath.replace(/\\/g, '/').toLowerCase();
+        const docFsNorm = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+            .replace(/\//g, '\\').replace(/\\/g, '/').toLowerCase();
+
+        let lookupTokens: Token[] | null = null;
+        let getLineText: (line: number) => string;
+        if (declFsNorm === docFsNorm) {
+            lookupTokens = this.tokenCache.getTokens(document);
+            const docLines = document.getText().split(/\r?\n/);
+            getLineText = (line) => docLines[line] ?? '';
+        } else {
+            lookupTokens = this.getTokensForUri(declUri);
+            // Try TokenCache for in-memory documents first; fall back to disk for production-loaded files.
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(declUri);
+            if (cachedText) {
+                const declLines = cachedText.split(/\r?\n/);
+                getLineText = (line) => declLines[line] ?? '';
+            } else {
+                getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFsPath, line) ?? '';
+            }
+        }
+        if (!lookupTokens || lookupTokens.length === 0) return result;
+
+        const classNameLower = className.toLowerCase();
+        const memberLower = memberName.toLowerCase();
+
+        for (const t of lookupTokens) {
+            if (t.type === TokenType.Structure && t.subType === TokenType.Class &&
+                t.label?.toLowerCase() === classNameLower && t.children) {
+                for (const child of t.children) {
+                    if (child.subType === TokenType.MethodDeclaration &&
+                        child.label?.toLowerCase() === memberLower) {
+                        const sig = getLineText(child.line).trim();
+                        if (sig && /\bPROCEDURE\b/i.test(sig)) {
+                            result.push({ signature: sig, declarationLine: child.line });
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private getLocalClassSearchFiles(document: TextDocument): string[] {
+        const files = new Set<string>([document.uri]);
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            // (1) MEMBER siblings: files sharing the same PROGRAM('main') parent.
+            const programFile = graph.getProgramFile(docFsPath);
+            if (programFile) {
+                for (const memberFsPath of graph.getMemberFiles(programFile)) {
+                    files.add('file:///' + memberFsPath);
+                }
+            }
+            // (2) Reverse-includes: anyone explicitly INCLUDEing the cursor's file.
+            const visited = new Set<string>();
+            const queue: string[] = [docFsPath];
+            while (queue.length > 0) {
+                const current = queue.shift()!;
+                const norm = current.toLowerCase().replace(/\\/g, '/');
+                if (visited.has(norm)) continue;
+                visited.add(norm);
+                for (const edge of graph.getReverseIncludes(current)) {
+                    files.add('file:///' + edge.fromFile);
+                    queue.push(edge.fromFile);
+                }
+            }
+            if (files.size > 1) {
+                logger.info(`[FRG] getLocalClassSearchFiles: widened to ${files.size} file(s) via MEMBER siblings + reverse includes`);
+                return Array.from(files);
+            }
+            // FRG built but yielded nothing useful — fall through to project scan.
+        }
+
+        // Graph not ready or returned no widening — fall back to scanning all project files.
+        // This is the path test 2's MultiFileFARFixture exercises (FRG not seeded).
+        const solutionManager = SolutionManager.getInstance();
+        if (solutionManager?.solution?.projects?.length) {
+            for (const project of solutionManager.solution.projects) {
+                for (const sourceFile of project.sourceFiles) {
+                    const fullPath = path.isAbsolute(sourceFile.relativePath)
+                        ? sourceFile.relativePath
+                        : path.join(project.path, sourceFile.relativePath);
+                    files.add(`file:///${fullPath.replace(/\\/g, '/')}`);
+                }
+            }
+        }
+
+        const result = Array.from(files);
+        logger.info(`📂 [local-class] search files: ${result.length}`);
+        return result;
+    }
+
     private getMemberSearchFiles(
         document: TextDocument,
         declarationFile: string | null,
@@ -1163,10 +1947,27 @@ export class ReferencesProvider {
         classFamily?: Set<string>,
         chainPrefix?: string,
         overloadFilter?: OverloadFilter,
-        includeDeclaration: boolean = true
+        includeDeclaration: boolean = true,
+        currentDocument?: TextDocument,
+        candidateOverloads?: Array<{ signature: string; declarationLine: number }>,
+        globalScope?: Map<string, string>
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
+
+        // P2b track-(b) + Phase B+: file-level variable-type index covering Tiers 2-5.
+        // Tier 6 (global) is loaded externally and passed as `globalScope`.
+        const fileVarIndex = this.buildFileVarTypeIndex(tokens);
+        const effectiveGlobalScope = globalScope ?? null;
+
+        // P2b track-(b): classifier + resolver for type-aware overload filtering.
+        // Only instantiated once per file; cheap stateless objects.
+        const argClassifier = new CallSiteArgumentClassifier();
+        const overloadResolver = new MethodOverloadResolver();
+        const classifierCtx: ClassifierContext = {
+            resolveSymbolType: (name, line) =>
+                this.lookupVarTypeAtLine(fileVarIndex, effectiveGlobalScope, line, name.toLowerCase())
+        };
 
         const memberLower = memberName.toLowerCase();
         const classLower = className?.toLowerCase();
@@ -1200,13 +2001,28 @@ export class ReferencesProvider {
             return classFamily ? classFamily.has(scope.classLower) : scope.classLower === classLower;
         };
 
-        // Read file lines once for overload-filtered MethodImplementation param checking
+        // Read file lines once for overload-filtered MethodImplementation param checking.
+        // Resolution order: (1) cursor's in-memory document if URIs match (case-insensitive);
+        // (2) TokenCache for any other in-memory buffer at this URI (cross-file FAR with
+        // open-but-unsaved files OR test-fixture files seeded via MultiFileFARFixture);
+        // (3) disk read for production-loaded files. The TokenCache step (added 671d7cd8)
+        // closes the silent-asymmetry where impl-discrimination skipped on cross-file scans
+        // because disk-read failed for in-memory buffers.
         let fileLines: string[] | null = null;
         if (overloadFilter) {
-            try {
-                const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
-            } catch { fileLines = null; }
+            if (currentDocument && currentDocument.uri.toLowerCase() === fileUri.toLowerCase()) {
+                fileLines = currentDocument.getText().split(/\r?\n/);
+            }
+            if (!fileLines) {
+                const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(fileUri);
+                if (cachedText) fileLines = cachedText.split(/\r?\n/);
+            }
+            if (!fileLines) {
+                try {
+                    const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                    fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                } catch { fileLines = null; }
+            }
         }
         const fileUriNorm = fileUri.toLowerCase();
 
@@ -1215,6 +2031,28 @@ export class ReferencesProvider {
             if (!overloadFilter) return true;
             if (argCount < 0) return true; // no parens = property access, always include
             return argCount >= overloadFilter.minArgs && argCount <= overloadFilter.maxArgs;
+        };
+
+        // P2b track-(b): type-aware call-site filter. Composes the existing arity check
+        // with the call-site argument classifier + overload-by-args resolver. Skips the
+        // type pick when there's only one candidate overload (nothing to disambiguate).
+        // Match-all fallback (silent-failure-pushback bias per Mark pick (b)) means an
+        // ambiguous call site is INCLUDED in results — false-positive over false-negative
+        // for F2-rename safety.
+        const isCompatibleCallSite = (callIdx: number): boolean => {
+            const argCount = this.countCallArgsFromTokens(tokens, callIdx);
+            if (!isCompatibleArgCount(argCount)) return false;
+            if (!candidateOverloads || candidateOverloads.length <= 1) return true;
+            if (argCount < 0) return true; // property access, no overload pick
+            const args = argClassifier.classifyArguments(tokens, callIdx, classifierCtx);
+            if (!args) return true;
+            const result = overloadResolver.findOverloadByArgClassifications(
+                args,
+                candidateOverloads.map(c => c.signature)
+            );
+            if (result.matchedAll || result.matchedIndex < 0) return true; // conservative
+            if (!overloadFilter) return true;
+            return candidateOverloads[result.matchedIndex].declarationLine === overloadFilter.declarationLine;
         };
 
         /** Checks if a declaration line is the matched overload's declaration. */
@@ -1255,7 +2093,7 @@ export class ReferencesProvider {
                             }
                         }
                         // 2-segment: SELF.Member — direct access, filter by enclosing method class
-                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                        if (isCompatibleCallSite(i)) {
                             locations.push(Location.create(fileUri,
                                 Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                              token.line, token.start + token.value.length)));
@@ -1267,7 +2105,7 @@ export class ReferencesProvider {
                         // 3+ segment all-in-one: SELF.X.Member (e.g. SELF.Sort.Thumb tokenized as one token)
                         const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
                         if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
@@ -1290,7 +2128,7 @@ export class ReferencesProvider {
                                 ? chainPrefixLower + '.' + memberLower
                                 : null;
                             if (!expectedChain || fullChain === expectedChain) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                      token.line, token.start + token.value.length)));
@@ -1301,10 +2139,52 @@ export class ReferencesProvider {
                             // Typed variable direct access: e.g. INIMgr.Init
                             // where chainPrefix is the variable name (INIMgr).
                             if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
+                            }
+                        } else if (parts.length === 2 && !chainPrefixLower && classLower) {
+                            // P2b track-(b): no chainPrefix from cursor side (cursor is on
+                            // the class-body decl, not a call site). Recognize var.member
+                            // calls where var's declared type is in the target class family.
+                            // Resolves cross-procedure callers like `inst.Append('x')` where
+                            // `inst MyClass` is declared at any of: parameter / procedure-local /
+                            // module / global scope (Tiers 2/3/5/6).
+                            const varNameLower = parts[0].toLowerCase();
+                            const varType = this.lookupVarTypeAtLine(
+                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
+                            if (varType) {
+                                const varTypeBase = varType.toLowerCase().split('(')[0].trim();
+                                const matchesFamily = classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower;
+                                if (matchesFamily) {
+                                    if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                    if (isCompatibleCallSite(i)) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                         token.line, token.start + token.value.length)));
+                                    }
+                                }
+                            }
+                        } else if (parts.length === 3 && !chainPrefixLower && classLower &&
+                                   parts[0].toLowerCase() === 'self') {
+                            // Phase B+ Tier 4: SELF.field.method receiver (cursor on class-body decl,
+                            // call site is `SELF.someInst.Append(...)` from inside a method body).
+                            // Look up the field via the enclosing class's data members.
+                            const fieldKey = 'self.' + parts[1].toLowerCase();
+                            const fieldType = this.lookupVarTypeAtLine(
+                                fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
+                            if (fieldType) {
+                                const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                                const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
+                                if (matchesFamily) {
+                                    if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                    if (isCompatibleCallSite(i)) {
+                                        locations.push(Location.create(fileUri,
+                                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                         token.line, token.start + token.value.length)));
+                                    }
+                                }
                             }
                         }
                     }
@@ -1320,6 +2200,36 @@ export class ReferencesProvider {
                 continue;
             }
 
+            // Phase B+ Tier 4 — SELF.field.method receiver tokenizes as
+            // StructureField("SELF.X") + Function("Method"). Catch the Function-token
+            // path here when no chainPrefix propagates from the cursor side. Look up
+            // X via the enclosing class's data members and confirm type matches family.
+            if ((token.type === TokenType.Function || token.type === TokenType.Variable) &&
+                token.value.toLowerCase() === memberLower &&
+                !chainPrefixLower && classLower) {
+                const prev = i > 0 ? tokens[i - 1] : null;
+                if (prev && prev.type === TokenType.StructureField && prev.line === token.line) {
+                    const prevParts = prev.value.split('.');
+                    if (prevParts.length === 2 && prevParts[0].toLowerCase() === 'self') {
+                        const fieldKey = 'self.' + prevParts[1].toLowerCase();
+                        const fieldType = this.lookupVarTypeAtLine(
+                            fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
+                        if (fieldType) {
+                            const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                            const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
+                            if (matchesFamily) {
+                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                if (isCompatibleCallSite(i)) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (token.type === TokenType.Variable && token.value.toLowerCase() === memberLower) {
                 const prev = tokens[i - 1];
                 if (prev && prev.line === token.line) {
@@ -1330,7 +2240,7 @@ export class ReferencesProvider {
                             const beforeDotToken = tokens[i - 2];
                             if (beforeDotToken && beforeDotToken.line === token.line &&
                                 beforeDotToken.value.toLowerCase() === chainPrefixLower) {
-                                if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
@@ -1341,12 +2251,12 @@ export class ReferencesProvider {
                                     // the declaring class itself (that would be a grandparent call).
                                     const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
                                     if (!scope || scope.classLower !== classLower) {
-                                        if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                        if (isCompatibleCallSite(i)) {
                                             locations.push(Location.create(fileUri,
                                                 Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                         }
                                     }
-                                } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                } else if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                 }
@@ -1357,12 +2267,12 @@ export class ReferencesProvider {
                             if (preDot && /^parent$/i.test(preDot.value) && classLower) {
                                 const scope = methodScopes.find(s => token.line >= s.startLine && token.line <= s.endLine);
                                 if (!scope || scope.classLower !== classLower) {
-                                    if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                                    if (isCompatibleCallSite(i)) {
                                         locations.push(Location.create(fileUri,
                                             Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                                     }
                                 }
-                            } else if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            } else if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }
@@ -1375,7 +2285,7 @@ export class ReferencesProvider {
                         // (tokenizer splits SELF.Sort.Thumb into StructureField + Variable).
                         // If we know the exact chain prefix, verify the StructureField value matches it.
                         if (!chainPrefixLower || prev.value.toLowerCase() === chainPrefixLower) {
-                            if (isCompatibleArgCount(this.countCallArgsFromTokens(tokens, i))) {
+                            if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                             }
@@ -1397,7 +2307,18 @@ export class ReferencesProvider {
                 if (enclosingStruct && enclosingStruct.subType === TokenType.Class) {
                     // When className is known, verify the label of the CLASS matches
                     if (!classLower || (enclosingStruct.label ?? '').toLowerCase() === classLower) {
-                        if (isMatchedDeclaration(token.line, fileUriNorm)) {
+                        // Type-aware overload distinction (fe254d6f Phase A B-extension):
+                        // when the cursor's decl signature is known, only include this
+                        // candidate decl when its signature matches via signaturesMatch.
+                        // Falls back to line/file equality (existing isMatchedDeclaration
+                        // semantics) when no signature is captured.
+                        let isSigMatch = isMatchedDeclaration(token.line, fileUriNorm);
+                        if (overloadFilter?.declSignature && fileLines) {
+                            const candidateSig = fileLines[token.line]?.trim() ?? '';
+                            isSigMatch = candidateSig.length > 0 &&
+                                this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig);
+                        }
+                        if (isSigMatch) {
                             locations.push(Location.create(fileUri,
                                 Range.create(token.line, token.start, token.line, token.start + token.value.length)));
                         }
@@ -1408,8 +2329,9 @@ export class ReferencesProvider {
             // Procedure implementation: "ClassName.MethodName PROCEDURE" at col 0
             // The PROCEDURE token has subType=MethodImplementation and label="ClassName.MethodName".
             // The method name itself is the Variable token immediately before PROCEDURE on the same line.
-            // All overloads of the same method name are included (overload resolution at
-            // call sites requires full type inference, so we aggregate them).
+            // Post-fe254d6f: only the matching-signature impl is included when overloadFilter
+            // carries declSignature; falls back to arity-only filtering otherwise. Pre-fe254d6f
+            // aggregated all overloads — that was the bug Mark reported for stringtheory.inc:415.
             if (token.subType === TokenType.MethodImplementation && token.label) {
                 if (!includeDeclaration) continue; // skip implementation headers when not wanted
                 const dotIdx = token.label.indexOf('.');
@@ -1418,12 +2340,24 @@ export class ReferencesProvider {
                     const implMethod = token.label.substring(dotIdx + 1).toLowerCase();
                     const inFamily = classFamily ? classFamily.has(implClass) : implClass === classLower;
                     if (implMethod === memberLower && (!classLower || inFamily)) {
-                        // Filter by overload: count params in this implementation's signature
+                        // Filter by overload (fe254d6f Phase A B-extension): when the
+                        // cursor's decl signature is known, prefer type-aware
+                        // signaturesMatch; fall back to arity range when only minArgs/
+                        // maxArgs are populated (e.g. dot-access path's pre-fe254d6f
+                        // arity-only filter for non-procedure callers).
                         if (overloadFilter && fileLines) {
                             const implLineText = fileLines[token.line] ?? '';
-                            const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
-                            if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
-                                continue; // wrong overload
+                            if (overloadFilter.declSignature) {
+                                const candidateSig = implLineText.trim();
+                                if (!candidateSig ||
+                                    !this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig)) {
+                                    continue; // wrong overload (type-aware check)
+                                }
+                            } else {
+                                const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
+                                if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
+                                    continue; // wrong overload (arity-only check)
+                                }
                             }
                         }
                         // The method-name token is the Variable immediately before PROCEDURE on the same line
@@ -1445,13 +2379,52 @@ export class ReferencesProvider {
     // ─── Plain symbol helpers ─────────────────────────────────────────────────
 
     /**
+     * Build an OverloadFilter for the plain-symbol path when the symbol is a
+     * procedure/method/global procedure declaration. Captures the cursor's
+     * declaration signature so `findReferencesInFile` can use
+     * `MethodOverloadResolver.signaturesMatch` (5f7478dc) for type-aware
+     * decl-on-decl filtering — siblings of the same name with different
+     * signatures are filtered out (fe254d6f).
+     *
+     * Returns undefined when the declaration line text doesn't match the
+     * PROCEDURE shape (no overload distinction needed for non-procedure symbols).
+     */
+    private buildPlainSymbolOverloadFilter(symbolInfo: SymbolInfo, document?: TextDocument): OverloadFilter | undefined {
+        // Read the declaration line from the in-memory TextDocument when possible
+        // (declaration is in the same file as the cursor); fall back to disk read.
+        let declLineText: string | null = null;
+        if (document && document.uri === symbolInfo.location.uri) {
+            const docLines = document.getText().split(/\r?\n/);
+            declLineText = docLines[symbolInfo.location.line] ?? null;
+        }
+        if (!declLineText) {
+            const declFile = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            declLineText = ClassMemberResolver.getDeclarationLineText(declFile, symbolInfo.location.line);
+        }
+        if (!declLineText || !/\bPROCEDURE\b/i.test(declLineText)) return undefined;
+
+        const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+        const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
+        const minArgs = maxArgs - defaultCount;
+        const filter: OverloadFilter = {
+            minArgs,
+            maxArgs,
+            declarationLine: symbolInfo.location.line,
+            declarationFileNorm: symbolInfo.location.uri.toLowerCase(),
+            declSignature: declLineText.trim()
+        };
+        logger.test(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, sig="${filter.declSignature}"`);
+        return filter;
+    }
+
+    /**
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] {
         const scopeType = symbolInfo.scope.type;
 
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
-            logger.error(`[FAR] Scope="${scopeType}" → searching only current file`);
+            logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
             return [currentDocument.uri];
         }
 
@@ -1459,19 +2432,37 @@ export class ReferencesProvider {
             // Module-level MAP procedures (type='PROCEDURE') are only available within the current
             // MEMBER module — do not expand to project-wide search.
             if (symbolInfo.type === 'PROCEDURE') {
-                logger.error(`[FAR] Scope="module" (MAP procedure) → searching only declaring file`);
-                return [symbolInfo.location.uri];
+                // Use FRG to also include MODULE implementation files from the declaring file.
+                // For a MAP-declared procedure, its implementation lives in a MODULE target file.
+                const declaringFilePath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, ''))
+                    .replace(/\\/g, '/').toLowerCase();
+                const graph = FileRelationshipGraph.getInstance();
+                const implFiles: string[] = [symbolInfo.location.uri];
+
+                if (graph.isBuilt) {
+                    const moduleEdges = graph.getForwardEdges(declaringFilePath)
+                        .filter(e => e.type === 'MODULE');
+                    for (const edge of moduleEdges) {
+                        const implUri = `file:///${edge.toFile}`;
+                        if (!implFiles.includes(implUri)) {
+                            implFiles.push(implUri);
+                        }
+                    }
+                }
+
+                logger.test(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets`);
+                return implFiles;
             }
             const isMember = this.isMemberFile(symbolInfo.location.uri);
             const isProcDecl = this.isProcedureDeclaration(symbolInfo.location.uri, symbolInfo.location.line);
-            logger.error(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
+            logger.test(`[FAR] Scope="module": isMemberFile=${isMember}, isProcedureDeclaration=${isProcDecl}`);
             if (!isMember && isProcDecl) {
                 // Non-MEMBER file procedure declaration at module level (PROGRAM file MAP entry) —
                 // fall through to global search so all call sites are found.
             } else {
                 // MEMBER-file module symbols are visible only within that MEMBER module.
                 // PROGRAM-file module-level data (non-procedure) also stays local.
-                logger.error(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
+                logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
         }
@@ -1507,7 +2498,7 @@ export class ReferencesProvider {
                         allFiles.push(uri);
                     }
                 }
-                logger.error(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
                 return allFiles;
             }
 
@@ -1523,11 +2514,11 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.error(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
             return allFiles;
         }
 
-        logger.error(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
+        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
 
         return [...alwaysInclude];
     }
@@ -1556,7 +2547,7 @@ export class ReferencesProvider {
             const tokens = this.getTokensForUri(uri);
             return tokens.some(t =>
                 t.line === line &&
-                t.type === TokenType.Procedure &&
+                TokenHelper.isProcedureOrFunction(t) &&
                 (t.subType === TokenType.MapProcedure ||
                  t.subType === TokenType.GlobalProcedure ||
                  t.subType === TokenType.MethodDeclaration)
@@ -1575,7 +2566,9 @@ export class ReferencesProvider {
         symbolInfo: SymbolInfo,
         includeDeclaration: boolean,
         fieldPrefixes?: Set<string>,
-        ignoreLineScope?: boolean
+        ignoreLineScope?: boolean,
+        overloadFilter?: OverloadFilter,
+        currentDocument?: TextDocument
     ): Location[] {
         const locations: Location[] = [];
         const searchWordLower = searchWord.toLowerCase();
@@ -1583,6 +2576,46 @@ export class ReferencesProvider {
         try {
             const tokens = this.getTokensForUri(fileUri);
             if (!tokens || tokens.length === 0) return locations;
+
+            // For overload distinction (fe254d6f): pre-build the set of lines
+            // that are procedure declarations / implementations + lazily-loaded
+            // file-line text for signature lookup. Used to classify each match
+            // as "decl/impl line" (filter via signaturesMatch) vs "call site"
+            // (no per-match filter — call-site type-aware filtering is P2b).
+            const procedureSubTypesForFilter = new Set<TokenType>([
+                TokenType.GlobalProcedure,
+                TokenType.MapProcedure,
+                TokenType.MethodDeclaration,
+                TokenType.MethodImplementation
+            ]);
+            const procedureDeclLines: Set<number> = new Set();
+            if (overloadFilter) {
+                for (const t of tokens) {
+                    if (TokenHelper.isProcedureOrFunction(t) &&
+                        t.subType !== undefined &&
+                        procedureSubTypesForFilter.has(t.subType)) {
+                        procedureDeclLines.add(t.line);
+                    }
+                }
+            }
+            // Lazily-loaded line text array for signaturesMatch lookups.
+            // Tries in-memory document first when fileUri matches the current
+            // document; falls back to disk read.
+            let candidateFileLines: string[] | null = null;
+            const getCandidateFileLines = (): string[] | null => {
+                if (candidateFileLines !== null) return candidateFileLines;
+                if (currentDocument && currentDocument.uri === fileUri) {
+                    candidateFileLines = currentDocument.getText().split(/\r?\n/);
+                    return candidateFileLines;
+                }
+                try {
+                    const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    candidateFileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                } catch {
+                    candidateFileLines = null;
+                }
+                return candidateFileLines;
+            };
 
             const scopeType = symbolInfo.scope.type;
             let startLine = 0;
@@ -1608,7 +2641,7 @@ export class ReferencesProvider {
 
             if (startLine > 0 || endLine < Number.MAX_SAFE_INTEGER) {
                 const scopeToken = symbolInfo.scope.token;
-                if (scopeToken.type === TokenType.Procedure) {
+                if (TokenHelper.isProcedureOrFunction(scopeToken)) {
                     // Collect locally-declared CLASS names from the data section of the parent procedure.
                     // Data section is between the procedure line and the CODE execution marker.
                     const dataEndLine = scopeToken.executionMarker?.line ?? endLine;
@@ -1624,7 +2657,7 @@ export class ReferencesProvider {
 
                     if (localClassNames.size > 0) {
                         for (const t of tokens) {
-                            if (t.type === TokenType.Procedure &&
+                            if (TokenHelper.isProcedureOrFunction(t) &&
                                 t.subType === TokenType.MethodImplementation &&
                                 t.label &&
                                 t.line > endLine) {
@@ -1639,7 +2672,7 @@ export class ReferencesProvider {
                                     // between our scope end and this impl, the impl belongs to that later
                                     // procedure, not to our scope procedure.
                                     const hasInterveningProc = tokens.some(tp =>
-                                        tp.type === TokenType.Procedure &&
+                                        TokenHelper.isProcedureOrFunction(tp) &&
                                         tp.subType === TokenType.GlobalProcedure &&
                                         tp.line > endLine && tp.line < t.line
                                     );
@@ -1656,7 +2689,8 @@ export class ReferencesProvider {
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
 
-            for (const token of tokens) {
+            for (let i = 0; i < tokens.length; i++) {
+                const token = tokens[i];
                 if (!validLineRanges.some(([s, e]) => token.line >= s && token.line <= e)) continue;
                 if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
 
@@ -1711,7 +2745,7 @@ export class ReferencesProvider {
                     }
                 } else if (token.label?.toLowerCase() === searchWordLower &&
                            token.value.toLowerCase() !== searchWordLower &&
-                           token.type !== TokenType.Procedure &&
+                           !TokenHelper.isProcedureOrFunction(token) &&
                            token.type !== TokenType.Structure) {
                     // MAP shorthand / structure label: the Structure/Procedure token itself carries
                     // label="ZipQueueType" but the Label token on the same line already matches.
@@ -1721,6 +2755,18 @@ export class ReferencesProvider {
                 }
 
                 if (!includeDeclaration && fileUri === declarationUri && token.line === declarationLine) continue;
+
+                // OverloadFilter: skip wrong-overload decl/impl matches via type-aware
+                // signaturesMatch (fe254d6f). Bare references with no parens AND
+                // call-site matches pass through (call-site type-aware filtering is
+                // P2b out-of-scope; arity-only filtering on call sites kept as best-effort).
+                if (overloadFilter && overloadFilter.declSignature && procedureDeclLines.has(token.line)) {
+                    const lines = getCandidateFileLines();
+                    const candidateSig = lines?.[token.line]?.trim();
+                    if (!candidateSig || !this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig)) {
+                        continue;
+                    }
+                }
 
                 locations.push(Location.create(
                     fileUri,
@@ -1863,7 +2909,7 @@ export class ReferencesProvider {
         // Build a set of lines that have a PROCEDURE keyword with a procedure subType
         const procedureLines = new Set<number>();
         for (const t of tokens) {
-            if (t.type === TokenType.Procedure && t.subType !== undefined && procedureSubTypes.has(t.subType)) {
+            if (TokenHelper.isProcedureOrFunction(t) && t.subType !== undefined && procedureSubTypes.has(t.subType)) {
                 procedureLines.add(t.line);
             }
         }
@@ -1933,6 +2979,13 @@ export class ReferencesProvider {
         currentTokens: Token[],
         includeDeclaration: boolean
     ): Promise<Location[] | null> {
+        // If the current file is a local-MAP implementation target, restrict search
+        // to only files reachable via that same procedure-local MAP scope.
+        const localScope = getLocalMapScope(document.uri);
+        if (localScope?.containingProcedure) {
+            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope);
+        }
+
         const wordLower = word.toLowerCase();
         const procedureSubTypes = new Set([
             TokenType.GlobalProcedure,
@@ -2040,12 +3093,70 @@ export class ReferencesProvider {
         }
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for procedure "${word}"`);
 
+        // Build OverloadFilter from the resolved declaration so siblings of the same
+        // name with different signatures are filtered via signaturesMatch (fe254d6f).
+        const overloadFilter = this.buildPlainSymbolOverloadFilter(syntheticInfo, document);
+
         const locations: Location[] = [];
+        let ycProc = 0;
         for (const fileUri of filesToSearch) {
-            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
+            await this.yieldIfNeeded(ycProc++);
+            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 
         logger.info(`✅ Found ${locations.length} reference(s) to procedure "${word}"`);
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * References search restricted to files reachable from a procedure-local MAP.
+     * Called when the current implementation file is the target of a MODULE declared
+     * inside a procedure body — only files sharing that same local-MAP scope are searched.
+     */
+    private async findLocalMapProcedureReferences(
+        word: string,
+        document: TextDocument,
+        includeDeclaration: boolean,
+        localScope: LocalMapScope
+    ): Promise<Location[] | null> {
+        const graph = FileRelationshipGraph.getInstance();
+        const declaringUri = `file:///${localScope.declaringFile}`;
+        const filesToSearch = new Set<string>([declaringUri, document.uri]);
+
+        if (graph.isBuilt) {
+            graph.getForwardEdges(localScope.declaringFile)
+                .filter(e => e.type === 'MODULE' &&
+                    e.containingProcedure?.toUpperCase() === localScope.containingProcedure!.toUpperCase())
+                .forEach(e => filesToSearch.add(`file:///${e.toFile}`));
+        }
+
+        const dummyToken: Token = {
+            type: TokenType.Variable,
+            subType: undefined,
+            value: word,
+            line: 0,
+            start: 0,
+            maxLabelLength: 0,
+            parent: undefined,
+            children: []
+        };
+        const syntheticInfo: SymbolInfo = {
+            token: dummyToken,
+            type: 'PROCEDURE',
+            scope: { token: dummyToken, type: 'global' },
+            location: { uri: declaringUri, line: 0, character: 0 },
+            originalWord: word,
+            searchWord: word
+        };
+
+        const locations: Location[] = [];
+        let ycLocalMap = 0;
+        for (const fileUri of filesToSearch) {
+            await this.yieldIfNeeded(ycLocalMap++);
+            locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
+        }
+
+        logger.info(`✅ [LocalMAP] Found ${locations.length} reference(s) to "${word}" (local to ${localScope.containingProcedure}), searched ${filesToSearch.size} file(s)`);
         return locations.length > 0 ? locations : null;
     }
 
@@ -2117,23 +3228,13 @@ export class ReferencesProvider {
      * falls back to reading and tokenizing from disk for closed files.
      */
     private getTokensForUri(uri: string): Token[] {
-        const cached = this.tokenCache.getTokensByUri(uri);
-        if (cached) return cached;
-
-        try {
-            const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            if (!fs.existsSync(filePath)) return [];
-
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const tokenizer = new ClarionTokenizer(content);
-            const tokens = tokenizer.tokenize();
-            const structure = new DocumentStructure(tokens);
-            structure.process();
-            return tokens;
-        } catch (error) {
-            logger.error(`❌ Failed to tokenize ${uri}: ${error instanceof Error ? error.message : String(error)}`);
-            return [];
-        }
+        // #188 — delegate to the shared mtime-validated closed-file cache so each
+        // file is tokenized at most once (open buffers still win; case-insensitive
+        // lookup preserved inside). Previously this re-read + re-tokenized from
+        // disk on EVERY call AND ran DocumentStructure.process() a second time
+        // (tokenize() already runs it), so one reference count re-parsed the same
+        // huge file ~4-5×.
+        return this.tokenCache.getTokensForClosedFile(uri);
     }
 
     /**

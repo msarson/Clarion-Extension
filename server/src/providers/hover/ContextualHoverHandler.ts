@@ -18,6 +18,33 @@ export class ContextualHoverHandler {
     ) {}
 
     /**
+     * Handle hover on a PROGRAM or MEMBER keyword (the Clarion document marker).
+     * Surfaces the program name on PROGRAM, or the parent program filename on
+     * MEMBER. Returns null if `documentStructure` reports no match.
+     */
+    handleProgramOrMemberKeyword(
+        word: string,
+        documentStructure: { getProgramName(): string | undefined; getMemberParent(): string | undefined }
+    ): Hover | null {
+        const upper = word.toUpperCase();
+        if (upper === 'PROGRAM') {
+            const name = documentStructure.getProgramName();
+            const value = name
+                ? `**PROGRAM** \`${name}\`\n\nClarion executable entry point. The startup module that contains the global \`MAP\` and the program's first \`CODE\` section.`
+                : `**PROGRAM**\n\nClarion executable entry point. The startup module that contains the global \`MAP\` and the program's first \`CODE\` section.`;
+            return { contents: { kind: 'markdown', value } };
+        }
+        if (upper === 'MEMBER') {
+            const parent = documentStructure.getMemberParent();
+            const value = parent
+                ? `**MEMBER** of \`${parent}\`\n\nThis file is a member module of the named PROGRAM. Procedures declared in the PROGRAM's \`MAP\` are visible here, and this file's globally-scoped procedures are added to that MAP.`
+                : `**MEMBER**\n\nDeclares this file as a member module of a parent PROGRAM. The parenthesised filename names the parent.`;
+            return { contents: { kind: 'markdown', value } };
+        }
+        return null;
+    }
+
+    /**
      * Handle MODULE keyword - can be in MAP (keyword) or on CLASS (attribute)
      */
     handleModuleKeyword(isInMapBlock: boolean): Hover | null {

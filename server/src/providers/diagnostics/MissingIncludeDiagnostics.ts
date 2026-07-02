@@ -12,7 +12,17 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger('MissingIncludeDiagnostics');
 logger.setLevel('error');
 
-const includeVerifier = new IncludeVerifier();
+// #158 Phase B Priority 2 — per-call-site perf instrumentation. Mark's
+// Phase A devlog shows 5.6s on a 29-token file — cost is NOT
+// token-proportional, so per-phase logging will localize whether it's
+// the SDI rebuild, the clearCache+include-chain walk, or
+// per-type isClassIncluded calls. Set level to "perf" to emit; flip to
+// "error" at final commit.
+// #158 — level set to "error" post-investigation. Flip to "perf" for
+// future investigations (single-character toggle).
+const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'error');
+
+const includeVerifier = IncludeVerifier.getInstance();
 
 /**
  * Shared: resolve project/cwproj paths from document URI.
@@ -30,10 +40,18 @@ function resolveProjectPaths(document: TextDocument): {
 }
 
 /**
- * Shared: collect Variable/ReferenceVariable type tokens at col 0 global scope,
- * skipping structure definitions and already-warned types.
+ * Shared: collect Variable/ReferenceVariable type tokens at col 0 (file-top-level
+ * scope), skipping structure definitions and already-warned types.
+ *
+ * #166 — naming clarification (renamed from `collectGlobalTypeTokens`): "col 0
+ * in current file" means file-top-level, which is **global** in a PROGRAM file
+ * but **module-scope** (tier 5 per the Clarion scope model — see
+ * `project_clarion_scope_model.md`) in a MEMBER file. The function name said
+ * "Global" but the check is file-relationship — "is this type's defining file
+ * in the include chain?" — not scope-resolution. The new name reflects intent.
+ * No behavior change.
  */
-function collectGlobalTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> {
+function collectFileTopLevelTypeTokens(tokens: Token[]): Array<{ label: Token; typeToken: Token; typeName: string; typeNameStart: number }> {
     const localTypes = new Set<string>();
     for (const t of tokens) {
         if (t.type === TokenType.Structure && t.label) {
@@ -87,20 +105,32 @@ export async function validateMissingIncludes(
     tokens: Token[],
     document: TextDocument
 ): Promise<Diagnostic[]> {
+    const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
 
     const { projectPath, cwprojPath } = resolveProjectPaths(document);
 
     // Always invalidate the current document's include cache — it just changed
+    const clearCacheStart = Date.now();
     includeVerifier.clearCache(document.uri);
+    const clearCacheMs = Date.now() - clearCacheStart;
 
+    const sdiStart = Date.now();
     const sdi = StructureDeclarationIndexer.getInstance();
     await sdi.getOrBuildIndex(projectPath);
+    const sdiMs = Date.now() - sdiStart;
 
     const constantParser = new ClassConstantParser();
     const constantsChecker = cwprojPath ? new ProjectConstantsChecker() : undefined;
 
-    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
+    let typeTokenCount = 0;
+    let includeCheckCount = 0;
+    let includeCheckTotalMs = 0;
+    let constantCheckTotalMs = 0;
+
+    const typeTokens = collectFileTopLevelTypeTokens(tokens);
+    for (const { typeToken, typeName, typeNameStart } of typeTokens) {
+        typeTokenCount++;
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)
@@ -111,13 +141,17 @@ export async function validateMissingIncludes(
         const incFilePath = definitions[0].filePath;
         const incFileName = path.basename(incFilePath);
 
+        const incCheckStart = Date.now();
         const alreadyIncluded = await includeVerifier.isClassIncluded(incFileName, document);
+        includeCheckCount++;
+        includeCheckTotalMs += Date.now() - incCheckStart;
         if (alreadyIncluded) continue;
 
         // Also check whether this class requires constants that are missing from the project.
         // Include them in the message and data payload so the code action can handle both at once.
         let missingConstants: string[] = [];
         if (cwprojPath && constantsChecker) {
+            const constantCheckStart = Date.now();
             const classConstants = await constantParser.parseFile(incFilePath);
             const thisClass = classConstants.find(c => c.className.toLowerCase() === typeName.toLowerCase());
             if (thisClass && thisClass.constants.length > 0) {
@@ -126,13 +160,14 @@ export async function validateMissingIncludes(
                     if (!isDefined) missingConstants.push(constant.name);
                 }
             }
+            constantCheckTotalMs += Date.now() - constantCheckStart;
         }
 
         const constantsSuffix = missingConstants.length > 0
             ? ` It also requires project constants: ${missingConstants.join(', ')}.`
             : '';
 
-        logger.error(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}${missingConstants.length > 0 ? ` + ${missingConstants.length} missing constants` : ''}`);
+        logger.test(`⚠️ Missing include for type "${typeName}" (defined in "${incFileName}") at line ${typeToken.line + 1}${missingConstants.length > 0 ? ` + ${missingConstants.length} missing constants` : ''}`);
 
         diagnostics.push({
             severity: DiagnosticSeverity.Warning,
@@ -146,6 +181,19 @@ export async function validateMissingIncludes(
             data: { typeName, incFileName, missingConstants },
         });
     }
+
+    perfLogger.perf("validateMissingIncludes complete", {
+        total_ms: Date.now() - fnStart,
+        clearCache_ms: clearCacheMs,
+        sdi_getOrBuild_ms: sdiMs,
+        type_tokens: typeTokenCount,
+        include_checks: includeCheckCount,
+        include_check_avg_ms: includeCheckCount > 0 ? Math.round(includeCheckTotalMs / includeCheckCount) : 0,
+        include_check_total_ms: includeCheckTotalMs,
+        constant_check_total_ms: constantCheckTotalMs,
+        diag_count: diagnostics.length,
+        uri: document.uri
+    });
 
     return diagnostics;
 }
@@ -173,7 +221,7 @@ export async function validateMissingConstants(
 
     // Without a project file we can't check constants — skip silently
     if (!cwprojPath) {
-        logger.error(`[MissingConstants] No cwproj path for ${document.uri.split('/').pop()} — skipping`);
+        logger.info(`[MissingConstants] No cwproj path for ${document.uri.split('/').pop()} — skipping`);
         return diagnostics;
     }
 
@@ -183,7 +231,7 @@ export async function validateMissingConstants(
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();
 
-    for (const { typeToken, typeName, typeNameStart } of collectGlobalTypeTokens(tokens)) {
+    for (const { typeToken, typeName, typeNameStart } of collectFileTopLevelTypeTokens(tokens)) {
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)
@@ -212,7 +260,7 @@ export async function validateMissingConstants(
 
         if (missing.length === 0) continue;
 
-        logger.error(`⚠️ Missing constants for "${typeName}": ${missing.join(', ')}`);
+        logger.info(`⚠️ Missing constants for "${typeName}": ${missing.join(', ')}`);
 
         diagnostics.push({
             severity: DiagnosticSeverity.Information,
@@ -229,4 +277,5 @@ export async function validateMissingConstants(
 
     return diagnostics;
 }
+
 

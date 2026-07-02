@@ -89,7 +89,7 @@ export async function initializeSolutionManager(solutionPath: string): Promise<v
         }
         
         // If we get here, we don't have a valid solution file
-        logger.error(`No valid solution file found`);
+        logger.test(`No valid solution file found`);
         throw new Error(`No valid solution file found`);
         
         logger.info("✅ SolutionManager initialized");

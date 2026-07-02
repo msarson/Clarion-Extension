@@ -33,6 +33,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -94,7 +95,7 @@ export class HoverProvider {
             this.contextHandler,
             this.formatter
         );
-        this.includeVerifier = new IncludeVerifier();
+        this.includeVerifier = IncludeVerifier.getInstance();
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
     }
 
@@ -142,7 +143,7 @@ export class HoverProvider {
                 const ifaceEnd = ifaceStart + iface.length;
                 if (position.character >= ifaceStart && position.character <= ifaceEnd) {
                     const ifaceToken = await this.findInterfaceToken(iface, document, tokens);
-                    if (ifaceToken) return this.buildInterfaceHover(ifaceToken, iface);
+                    if (ifaceToken) return this.buildInterfaceHover(ifaceToken, iface, document);
                 }
             }
 
@@ -188,7 +189,7 @@ export class HoverProvider {
             // local class methods to access the enclosing procedure's parameters.
             if (currentScope.subType === TokenType.MethodImplementation) {
                 const outerProcs = tokens.filter(t =>
-                    t.type === TokenType.Procedure && t.subType === TokenType.GlobalProcedure
+                    TokenHelper.isProcedureOrFunction(t) && t.subType === TokenType.GlobalProcedure
                 );
                 for (const gp of outerProcs) {
                     const outerParamHover = this.variableResolver.findParameterHover(word, document, gp);
@@ -228,7 +229,8 @@ export class HoverProvider {
                     logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
                     
                     // First check if this is a procedure in the MAP (before treating as variable)
-                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line);
+                    const localScope = getLocalMapScope(document.uri);
+                    const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line, localScope?.containingProcedure);
                     
                     if (mapDecl) {
                         logger.info(`✅ Found MAP declaration for ${word} in parent - treating as procedure call`);
@@ -706,7 +708,7 @@ export class HoverProvider {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {
             timeoutId = setTimeout(() => {
-                logger.error(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
+                logger.test(`⏱️ [HOVER] checkClassTypeHover timed out for "${word}" — class index build too slow`);
                 resolve(null);
             }, 10000);
         });
@@ -796,7 +798,7 @@ export class HoverProvider {
             const ifaceToken = await this.findInterfaceToken(ifaceName, document, tokens);
             if (!ifaceToken) return null;
 
-            return this.buildInterfaceHover(ifaceToken, ifaceName);
+            return this.buildInterfaceHover(ifaceToken, ifaceName, document);
         }
 
         // Also hover directly on an INTERFACE structure's label token (col 0)
@@ -806,7 +808,7 @@ export class HoverProvider {
             t.line === position.line
         );
         if (ifaceStruct && ifaceStruct.label?.toLowerCase() === word.toLowerCase()) {
-            return this.buildInterfaceHover(ifaceStruct, word);
+            return this.buildInterfaceHover(ifaceStruct, word, document);
         }
 
         return null;
@@ -922,14 +924,35 @@ export class HoverProvider {
         return null;
     }
 
-    /** Build a Hover card for an INTERFACE, listing its method prototypes */
-    private buildInterfaceHover(ifaceToken: Token, ifaceName: string): Hover {
+    /**
+     * Build a Hover card for an INTERFACE, listing its method prototypes and
+     * — when `document` is supplied — a footer naming each CLASS in the same
+     * file that declares `IMPLEMENTS(<this interface>)`. Cross-file implementors
+     * are not surfaced in v1; that's `findReferencesToControlAcrossFiles`-style
+     * follow-up territory for `StructureDeclarationIndexer`.
+     */
+    private buildInterfaceHover(ifaceToken: Token, ifaceName: string, document?: TextDocument): Hover {
         const methods = (ifaceToken.children ?? [])
             .filter(c => c.subType === TokenType.InterfaceMethod)
             .map(c => `  ${c.label ?? c.value}`)
             .join('\n');
         const body = methods ? `\n${methods}\n` : '';
-        const content = `\`\`\`clarion\n${ifaceName} INTERFACE${body}END\n\`\`\`\n\n*Interface — defines a contract implemented by classes.*`;
+
+        let implementorsFooter = '';
+        if (document) {
+            const implementors = this.tokenCache.getStructure(document).getImplementors(ifaceName);
+            if (implementors.length > 0) {
+                const list = implementors
+                    .map(c => `- \`${c.label ?? c.value}\` (line ${c.line + 1})`)
+                    .join('\n');
+                implementorsFooter =
+                    `\n\n**${implementors.length} class${implementors.length === 1 ? '' : 'es'} implement${implementors.length === 1 ? 's' : ''} this interface in this file:**\n${list}`;
+            }
+        }
+
+        const content =
+            `\`\`\`clarion\n${ifaceName} INTERFACE${body}END\n\`\`\`\n\n` +
+            `*Interface — defines a contract implemented by classes.*${implementorsFooter}`;
         return { contents: { kind: 'markdown', value: content } };
     }
 

@@ -3,7 +3,6 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
-import { redirectionService } from '../paths/RedirectionService';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { buildSolutionOrProject } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
@@ -35,7 +34,7 @@ interface ProjectOutputInfo {
 function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undefined {
     try {
         if (!fs.existsSync(cwprojPath)) {
-            logger.error(`Project file not found: ${cwprojPath}`);
+            logger.test(`Project file not found: ${cwprojPath}`);
             return undefined;
         }
 
@@ -114,7 +113,7 @@ function extractProjectOutputInfo(cwprojPath: string): ProjectOutputInfo | undef
  * @param outputInfo - Project output information
  * @returns Path to the executable or undefined if not found
  */
-function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
+async function findExecutable(outputInfo: ProjectOutputInfo): Promise<string | undefined> {
     const { outputName, projectDir, startProgram, isNativeExe } = outputInfo;
 
     // StartProgram is always the most explicit — relative to project dir
@@ -135,21 +134,28 @@ function findExecutable(outputInfo: ProjectOutputInfo): string | undefined {
     const exeName = outputName.toLowerCase().endsWith('.exe') ? outputName : `${outputName}.exe`;
     logger.info(`Looking for executable: ${exeName} in project: ${projectDir}`);
 
-    // Try redirection service — *.exe entries are relative to project dir
+    // Ask the language server (which owns the canonical redirection parser) to
+    // resolve the exe via the solution's redirection chain. Server returns
+    // { path: "", source: "" } if not found or no solution loaded.
     try {
-        const resolver = redirectionService.getResolver(projectDir);
-        const resolved = resolver(exeName);
-        if (resolved) {
-            const absoluteResolved = path.isAbsolute(resolved)
-                ? resolved
-                : path.resolve(projectDir, resolved);
-            if (fs.existsSync(absoluteResolved)) {
-                logger.info(`✅ Found executable via redirection: ${absoluteResolved}`);
-                return absoluteResolved;
+        const client = getLanguageClient();
+        if (client && !client.needsStart()) {
+            const result = await client.sendRequest<{ path: string, source: string }>(
+                'clarion/findFile',
+                { filename: exeName }
+            );
+            if (result.path) {
+                const absoluteResolved = path.isAbsolute(result.path)
+                    ? result.path
+                    : path.resolve(projectDir, result.path);
+                if (fs.existsSync(absoluteResolved)) {
+                    logger.info(`✅ Found executable via server redirection: ${absoluteResolved}`);
+                    return absoluteResolved;
+                }
             }
         }
     } catch (error) {
-        logger.warn(`Redirection resolution failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(`Server redirection resolution failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     // Fallback: common locations relative to project dir
@@ -545,7 +551,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                         return;
                     }
                 } else {
-                    logger.error(`Project directory not found: ${selectedProject.path}`);
+                    logger.test(`Project directory not found: ${selectedProject.path}`);
                     window.showErrorMessage(`Project directory not found: ${selectedProject.path}`);
                     return;
                 }
@@ -554,7 +560,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             logger.info(`📝 Checking project file: ${cwprojPath}`);
             
             if (!fs.existsSync(cwprojPath)) {
-                logger.error(`Project file not found: ${cwprojPath}`);
+                logger.test(`Project file not found: ${cwprojPath}`);
                 window.showErrorMessage(`Project file not found: ${cwprojPath}`);
                 return;
             }
@@ -595,7 +601,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             logger.info(`🔍 Looking for executable...`);
 
-            const exePath = findExecutable(outputInfo);
+            const exePath = await findExecutable(outputInfo);
 
             if (!exePath) {
                 window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
@@ -736,7 +742,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 return;
             }
 
-            const exePath = findExecutable(outputInfo);
+            const exePath = await findExecutable(outputInfo);
             if (!exePath) {
                 window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
                 return;

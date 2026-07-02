@@ -1,6 +1,7 @@
 import { Token, TokenType } from "./ClarionTokenizer";
 import LoggerManager from "./logger";
 import { FormattingOptions } from 'vscode-languageserver';
+import { TokenHelper } from "./utils/TokenHelper";
 
 type StructureToken = Token & {
     type: TokenType.Structure;
@@ -63,7 +64,7 @@ class ClarionFormatter {
     private identifyExecutionRanges(): void {
         this.executionRanges = [];
         for (const token of this.tokens) {
-            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
+            if (TokenHelper.isProcedureOrFunction(token) || token.subType === TokenType.Routine) {
                 const executionStart = token.executionMarker ? token.executionMarker.line + 1 : token.line + 1;
                 this.executionRanges.push({
                     startsAt: executionStart,
@@ -74,7 +75,7 @@ class ClarionFormatter {
     }
     private identifyLocalDataSections(): void {
         for (const token of this.tokens) {
-            if (token.type === TokenType.Procedure || token.subType === TokenType.Routine) {
+            if (TokenHelper.isProcedureOrFunction(token) || token.subType === TokenType.Routine) {
                 if (token.executionMarker) {
                     const startLine = token.line + 1;
                     const endLine = token.executionMarker.line - 1;
@@ -348,6 +349,32 @@ class ClarionFormatter {
         // Bug 3 fix: detect input EOL and use it for output
         const eol = this.text.includes('\r\n') ? '\r\n' : '\n';
         return formattedLines.join(eol);
+    }
+
+    public formatRange(startLine: number, endLine: number): string | null {
+        if (startLine < 0 || endLine < 0 || endLine < startLine) {
+            return null;
+        }
+
+        const originalLines = this.text.split(/\r?\n/);
+        if (originalLines.length === 0) {
+            return null;
+        }
+
+        const safeStart = Math.min(startLine, originalLines.length - 1);
+        const safeEnd = Math.min(endLine, originalLines.length - 1);
+        if (safeEnd < safeStart) {
+            return null;
+        }
+
+        const formattedText = this.format();
+        const formattedLines = formattedText.split(/\r?\n/);
+        const eol = this.text.includes('\r\n') ? '\r\n' : '\n';
+
+        const originalRange = originalLines.slice(safeStart, safeEnd + 1).join(eol);
+        const formattedRange = formattedLines.slice(safeStart, safeEnd + 1).join(eol);
+
+        return originalRange === formattedRange ? null : formattedRange;
     }
 
     public formatDocument(): string {

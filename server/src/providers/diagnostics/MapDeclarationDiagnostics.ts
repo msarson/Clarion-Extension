@@ -2,10 +2,13 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
+import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
+import { pathToCanonicalUri } from '../../utils/UriUtils';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -45,7 +48,8 @@ function resolveClwPath(bareFilename: string): string | null {
  */
 export async function validateMissingMapDeclarations(
     tokens: Token[],
-    document: TextDocument
+    document: TextDocument,
+    getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Only relevant for MEMBER files
     const memberToken = tokens.find(t =>
@@ -64,7 +68,7 @@ export async function validateMissingMapDeclarations(
     // Collect GlobalProcedure tokens only — MethodImplementation (dotted names)
     // are declared in CLASS blocks, not MAP, so they are excluded by subtype.
     const implementations = tokens.filter(t =>
-        t.type === TokenType.Procedure &&
+        TokenHelper.isProcedureOrFunction(t) &&
         t.subType === TokenType.GlobalProcedure &&
         t.label
     );
@@ -73,31 +77,179 @@ export async function validateMissingMapDeclarations(
         return [];
     }
 
-    // Build a set of procedure names already declared in this file's own MAP blocks.
-    // A MEMBER file can have its own MAP/END (e.g. for local procedures) — those are
-    // valid declarations and must not trigger the warning.
-    const locallyDeclared = new Set<string>(
+    // Build a set of procedure names declared in a MODULE('thisfile.clw') block
+    // within this file's own MAP. Only these count as true self-declarations — bare
+    // MAP entries with no MODULE wrapper are forward-declarations for calling external
+    // procedures and must not suppress the missing-declaration check.
+    const currentBasename = nodePath.basename(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    ).toLowerCase();
+
+    // Case 1: inside MODULE('thisfile.clw') — self-declaration in the same file's
+    // MODULE block; no cross-file resolver needed, but signatures still need to match.
+    const selfModuleDeclaredTokens = new Map<string, Token>(
         tokens
-            .filter(t => t.subType === TokenType.MapProcedure && t.label)
-            .map(t => t.label!.toUpperCase())
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                const parent = t.parent;
+                if (!parent || parent.type !== TokenType.Structure) return false;
+                if (parent.value.toUpperCase() !== 'MODULE' || !parent.referencedFile) return false;
+                return nodePath.basename(parent.referencedFile).toLowerCase() === currentBasename;
+            })
+            .map(t => [t.label!.toUpperCase(), t] as [string, Token])
     );
+
+    // Case 2: inside a local MAP whose parent is a procedure body — declared and
+    // implemented in the same file; no cross-file resolver needed, but signatures
+    // still need to match.
+    const procLevelDeclaredTokens = new Map<string, Token>(
+        tokens
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                const parent = t.parent;
+                if (!parent || parent.type !== TokenType.Structure) return false;
+                if (parent.value.toUpperCase() !== 'MAP') return false;
+                const grandParent = parent.parent;
+                return grandParent !== undefined &&
+                    (grandParent.subType === TokenType.GlobalProcedure ||
+                     grandParent.subType === TokenType.MethodImplementation);
+            })
+            .map(t => [t.label!.toUpperCase(), t] as [string, Token])
+    );
+
+    // Case 1b: MAP contains INCLUDE directives — collect procedure declarations
+    // from included INC files (app-generated code puts declarations in _GL1.INC etc.).
+    // Clarion's preprocessor inlines INC content at the INCLUDE position, so a
+    // MODULE('thisfile.clw') block inside the INC effectively declares procedures for
+    // this CLW. We only accept declarations inside a MODULE whose referenced file
+    // matches the current CLW basename to avoid false-positives from unrelated INC files.
+    const incDeclaredTokens = new Map<string, Token>();
+    const currentClwBasename = nodePath.basename(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    ).toLowerCase();
+    const currentClwDir = nodePath.dirname(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    );
+    const mapStructureTokens = tokens.filter(t =>
+        t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP'
+    );
+    for (const mapToken of mapStructureTokens) {
+        const mapEnd = mapToken.finishesAt;
+        const includesInMap = tokens.filter(t =>
+            t.type === TokenType.Directive &&
+            t.value.toUpperCase() === 'INCLUDE' &&
+            t.referencedFile &&
+            t.line > mapToken.line &&
+            (mapEnd === undefined || t.line <= mapEnd)
+        );
+        for (const inclToken of includesInMap) {
+            // ─── Sibling-dir fallback (cluster site 3 of 4, task 6253f9d5) ─────
+            // Try same directory as current CLW first (most common), then redirection.
+            // Load-bearing for no-solution-open mode + cross-directory siblings
+            // outside the project's .red search paths. Move in unison with the
+            // cluster-canonical site at `ClassMemberResolver.ts:~1041` +
+            // `ImplementationProvider.ts:867` + `MapDeclarationCodeActionProvider.ts:resolveClwPath`.
+            // Phase A audit: `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
+            const sameDirPath = nodePath.join(currentClwDir, inclToken.referencedFile!);
+            const incPath = fs.existsSync(sameDirPath)
+                ? sameDirPath
+                : resolveClwPath(inclToken.referencedFile!);
+            if (!incPath) continue;
+            try {
+                const incUri = pathToCanonicalUri(incPath);
+                // #117 B1: shared cache-first/disk-fallback content load. Downstream
+                // unchanged — TextDocument + cached async getTokens. undefined => skip
+                // this include (matches the prior readFileSync-throws -> catch path).
+                const incContent = CrossFileResolver.loadExternalFileContent(tokenCache, incUri, incPath, getOpenDocumentContent);
+                if (incContent === undefined) continue;
+                const incDoc = TextDocument.create(incUri, 'clarion', 1, incContent);
+                const incTokens = await tokenCache.getTokens(incDoc);
+
+                // Only accept procedures inside MODULE('thisfile.clw') blocks
+                for (const t of incTokens) {
+                    if (t.subType === TokenType.MapProcedure && t.label && t.parent) {
+                        const moduleRef = t.parent.referencedFile;
+                        if (moduleRef && nodePath.basename(moduleRef).toLowerCase() === currentClwBasename) {
+                            incDeclaredTokens.set(t.label.toUpperCase(), t);
+                        }
+                    }
+                }
+            } catch { /* skip unreadable INC files */ }
+        }
+    }
 
     const resolver = new CrossFileResolver(TokenCache.getInstance());
     const diagnostics: Diagnostic[] = [];
+    const docLines = document.getText().split('\n');
 
     for (const proc of implementations) {
         const procName = proc.label!;
 
-        // Skip procedures declared in this file's own MAP block
-        if (locallyDeclared.has(procName.toUpperCase())) {
+        // Case 1: self-declared via MODULE('thisfile.clw') — compare signatures locally
+        const selfModuleDecl = selfModuleDeclaredTokens.get(procName.toUpperCase());
+        if (selfModuleDecl) {
+            const declLine = docLines[selfModuleDecl.line] ?? '';
+            const implLine = docLines[proc.line] ?? '';
+            const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: { start: { line: proc.line, character: 0 }, end: { line: proc.line, character: procName.length } },
+                    message: `Procedure '${procName}' signature does not match its local MAP declaration.`,
+                    source: 'clarion',
+                    code: 'map-signature-mismatch',
+                    data: {
+                        procName,
+                        parentFileUri: document.uri,
+                        declLine: selfModuleDecl.line,
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
+                });
+            }
+            continue;
+        }
+
+        // Case 2: procedure-level MAP declaration — compare signatures locally
+        const procLevelDecl = procLevelDeclaredTokens.get(procName.toUpperCase());
+        if (procLevelDecl) {
+            const declLine = docLines[procLevelDecl.line] ?? '';
+            const implLine = docLines[proc.line] ?? '';
+            const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: { start: { line: proc.line, character: 0 }, end: { line: proc.line, character: procName.length } },
+                    message: `Procedure '${procName}' signature does not match its local MAP declaration.`,
+                    source: 'clarion',
+                    code: 'map-signature-mismatch',
+                    data: {
+                        procName,
+                        parentFileUri: document.uri,
+                        declLine: procLevelDecl.line,
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
+                });
+            }
+            continue;
+        }
+
+        // Case 1b: declared in an INC file included by a MAP block in this file
+        if (incDeclaredTokens.has(procName.toUpperCase())) {
             continue;
         }
 
         try {
+            const localScope = getLocalMapScope(document.uri);
             const result = await resolver.findMapDeclarationInMemberFile(
                 procName,
                 memberToken.referencedFile,
-                document
+                document,
+                undefined,
+                localScope?.containingProcedure
             );
 
             const range: Range = {
@@ -126,7 +278,6 @@ export async function validateMissingMapDeclarations(
             } else {
                 // Declaration found — compare signatures to catch parameter mismatches
                 try {
-                    const docLines = document.getText().split('\n');
                     const implLine = docLines[proc.line] ?? '';
                     const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
 
@@ -135,8 +286,11 @@ export async function validateMissingMapDeclarations(
                         const uriPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).toLowerCase().replace(/\\/g, '/');
                         return uriPath === normalizedResultPath;
                     });
-                    const parentText = (resultLiveUri && tokenCache.getDocumentText(resultLiveUri))
-                        ?? fs.readFileSync(result.file, 'utf8');
+                    // #117 B1: shared cache-first/disk-fallback content load (V2b is a
+                    // TEXT/line read, not a tokenize). undefined => skip this proc's
+                    // signature check (the prior readFileSync-throws was caught below).
+                    const parentText = CrossFileResolver.loadExternalFileContent(tokenCache, resultLiveUri, result.file, getOpenDocumentContent);
+                    if (parentText === undefined) continue;
                     const parentLines = parentText.split('\n');
                     const declLine = parentLines[result.line] ?? '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
@@ -171,28 +325,35 @@ export async function validateMissingMapDeclarations(
 }
 
 /**
- * Warns when a procedure declared inside a MAP/MODULE block in a PROGRAM file
+ * Warns when a procedure declared inside a MAP/MODULE block
  * has no matching implementation (GlobalProcedure) in the referenced CLW file.
+ * Applies to both PROGRAM and MEMBER files that contain MODULE declarations.
  */
 export async function validateMissingImplementations(
     tokens: Token[],
     document: TextDocument,
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
-    // Only relevant for PROGRAM files
-    const programToken = tokens.find(t =>
+    // Must be a Clarion source file (PROGRAM or MEMBER)
+    const clarionDoc = tokens.find(t =>
         t.type === TokenType.ClarionDocument &&
-        t.value.toUpperCase() === 'PROGRAM' &&
+        (t.value.toUpperCase() === 'PROGRAM' || t.value.toUpperCase() === 'MEMBER') &&
         t.line < 5
     );
 
-    if (!programToken) {
+    if (!clarionDoc) {
         return [];
     }
 
     const tokenCache = TokenCache.getInstance();
     const docLines = document.getText().split('\n');
     const diagnostics: Diagnostic[] = [];
+
+    // Same-dir resolution context for MODULE filename lookup (mirrors the
+    // INCLUDE pattern at validateMissingMapDeclarations:128-148).
+    const currentClwDir = nodePath.dirname(
+        decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
+    );
 
     // Find all MODULE tokens that reference a file
     const moduleTokens = tokens.filter(t =>
@@ -203,10 +364,17 @@ export async function validateMissingImplementations(
     );
 
     for (const moduleToken of moduleTokens) {
-        const clwPath = resolveClwPath(moduleToken.referencedFile!);
-
+        // MODULE filenames are stored unresolved on the token
+        // (DocumentStructure.resolveFileReferences:1915 — "We're storing
+        // unresolved filenames"). Resolve to an absolute path before any URI
+        // construction, otherwise bare filenames leak into the cache as
+        // `file:///MyOther.clw` URIs (task d2fadc09). Same-dir first (most
+        // common in practice), redirection fallback — same shape as the
+        // INCLUDE handler at line 145-148.
+        const bareName = moduleToken.referencedFile!;
+        const sameDirPath = nodePath.join(currentClwDir, bareName);
+        const clwPath = fs.existsSync(sameDirPath) ? sameDirPath : resolveClwPath(bareName);
         if (!clwPath) {
-            logger.debug(`⚠️ Could not resolve MODULE file: ${moduleToken.referencedFile}`);
             continue;
         }
 
@@ -222,7 +390,7 @@ export async function validateMissingImplementations(
             if (openText !== null) {
                 // File is open in VS Code — use the live buffer content directly.
                 implFileContent = openText;
-                const implUri = 'file:///' + clwPath.replace(/\\/g, '/');
+                const implUri = pathToCanonicalUri(clwPath);
                 const implDoc = TextDocument.create(implUri, 'clarion', 1, openText);
                 implTokens = tokenCache.getTokens(implDoc);
             } else {
@@ -247,7 +415,7 @@ export async function validateMissingImplementations(
                     }
                 } else {
                     implFileContent = fs.readFileSync(clwPath, 'utf8');
-                    const implDoc = TextDocument.create('file:///' + clwPath.replace(/\\/g, '/'), 'clarion', 1, implFileContent);
+                    const implDoc = TextDocument.create(pathToCanonicalUri(clwPath), 'clarion', 1, implFileContent);
                     implTokens = tokenCache.getTokens(implDoc);
                 }
             }
@@ -259,7 +427,7 @@ export async function validateMissingImplementations(
         // Build a map of implemented procedure names → their line numbers
         const implemented = new Map<string, number>();
         for (const t of implTokens) {
-            if (t.type === TokenType.Procedure &&
+            if (TokenHelper.isProcedureOrFunction(t) &&
                 t.subType === TokenType.GlobalProcedure &&
                 t.label) {
                 implemented.set(t.label.toUpperCase(), t.line);
@@ -290,7 +458,7 @@ export async function validateMissingImplementations(
                     code: 'missing-map-implementation',
                     data: {
                         procName,
-                        clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                        clwFileUri: pathToCanonicalUri(clwPath),
                         declLine: decl.line,
                         currentFileUri: document.uri
                     }
@@ -300,7 +468,7 @@ export async function validateMissingImplementations(
                 // Implementation exists — compare signatures
                 try {
                     const implLine = implTokens.find(t =>
-                        t.type === TokenType.Procedure &&
+                        TokenHelper.isProcedureOrFunction(t) &&
                         t.subType === TokenType.GlobalProcedure &&
                         t.label?.toUpperCase() === procName.toUpperCase()
                     );
@@ -321,7 +489,7 @@ export async function validateMissingImplementations(
                                 code: 'map-impl-signature-mismatch',
                                 data: {
                                     procName,
-                                    clwFileUri: 'file:///' + clwPath.replace(/\\/g, '/'),
+                                    clwFileUri: pathToCanonicalUri(clwPath),
                                     implLine: implLine.line,
                                     declLine: decl.line,
                                     currentFileUri: document.uri

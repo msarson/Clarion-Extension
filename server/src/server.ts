@@ -17,6 +17,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 import {
     DocumentFormattingParams,
+    DocumentRangeFormattingParams,
     DocumentSymbolParams,
     DocumentSymbol,
     FoldingRangeParams,
@@ -34,7 +35,9 @@ import {
     TextDocumentSyncKind,
     SignatureHelp,
     ReferenceParams,
-    RenameParams
+    RenameParams,
+    DocumentLink,
+    DocumentLinkParams
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -56,12 +59,14 @@ import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
+import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
 import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider';
 import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
 import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
+import { UnicodeCodeActionProvider } from './providers/UnicodeCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -73,7 +78,12 @@ import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
+import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
+import { SymbolFinderService } from './services/SymbolFinderService';
+import { ReferenceIndex } from './services/ReferenceIndex';
+import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
+import { pathToCanonicalUri } from './utils/UriUtils';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
@@ -83,13 +93,146 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
 
+// #158 — startup-perf instrumentation. Set level to "perf" to emit; flip to
+// "error" to silence post-investigation. Captures the 7 startup-phase
+// boundaries Bob named in the dispatch + per-document validation timing.
+// Pattern per the `perfLogger` infrastructure from `0d70270`.
+// #158 — perfLogger level set to "error" post-investigation. Calls remain
+// in place; flip back to "perf" for future startup-time investigations
+// (toggle is a single-character edit per logger).
+const perfLogger = LoggerManager.getLogger("StartupPerf", "error");
+const serverModuleLoadedAt = Date.now();
+perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
+
+const globalStartTime = Date.now();
+logger.info(`⏱️ [STARTUP] Server process started at ${new Date().toISOString()}`);
+
+// #158 — first-call flags for one-shot phase boundaries.
+let firstDocumentOpenFired = false;
+let firstValidateFired = false;
+
+// #158 Phase B addendum — defer async validators until solution-ready.
+// Mark's perf-data insight: initial onDidOpen fires at t~63ms but
+// libsrcPaths isn't populated until clarion/solutionReady fires (~11s in
+// Mark's setup). The P3 libsrc-skip can't catch the initial async scan
+// because libsrcPaths is empty → libsrc files get the full 14s async pass
+// despite being structurally exempt.
+//
+// Fix: hold the async validator pass on `onDidOpen` until solution-ready
+// drains the queue. Sync diagnostics still fire immediately (fast
+// feedback). Once solution loads, libsrcPaths is populated, the drain
+// loop hits the now-effective P3 libsrc-skip on first deferred async
+// pass — eliminating ~15s of redundant async work.
+//
+// No-solution-mode safety net: a 2s timeout marks the pipeline ready +
+// drains the queue if solutionReady never fires (loose .clw in
+// non-Clarion workspace). 2s is well under perceived-startup-blocking
+// threshold; loose-file users wait 2s for async diagnostics instead of
+// getting them at t=63ms. Acceptable per Bob's dispatch.
+let solutionPipelineReady = false;
+const deferredAsyncDocs = new Set<string>();
+
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
 // Track if a solution operation is in progress
 export let solutionOperationInProgress = false;
 
-// CodeLens reference count cache — keyed by "uri:line:char", invalidated on any document change
-const codeLensRefCache = new Map<string, { refs: Location[]; generation: number }>();
-let codeLensGeneration = 0;
+// CodeLens reference-count cache — keyed by "uri:line:char" (the symbol's declaration
+// position). `refs` is the Find-All-References result (the displayed count is always
+// refs.length, unchanged from before); `shortName` is the symbol's last dotted segment,
+// used for invalidation. Presence in the map = "resolved" (so a genuine 0-ref count is
+// distinguishable from "not yet computed").
+//
+// #189 Phase 2: invalidation is per-file, not global. `codeLensRefIndex` tracks which
+// files each cached symbol's references live in (cacheKey → site files), so editing one
+// file evicts only the counts that file can affect — counts for other files stay warm
+// across edits instead of every count recomputing on every keystroke.
+const codeLensRefCache = new Map<string, { refs: Location[]; shortName: string }>();
+const codeLensRefIndex = new ReferenceIndex();
+let codeLensPrecomputeGeneration = 0;
+
+function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[] {
+    const dedup = new Set<string>();
+    const files: string[] = [];
+    for (const project of solution.projects) {
+        for (const sourceFile of project.sourceFiles) {
+            if (!sourceFile.relativePath) continue;
+            const abs = path.join(project.path, sourceFile.relativePath);
+            const key = path.normalize(abs).toLowerCase();
+            if (dedup.has(key)) continue;
+            dedup.add(key);
+            files.push(abs);
+        }
+    }
+    return files;
+}
+
+/**
+ * #189 Phase 2 — background precompute for CodeLens reference counts.
+ * Builds the existing declaration-keyed cache (`uri:line:char`) once at solution-ready
+ * so most `onCodeLensResolve` calls hit O(1) map lookups. Resolve still falls back to
+ * live FAR whenever precompute is unavailable/incomplete, so correctness is preserved.
+ */
+async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo): Promise<void> {
+    const generation = ++codeLensPrecomputeGeneration;
+    codeLensRefCache.clear();
+    codeLensRefIndex.clear(); // also marks ready=false
+
+    if (!serverSettings.referencesCodeLensEnabled) return;
+
+    const filePaths = collectSolutionSourceFilePaths(solution);
+    let scannedFiles = 0;
+    let indexedLenses = 0;
+    const startedAt = Date.now();
+
+    for (const absPath of filePaths) {
+        if (generation !== codeLensPrecomputeGeneration) return; // superseded by a newer build
+        if (!fs.existsSync(absPath)) continue;
+
+        const uri = pathToCanonicalUri(absPath);
+        const openDoc = documents.get(uri);
+        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, fs.readFileSync(absPath, 'utf8'));
+        const lenses = codeLensProvider.provideCodeLenses(doc);
+
+        for (const lens of lenses) {
+            if (generation !== codeLensPrecomputeGeneration) return;
+            const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+            if (!data) continue;
+
+            const refs = await referencesProvider.provideReferences(
+                doc,
+                { line: data.line, character: data.character },
+                { includeDeclaration: true }
+            ) ?? [];
+
+            const cacheKey = `${data.uri}:${data.line}:${data.character}`;
+            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs, shortName });
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of refs) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
+
+            indexedLenses++;
+            if (indexedLenses % 25 === 0) {
+                await new Promise<void>(resolve => setImmediate(resolve));
+            }
+        }
+
+        scannedFiles++;
+        if (scannedFiles % 10 === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+    }
+
+    if (generation === codeLensPrecomputeGeneration) {
+        codeLensRefIndex.setReady(true);
+        logger.info(`⚡ CodeLens reference precompute ready: ${indexedLenses} lenses across ${scannedFiles} files in ${Date.now() - startedAt}ms`);
+    }
+}
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -108,6 +251,7 @@ const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
 const completionProvider = new CompletionProvider();
+const documentLinkProvider = new DocumentLinkProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
@@ -122,6 +266,11 @@ process.on('unhandledRejection', (reason: any) => {
 });
 // Log all incoming requests and notifications
 connection.onInitialize((params) => {
+    const t0 = Date.now();
+    logger.info(`⏱️ [STARTUP] onInitialize called at ${new Date().toISOString()}`);
+    perfLogger.perf("Phase: LSP onInitialize received", {
+        since_module_load_ms: t0 - serverModuleLoadedAt
+    });
     try {
         logger.info(`📥 [CRITICAL] Initialize request received`);
         logger.info(`📥 [CRITICAL] Client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -157,10 +306,11 @@ connection.onInitialize((params) => {
         logger.info(`📥 [CRITICAL] Responding with server capabilities`);
         
         // Return server capabilities
-        return {
+        const result: InitializeResult = {
             capabilities: {
                 textDocumentSync: TextDocumentSyncKind.Incremental,
                 documentFormattingProvider: true,
+                documentRangeFormattingProvider: true,
                 documentSymbolProvider: true,
                 foldingRangeProvider: true,
                 colorProvider: true,
@@ -182,6 +332,7 @@ connection.onInitialize((params) => {
                     triggerCharacters: ['.', ':'],
                     resolveProvider: false
                 },
+                documentLinkProvider: { resolveProvider: false },
                 semanticTokensProvider: {
                     legend: clarionSemanticTokensProvider.getLegend(),
                     range: false,
@@ -189,6 +340,12 @@ connection.onInitialize((params) => {
                 }
             }
         };
+        logger.info(`⏱️ [STARTUP] onInitialize complete in ${Date.now() - t0}ms`);
+        perfLogger.perf("Phase: LSP onInitialize complete", {
+            handler_ms: Date.now() - t0,
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
+        return result;
     } catch (error) {
         logger.error(`❌ [CRITICAL] Error in onInitialize: ${error instanceof Error ? error.message : String(error)}`);
         logger.error(`❌ [CRITICAL] Error stack: ${error instanceof Error && error.stack ? error.stack : 'No stack available'}`);
@@ -207,6 +364,9 @@ connection.onInitialized(() => {
     try {
         logger.info(`📥 [CRITICAL] Server initialized notification received`);
         logger.info(`📥 [CRITICAL] Server is now fully initialized`);
+        perfLogger.perf("Phase: Client initialize handshake complete (onInitialized)", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
         
         // Set the serverInitialized flag
         setServerInitialized(true);
@@ -254,7 +414,15 @@ documents.onDidOpen((event) => {
         const uri = document.uri;
 
         logger.info(`📂 Document opened: ${uri}`);
-        
+
+        if (!firstDocumentOpenFired) {
+            firstDocumentOpenFired = true;
+            perfLogger.perf("Phase: First onDidOpen", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                uri
+            });
+        }
+
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
         }
@@ -285,7 +453,7 @@ const lastValidatedVersions = new Map<string, number>();
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
-        if (!document.uri.toLowerCase().endsWith('.clw') && 
+        if (!document.uri.toLowerCase().endsWith('.clw') &&
             !document.uri.toLowerCase().endsWith('.inc') &&
             !document.uri.toLowerCase().endsWith('.equ')) {
             return;
@@ -301,21 +469,23 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
+        // #158 — startup-perf instrumentation
+        const validateStart = Date.now();
+        if (!firstValidateFired) {
+            firstValidateFired = true;
+            perfLogger.perf("Phase: First validateTextDocument", {
+                since_module_load_ms: validateStart - serverModuleLoadedAt,
+                caller,
+                uri: document.uri
+            });
+        }
+
         // Record version before any async work so duplicate-skip still works
         const startVersion = document.version;
         lastValidatedVersions.set(document.uri, document.version);
 
-        // PERFORMANCE: Use cached tokens instead of re-tokenizing
-        const tokens = getTokens(document);
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller);
-
-        // Send sync diagnostics immediately for fast feedback
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
-
-        // Async pass: detect discarded return values via cross-file type resolution
-        const memberLocator = new MemberLocatorService();
-        // Provide a live-document getter so validateMissingImplementations can read
-        // open files even when the TokenCache has been cleared (e.g. structure-affecting edit).
+        // Provide a live-document getter so both sync and async cross-file diagnostics
+        // can read open files even when the TokenCache entry was cleared.
         const getOpenDocumentContent = (absPath: string): string | null => {
             const normalizedPath = absPath.toLowerCase().replace(/\\/g, '/');
             for (const doc of documents.all()) {
@@ -324,25 +494,136 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             }
             return null;
         };
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags] = await Promise.all([
-            DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator),
-            DiagnosticProvider.validateMissingIncludes(tokens, document),
-            DiagnosticProvider.validateMissingConstants(tokens, document),
-            DiagnosticProvider.validateMissingMapDeclarations(tokens, document),
-            DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent),
+
+        // PERFORMANCE: Use cached tokens instead of re-tokenizing
+        const tokens = getTokens(document);
+        const syncStart = Date.now();
+        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller, getOpenDocumentContent);
+        const syncMs = Date.now() - syncStart;
+
+        // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
+        // files. Library files (StringTheory, ABC, etc.) are stable, read-only
+        // by convention, and don't change based on user edits. Their async
+        // diagnostics (discardedReturn / missingIncludes / undeclaredVar /
+        // missingImpl) impose massive cost on large files (Mark's Phase A:
+        // 13.9s on 72k-token StringTheory.clw) for ~zero user-actionable
+        // value: users don't fix lint warnings inside library code they
+        // didn't write.
+        //
+        // Trade-off: a user who DOES edit a libsrc file (e.g., extending
+        // ABC) will silently miss async diagnostics. Acceptable per Bob's
+        // dispatch — release-build trade-off for the perf win. Sync
+        // diagnostics still run normally so syntax / structure errors
+        // remain visible.
+        //
+        // Detection: case-insensitive prefix match of normalized
+        // `document.uri` filesystem path against each `serverSettings.libsrcPaths`
+        // entry. Uses the same URI → fs-path pattern as the rest of
+        // server.ts (decodeURIComponent + replace).
+        const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\').toLowerCase();
+        const isLibsrcFile = (serverSettings.libsrcPaths ?? []).some(libDir => {
+            if (!libDir) return false;
+            const normalizedLibDir = libDir.replace(/\//g, '\\').toLowerCase();
+            return docFsPath.startsWith(normalizedLibDir + '\\') || docFsPath.startsWith(normalizedLibDir + '/');
+        });
+
+        if (isLibsrcFile) {
+            // Send only sync diagnostics; skip the async Promise.all entirely.
+            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            perfLogger.perf("validateTextDocument libsrc-skip (async validators bypassed)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
+
+        // Send sync diagnostics immediately for fast feedback
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 Phase B addendum — defer async validators until solution-ready
+        // when the caller is the initial `onDidOpen`. At t=63ms (first
+        // onDidOpen), libsrcPaths is empty so the P3 libsrc-skip can't fire;
+        // running the full async pass on a libsrc file like StringTheory.clw
+        // burns ~14s of pointless work. By the time solutionReady fires
+        // (~11s in), libsrcPaths is populated, and the drain loop hits the
+        // now-effective P3 libsrc-skip on first deferred async pass.
+        //
+        // No-solution timeout fallback (registered at bottom of file) marks
+        // pipeline ready after 2s if solutionReady never fires.
+        if (!solutionPipelineReady && caller === 'onDidOpen') {
+            deferredAsyncDocs.add(document.uri);
+            perfLogger.perf("validateTextDocument async deferred (solution pending)", {
+                total_ms: Date.now() - validateStart,
+                sync_ms: syncMs,
+                token_count: tokens.length,
+                diag_count: diagnostics.length,
+                uri: document.uri,
+                caller
+            });
+            return;
+        }
+
+        // Async pass: detect discarded return values via cross-file type resolution
+        const memberLocator = new MemberLocatorService();
+        // 6b40d7da Phase B (#115): undeclared-variable validator runs in this async
+        // pass for cross-file scope resolution via SymbolFinderService.
+        const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
+        const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+        // #158 — per-validator timing. Wrap each Promise.all element with a
+        // perf-timed shim that captures its individual wallclock.
+        const asyncStart = Date.now();
+        const timeIt = async <T>(name: string, p: Promise<T>): Promise<T> => {
+            const t0 = Date.now();
+            const result = await p;
+            perfLogger.perf(`Validator ${name}`, {
+                ms: Date.now() - t0,
+                uri: document.uri
+            });
+            return result;
+        };
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
+            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
+            timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
+            timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
+            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),
+            timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
+            timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
+            timeIt('ifaceImpl', DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)),
         ]);
+        const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
         const currentDoc = documents.get(document.uri);
         if (!currentDoc || currentDoc.version !== startVersion) {
+            perfLogger.perf("validateTextDocument stale-skip", {
+                total_ms: Date.now() - validateStart,
+                token_count: tokens.length,
+                uri: document.uri,
+                caller
+            });
             return;
         }
 
-        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags];
+        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
         connection.sendDiagnostics({ uri: document.uri, diagnostics });
+
+        // #158 — per-document final perf summary
+        perfLogger.perf("validateTextDocument complete", {
+            total_ms: Date.now() - validateStart,
+            sync_ms: syncMs,
+            async_ms: asyncMs,
+            token_count: tokens.length,
+            diag_count: diagnostics.length,
+            uri: document.uri,
+            caller
+        });
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -475,6 +756,9 @@ connection.onSelectionRanges((params) => {
 
 // Handle CodeLens requests — return unresolved lenses (ranges + data only)
 connection.onCodeLens((params) => {
+    // #185 — reference-count CodeLens is opt-out; when disabled, emit no lenses
+    // so no reference searches run (resolveCodeLens is never called).
+    if (!serverSettings.referencesCodeLensEnabled) return [];
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
     try {
@@ -498,7 +782,7 @@ connection.onCodeLensResolve(async (lens) => {
         const cached = codeLensRefCache.get(cacheKey);
 
         let refs: Location[] | null;
-        if (cached && cached.generation === codeLensGeneration) {
+        if (cached) {
             refs = cached.refs;
         } else {
             refs = await referencesProvider.provideReferences(
@@ -506,7 +790,21 @@ connection.onCodeLensResolve(async (lens) => {
                 { line: data.line, character: data.character },
                 { includeDeclaration: true }
             );
-            codeLensRefCache.set(cacheKey, { refs: refs ?? [], generation: codeLensGeneration });
+            const resolved = refs ?? [];
+            // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
+            // name-based invalidation when an edit adds a new reference (#189 Phase 2).
+            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
+            // Track which files this symbol's references live in, so a later edit to one
+            // of those files evicts this count (and only the affected counts).
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of resolved) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
         }
 
         const count = refs?.length ?? 0;
@@ -640,6 +938,49 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
     }
 }
 
+/**
+ * #189 Phase 2 — evict only the CodeLens reference counts that an edit to `document`
+ * can affect, instead of the old blunt "invalidate everything on any change". The
+ * displayed count is unchanged (still refs.length from Find-All-References); this only
+ * decides WHICH cached counts survive an edit, so switching between files keeps their
+ * counts warm rather than recomputing on every keystroke.
+ *
+ * A count can change from an edit to this file in three ways, all covered:
+ *   (a) the symbol is DECLARED here  (its own lens),
+ *   (b) a reference to it LIVES here and was removed/changed (tracked via the index),
+ *   (c) a reference to it was just ADDED here (its name now appears in the text).
+ * (c) over-approximates (names in strings/comments included) — safe, worst case is an
+ * extra recompute. Brand-new cross-file references still settle on the other file's
+ * next change; closing that fully is Phase 4 (forward extraction).
+ */
+function invalidateCodeLensForFile(document: TextDocument): void {
+    if (codeLensRefCache.size === 0) return;
+    const uriLower = document.uri.toLowerCase();
+    const toEvict = new Set<string>();
+
+    // (a) symbols declared in this file — cacheKey is `${uri}:${line}:${char}`
+    for (const key of codeLensRefCache.keys()) {
+        if (key.toLowerCase().startsWith(uriLower + ':')) toEvict.add(key);
+    }
+
+    // (b) symbols whose references live in this file (removed/changed calls)
+    for (const key of codeLensRefIndex.keysReferencingFile(document.uri)) toEvict.add(key);
+
+    // (c) symbols whose name now appears in this file (newly-added calls)
+    const names = document.getText().match(/[A-Za-z_]\w*/g);
+    if (names) {
+        const nameSet = new Set(names.map(n => n.toLowerCase()));
+        for (const [key, entry] of codeLensRefCache) {
+            if (entry.shortName && nameSet.has(entry.shortName)) toEvict.add(key);
+        }
+    }
+
+    for (const key of toEvict) {
+        codeLensRefCache.delete(key);
+        codeLensRefIndex.removeSymbol(key);
+    }
+}
+
 documents.onDidChangeContent(event => {
     try {
         const document = event.document;
@@ -655,9 +996,10 @@ documents.onDidChangeContent(event => {
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
         
-        // Any document change invalidates all CodeLens reference counts
-        codeLensGeneration++;
-        
+        // #189 Phase 2: invalidate only the CodeLens counts this edit can affect,
+        // instead of every cached count. Counts for other files stay warm.
+        invalidateCodeLensForFile(document);
+
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
@@ -709,7 +1051,7 @@ documents.onDidChangeContent(event => {
                 const tokensStart = performance.now();
                 const tokens = getTokens(document);
                 const tokensMs = (performance.now() - tokensStart).toFixed(1);
-                logger.error(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
+                logger.info(`⏱️ [SERVER] getTokens: ${tokensMs}ms, ${tokens.length} tokens for ${path.basename(decodeURIComponent(uri))}`);
                 logger.info(`🔍 Successfully refreshed tokens after edit: ${uri}, got ${tokens.length} tokens`);
                 
                 // Remove stale duplicate cache entries for this URI (e.g., file:///f:/ vs file:///f%3A/)
@@ -804,10 +1146,79 @@ connection.onDocumentFormatting((params: DocumentFormattingParams): TextEdit[] =
     }
 });
 
+connection.onDocumentRangeFormatting((params: DocumentRangeFormattingParams): TextEdit[] => {
+    try {
+        logger.info(`📐 [DEBUG] Received onDocumentRangeFormatting request for: ${params.textDocument.uri}`);
+        const document = documents.get(params.textDocument.uri);
+        if (!document) {
+            logger.warn(`⚠️ [DEBUG] Document not found for range formatting: ${params.textDocument.uri}`);
+            return [];
+        }
+
+        const uri = document.uri;
+        if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
+            logger.info(`🔍 [DEBUG] Skipping XML file in onDocumentRangeFormatting: ${uri}`);
+            return [];
+        }
+
+        const text = document.getText();
+        const tokens = getTokens(document);
+        const formatter = new ClarionFormatter(tokens, text, {
+            formattingOptions: params.options
+        });
+
+        if (document.lineCount === 0) {
+            return [];
+        }
+
+        const startLine = Math.max(0, Math.min(params.range.start.line, document.lineCount - 1));
+        const rawEndLine = params.range.end.character === 0
+            ? params.range.end.line - 1
+            : params.range.end.line;
+        const endLine = Math.max(startLine, Math.min(rawEndLine, document.lineCount - 1));
+        let replacement = formatter.formatRange(startLine, endLine);
+
+        // Some clients report selection end at column 0 of the *next* line; others use
+        // the final selected line with non-zero character. If the normalized range no-ops,
+        // retry once with the raw end-line interpretation to avoid false "no change".
+        if (replacement === null) {
+            const altEndLine = Math.max(startLine, Math.min(params.range.end.line, document.lineCount - 1));
+            if (altEndLine !== endLine) {
+                replacement = formatter.formatRange(startLine, altEndLine);
+            }
+        }
+
+        if (replacement === null) {
+            return [];
+        }
+
+        const eol = text.includes('\r\n') ? '\r\n' : '\n';
+        const hasNextLine = endLine + 1 < document.lineCount;
+        const startOffset = document.offsetAt(Position.create(startLine, 0));
+        const endOffset = hasNextLine
+            ? document.offsetAt(Position.create(endLine + 1, 0))
+            : text.length;
+
+        return [TextEdit.replace(
+            Range.create(document.positionAt(startOffset), document.positionAt(endOffset)),
+            hasNextLine ? replacement + eol : replacement
+        )];
+    } catch (error) {
+        logger.error(`❌ [DEBUG] Error range-formatting document: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+});
+
 
 // Cache for document symbols to avoid recomputing during rapid typing
 const symbolCache = new Map<string, DocumentSymbol[]>();
 const foldingCache = new Map<string, FoldingRange[]>();
+
+connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    return documentLinkProvider.provideDocumentLinks(document);
+});
 
 connection.onDocumentSymbol((params: DocumentSymbolParams) => {
     const perfStart = performance.now();
@@ -1001,6 +1412,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
     libsrcPaths: string[];
     solutionFilePath?: string; // Add optional solution file path
     defaultLookupExtensions?: string[]; // Add default lookup extensions
+    undeclaredVariablesEnabled?: boolean; // #62 opt-in
+    indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
+    referencesCodeLensEnabled?: boolean; // #185 opt-out
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1030,9 +1444,32 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info(`✅ Updated default lookup extensions: ${params.defaultLookupExtensions.join(', ')}`);
         }
 
+        // Preserve the constructor default when a (legacy) client doesn't include
+        // the field. Only an explicit boolean from the client wins. (#62 fix)
+        if (params.undeclaredVariablesEnabled !== undefined) {
+            serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
+        }
+        if (params.indistinguishablePrototypesEnabled !== undefined) {
+            serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
+        }
+        if (params.referencesCodeLensEnabled !== undefined) {
+            serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
+            if (!serverSettings.referencesCodeLensEnabled) {
+                codeLensPrecomputeGeneration++;
+                codeLensRefCache.clear();
+                codeLensRefIndex.clear();
+            } else if (globalSolution) {
+                setImmediate(() => {
+                    precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
+                        logger.error(`❌ CodeLens reference precompute failed after setting toggle: ${err instanceof Error ? err.message : String(err)}`)
+                    );
+                });
+            }
+        }
+
         // Always-visible startup summary of Clarion folder configuration
         // Use logger.error so it's visible even when log level is set to "error"
-        logger.error(`\n📦 Clarion Extension — Solution Load\n` +
+        logger.test(`\n📦 Clarion Extension — Solution Load\n` +
             `  Solution : ${params.solutionFilePath || '(none)'}\n` +
             `  Version  : ${params.clarionVersion || '(unknown)'}\n` +
             `  Config   : ${params.configuration || '(none)'}\n` +
@@ -1110,28 +1547,84 @@ connection.onNotification('clarion/updatePaths', async (params: {
         // Build the solution after registering handlers
         const buildStartTime = performance.now();
         try {
+            logger.info(`⏱️ [STARTUP] Solution build started at +${Date.now() - (globalStartTime ?? Date.now())}ms`);
             logger.info(`🔄 Building solution...`);
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
+            logger.info(`⏱️ [STARTUP] Solution build done: ${globalSolution.projects.length} projects, ${globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0)} source files in ${(buildEndTime - buildStartTime).toFixed(0)}ms`);
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Always-visible project summary
             const projectSummary = globalSolution.projects.map((p, i) =>
                 `  [${i+1}] ${p.name}  (${p.sourceFiles.length} sources)  ${p.path}`
             ).join('\n');
-            logger.error(`\n✅ Solution ready: ${globalSolution.name}\n` +
+            logger.test(`\n✅ Solution ready: ${globalSolution.name}\n` +
                 `  Projects (${globalSolution.projects.length}):\n` +
                 (projectSummary || '  (none)'));
             
+            // Notify the client that the solution is ready so it can defer refreshOpenDocuments
+            // until after we have real project data (avoids flooding the LSP pipe with
+            // thousands of clarion/findFile requests when getSolutionTree returns 0 projects).
+            connection.sendNotification('clarion/solutionReady', {
+                solutionFilePath: solutionPath,
+                projectCount: globalSolution.projects.length
+            });
+            logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
+            perfLogger.perf("Phase: Solution loaded (clarion/solutionReady sent)", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                project_count: globalSolution.projects.length
+            });
+
             // Re-validate all open documents now that cross-file type info is available.
             // The async diagnostic pass (discarded return value detection) needs the solution
             // to be ready; it may have already run (and silently skipped resolutions) before
             // this point, so force a fresh pass on every open file.
             logger.info("🔁 Re-validating open documents after solution ready...");
+            const revalDispatchStart = Date.now();
+            const openDocs = documents.all();
             lastValidatedVersions.clear();
-            for (const doc of documents.all()) {
+
+            // #158 Phase B addendum — mark pipeline ready BEFORE the
+            // re-validation loop so deferred docs hit the (now-effective) P3
+            // libsrc-skip on their first async pass. `documents.all()`
+            // already covers every doc (including the deferred ones), so
+            // calling `validateTextDocument` on each is sufficient — no
+            // separate `deferredAsyncDocs` drain loop needed. Clear the set
+            // for hygiene.
+            solutionPipelineReady = true;
+            const deferredCount = deferredAsyncDocs.size;
+            deferredAsyncDocs.clear();
+
+            for (const doc of openDocs) {
                 validateTextDocument(doc, 'solutionReady');
             }
+            perfLogger.perf("Phase: Post-solution re-validation dispatched", {
+                dispatch_ms: Date.now() - revalDispatchStart,
+                doc_count: openDocs.length,
+                deferred_drained: deferredCount,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
+            // NOTE: dispatch_ms only measures the synchronous loop. Each
+            // validateTextDocument runs async; individual completion times appear
+            // as `validateTextDocument complete` perf entries above.
+
+            // Doc-link refresh post-solution-ready. DocumentLinkProvider uses
+            // FRG, which isn't ready until solution-load completes; editors
+            // request links right after onDidOpen and cache the empty result.
+            // Custom notification (rather than a standard LSP refresh request,
+            // which doesn't exist for document links — see GH #160). Client
+            // re-invokes the provider per visible editor.
+            connection.sendNotification('clarion/refreshDocumentLinks');
+            logger.info("🔗 Document-link refresh notification sent to client");
+
+            // #189 Phase 2 — precompute CodeLens reference counts in the background.
+            // Keeps `onCodeLensResolve` mostly cache-hit/O(1) after startup while still
+            // preserving live FAR fallback when precompute is incomplete.
+            setImmediate(() => {
+                precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
+                    logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
+                );
+            });
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
@@ -1142,13 +1635,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
-                logger.error(`⏱️ [INDEX] Pre-building structure index for ${projectPaths.length} project(s) in background`);
+                const sdiStart = Date.now();
+                logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
                 await Promise.all(projectPaths.map(p =>
                     indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
                     )
                 ));
-                logger.error(`⏱️ [INDEX] Background structure index pre-build complete`);
+                logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -1166,10 +1660,19 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         }
                     }
                 }
-                logger.error(`⏱️ [FRG] Building FileRelationshipGraph for ${allFiles.length} source file(s) in background`);
+                const frgStart = Date.now();
+                logger.info(`⏱️ [STARTUP] FRG build starting for ${allFiles.length} source file(s) at +${frgStart - globalStartTime}ms`);
+                connection.sendNotification('clarion/graphStatus', { status: 'building', fileCount: allFiles.length });
                 await graph.buildInBackground(allFiles).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
+                logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                connection.sendNotification('clarion/graphStatus', {
+                    status: 'built',
+                    fileCount: graph.fileCount,
+                    edgeCount: graph.edgeCount,
+                    durationMs: graph.buildDurationMs
+                });
             });
 
             // Log each project in the global solution
@@ -1231,7 +1734,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
 // Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
 // The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
 connection.onNotification('clarion/projectConstantsChanged', () => {
-    logger.error('📥 clarion/projectConstantsChanged — re-validating all open documents');
+    logger.test('📥 clarion/projectConstantsChanged — re-validating all open documents');
     // Clear the version-skip cache so validateTextDocument doesn't skip documents
     // whose source hasn't changed but whose cwproj has.
     lastValidatedVersions.clear();
@@ -1308,10 +1811,13 @@ connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutio
     }
 });
 
-// Add a handler for finding files using the server-side redirection parser
-connection.onRequest('clarion/findFile', async (params: { filename: string }): Promise<{ path: string, source: string }> => {
+// Add a handler for finding files using the server-side redirection parser.
+// No-solution-mode resolution (#113): when SolutionManager is null, walk
+// localDir(sourceUri) → serverSettings.libsrcPaths → extension fallback.
+// Substrate: serverSettings.libsrcPaths is version-bound per dd87633f B1.
+connection.onRequest('clarion/findFile', async (params: { filename: string, sourceUri?: string }): Promise<{ path: string, source: string }> => {
     logger.info(`🔍 Received request to find file: ${params.filename}`);
-    
+
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
@@ -1334,7 +1840,21 @@ connection.onRequest('clarion/findFile', async (params: { filename: string }): P
                 logger.warn(`⚠️ File not found: ${params.filename}`);
             }
         } else {
-            logger.warn(`⚠️ No SolutionManager instance available to find file: ${params.filename}`);
+            // No-solution mode (#113): delegate to the resolver in findFileNoSolution.ts
+            // (extracted for testability — see server/src/test/FindFile.NoSolutionResolution.test.ts).
+            const noSolutionHit = resolveFileInNoSolutionMode(params.filename, params.sourceUri);
+            if (noSolutionHit) {
+                logger.info(`✅ Found file (no-solution): ${noSolutionHit.path} (source: ${noSolutionHit.source})`);
+                return noSolutionHit;
+            }
+
+            // Silent-miss diagnostic: if libsrcPaths is empty here, the user likely
+            // has no Clarion version selected (ensureActiveClarionVersion did not
+            // populate the substrate). Surface this in logs so misses are traceable.
+            if (!serverSettings.libsrcPaths?.length) {
+                logger.warn(`[clarion/findFile] no-solution mode, libsrcPaths empty — no Clarion version selected?`);
+            }
+            logger.warn(`⚠️ File not found (no-solution mode): ${params.filename}`);
         }
     } catch (error) {
         logger.error(`❌ Error finding file ${params.filename}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1615,7 +2135,7 @@ connection.onDefinition(async (params) => {
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.error(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
+        logger.test(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
     
@@ -1635,7 +2155,7 @@ connection.onDefinition(async (params) => {
 
 // Handle implementation requests
 connection.onImplementation(async (params) => {
-    logger.error(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
+    logger.info(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying implementation request`);
@@ -1736,11 +2256,11 @@ connection.onDocumentHighlight(async (params) => {
 });
 
 // Handle workspace symbol search
-connection.onWorkspaceSymbol(async (params) => {
+connection.onWorkspaceSymbol(async (params, token) => {
     if (!serverInitialized) return [];
 
     try {
-        return await workspaceSymbolProvider.provideWorkspaceSymbols(params.query);
+        return await workspaceSymbolProvider.provideWorkspaceSymbols(params.query, token);
     } catch (error) {
         logger.error(`❌ Error providing workspace symbols: ${error instanceof Error ? error.message : String(error)}`);
         return [];
@@ -1777,39 +2297,55 @@ connection.onHover(async (params) => {
 
 // Handle code actions (lightbulb) requests
 connection.onCodeAction(async (params) => {
-    logger.info(`💡 Received code action request for: ${params.textDocument.uri}`);
+    logger.info(`⏱️ [CODE-ACTION] ▶ triggered line=${params.range.start.line} file="${params.textDocument.uri.split('/').pop()}"`);
     
     if (!serverInitialized) {
-        logger.info(`⚠️ Server not initialized yet, delaying code action request`);
+        logger.info(`⏱️ [CODE-ACTION] ⚠ server not initialized, returning []`);
         return [];
     }
     
     const document = documents.get(params.textDocument.uri);
     if (!document) {
-        logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
+        logger.info(`⏱️ [CODE-ACTION] ⚠ document not found`);
         return [];
     }
     
     try {
+        const caStart = Date.now();
+
+        const t0 = Date.now();
+        logger.info(`⏱️ [CODE-ACTION] ClassConstants starting`);
         const codeActionProvider = new ClassConstantsCodeActionProvider();
         const actions = await codeActionProvider.provideCodeActions(
             document,
             params.range,
             params.context,
-            params as any // CancellationToken
+            params as any
         );
+        logger.info(`⏱️ [CODE-ACTION] ClassConstants done: ${Date.now() - t0}ms → ${actions.length} actions`);
 
+        const t2 = Date.now();
         const flattenProvider = new FlattenCodeActionProvider();
         const flattenActions = flattenProvider.provideCodeActions(document, params.range);
+        logger.info(`⏱️ [CODE-ACTION] Flatten done: ${Date.now() - t2}ms → ${flattenActions.length} actions`);
 
+        const t4 = Date.now();
         const mapModuleProvider = new MapModuleCodeActionProvider();
         const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
+        logger.info(`⏱️ [CODE-ACTION] MapModule done: ${Date.now() - t4}ms → ${mapModuleActions.length} actions`);
 
+        const t6 = Date.now();
         const mapDeclProvider = new MapDeclarationCodeActionProvider();
         const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
+        logger.info(`⏱️ [CODE-ACTION] MapDecl done: ${Date.now() - t6}ms → ${mapDeclActions.length} actions`);
 
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions];
-        logger.info(`Provided ${allActions.length} code actions`);
+        const t8 = Date.now();
+        const unicodeProvider = new UnicodeCodeActionProvider();
+        const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
+        logger.info(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
+        logger.info(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
@@ -1957,9 +2493,37 @@ connection.onExit(() => {
     }
 });
 
+// #158 Phase B addendum — no-solution-mode safety net for deferred async
+// queue. If `clarion/solutionReady` never fires within 2s of server start
+// (loose `.clw` opened in a non-Clarion workspace), mark the pipeline ready
+// + drain the queue so deferred docs get their async pass.
+//
+// 2s threshold rationale: solutionReady on Mark's setup arrives at ~11s;
+// real no-solution-mode workspaces produce no solutionReady at all. 2s is
+// well under perceived-startup-blocking; loose-file users wait 2s for
+// async diagnostics instead of getting them at t=63ms. Acceptable trade.
+setTimeout(() => {
+    if (!solutionPipelineReady) {
+        perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+            since_module_load_ms: Date.now() - serverModuleLoadedAt,
+            deferred_count: deferredAsyncDocs.size
+        });
+        solutionPipelineReady = true;
+        const queuedUris = Array.from(deferredAsyncDocs);
+        deferredAsyncDocs.clear();
+        for (const uri of queuedUris) {
+            const doc = documents.get(uri);
+            if (doc) validateTextDocument(doc, 'noSolutionTimeout');
+        }
+    }
+}, 2000);
+
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection");
 console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+perfLogger.perf("Phase: Server listening (connection.listen called)", {
+    since_module_load_ms: Date.now() - serverModuleLoadedAt
+});
 connection.listen();
 
 // Add a handler for getting performance metrics

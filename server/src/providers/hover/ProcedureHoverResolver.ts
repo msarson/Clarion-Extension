@@ -8,6 +8,7 @@ import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { ProcedureCallDetector } from '../utils/ProcedureCallDetector';
 import LoggerManager from '../../logger';
+import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ProcedureHoverResolver");
@@ -160,12 +161,14 @@ export class ProcedureHoverResolver {
             if (memberToken?.referencedFile) {
                 logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);
                 
+                const localScope = getLocalMapScope(document.uri);
                 // Use CrossFileResolver to find MAP declaration
                 const memberMapResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
                     procName,
                     memberToken.referencedFile,
                     document,
-                    line
+                    line,
+                    localScope?.containingProcedure
                 );
                 
                 if (memberMapResult) {

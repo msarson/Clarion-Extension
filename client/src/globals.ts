@@ -1,4 +1,4 @@
-import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration } from 'vscode';
+import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration, ExtensionContext } from 'vscode';
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
@@ -6,7 +6,7 @@ import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SettingsStorageManager } from './utils/SettingsStorageManager';
 const logger = LoggerManager.getLogger("Globals");
-logger.setLevel("error"); // Production: Only log errors
+logger.setLevel("error");
 
 // Interface for solution settings
 export interface ClarionSolutionSettings {
@@ -15,6 +15,12 @@ export interface ClarionSolutionSettings {
     version: string;
     configuration: string;
 }
+
+// #146 explicit-close flag and fallback-policy helper live in
+// `./utils/SolutionFallbackPolicy` (vscode-free so unit tests can import
+// them without dragging in the workspace/ExtensionContext surface).
+import { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
+export { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY };
 
 /**
  * Helper function to get the correct configuration target (always folder-level)
@@ -36,6 +42,193 @@ let _globalClarionConfiguration: string = "Release";
 
 // ✅ Ensure these settings are available globally
 const DEFAULT_EXTENSIONS = [".clw", ".inc", ".equ", ".eq", ".int"];
+
+/**
+ * #132 / dd87633f B1 — solution-free entry point for selecting a Clarion
+ * version. Populates `globalSettings.{libsrcPaths, redirectionPath, macros,
+ * redirectionFile}` from the parsed version's properties and persists the
+ * version + properties-file path to User-scope (`clarion.activeVersion` +
+ * `clarion.activePropertiesFile`). Callable before any solution / workspace
+ * folder is open.
+ *
+ * Wired from the new status-bar item + Clarion Tools pane picker (B2) and
+ * from the first-run migration check + solution-open guard (B3).
+ *
+ * Returns true when the version was found in `propertiesFile` and applied.
+ */
+export async function setActiveClarionVersion(
+    version: string,
+    propertiesFile: string
+): Promise<boolean> {
+    logger.info(`🔄 Setting effective active Clarion version (L2, in-memory): ${version} → ${propertiesFile}`);
+
+    // L2 (effective active): in-memory per-VSCode-instance state. Drives
+    // file-resolution surfaces (libsrcPaths / redirectionPath / macros).
+    // Per #141 Q4 — does NOT write L1 (settings.json default) or L3
+    // (solutionVersionMemory). Those are explicit-action paths (picker
+    // "Set as default", solution-open confirm, mid-session switch).
+    globalClarionVersion = version;
+    globalClarionPropertiesFile = propertiesFile;
+
+    // Populate `globalSettings.*` (libsrcPaths / redirectionPath / macros /
+    // redirectionFile) from the parsed version's properties.
+    const applied = await ClarionExtensionCommands.loadVersionGlobalSettings(propertiesFile, version);
+    if (!applied) {
+        logger.warn(`⚠️ Version "${version}" not found in ${propertiesFile}; globalSettings unchanged`);
+    }
+
+    // Q5 baseline (first-time install): if no L1 default is configured yet,
+    // also write the L1 default so the user's first-ever pick survives a
+    // VS Code restart. Picker handlers in B2 can refine this with explicit
+    // "Set as default" behavior; this preserves today's first-install UX
+    // without B2 needing to land first. Cross-instance behavior unchanged
+    // (L1 is User-scope; other instances inherit naturally).
+    const config = workspace.getConfiguration('clarion');
+    const existingDefault = config.get<string>('activeVersion', '');
+    if (!existingDefault) {
+        logger.info(`🔄 Q5 baseline: no existing L1 default → auto-writing default to ${version}`);
+        await SettingsStorageManager.setDefaultVersion(version, propertiesFile);
+    }
+
+    // Refresh the version status-bar item (B2). Lazy import to avoid circular dep.
+    // #141 Q9 — pass solution-loaded state so the status bar gates correctly
+    // (hidden when no solution; visible only when solution is loaded). At
+    // activation time `globalSolutionFile` is empty → hide. At mid-session
+    // picker time with a solution open → show.
+    try {
+        const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+        updateVersionStatusBar(version, propertiesFile, !!globalSolutionFile);
+    } catch {
+        // Status bar not initialised yet — fine; activation will paint it later.
+    }
+
+    return applied;
+}
+
+/**
+ * #132 / dd87633f B3 — on-activation entry point: run first-run version
+ * migration + paint the version status bar from User-scope settings.
+ *
+ * Under the post-#141 three-layer model (Q4):
+ *   - L1 Default: `clarion.activeVersion` / `clarion.activePropertiesFile`
+ *     (User-scope settings.json). Migration writes here.
+ *   - L2 Effective active: in-memory; init from L1 default via the call to
+ *     `setActiveClarionVersion` below.
+ *   - L3 Solution memory: `ExtensionContext.globalState.clarion.solutionVersionMemory`.
+ *     Backfilled from legacy `solutions[].version` entries on first
+ *     post-#141 activation (gated by `solutionVersionMemoryBackfilled`).
+ *
+ * L1 migration: if `clarion.activeVersion` is empty AND any
+ * `solutions[].version` exists in workspace settings, auto-promote the first
+ * legacy entry to User scope. Gated by `clarion.versionMigrated` (one-shot
+ * flag) so it never re-fires. Set the flag even when nothing to migrate IF
+ * the User-scope value is already populated — preserves "first run after
+ * install vs first run after upgrade" semantics.
+ *
+ * L3 backfill (#141 B3): when `context` is provided AND
+ * `solutionVersionMemoryBackfilled` is false, iterate every
+ * `solutions[].version` entry with non-empty `solutionFile` + `version` and
+ * seed L3 via `SettingsStorageManager.setSolutionVersion`. Gated separately
+ * from `versionMigrated` because pre-#141 users may already have the L1
+ * migration flag set but have never had L3 populated. Idempotent — re-running
+ * with a partially-populated L3 just re-writes the same key-value pairs.
+ *
+ * Status-bar paint: read `clarion.activeVersion` from User scope; if non-
+ * empty, call `setActiveClarionVersion` to populate `globalSettings.*` +
+ * refresh the status bar item. Solution-free.
+ */
+export async function activateClarionVersionState(context?: ExtensionContext): Promise<void> {
+    const config = workspace.getConfiguration('clarion');
+    const migrated = config.get<boolean>('versionMigrated', false);
+    let activeVersion = config.get<string>('activeVersion', '');
+    let activePropertiesFile = config.get<string>('activePropertiesFile', '');
+
+    if (!migrated) {
+        if (activeVersion && activePropertiesFile) {
+            // L1 already populated (e.g. set via picker before migration flag
+            // existed). Mark migrated; no L1 auto-promote needed.
+            await config.update('versionMigrated', true, ConfigurationTarget.Global);
+        } else {
+            // Look for a legacy solutions[].version to auto-promote to L1.
+            const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+            const legacy = solutions.find(s => s.version && s.propertiesFile);
+            if (legacy) {
+                logger.info(`🔄 Migrating legacy version from solutions[]: ${legacy.version} → L1 default`);
+                await setActiveClarionVersion(legacy.version, legacy.propertiesFile);
+                await config.update('versionMigrated', true, ConfigurationTarget.Global);
+                activeVersion = legacy.version;
+                activePropertiesFile = legacy.propertiesFile;
+            }
+            // If no legacy entry exists, leave the flag false — first-run user
+            // hasn't set up Clarion yet; they'll set it via the picker.
+        }
+    }
+
+    // #141 B3 — L3 backfill from legacy `solutions[].version` entries.
+    // Separate flag from `versionMigrated` because pre-#141 users may already
+    // have the L1 migration flag set but never had L3 (didn't exist pre-#141).
+    if (context) {
+        const l3Backfilled = config.get<boolean>('solutionVersionMemoryBackfilled', false);
+        if (!l3Backfilled) {
+            const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+            const candidates = solutions.filter(s => s.solutionFile && s.version);
+            if (candidates.length > 0) {
+                logger.info(`🔄 #141 B3 — backfilling L3 solutionVersionMemory from ${candidates.length} legacy solutions[] entr${candidates.length === 1 ? 'y' : 'ies'}`);
+                for (const entry of candidates) {
+                    await SettingsStorageManager.setSolutionVersion(context, entry.solutionFile, entry.version);
+                }
+            } else {
+                logger.info(`ℹ️ #141 B3 — no legacy solutions[].version entries to backfill into L3`);
+            }
+            // Set the flag regardless of whether any entries were backfilled —
+            // a fresh-install user with no legacy entries should not re-attempt
+            // the backfill on every activation.
+            await config.update('solutionVersionMemoryBackfilled', true, ConfigurationTarget.Global);
+        }
+    }
+
+    // Paint the status bar from the (now-current) User-scope value.
+    if (activeVersion && activePropertiesFile) {
+        // Re-apply via setActiveClarionVersion to populate globalSettings.*
+        // even when migration was a no-op (e.g. fresh VS Code launch after the
+        // settings were already migrated previously).
+        await setActiveClarionVersion(activeVersion, activePropertiesFile);
+    } else {
+        // No version configured — hide the status bar item.
+        try {
+            const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+            updateVersionStatusBar(undefined, undefined);
+        } catch {
+            // Activation-time error — not blocking.
+        }
+    }
+}
+
+/**
+ * #132 / dd87633f B3 — solution-open guard.
+ *
+ * Returns true when a Clarion version is configured (in `globalClarionVersion`
+ * or via User-scope `clarion.activeVersion`). When false, fires the
+ * `clarion.setActiveVersion` picker and returns whatever the user picked
+ * (true if they completed selection, false if they cancelled). Callers
+ * should NOT proceed with solution-open when this returns false.
+ */
+export async function ensureActiveClarionVersion(): Promise<boolean> {
+    if (globalClarionVersion) return true;
+
+    const config = workspace.getConfiguration('clarion');
+    const activeVersion = config.get<string>('activeVersion', '');
+    const activePropertiesFile = config.get<string>('activePropertiesFile', '');
+    if (activeVersion && activePropertiesFile) {
+        await setActiveClarionVersion(activeVersion, activePropertiesFile);
+        return true;
+    }
+
+    // Fire the picker via the registered command + check result.
+    const { commands } = await import('vscode');
+    await commands.executeCommand('clarion.setActiveVersion');
+    return !!globalClarionVersion;
+}
 
 export async function setGlobalClarionSelection(
     solutionFile: string,
@@ -71,9 +264,20 @@ export async function setGlobalClarionSelection(
         return;
     }
     
+    // #141 B1 / Q4 — solution-open no longer writes L1 (default version).
+    // Default is set explicitly via the picker's "Set as default" action (B2),
+    // or auto-seeded by the Q5 baseline inside `setActiveClarionVersion` for
+    // first-install. The original #132 decoupling (line above) was: "make
+    // libsrcPaths/redirectionPath/macros available even with no solution
+    // loaded" — that goal is now served by L2 in-memory effective active,
+    // not by writing every solution-open version into L1.
+    //
+    // Per-solution version memory (L3) is written by B2 on Q3 mid-session
+    // switch or Q2/Q8 confirm prompts — not from setGlobalClarionSelection.
+
     if (solutionFile && clarionPropertiesFile && clarionVersion) {
         logger.info("✅ All required settings are set. Saving using smart storage manager...");
-        
+
         // Use the smart storage manager (handles workspace vs folder storage)
         await SettingsStorageManager.saveSolutionSettings(
             solutionFile,
@@ -114,48 +318,6 @@ export async function setGlobalClarionSelection(
     }
 }
 
-/**
- * Updates the solutions array in workspace settings
- */
-async function updateSolutionsArray(
-    solutionFile: string,
-    clarionPropertiesFile: string,
-    clarionVersion: string,
-    clarionConfiguration: string
-) {
-    if (!solutionFile) return;
-    
-    // Get the current solutions array
-    const config = workspace.getConfiguration("clarion");
-    const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
-    
-    // Check if this solution is already in the array
-    const solutionIndex = solutions.findIndex(s => s.solutionFile === solutionFile);
-    
-    if (solutionIndex >= 0) {
-        // Update existing solution
-        solutions[solutionIndex] = {
-            solutionFile,
-            propertiesFile: clarionPropertiesFile,
-            version: clarionVersion,
-            configuration: clarionConfiguration
-        };
-    } else {
-        // Add new solution
-        solutions.push({
-            solutionFile,
-            propertiesFile: clarionPropertiesFile,
-            version: clarionVersion,
-            configuration: clarionConfiguration
-        });
-    }
-    
-    // Save the updated solutions array
-    await config.update("solutions", solutions, ConfigurationTarget.Workspace);
-    logger.info(`✅ Updated solutions array with ${solutions.length} solutions`);
-}
-
-
 // ❌ These should NOT be saved in workspace
 let _globalRedirectionFile = "";
 let _globalRedirectionPath = "";
@@ -170,6 +332,18 @@ export const globalSettings = {
 
     get fileSearchExtensions() {
         return workspace.getConfiguration("clarion").get<string[]>("fileSearchExtensions", DEFAULT_EXTENSIONS);
+    },
+
+    get undeclaredVariablesEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", true);
+    },
+
+    get indistinguishablePrototypesEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.indistinguishablePrototypes.enabled", true);
+    },
+
+    get referencesCodeLensEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("referencesCodeLens.enabled", true);
     },
 
     get configuration() {
@@ -300,8 +474,20 @@ export const globalSettings = {
         }
     },
     
-    /** ✅ Load settings from .vscode/settings.json */
-    async initializeFromWorkspace() {
+    /** ✅ Load settings from .vscode/settings.json
+     *
+     * @param context Required ExtensionContext. The
+     *   `SOLUTION_EXPLICITLY_CLOSED_KEY` workspaceState flag is consulted to
+     *   suppress the #104 `solutions[0]` fallback in the explicit-close case
+     *   (#146).
+     *
+     * #141 B1 — was optional in #146; tightened to required here now that a
+     * concrete caller (SolutionInitializer.workspaceHasBeenTrusted) reliably
+     * has the context handle. Removing the optional shim simplifies the
+     * activation flow + prevents legacy callers from silently bypassing the
+     * close-flag check.
+     */
+    async initializeFromWorkspace(context: ExtensionContext) {
         logger.info("🔄 Loading settings from .vscode/settings.json...");
 
         // ✅ Early exit if no folder open
@@ -310,23 +496,54 @@ export const globalSettings = {
             return;
         }
 
+        // #146 (hardened) — explicit-close hard-suppression. Mark reported
+        // (post-#146 ship) that closing a solution then restarting still
+        // auto-loaded. Root cause: the original #146 only gated the
+        // `solutions[0]` fallback branch; when `currentSolution` was
+        // non-empty at restart (e.g. `closeClarionSolution`'s settings-clear
+        // is guarded by `target && workspace.workspaceFolders` and skips
+        // when target is undefined — untrusted workspace at close, race
+        // conditions, etc.), the `if (currentSolution)` branch fired
+        // unconditionally and the flag was bypassed entirely.
+        //
+        // Fix: check the flag FIRST, hard-skip ALL auto-load when set.
+        // Broader than the original #146 — gates the direct-currentSolution
+        // -load path too.
+        //
+        // Sticky-until-explicit-open semantics (trace-revealed at `a0367cb`):
+        // `initializeFromWorkspace` is called TWICE during activation
+        // (`ActivationManager.loadFolderSettings` + `SolutionInitializer.
+        // workspaceHasBeenTrusted`). Consume-on-read meant only the FIRST
+        // call benefited; the second saw `false` and auto-loaded.
+        // Decoupled fix: flag persists until the user explicitly opens a
+        // solution (`SolutionOpener.openClarionSolution` /
+        // `openSolutionFromList` clear it at entry). Multiple
+        // `initializeFromWorkspace` calls within one activation all
+        // see the same flag value — all suppress.
+        const explicitlyClosed = context.workspaceState.get<boolean>(SOLUTION_EXPLICITLY_CLOSED_KEY, false) ?? false;
+        if (explicitlyClosed) {
+            logger.info("ℹ️ Solution was explicitly closed — suppressing all auto-load (#146 hardened)");
+            return;
+        }
+
         // Check if we need to migrate existing settings to the solutions array
         await this.migrateToSolutionsArray();
 
         // Get the current solution from settings
         const currentSolution = workspace.getConfiguration().get<string>("clarion.currentSolution", "");
-        
+
         // ✅ Read workspace settings
         let solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
         let clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
         let clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
         let clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
 
+        const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+
         // If we have a current solution, try to find it in the solutions array
         if (currentSolution) {
-            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
             const solution = solutions.find(s => s.solutionFile === currentSolution);
-            
+
             if (solution) {
                 logger.info(`✅ Found current solution in solutions array: ${solution.solutionFile}`);
                 solutionFile = solution.solutionFile;
@@ -336,18 +553,20 @@ export const globalSettings = {
             } else {
                 logger.warn(`⚠️ Current solution ${currentSolution} not found in solutions array`);
             }
-        } else {
-            // currentSolution is blank — fall back to solutions array
-            const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
-            if (solutions.length > 0) {
-                // Use the first (or only) entry
-                const solution = solutions[0];
-                logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
-                solutionFile = solution.solutionFile;
-                clarionPropertiesFile = solution.propertiesFile;
-                clarionVersion = solution.version;
-                clarionConfiguration = solution.configuration;
-            }
+        } else if (shouldUseSolutionFallback(currentSolution, solutions, /* explicitlyClosed */ false)) {
+            // currentSolution is blank, solutions[] populated:
+            // honor the #104 fallback so a never-set currentSolution still
+            // auto-loads from solutions[0]. `explicitlyClosed` passed as
+            // false-literal because the explicit-close case early-returned
+            // above (the original #146 gating preserved here for clarity
+            // even though it can't fire post-hardening — keeps the helper's
+            // contract honest).
+            const solution = solutions[0];
+            logger.info(`✅ currentSolution is empty, defaulting to first solution in array: ${solution.solutionFile}`);
+            solutionFile = solution.solutionFile;
+            clarionPropertiesFile = solution.propertiesFile;
+            clarionVersion = solution.version;
+            clarionConfiguration = solution.configuration;
         }
 
         logger.info(`🔍 Read from workspace settings:

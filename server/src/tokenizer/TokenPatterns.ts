@@ -6,7 +6,7 @@ import { TokenType } from './TokenTypes';
 
 export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     MODULE: /^\s*MODULE\b/i,  // MODULE should be the first word on the line
-    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,))/i,
+    APPLICATION: /\bAPPLICATION\b(?=\s*(\(|,|!|$))/i,
     // ✅ CASE, IF, LOOP should not match after : or . (qualified identifiers like nts:case, obj.case)
     CASE: /(?<![:\w.])\bCASE\b/i,
     CLASS: /\bCLASS\b/i,
@@ -19,7 +19,7 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     JOIN: /\bJOIN\b/i,
     LOOP: /(?<![:\w.])\bLOOP\b/i,  // ✅ Prevent matching after : or . or word char
     MAP: /\bMAP\b/i,
-    MENU: /\bMENU\b(?=\s*(\(|,))/i,
+    MENU: /\bMENU\b(?=\s*(\(|,|!|$))/i,
     MENUBAR: /\bMENUBAR\b/i,
     // ✅ QUEUE changed to use negative lookbehind for qualified identifiers
     QUEUE: /(?<![:\w.])\bQUEUE\b/i,
@@ -32,10 +32,10 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     SECTION: /\bSECTION\b/i,
     SHEET: /\bSHEET\b/i,
     TAB: /\bTAB\b/i,
-    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,))/i,  // Only match TOOLBAR at beginning of line followed by ( or ,
+    TOOLBAR: /^[ \t]*TOOLBAR\b(?=\s*(\(|,|!|$))/i,  // Only match TOOLBAR at beginning of line followed by ( , ! or end of line
     // ✅ VIEW changed to use word boundary instead of requiring leading space
     VIEW: /\bVIEW\b/i,
-    WINDOW: /\bWINDOW\b(?=\s*(\(|,))/i,
+    WINDOW: /\bWINDOW\b(?=\s*(\(|,|!|$))/i,
     OPTION: /\bOPTION\b/i,
     ITEMIZE: /\bITEMIZE\b/i,
     EXECUTE: /\bEXECUTE\b/i,
@@ -57,7 +57,15 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=\s|!|$)|(\.)(?=\s|!|$)/i,  // END keyword or dot terminator
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
-    [TokenType.FieldEquateLabel]: /\?[A-Za-z_][A-Za-z0-9_]*/i,
+    // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
+    // anonymous-control marker (e.g. `BUTTON('OK'),USE(?)`); `?Name` is a named
+    // field equate. Compound `?Prefix:Suffix` names (#174) are captured as ONE
+    // token, matching the sibling `Label` pattern (which already includes `:` in
+    // its character class). Pre-#174 the suffix was split off and re-classified
+    // as a separate token (often `Attribute` when the suffix happened to match an
+    // attribute-keyword name like EXTERNAL/HIDE/TRN), driving the
+    // `AttributeDiagnostics` false-positive Mark surfaced from `Frame_AcctsMap.clw:816`.
+    [TokenType.FieldEquateLabel]: /\?(?:[A-Za-z_][A-Za-z0-9_:]*)?/i,
     [TokenType.ClarionDocument]: /\b(?:PROGRAM|MEMBER)\b/i,
     // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
     [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly
@@ -73,10 +81,17 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Attribute]: /\b(?:ALONE|AT|AUTO|BINARY|BINDABLE|CENTERED|COM|CREATE|CURSOR|DEFAULT|DERIVED|DLL|DOUBLE|DROP|DRIVER|DUP|EXTERNAL|FILL|FILTER|FIRST|FLAT|HLP|ICON|IMM|IMPLEMENTS|INS|MASK|MAX|MDI|MODAL|MODULE|MSG|NAME|NOBAR|NOCASE|NOFRAME|NOMERGE|NOSHEET|OEM|OVER|OVR|OWNER|PAGE|PASCAL|PRE|PRIMARY|PRIVATE|PROTECTED|RAW|RECLAIM|REQ|RESIZE|RIGHT|SCROLL|STATUS|STATIC|STD|SYSTEM|THREAD|TIMER|TIP|TIMES|TRN|TYPE|UPR|USE|VBX|VCR|VIRTUAL|WALLPAPER|REF)\b/i,
     [TokenType.Constant]: /\b(?:TRUE|FALSE|NULL|LEVEL:BENIGN|LEVEL:NOTIFY|LEVEL:FATAL|ICON:Asterisk|ICON:Exclamation|ICON:Hand|ICON:Question|BUTTON:YES|BUTTON:NO|BUTTON:OK|BUTTON:CANCEL|CENTER|LEFT|RIGHT)\b/i,
     [TokenType.Property]: /\b(?:color|width|height|top|left|right|bottom|text|visible|enabled|font|size|style|value|caption)\b/i,
-    [TokenType.Number]: /\b[0-9]+(\.[0-9]+)?\b/i,
+    // Decimal (`1`, `1.5`), hex (`1000h`, `0FFh`), octal (`777o`), binary (`1010b`).
+    // All non-decimal forms require a leading decimal digit per Clarion's lexer
+    // convention — `0FFh` is valid hex, `FFh` falls through to Variable. Without
+    // this, the leading digits of a suffixed literal were silently dropped and
+    // the suffix character emerged as a 1-char Variable glued to the source
+    // position (Alice traced this from a `pAdr = 1000h` repro that surfaced as
+    // a spurious undeclared-variable diagnostic — task 7a98d63f).
+    [TokenType.Number]: /\b(?:[0-9][0-9A-Fa-f]*[hH]|[0-7]+[oO]|[01]+[bB]|[0-9]+(?:\.[0-9]+)?)\b/i,
     [TokenType.Operator]: /[\+\-\*\/\=\>\<\&\|\~]/,
     [TokenType.Delimiter]: /[\(\)\[\]\{\}\,\:\;]/,
-    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. Structure keywords (CLASS, FILE, WINDOW, etc.) are valid Clarion labels per language spec.
+    [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PROGRAM|MEMBER|END|CODE|DATA)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. CODE/DATA are execution markers, never labels.
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
     [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
