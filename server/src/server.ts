@@ -83,6 +83,7 @@ import { MemberLocatorService } from './services/MemberLocatorService';
 import { SymbolFinderService } from './services/SymbolFinderService';
 import { ReferenceIndex } from './services/ReferenceIndex';
 import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
+import { pathToCanonicalUri } from './utils/UriUtils';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
@@ -147,6 +148,91 @@ export let solutionOperationInProgress = false;
 // across edits instead of every count recomputing on every keystroke.
 const codeLensRefCache = new Map<string, { refs: Location[]; shortName: string }>();
 const codeLensRefIndex = new ReferenceIndex();
+let codeLensPrecomputeGeneration = 0;
+
+function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[] {
+    const dedup = new Set<string>();
+    const files: string[] = [];
+    for (const project of solution.projects) {
+        for (const sourceFile of project.sourceFiles) {
+            if (!sourceFile.relativePath) continue;
+            const abs = path.join(project.path, sourceFile.relativePath);
+            const key = path.normalize(abs).toLowerCase();
+            if (dedup.has(key)) continue;
+            dedup.add(key);
+            files.push(abs);
+        }
+    }
+    return files;
+}
+
+/**
+ * #189 Phase 2 — background precompute for CodeLens reference counts.
+ * Builds the existing declaration-keyed cache (`uri:line:char`) once at solution-ready
+ * so most `onCodeLensResolve` calls hit O(1) map lookups. Resolve still falls back to
+ * live FAR whenever precompute is unavailable/incomplete, so correctness is preserved.
+ */
+async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo): Promise<void> {
+    const generation = ++codeLensPrecomputeGeneration;
+    codeLensRefCache.clear();
+    codeLensRefIndex.clear(); // also marks ready=false
+
+    if (!serverSettings.referencesCodeLensEnabled) return;
+
+    const filePaths = collectSolutionSourceFilePaths(solution);
+    let scannedFiles = 0;
+    let indexedLenses = 0;
+    const startedAt = Date.now();
+
+    for (const absPath of filePaths) {
+        if (generation !== codeLensPrecomputeGeneration) return; // superseded by a newer build
+        if (!fs.existsSync(absPath)) continue;
+
+        const uri = pathToCanonicalUri(absPath);
+        const openDoc = documents.get(uri);
+        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, fs.readFileSync(absPath, 'utf8'));
+        const lenses = codeLensProvider.provideCodeLenses(doc);
+
+        for (const lens of lenses) {
+            if (generation !== codeLensPrecomputeGeneration) return;
+            const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+            if (!data) continue;
+
+            const refs = await referencesProvider.provideReferences(
+                doc,
+                { line: data.line, character: data.character },
+                { includeDeclaration: true }
+            ) ?? [];
+
+            const cacheKey = `${data.uri}:${data.line}:${data.character}`;
+            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs, shortName });
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of refs) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
+
+            indexedLenses++;
+            if (indexedLenses % 25 === 0) {
+                await new Promise<void>(resolve => setImmediate(resolve));
+            }
+        }
+
+        scannedFiles++;
+        if (scannedFiles % 10 === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+    }
+
+    if (generation === codeLensPrecomputeGeneration) {
+        codeLensRefIndex.setReady(true);
+        logger.info(`⚡ CodeLens reference precompute ready: ${indexedLenses} lenses across ${scannedFiles} files in ${Date.now() - startedAt}ms`);
+    }
+}
 
 // Make solutionOperationInProgress accessible globally
 (global as any).solutionOperationInProgress = false;
@@ -1368,6 +1454,17 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
         if (params.referencesCodeLensEnabled !== undefined) {
             serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
+            if (!serverSettings.referencesCodeLensEnabled) {
+                codeLensPrecomputeGeneration++;
+                codeLensRefCache.clear();
+                codeLensRefIndex.clear();
+            } else if (globalSolution) {
+                setImmediate(() => {
+                    precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
+                        logger.error(`❌ CodeLens reference precompute failed after setting toggle: ${err instanceof Error ? err.message : String(err)}`)
+                    );
+                });
+            }
         }
 
         // Always-visible startup summary of Clarion folder configuration
@@ -1519,6 +1616,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // re-invokes the provider per visible editor.
             connection.sendNotification('clarion/refreshDocumentLinks');
             logger.info("🔗 Document-link refresh notification sent to client");
+
+            // #189 Phase 2 — precompute CodeLens reference counts in the background.
+            // Keeps `onCodeLensResolve` mostly cache-hit/O(1) after startup while still
+            // preserving live FAR fallback when precompute is incomplete.
+            setImmediate(() => {
+                precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
+                    logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
+                );
+            });
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
