@@ -423,7 +423,11 @@ export function validateExecuteStructures(tokens: Token[], document: TextDocumen
  * marker (Gap M). Gap L follow-up; closes the validation half of issue
  * `7dedd7c8`.
  */
-export function validateViewProjectFields(tokens: Token[], document: TextDocument): Diagnostic[] {
+export function validateViewProjectFields(
+    tokens: Token[],
+    document: TextDocument,
+    getOpenDocumentContent?: (absPath: string) => string | null
+): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
     // Look for any VIEW first — bail before doing any cross-file work if the
@@ -433,7 +437,7 @@ export function validateViewProjectFields(tokens: Token[], document: TextDocumen
     );
     if (!hasView) return diagnostics;
 
-    const fileResolver = new FileResolver(tokens, document);
+    const fileResolver = new FileResolver(tokens, document, getOpenDocumentContent);
 
     for (const view of tokens) {
         if (view.type !== TokenType.Structure) continue;
@@ -561,7 +565,11 @@ class FileResolver {
     private currentClwDir: string;
     private tokenCache = TokenCache.getInstance();
 
-    constructor(currentTokens: Token[], private document: TextDocument) {
+    constructor(
+        currentTokens: Token[],
+        private document: TextDocument,
+        private getOpenDocumentContent?: (absPath: string) => string | null
+    ) {
         this.indexFiles(currentTokens);
         // Resolve the URI to a directory so include filenames can be resolved
         // relative to the current CLW. Mirrors the same-dir-first approach in
@@ -640,7 +648,14 @@ class FileResolver {
         // #117 B1: shared cache-first/disk-fallback content load (was an inline
         // `getDocumentText(uri) ?? fs.readFileSync` here). Downstream stays exactly
         // as before — sync direct tokenize, undefined on any failure.
-        const content = CrossFileResolver.loadExternalFileContent(this.tokenCache, uri, candidate);
+        // #199: thread live-doc resolver for JOIN/FROM cross-file loads so OPEN+DIRTY
+        // include targets use the editor buffer instead of stale saved disk.
+        const content = CrossFileResolver.loadExternalFileContent(
+            this.tokenCache,
+            uri,
+            candidate,
+            this.getOpenDocumentContent ?? undefined
+        );
         if (content === undefined) return undefined;
         try {
             return new ClarionTokenizer(content).tokenize();
