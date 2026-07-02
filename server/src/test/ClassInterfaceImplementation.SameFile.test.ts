@@ -18,6 +18,8 @@ import { validateClassInterfaceImplementationAsync } from '../providers/diagnost
  * Bidirectional pin:
  *   - Bug-pin: same-file class missing one three-part impl → warns, names it.
  *   - Sentinel: same-file class implementing all methods → no warning.
+ *   - Overload sentinel: same-name interface methods with different param counts
+ *     are matched independently.
  */
 
 let docCounter = 0;
@@ -79,6 +81,58 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
         ]);
         assert.strictEqual(d.length, 0,
             `fully-implemented same-file class must not warn; got: ${JSON.stringify(d.map(x => x.message))}`);
+    });
+
+    test('derived class inherits interface implementations from parent — no warning', async () => {
+        const d = await diags([
+            '  PROGRAM',
+            '  MAP',
+            '  END',
+            'IGreeter  INTERFACE,TYPE',
+            'Hello       PROCEDURE',
+            'Goodbye     PROCEDURE',
+            '          END',
+            'BaseGreeter CLASS,IMPLEMENTS(IGreeter)',
+            'Init        PROCEDURE',
+            '          END',
+            'DerivedGreeter CLASS(BaseGreeter),IMPLEMENTS(IGreeter)',
+            '          END',
+            '  CODE',
+            'BaseGreeter.IGreeter.Hello PROCEDURE',
+            '  CODE',
+            '  RETURN',
+            'BaseGreeter.IGreeter.Goodbye PROCEDURE',
+            '  CODE',
+            '  RETURN',
+            'BaseGreeter.Init PROCEDURE',
+            '  CODE',
+            '  RETURN',
+        ]);
+        assert.strictEqual(d.length, 0,
+            `derived class must inherit interface implementations from parent; got: ${JSON.stringify(d.map(x => x.message))}`);
+    });
+
+    test('same-name interface overloads are matched by parameter count', async () => {
+        const d = await diags([
+            '  PROGRAM',
+            '  MAP',
+            '  END',
+            'IWorker   INTERFACE,TYPE',
+            'DoThing     PROCEDURE',
+            'DoThing     PROCEDURE(LONG)',
+            '          END',
+            'MyWorker CLASS,IMPLEMENTS(IWorker)',
+            '          END',
+            '  CODE',
+            'MyWorker.IWorker.DoThing PROCEDURE',
+            '  CODE',
+            '  RETURN',
+            'MyWorker.IWorker.DoThing PROCEDURE(LONG)',
+            '  CODE',
+            '  RETURN',
+        ]);
+        assert.strictEqual(d.length, 0,
+            `same-name overloads should be matched by parameter count; got: ${JSON.stringify(d.map(x => x.message))}`);
     });
 
     test('declaration-only .inc with no MODULE — skipped (impls live in an unknown module)', async () => {

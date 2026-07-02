@@ -14,7 +14,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
-import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
@@ -157,6 +157,42 @@ export class MemberLocatorService {
     }
 
     /**
+     * Enumerates interface methods with their declaration parameter counts.
+     * Used by the interface-implementation diagnostic to distinguish overloads.
+     */
+    async enumerateInterfaceMembersWithParamCounts(
+        ifaceName: string,
+        document: TextDocument
+    ): Promise<Array<{ name: string; paramCount: number }> | null> {
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+        const docLines = document.getText().split(/\r?\n/);
+
+        const local = this.enumerateInterfaceMembersFromTokensWithParamCounts(tokens, ifaceName, docLines);
+        if (local) return local;
+
+        const fromInclude = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
+            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+        );
+        if (fromInclude) return fromInclude;
+
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(ifaceName);
+        if (infos.length > 0) {
+            const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
+            const data = await this.loadDocument(info.filePath);
+            if (data) {
+                const fromSdi = this.enumerateInterfaceMembersFromTokensWithParamCounts(
+                    data.tokens, ifaceName, data.doc.getText().split(/\r?\n/)
+                );
+                if (fromSdi) return fromSdi;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Combined convenience: resolves variable type then finds member in that class or interface.
      * This is the primary entry point for hover, F12, and Ctrl+F12 dot-access lookups.
      */
@@ -267,6 +303,34 @@ export class MemberLocatorService {
 
             const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited);
             if (nested) return nested;
+        }
+        return null;
+    }
+
+    private async enumerateInterfaceMembersInIncludeChainWithParamCounts(
+        ifaceName: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<Array<{ name: string; paramCount: number }> | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (data) {
+                const found = this.enumerateInterfaceMembersFromTokensWithParamCounts(
+                    data.tokens, ifaceName, data.doc.getText().split(/\r?\n/)
+                );
+                if (found) return found;
+
+                const nested = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                );
+                if (nested) return nested;
+            }
         }
         return null;
     }
@@ -541,6 +605,20 @@ export class MemberLocatorService {
     }
 
     /**
+     * Collects the implemented interface methods for a class and all of its
+     * ancestors. Returns null when any link in the chain cannot be resolved so
+     * callers can skip rather than false-positive.
+     */
+    async collectImplementedInterfaceMethodsIncludingAncestors(
+        className: string,
+        document: TextDocument,
+        inlineAllowed: boolean
+    ): Promise<Set<string> | null> {
+        const visited = new Set<string>();
+        return this.collectImplementedInterfaceMethodsRecursive(className, document, inlineAllowed, visited);
+    }
+
+    /**
      * #165/#181 — token-scanning variant of {@link collectImplementedInterfaceMethods}
      * for a class declared AND implemented in the same module (a PROGRAM/MEMBER
      * `.clw` with no `MODULE(...)` attribute) — the three-part impls are in the
@@ -566,6 +644,123 @@ export class MemberLocatorService {
             impls.add(`${parts[1].toLowerCase()}.${parts[2].toLowerCase()}`);
         }
         return impls;
+    }
+
+    private scanThreePartImplsWithCounts(tokens: Token[], className: string, docLines: string[]): Set<string> {
+        const clsLower = className.toLowerCase();
+        const impls = new Set<string>();
+        for (const t of tokens) {
+            if (t.subType !== TokenType.MethodImplementation || !t.label) continue;
+            const parts = t.label.split('.');
+            if (parts.length !== 3) continue;
+            if (parts[0].toLowerCase() !== clsLower) continue;
+            const methodName = parts[2].toLowerCase();
+            const lineText = docLines[t.line] ?? '';
+            const paramCount = this.countParamsInDecl(lineText);
+            impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
+        }
+        return impls;
+    }
+
+    private async collectImplementedInterfaceMethodsRecursive(
+        className: string,
+        document: TextDocument,
+        inlineAllowed: boolean,
+        visited: Set<string>
+    ): Promise<Set<string> | null> {
+        const key = className.toLowerCase();
+        if (visited.has(key)) return new Set();
+        visited.add(key);
+
+        const info = await this.resolveClassDeclarationInfo(className, document);
+        if (!info) return null;
+
+        const ownImpls = await this.collectImplementedInterfaceMethodsForDeclaration(info, document, inlineAllowed);
+        if (ownImpls === null) return null;
+
+        const merged = new Set(ownImpls);
+        if (info.parentName) {
+            const parentImpls = await this.collectImplementedInterfaceMethodsRecursive(
+                info.parentName,
+                document,
+                inlineAllowed,
+                visited
+            );
+            if (parentImpls === null) return null;
+            for (const entry of parentImpls) {
+                merged.add(entry);
+            }
+        }
+
+        return merged;
+    }
+
+    private async collectImplementedInterfaceMethodsForDeclaration(
+        info: StructureDeclarationInfo,
+        document: TextDocument,
+        inlineAllowed: boolean
+    ): Promise<Set<string> | null> {
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        if (info.moduleName) {
+            const resolved = this.resolveFilePath(info.moduleName, path.dirname(info.filePath));
+            if (!resolved) return null;
+            const data = await this.loadDocument(resolved);
+            if (!data) return null;
+            return this.scanThreePartImplsWithCounts(data.tokens, info.name, data.doc.getText().split(/\r?\n/));
+        }
+
+        if (!inlineAllowed) {
+            return null;
+        }
+
+        if (path.normalize(info.filePath).toLowerCase() !== path.normalize(currentPath).toLowerCase()) {
+            return null;
+        }
+
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+        return this.scanThreePartImplsWithCounts(tokens, info.name, document.getText().split(/\r?\n/));
+    }
+
+    private async resolveClassDeclarationInfo(
+        className: string,
+        document: TextDocument
+    ): Promise<StructureDeclarationInfo | null> {
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const currentInfo = this.extractClassDeclarationInfoFromDocument(className, document, currentPath);
+        if (currentInfo) return currentInfo;
+
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(className);
+        if (infos.length === 0) return null;
+        return infos.find(d => !d.isType) || infos[0];
+    }
+
+    private extractClassDeclarationInfoFromDocument(
+        className: string,
+        document: TextDocument,
+        filePath: string
+    ): StructureDeclarationInfo | null {
+        const lines = document.getText().split(/\r?\n/);
+        const classNamePattern = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'i');
+        const modulePattern = /,\s*MODULE\s*\(\s*['"]?([^'")\s]+)['"]?\s*\)/i;
+        const parentPattern = /\bCLASS\s*\(\s*([A-Za-z_]\w*)\s*\)/i;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!classNamePattern.test(line)) continue;
+            return {
+                name: className,
+                filePath,
+                line: i,
+                structureType: 'CLASS',
+                parentName: parentPattern.exec(line)?.[1],
+                moduleName: modulePattern.exec(line)?.[1],
+                isType: /,\s*TYPE\b/i.test(line),
+                lineContent: line.trim()
+            };
+        }
+
+        return null;
     }
 
     /** Walks the INCLUDE chain enumerating an INTERFACE's method names (#181). */
@@ -622,6 +817,34 @@ export class MemberLocatorService {
             if (token.label) names.push(token.label);
         }
         return names;
+    }
+
+    private enumerateInterfaceMembersFromTokensWithParamCounts(
+        tokens: Token[],
+        ifaceName: string,
+        docLines: string[]
+    ): Array<{ name: string; paramCount: number }> | null {
+        const ifaceToken = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Interface &&
+            t.label?.toLowerCase() === ifaceName.toLowerCase() &&
+            t.finishesAt !== undefined
+        );
+        if (!ifaceToken || ifaceToken.finishesAt === undefined) return null;
+        const ifaceEnd = ifaceToken.finishesAt;
+
+        const methods: Array<{ name: string; paramCount: number }> = [];
+        for (const token of tokens) {
+            if (token.line <= ifaceToken.line || token.line >= ifaceEnd) continue;
+            if (!TokenHelper.isProcedureOrFunction(token)) continue;
+            if (token.subType !== TokenType.InterfaceMethod) continue;
+            if (!token.label) continue;
+            methods.push({
+                name: token.label,
+                paramCount: this.countParamsInDecl(docLines[token.line] ?? '')
+            });
+        }
+        return methods;
     }
 
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
