@@ -163,6 +163,13 @@ Productivity features to write code faster.
 - CodeLens reference counts are warmed more aggressively and invalidated more precisely to reduce repeated full scans.
 - Additional rename/reference URI-normalization hardening reduces duplicate-edit collisions.
 
+#### 🧩 Other notable 0.9.7 additions
+- Protected-branch pre-commit guard for release branches (`master`, `main`, `version-x.y.z`).
+- New `clarion.referencesCodeLens.enabled` setting to disable expensive reference-count CodeLens on very large files.
+- Interface and overload diagnostics expanded with indistinguishable-prototype detection and stricter interface implementation checks.
+- Typed-variable overload resolution improved across Go To Definition / Hover / Go To Implementation.
+- New diagnostics include undeclared-variable coverage and missing-MAP declaration checks.
+
 **[See full changelog →](CHANGELOG.md)**
 
 ---
