@@ -4,12 +4,6 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 
-/** Extracts the filename from a `MODULE('x.clw')` attribute on a declaration line. */
-function extractModuleAttribute(lineText: string): string | undefined {
-    const m = lineText.match(/MODULE\s*\(\s*'([^']+)'\s*\)/i);
-    return m ? m[1] : undefined;
-}
-
 /**
  * Warns when a CLASS declares `IMPLEMENTS(SomeInterface)` but does not provide an
  * implementation for one of the interface's methods — a silent interface-contract
@@ -26,20 +20,17 @@ function extractModuleAttribute(lineText: string): string | undefined {
  * So this validator resolves, per class:
  *   - the required method set — each implemented interface's methods, found
  *     same-file or via the class file's INCLUDE chain
- *     (`MemberLocatorService.enumerateInterfaceMembers`);
+ *     (`MemberLocatorService.enumerateInterfaceMembersWithParamCounts`);
  *   - the provided implementations — three-part `Class.Interface.Method` defs in
- *     the class's MODULE (`MemberLocatorService.collectImplementedInterfaceMethods`);
+ *     the class's MODULE, plus ancestor classes when the class derives from a
+ *     base type (`MemberLocatorService.collectImplementedInterfaceMethodsIncludingAncestors`);
  * and warns for any interface method with no matching implementation.
  *
  * Conservative scope (no false positives — skip rather than guess):
- *   - Only non-derived `CLASS,IMPLEMENTS`. Derived `CLASS(Parent),IMPLEMENTS`
- *     classes may inherit implementations from an ancestor (the compiler stubs
- *     unimplemented methods to the parent), so they are skipped — un-skipping
- *     with ancestor resolution is a follow-up (#181 item 2).
- *   - Requires a resolvable `MODULE('x.clw')` and resolvable interface; if either
- *     can't be found, the class/interface is skipped.
- *   - Matching is by method NAME (case-insensitive); parameter/overload
- *     discrimination is a follow-up (#181 item 3).
+ *   - Requires a resolvable implementation target (current file, MODULE target,
+ *     or ancestor chain) and resolvable interface; if either can't be found, the
+ *     class/interface is skipped.
+ *   - Matching is by method NAME + parameter count (case-insensitive).
  */
 export async function validateClassInterfaceImplementationAsync(
     tokens: Token[],
@@ -54,56 +45,35 @@ export async function validateClassInterfaceImplementationAsync(
     const classes = structure.getClasses();
     if (classes.length === 0) return diagnostics;
 
-    const docLines = document.getText().split(/\r?\n/);
+    const inlineAllowed = structure.getDocumentKind() !== undefined;
 
     for (const cls of classes) {
         const implemented = cls.implementedInterfaces;
         if (!implemented || implemented.length === 0) continue;
 
-        // Skip classes that derive from a base class — `CLASS(Parent)` has `(`
-        // immediately after the CLASS keyword (vs `CLASS,IMPLEMENTS` with a comma).
-        // A missing method may be inherited from the parent (#181 item 2).
-        const idx = tokens.indexOf(cls);
-        if (idx >= 0 && tokens[idx + 1]?.value === '(') continue;
-
         const className = cls.label ?? cls.value;
 
-        // Locate the implementations. Interface methods are implemented as
-        // three-part `Class.Interface.Method PROCEDURE` defs, either:
-        //   - in the class's MODULE('x.clw') (the separately-compiled pattern), or
-        //   - in THIS file, when the class is declared + implemented inline in a
-        //     PROGRAM/MEMBER source with no MODULE attribute.
-        // A declaration-only `.inc` with no MODULE (getDocumentKind undefined)
-        // has its impls in an unknown module → skip rather than false-positive.
-        const moduleFile = extractModuleAttribute(docLines[cls.line] ?? '');
-        let implementedMethods: Set<string> | null;
-        if (moduleFile) {
-            implementedMethods = await memberLocator.collectImplementedInterfaceMethods(
-                className, moduleFile, document
-            );
-        } else if (structure.getDocumentKind() !== undefined) {
-            implementedMethods = memberLocator.collectImplementedInterfaceMethodsFromTokens(
-                tokens, className
-            );
-        } else {
-            continue;
-        }
+        const implementedMethods = await memberLocator.collectImplementedInterfaceMethodsIncludingAncestors(
+            className,
+            document,
+            inlineAllowed
+        );
         if (implementedMethods === null) continue; // module unresolvable → skip
 
         for (const ifaceNameRaw of implemented) {
-            const required = await memberLocator.enumerateInterfaceMembers(ifaceNameRaw, document);
+            const required = await memberLocator.enumerateInterfaceMembersWithParamCounts(ifaceNameRaw, document);
             if (required === null) continue; // interface unresolvable → skip
 
-            const ifaceLower = ifaceNameRaw.toLowerCase();
-            for (const methodName of required) {
-                if (implementedMethods.has(`${ifaceLower}.${methodName.toLowerCase()}`)) continue;
+            for (const method of required) {
+                const key = `${ifaceNameRaw.toLowerCase()}.${method.name.toLowerCase()}#${method.paramCount}`;
+                if (implementedMethods.has(key)) continue;
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range: {
                         start: { line: cls.line, character: cls.start },
                         end: { line: cls.line, character: cls.start + cls.value.length },
                     },
-                    message: `CLASS '${className}' implements '${ifaceNameRaw}' but does not implement method '${ifaceNameRaw}.${methodName}' (expected '${className}.${ifaceNameRaw}.${methodName} PROCEDURE')`,
+                    message: `CLASS '${className}' implements '${ifaceNameRaw}' but does not implement method '${ifaceNameRaw}.${method.name}' (expected '${className}.${ifaceNameRaw}.${method.name} PROCEDURE')`,
                     source: 'clarion',
                     code: 'unimplemented-interface-method',
                 });
