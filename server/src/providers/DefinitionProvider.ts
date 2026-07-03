@@ -133,6 +133,8 @@ export class DefinitionProvider {
                 const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const methodMatch = afterDot.match(/^(\w+)/);
+                const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
+                const isSelfParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
                 
                 // Extract just the method name from word if it includes the prefix (e.g., "self.SaveFile" -> "SaveFile")
                 let methodName = word;
@@ -204,7 +206,7 @@ export class DefinitionProvider {
                     }
 
                     // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-                    if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                    if (isSelfParentChain && beforeDot.includes('.')) {
                         // #131 — arg-classification overlay for chained calls like
                         // SELF.inner.SetValue(args). Resolve the chain to the class that
                         // owns the final member, then pick the matching overload by argument
@@ -233,7 +235,7 @@ export class DefinitionProvider {
                     }
 
                     // SELF.property or PARENT.property (no parentheses) — find the class member declaration
-                    if (!hasParentheses && /^\s*(self|parent)\b/i.test(beforeDot)) {
+                    if (!hasParentheses && isSelfParentChain) {
                         const isSelf = /\bself$/i.test(beforeDot);
                         logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
                         const memberInfo = isSelf
@@ -246,9 +248,9 @@ export class DefinitionProvider {
                     }
 
                     // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
-                    if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
+                    if (!isSelfParentChain) {
                         // Multi-segment variable chain: variable.property.method
-                        if (beforeDot.includes('.')) {
+                        if (isPureChain && beforeDot.includes('.')) {
                             // #131 — arg-classification overlay for typed-var chained calls
                             // like outer.inner.SetValue(args). Same gap and same fix as the
                             // SELF/PARENT chained branch above: resolve the chain's final

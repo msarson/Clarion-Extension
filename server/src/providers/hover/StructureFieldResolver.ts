@@ -126,6 +126,8 @@ export class StructureFieldResolver {
         // Handles: "self", "address(self", "x = self", etc.
         const isSelfMember = /\bself$/i.test(beforeDot);
         const isParentMember = /\bparent$/i.test(beforeDot);
+        const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
+        const isSelfOrParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
         logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
         
         // This is a member access (hovering over the field after the dot)
@@ -147,7 +149,7 @@ export class StructureFieldResolver {
                 logger.info(`PARENT method call detected with ${paramCount} parameters`);
             }
             return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
-        } else if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+        } else if (isSelfOrParentChain && beforeDot.includes('.')) {
             // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
             let paramCount: number | undefined;
             if (hasParentheses) {
@@ -157,7 +159,7 @@ export class StructureFieldResolver {
             if (chainedInfo) {
                 return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
             }
-        } else if (beforeDot.includes('.')) {
+        } else if (isPureChain && beforeDot.includes('.')) {
             // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
             let paramCount: number | undefined;
             if (hasParentheses) {
