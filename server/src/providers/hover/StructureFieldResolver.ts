@@ -189,8 +189,10 @@ export class StructureFieldResolver {
                 }
 
                 // Try typed class variable: find what class type structureName is,
-                // then look up the member in that class (e.g., st.GetValue() where st StringTheory)
-                const varTypeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
+                // then look up the member in that class (e.g., st.GetValue() where st StringTheory).
+                // Pass position.line so resolveVariableType can also check procedure parameters
+                // (e.g. `*WindowInfo Info` — parameters are not column-0 tokens). Issue #215.
+                const varTypeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
                 if (varTypeInfo) {
                     const { typeName: varType, isClass, isReference } = varTypeInfo;
                     logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}, isReference=${isReference}), looking up member "${fieldName}"`);
@@ -270,10 +272,15 @@ export class StructureFieldResolver {
     }
 
     /**
-     * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files)
-     * and return hover info showing the field declaration.
+     * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files
+     * or the current document itself).
      */
     private async resolveStructureTypeFieldHover(typeName: string, fieldName: string, document: TextDocument): Promise<Hover | null> {
+        // First: check the current document's own tokens (handles same-file GROUP,TYPE definitions)
+        const currentTokens = this.tokenCache.getTokens(document);
+        const fromCurrentDoc = this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri);
+        if (fromCurrentDoc) return fromCurrentDoc;
+
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const result = await this.findFieldInTypeIncludes(typeName, fieldName, filePath, new Set());
         if (result) return result;
@@ -284,6 +291,54 @@ export class StructureFieldResolver {
             return this.findFieldInTypeIncludes(typeName, fieldName, equatesPath, new Set());
         }
         return null;
+    }
+
+    /**
+     * Searches an already-tokenized token array for a field inside a named GROUP/QUEUE/FILE type.
+     * Used to resolve same-file type definitions without a disk read.
+     */
+    private findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string): Hover | null {
+        const labelToken = tokens.find(t =>
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.start === 0 &&
+            t.value.toLowerCase() === typeName.toLowerCase()
+        );
+        if (!labelToken) return null;
+
+        const labelIdx = tokens.indexOf(labelToken);
+        let structureEndLine = Number.MAX_VALUE;
+        for (let i = labelIdx + 1; i < tokens.length; i++) {
+            const t = tokens[i];
+            if (t.line !== labelToken.line) break;
+            if (t.type === TokenType.Structure && t.finishesAt !== undefined) {
+                structureEndLine = t.finishesAt;
+                break;
+            }
+        }
+
+        const fieldToken = tokens.find(t =>
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.start === 0 &&
+            t.value.toLowerCase() === fieldName.toLowerCase() &&
+            t.line > labelToken.line &&
+            t.line < structureEndLine
+        );
+        if (!fieldToken) return null;
+
+        const lineTokens = tokens.filter(t => t.line === fieldToken.line);
+        const declaration = lineTokens.map(t => t.value).join('  ').trim();
+        const typeToken = lineTokens.find(t => t.start > fieldToken.start);
+        const fieldType = typeToken?.value ?? 'UNKNOWN';
+        const fileName = path.basename(decodeURIComponent(sourceUri.replace(/^file:\/\/\//, '')).replace(/\//g, path.sep));
+        const markdown = [
+            `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
+            ``,
+            `\`\`\`clarion`,
+            declaration,
+            `\`\`\``,
+            `${fileName}:${fieldToken.line + 1}`
+        ].join('\n');
+        return { contents: { kind: 'markdown', value: markdown } };
     }
 
     /**
