@@ -88,7 +88,7 @@ export class HoverRouter {
         if (symbolHover) return symbolHover;
 
         // 9. Handle attributes
-        const attributeHover = this.handleAttribute(word, line, wordRange, document);
+        const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock);
         if (attributeHover) return attributeHover;
 
         // 9.5 Handle PROP: runtime property equates
@@ -331,8 +331,22 @@ export class HoverRouter {
     /**
      * Handle Clarion attributes
      */
-    private handleAttribute(word: string, line: string, wordRange: any, document: any): Hover | null {
+    private handleAttribute(
+        word: string,
+        line: string,
+        wordRange: any,
+        document: any,
+        position: { line: number; character: number },
+        documentStructure: { getControlContextAt(line: number, character: number): { structureType: string | null; controlType: string | null } },
+        isInClassBlock: boolean
+    ): Hover | null {
         if (!this.attributeService.isAttribute(word)) {
+            return null;
+        }
+
+        const controlContext = documentStructure.getControlContextAt(position.line, position.character);
+        const inDeclarationContext = isInClassBlock || controlContext.structureType !== null || controlContext.controlType !== null;
+        if (!inDeclarationContext) {
             return null;
         }
 
