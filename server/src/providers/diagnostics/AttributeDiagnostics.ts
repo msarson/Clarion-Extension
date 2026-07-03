@@ -30,6 +30,7 @@ const VALIDATABLE_CONTROLS = new Set([
  */
 export function validateAttributeApplicability(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
+    const lines = document.getText().split(/\r?\n/);
 
     // Build DocumentStructure so we can call getControlContextAt per token
     const structure = new DocumentStructure(tokens);
@@ -103,6 +104,30 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
              tokens[i + 2].type === TokenType.FieldEquateLabel ||
              tokens[i + 2].type === TokenType.WindowElement)) {
             continue;
+        }
+
+        // Dot-suffix guard: skip Attribute tokens used as member names in dot access,
+        // e.g. SELF.Sectors.Type or Obj.Item.Type. In these contexts TYPE/ITEM/etc.
+        // are identifiers, not Clarion attribute applications.
+        const lineText = lines[token.line] ?? '';
+        if (token.start > 0 && lineText[token.start - 1] === '.') {
+            continue;
+        }
+
+        // Procedure/function parameter guard: skip Attribute tokens inside the
+        // signature parameter list, e.g. PROCEDURE(STRING Item, STRING Type).
+        // TYPE/ITEM keywords in parameter names are identifiers here, not attributes.
+        const upperLine = lineText.toUpperCase();
+        const procIdx = upperLine.indexOf('PROCEDURE');
+        const funcIdx = upperLine.indexOf('FUNCTION');
+        const sigIdx = procIdx >= 0 ? procIdx : funcIdx;
+        if (sigIdx >= 0) {
+            const openParen = lineText.indexOf('(', sigIdx);
+            const closeParen = openParen >= 0 ? lineText.indexOf(')', openParen + 1) : -1;
+            if (openParen >= 0 && closeParen > openParen &&
+                token.start > openParen && token.start < closeParen) {
+                continue;
+            }
         }
 
         const attrName = token.value.toUpperCase();

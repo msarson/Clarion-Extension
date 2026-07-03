@@ -764,4 +764,32 @@ suite('validateAttributeApplicability', () => {
                 'misapplied CREATE on a |-continuation line of BUTTON must STILL fire (continuation fallback must survive)');
         });
     });
+
+    suite('#219 — TYPE in member access and parameter names is not an attribute', () => {
+        test('no diagnostic for dot-access member suffix ".Type" (abutil-style)', () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE',
+                '  CODE',
+                "  SELF.FetchQueue('X','Y',SELF.Sectors,SELF.Sectors.Family,SELF.Sectors.Item,SELF.Sectors.Type)",
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected no invalid-attribute-context for SELF.Sectors.Type member access; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        test('no diagnostic for parameter name "Type" in PROCEDURE signature', () => {
+            const doc = makeDoc([
+                'GetSector PROCEDURE(STRING Family, STRING Item, STRING Type)',
+                '  CODE',
+                '  RETURN',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected no invalid-attribute-context for PROCEDURE parameter name "Type"; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+    });
 });
