@@ -278,8 +278,10 @@ export class DefinitionProvider {
                         const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
-                            const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
-                            const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
+                            // Pass position.line so resolveVariableType can also check procedure
+                            // parameters (e.g. `*WindowInfo Info`). Issue #215.
+                            const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
+                            const classType = typeInfo?.typeName ?? this.findVariableType(tokens, structureName, position.line, document);
                             if (classType) {
                                 logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
                                 // #125 — arg-classification overlay: when the typed-var call has
@@ -765,8 +767,9 @@ export class DefinitionProvider {
                     }
 
                     // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
-                    const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
-                    const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
+                    // Pass position.line to also resolve procedure parameters. Issue #215.
+                    const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
+                    const classType = typeInfo?.typeName ?? this.findVariableType(tokens, structureName, position.line, document);
                     if (classType) {
                         logger.info(`Variable ${structureName} is of type ${classType}, looking for member ${fieldName}`);
                         const result = await this.findClassMemberInType(tokens, classType, fieldName, document);
@@ -2189,7 +2192,7 @@ export class DefinitionProvider {
         }
     }
 
-    private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
+    private findVariableType(tokens: Token[], variableName: string, currentLine: number, document?: TextDocument): string | null {
         logger.info(`Looking for type of variable ${variableName}`);
 
         // Find the variable declaration
@@ -2203,11 +2206,32 @@ export class DefinitionProvider {
         );
 
         if (varTokens.length === 0) {
-            // Check if it's a parameter
+            // Check if it's a parameter — parse the enclosing procedure's PROCEDURE() signature
             const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
             if (currentScope) {
-                // TODO: Parse parameters to get type - for now return null
-                logger.info('Variable might be a parameter - parameter type detection not yet implemented');
+                const content = document?.getText();
+                if (content) {
+                    const lines = content.split('\n');
+                    const procedureLine = lines[currentScope.line] ?? '';
+                    const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+                    if (sigMatch?.[1]) {
+                        const wordLower = variableName.toLowerCase();
+                        for (const param of sigMatch[1].split(',')) {
+                            const trimmed = param.trim().replace(/^<(.*)>$/, '$1').trim();
+                            const m = trimmed.match(/^([*&]?\s*[\w:]+)\s+([A-Za-z_][\w:]*)(?:\s*=.*)?$/i);
+                            if (!m) continue;
+                            const paramName = m[2];
+                            const pLower = paramName.toLowerCase();
+                            if (pLower === wordLower || pLower.endsWith(':' + wordLower)) {
+                                const typeName = m[1].trim().replace(/^[*&]\s*/, '').trim();
+                                if (typeName) {
+                                    logger.info(`findVariableType: "${variableName}" is parameter of type "${typeName}"`);
+                                    return typeName;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             return null;
         }

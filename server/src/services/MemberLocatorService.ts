@@ -103,18 +103,72 @@ export class MemberLocatorService {
 
     /**
      * Resolves the type of a named variable.
-     * Search order: current file → MEMBER parent → INCLUDE chain.
+     * Search order: current file → MEMBER parent → INCLUDE chain → procedure parameters.
      * Returns { typeName, isClass, isReference } or null if not found/unresolvable.
      * isReference is true when the variable was declared as &TypeName (Clarion reference).
+     *
+     * Pass `scopeLine` when the caller has position context — this enables resolving
+     * parameters of the enclosing procedure (e.g. `*WindowInfo Info`), which are not
+     * column-0 tokens and are therefore invisible to `findVariableTokenCrossFile`.
      */
     async resolveVariableType(
         varName: string,
         tokens: Token[],
-        document: TextDocument
+        document: TextDocument,
+        scopeLine?: number
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         const found = await this.findVariableTokenCrossFile(varName, tokens, document);
-        if (!found) return null;
+        if (!found) {
+            if (scopeLine !== undefined) {
+                return this.resolveParameterType(varName, document, scopeLine);
+            }
+            return null;
+        }
         return this.extractTypeFromToken(found.token, found.tokens);
+    }
+
+    /**
+     * Resolves the type of `varName` as a procedure parameter by parsing the
+     * PROCEDURE(...) header of the scope that encloses `scopeLine`.
+     * Handles `*TypeName` (pass-by-address GROUP/QUEUE) and `&TypeName` (reference)
+     * prefixes, stripping them to obtain the bare type name.
+     */
+    private resolveParameterType(
+        varName: string,
+        document: TextDocument,
+        scopeLine: number
+    ): { typeName: string; isClass: boolean; isReference: boolean } | null {
+        const structure = this.tokenCache.getStructure(document);
+        const scopeToken = TokenHelper.getInnermostScopeAtLine(structure, scopeLine);
+        if (!scopeToken) return null;
+
+        const lines = document.getText().split('\n');
+        const procedureLine = lines[scopeToken.line];
+        if (!procedureLine) return null;
+
+        const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        if (!sigMatch || !sigMatch[1]) return null;
+
+        const wordLower = varName.toLowerCase();
+        for (const param of sigMatch[1].split(',')) {
+            const trimmed = param.trim().replace(/^<(.*)>$/, '$1').trim();
+            // [*&]? TYPE NAME [= default]  or  <*TYPE NAME>
+            const m = trimmed.match(/^([*&]?\s*[\w:]+)\s+([A-Za-z_][\w:]*)(?:\s*=.*)?$/i);
+            if (!m) continue;
+
+            const rawType = m[1].trim();
+            const paramName = m[2];
+            const pLower = paramName.toLowerCase();
+            if (pLower !== wordLower && !pLower.endsWith(':' + wordLower)) continue;
+
+            const isRef = rawType.startsWith('&');
+            const typeName = rawType.replace(/^[*&]\s*/, '').trim();
+            if (!typeName) continue;
+
+            logger.info(`resolveParameterType: "${varName}" → type "${typeName}" (isRef=${isRef})`);
+            return { typeName, isClass: false, isReference: isRef };
+        }
+        return null;
     }
 
     /**
