@@ -309,6 +309,24 @@ export class DefinitionProvider {
                 }
             }
 
+            // ✅ #211 DO routine reference: F12 on routine name in `DO RoutineName` → ROUTINE label
+            const doRoutineMatch = line.match(/\bDO\s+(\w+)/i);
+            if (doRoutineMatch) {
+                const routineName = doRoutineMatch[1];
+                if (routineName.toLowerCase() === word.toLowerCase()) {
+                    const routineStart = line.indexOf(routineName, line.toUpperCase().indexOf('DO'));
+                    const routineEnd = routineStart + routineName.length;
+                    if (position.character >= routineStart && position.character <= routineEnd) {
+                        logger.info(`F12 on routine reference: DO ${routineName} — looking for ROUTINE label`);
+                        const routineLocation = this.findRoutineDefinition(routineName, document, position, tokens);
+                        if (routineLocation) {
+                            logger.info(`✅ Found ROUTINE '${routineName}' definition`);
+                            return routineLocation;
+                        }
+                    }
+                }
+            }
+
             // ✅ IMPLEMENTS(InterfaceName) navigation: F12 on interface name → INTERFACE declaration
             const implementsMatch = line.match(/\bIMPLEMENTS\s*\(\s*(\w+)\s*\)/gi);
             if (implementsMatch) {
@@ -2343,6 +2361,43 @@ export class DefinitionProvider {
 
         logger.info(`📋 SCOPE-FILTER: Returning ${accessible.length} candidates (sorted by scope distance)`);
         return accessible;
+    }
+
+    /**
+     * #211 — Resolves F12 on a routine name in a `DO RoutineName` statement to the `RoutineName ROUTINE` label
+     * Routines are procedure-local labels; this method scopes the search to the enclosing procedure only.
+     * @param routineName The name of the routine to find (case-insensitive)
+     * @param document The text document
+     * @param position The position of the DO reference
+     * @param tokens The tokens array
+     * @returns A Location pointing to the routine definition, or null if not found
+     */
+    private findRoutineDefinition(routineName: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
+        logger.info(`🔍 [#211] Resolving DO routine reference: "${routineName}"`);
+        
+        const structure = this.tokenCache.getStructure(document);
+        
+        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, position.line);
+        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
+            logger.info(`❌ No enclosing procedure found at line ${position.line}`);
+            return null;
+        }
+        
+        logger.info(`Found enclosing procedure: "${enclosingProc.value}" (lines ${enclosingProc.line}-${enclosingProc.finishesAt})`);
+
+        const routineTokens = structure.findRoutines(routineName).filter(routineToken => {
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+            return parentScope?.line === enclosingProc.line && parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
+        });
+
+        if (routineTokens.length === 0) {
+            logger.info(`❌ No ROUTINE label found for "${routineName}" in procedure "${enclosingProc.value}"`);
+            return null;
+        }
+
+        const routineToken = routineTokens[0];
+        logger.info(`✅ Found ROUTINE "${routineName}" at line ${routineToken.line}`);
+        return Location.create(document.uri, Range.create(routineToken.line, 0, routineToken.line, routineToken.value.length));
     }
 
 }
