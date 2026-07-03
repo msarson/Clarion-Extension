@@ -186,8 +186,11 @@ export class MemberLocatorService {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
-        // 0. Current document tokens (class defined in the same file)
-        const fromCurrentDoc = await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS');
+        // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback)
+        const fromCurrentDoc =
+            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS') ??
+            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'GROUP') ??
+            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'QUEUE');
         if (fromCurrentDoc) return fromCurrentDoc;
 
         // 1. Walk INCLUDE chain reachable from this document
@@ -196,6 +199,32 @@ export class MemberLocatorService {
             new Set([docPath.toLowerCase()])
         );
         if (fromInclude) return fromInclude;
+
+        // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
+        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath));
+            if (parentPath) {
+                const parentData = await this.loadDocument(parentPath);
+                if (parentData) {
+                    const fromMemberParent =
+                        this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'CLASS') ??
+                        this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'GROUP') ??
+                        this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'QUEUE');
+                    if (fromMemberParent) return fromMemberParent;
+
+                    const fromMemberIncludes = await this.findInIncludeChain(
+                        className,
+                        memberName,
+                        parentData.tokens,
+                        path.dirname(parentPath),
+                        paramCount,
+                        new Set([docPath.toLowerCase(), parentPath.toLowerCase()])
+                    );
+                    if (fromMemberIncludes) return fromMemberIncludes;
+                }
+            }
+        }
 
         // 2. StructureDeclarationIndexer (covers libsrc / accessory paths) + parent chain
         await this.ensureIndexBuilt();
@@ -947,17 +976,33 @@ export class MemberLocatorService {
             // 🚀 Load once — use tokens for member lookup, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
-                const result = this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount);
+                const result =
+                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'CLASS') ??
+                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'GROUP') ??
+                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'QUEUE');
                 if (result) return result;
                 // Fallback to disk scan for edge cases — prefer live editor text if file is open
                 const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                 const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
-                const diskResult = scanClassBodyForMember(
-                    resolvedPath, className, memberName, paramCount, 'CLASS',
-                    (line) => this.countParamsInDecl(line),
-                    (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                    liveContent
-                );
+                const diskResult =
+                    scanClassBodyForMember(
+                        resolvedPath, className, memberName, paramCount, 'CLASS',
+                        (line) => this.countParamsInDecl(line),
+                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+                        liveContent
+                    ) ??
+                    scanClassBodyForMember(
+                        resolvedPath, className, memberName, paramCount, 'GROUP',
+                        (line) => this.countParamsInDecl(line),
+                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+                        liveContent
+                    ) ??
+                    scanClassBodyForMember(
+                        resolvedPath, className, memberName, paramCount, 'QUEUE',
+                        (line) => this.countParamsInDecl(line),
+                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+                        liveContent
+                    );
                 if (diskResult) return diskResult;
 
                 const nested = await this.findInIncludeChain(
