@@ -167,6 +167,36 @@ function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[]
 }
 
 /**
+ * #189 Phase 4 (initial) — declaration-position probe for FAR fast-path.
+ *
+ * If the cursor is on a line that has a CodeLens declaration symbol, return its
+ * lens data so `onReferences` can hit the precomputed reference cache in O(1)
+ * (same cache used by CodeLens resolve) before falling back to live FAR scans.
+ */
+function findCodeLensDataAtPosition(
+    document: TextDocument,
+    position: { line: number; character: number }
+): { uri: string; line: number; character: number; symbolName: string } | null {
+    const lenses = codeLensProvider.provideCodeLenses(document);
+    const sameLine = lenses
+        .map(l => l.data as { uri: string; line: number; character: number; symbolName: string } | undefined)
+        .filter((d): d is { uri: string; line: number; character: number; symbolName: string } => !!d && d.line === position.line);
+    if (sameLine.length === 0) return null;
+
+    // Prefer a candidate whose method/proc segment range covers the cursor.
+    for (const data of sameLine) {
+        const shortName = (data.symbolName ?? '').split('.').pop() ?? '';
+        const start = data.character;
+        const end = start + shortName.length;
+        if (position.character >= start && position.character <= end) return data;
+    }
+
+    // Fallback: nearest declaration anchor on this line.
+    sameLine.sort((a, b) => Math.abs(position.character - a.character) - Math.abs(position.character - b.character));
+    return sameLine[0] ?? null;
+}
+
+/**
  * #189 Phase 2 — background precompute for CodeLens reference counts.
  * Builds the existing declaration-keyed cache (`uri:line:char`) once at solution-ready
  * so most `onCodeLensResolve` calls hit O(1) map lookups. Resolve still falls back to
@@ -2198,6 +2228,26 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 
     try {
+        // #189 Phase 4 (initial): if cursor is on a declaration symbol that has a
+        // precomputed CodeLens reference entry, serve FAR directly from that cache.
+        // Keeps FAR O(1) for the common declaration-path while preserving the full
+        // live provider fallback for every other case.
+        const lensData = findCodeLensDataAtPosition(document, params.position);
+        if (lensData) {
+            const cacheKey = `${lensData.uri}:${lensData.line}:${lensData.character}`;
+            const cached = codeLensRefCache.get(cacheKey);
+            if (cached) {
+                let refs = cached.refs;
+                if (!params.context.includeDeclaration) {
+                    refs = refs.filter(loc =>
+                        !(loc.uri === lensData.uri && loc.range.start.line === lensData.line)
+                    );
+                }
+                logger.info(`⚡ [FAR] Cache hit for declaration ${cacheKey}: ${refs.length} reference(s)`);
+                return refs;
+            }
+        }
+
         const references = await Promise.race([
             referencesProvider.provideReferences(document, params.position, params.context),
             new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
