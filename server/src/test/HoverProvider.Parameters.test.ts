@@ -124,6 +124,28 @@ suite('HoverProvider – Parameters and Local Variables', () => {
             const text = getHoverText(hover);
             assert.ok(text.includes('pCount') || text.includes('LONG'), `Got: ${text}`);
         });
+
+        test('hover on parameter name in PROCEDURE declaration prefers declaration scope', async () => {
+            const codeWithSibling = [
+                'FirstProc PROCEDURE()',
+                'Info      LONG',
+                '  CODE',
+                '  RETURN',
+                '',
+                'SecondProc PROCEDURE(STRING Name, *WindowInfo Info)',
+                '  CODE',
+                '  RETURN',
+            ].join('\n');
+
+            const doc = TextDocument.create('test://hover-params-decl.clw', 'clarion', 1, codeWithSibling);
+            // Line 5: "SecondProc PROCEDURE(STRING Name, *WindowInfo Info)"
+            // Hover on "Info" parameter in the declaration (not usage in CODE)
+            const position = Position.create(5, 47);
+            const hover = await provider.provideHover(doc, position);
+            assert.ok(hover, 'Should provide hover for parameter name in declaration');
+            const text = getHoverText(hover);
+            assert.ok(text.includes('WindowInfo') || text.includes('Info'), `Got: ${text}`);
+        });
     });
 
     // -----------------------------------------------------------------------
