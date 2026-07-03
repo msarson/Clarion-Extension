@@ -24,7 +24,15 @@ suite('HoverProvider - DocumentStructure API Integration', () => {
         tokenCache.clearTokens('test://hover2.clw');
         tokenCache.clearTokens('test://hover3.clw');
         tokenCache.clearTokens('test://hover4.clw');
+        tokenCache.clearTokens('test://hover5.clw');
+        tokenCache.clearTokens('test://hover6.clw');
     });
+
+    function hoverText(hover: any): string {
+        return typeof hover.contents === 'string'
+            ? hover.contents
+            : 'value' in hover.contents ? hover.contents.value : '';
+    }
 
     suite('MAP procedure hover (declaration → implementation)', () => {
         test('should show implementation hover when hovering on MAP declaration', async () => {
@@ -176,5 +184,6 @@ END`;
                     'Should not show MAP declaration when not in MAP context');
             }
         });
+
     });
 });
