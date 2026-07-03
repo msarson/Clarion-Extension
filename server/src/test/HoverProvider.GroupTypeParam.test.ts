@@ -75,4 +75,38 @@ suite('HoverProvider — GROUP,TYPE parameter field access (#215)', () => {
         const text = hoverText(hover);
         assert.ok(text.toLowerCase().includes('count'), `Hover should mention "Count", got: ${text}`);
     });
+
+    test('does not bleed into sibling procedure when same-named local var exists (abutil.clw pattern)', async () => {
+        // Mirrors the abutil.clw case: TestClass.Update has `Info LIKE(WindowInfo),AUTO` as a local
+        // variable, while TestClass.UpdateWindowInfo has `*WindowInfo Info` as a parameter.
+        // Hovering on Info.Maximized inside UpdateWindowInfo must NOT pick up the sibling's local.
+        const code = [
+            'WindowInfo         GROUP,TYPE',
+            'Maximized            BYTE',
+            'Minimized            BYTE',
+            '  END',
+            '',
+            'TestClass.Update PROCEDURE()',
+            'Info               LIKE(WindowInfo),AUTO',
+            '  CODE',
+            '  Info.Maximized = 1',
+            '',
+            'TestClass.UpdateWindowInfo PROCEDURE(*WindowInfo Info)',
+            '  CODE',
+            '  IF Info.Maximized',
+            '    RETURN',
+            '  END',
+        ].join('\n');
+
+        const doc = TextDocument.create('test://sibling-scope-#215.clw', 'clarion', 1, code);
+        tokenCache.getTokens(doc);
+
+        // Line 12: "  IF Info.Maximized" — cursor on "Maximized"
+        // "  IF Info.Maximized" → 0=sp,1=sp,2=I,3=F,4=sp,5=I,6=n,7=f,8=o,9=.,10=M...
+        const hover = await provider.provideHover(doc, Position.create(12, 12));
+        assert.ok(hover !== null && hover !== undefined,
+            'Should provide hover for "Maximized" even when same-named local exists in sibling procedure');
+        const text = hoverText(hover);
+        assert.ok(text.toLowerCase().includes('maximized'), `Hover should mention "Maximized", got: ${text}`);
+    });
 });

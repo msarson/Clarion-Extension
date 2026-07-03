@@ -117,7 +117,7 @@ export class MemberLocatorService {
         document: TextDocument,
         scopeLine?: number
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
-        const found = await this.findVariableTokenCrossFile(varName, tokens, document);
+        const found = await this.findVariableTokenCrossFile(varName, tokens, document, scopeLine);
         if (!found) {
             if (scopeLine !== undefined) {
                 return this.resolveParameterType(varName, document, scopeLine);
@@ -166,7 +166,9 @@ export class MemberLocatorService {
             if (!typeName) continue;
 
             logger.info(`resolveParameterType: "${varName}" → type "${typeName}" (isRef=${isRef})`);
-            return { typeName, isClass: false, isReference: isRef };
+            // Treat the resolved parameter type as a user-defined type (isClass: true) so callers
+            // route through findMemberInClass which has SDI support for GROUP/QUEUE/CLASS types.
+            return { typeName, isClass: true, isReference: isRef };
         }
         return null;
     }
@@ -301,10 +303,36 @@ export class MemberLocatorService {
     private async findVariableTokenCrossFile(
         varName: string,
         tokens: Token[],
-        document: TextDocument
+        document: TextDocument,
+        scopeLine?: number
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const varNameLower = varName.toLowerCase();
+
+        // When scopeLine is known, build a set of "other procedure" line ranges to skip.
+        // This prevents picking up a same-named local variable from a sibling procedure
+        // (e.g. `Info` at line 932 inside INIClass.Update when we're inside INIClass.UpdateWindowInfo).
+        let excludedRanges: Array<{ start: number; end: number }> = [];
+        if (scopeLine !== undefined) {
+            const structure = this.tokenCache.getStructure(document);
+            const currentScope = TokenHelper.getInnermostScopeAtLine(structure, scopeLine);
+            const currentScopeLine = currentScope?.line;
+            excludedRanges = tokens
+                .filter(t =>
+                    TokenHelper.isProcedureOrFunction(t) &&
+                    t.finishesAt !== undefined &&
+                    t.line !== currentScopeLine
+                )
+                .map(t => ({ start: t.line, end: t.finishesAt! }));
+        }
+        const isExcluded = (line: number): boolean =>
+            excludedRanges.some(r => line > r.start && line <= r.end);
+
         // 1. Current file (column 0 label or structure)
-        const local = tokens.find(t => t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase()));
+        const local = tokens.find(t =>
+            t.start === 0 &&
+            this.tokenMatchesName(t, varNameLower) &&
+            !isExcluded(t.line)
+        );
         if (local) return { token: local, tokens, doc: document };
 
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
