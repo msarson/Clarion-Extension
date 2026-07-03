@@ -179,6 +179,18 @@ export class HoverProvider {
 
             logger.info(`Current scope: ${currentScope.value}`);
 
+            // If cursor is on a PROCEDURE/FUNCTION declaration line, prioritize that exact
+            // declaration scope for parameter hover before falling back to currentScope.
+            // This prevents sibling-procedure locals with the same name from winning.
+            const declarationScope = tokens.find(t =>
+                TokenHelper.isProcedureOrFunction(t) &&
+                t.line === position.line
+            );
+            if (declarationScope) {
+                const declarationParamHover = this.variableResolver.findParameterHover(word, document, declarationScope);
+                if (declarationParamHover) return declarationParamHover;
+            }
+
             // First, try searching with the full word (handles labels with colons like BRW1::View:Browse)
             logger.info(`Checking if ${word} (full word) is a parameter...`);
             let parameterHover = this.variableResolver.findParameterHover(word, document, currentScope);
