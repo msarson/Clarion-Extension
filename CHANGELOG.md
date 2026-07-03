@@ -6,7 +6,7 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
-### [0.9.7] - Unreleased
+### [0.9.7] - 2026-07-02
 
 **New Features**
 
