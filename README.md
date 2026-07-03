@@ -146,7 +146,16 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.7 (2026-07-02) — No-Solution UX, Formatting, and Diagnostics
+### Latest: v0.9.8 (2026-07-03) — Documentation corrections
+
+- Updated release documentation to reflect v0.9.8 as the current version.
+- Corrected release timeline references so v0.9.7 is clearly marked as released on 2026-07-02.
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.7 (2026-07-02) — No-Solution UX, Formatting, and Diagnostics
 
 #### 🧭 No-solution workflow improvements
 - `clarion.quickOpen` now falls back to VS Code's native Quick Open when no solution is loaded.
