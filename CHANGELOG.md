@@ -8,6 +8,15 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.9] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **F12 on `DO RoutineName` now resolves to the matching `ROUTINE` label in the current procedure scope** (#211): DefinitionProvider now uses `DocumentStructure.findRoutines()` plus parent-scope matching, so routine references in `DO ...` statements navigate correctly and do not bleed into unrelated routines.
+- 🐛 **`CLIP(...)` hover now resolves as a built-in function in expression contexts** (#213): hover routing no longer misclassifies keyword collisions (e.g. `CLIP`) as control attributes outside control declarations.
+- 🐛 **Hover/F12 on structure fields via typed procedure parameters now works** (#215): cases like `Info.Maximized` where `Info` is declared `*WindowInfo` (GROUP/TYPE) now resolve correctly. Parameter type extraction was added for `PROCEDURE(...)` signatures and wired into typed dot-access paths.
+- 🐛 **Parameter hover on declaration lines now prefers the declaration scope** (#217): hovering `Info` directly in `PROCEDURE(... *WindowInfo Info)` no longer resolves to a same-named local from a sibling procedure.
+- 🐛 **Real-world `abutil.clw` dot-access fixes (expression-safe chain detection + MEMBER-parent type resolution)** (#219): typed member access inside expressions like `CHOOSE(NOT Info.Maximized, ...)` now resolves correctly for both hover and F12; lookup now properly reaches MEMBER parent/include layouts and GROUP/QUEUE type members.
+- 🐛 **Removed false `invalid-attribute-context` diagnostics for `Type` identifier usage** (#220): diagnostics now skip attribute validation when keyword-like tokens are used as dot-member suffixes (e.g. `SELF.Sectors.Type`) or as parameter names inside `PROCEDURE(...)` / `FUNCTION(...)` signatures.
+
 ---
 
 ### [0.9.8] - 2026-07-03
