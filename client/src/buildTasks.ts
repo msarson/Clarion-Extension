@@ -423,7 +423,6 @@ export async function executeBuildTask(params: {
             : `🔄 Building Clarion Project: ${targetName}`;
 
         startOperationStatusBar("build", buildTypeMessage.replace(/^🔄\s*/, ""));
-        window.showInformationMessage(buildTypeMessage);
 
         // Execute the task and wait for it to complete
         const taskExecution = await tasks.executeTask(task);
@@ -658,9 +657,7 @@ export async function buildSolutionWithDependencyOrder(
         const resolver = new ProjectDependencyResolver(solutionDir, solutionInfo.projects);
         
         // Analyze dependencies
-        window.showInformationMessage('Analyzing project dependencies...');
         await resolver.analyzeDependencies();
-        window.showInformationMessage('Dependency analysis complete.');
         
         // Get build order
         const buildOrder = resolver.getBuildOrder();
@@ -668,7 +665,7 @@ export async function buildSolutionWithDependencyOrder(
         // Log dependency summary
         logger.info(resolver.getDependencySummary());
         
-        window.showInformationMessage(`Building ${buildOrder.length} projects in dependency order...`);
+        startOperationStatusBar("build", `Building ${buildOrder.length} projects in dependency order...`);
         
         // Build each project in order
         let successCount = 0;
@@ -678,7 +675,6 @@ export async function buildSolutionWithDependencyOrder(
             const project = buildOrder[i];
             try {
                 logger.info(`Building project: ${project.name}`);
-                window.showInformationMessage(`Building: ${project.name}`);
                 startOperationStatusBar("build", `Building ${project.name} (${i + 1}/${buildOrder.length})...`);
                 
                 // Notify tree provider of build progress
