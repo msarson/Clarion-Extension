@@ -768,6 +768,24 @@ export class DefinitionProvider {
                         return this.findClassMember(tokens, fieldName, document, position.line);
                     }
 
+                    // Multi-segment chain (e.g. obj.inner.error): resolve the final class of
+                    // the chain prefix before the last dot, then resolve member on that class.
+                    if (beforeDot.includes('.')) {
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, undefined);
+                        if (chainedInfo) {
+                            logger.info(`Resolved chained field "${beforeDot}.${fieldName}" at ${chainedInfo.file}:${chainedInfo.line}`);
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                        const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                        if (finalClass) {
+                            logger.info(`Resolved chain prefix "${beforeDot}" to class "${finalClass}" for field "${fieldName}"`);
+                            const chainedResult = await this.findClassMemberInType(tokens, finalClass, fieldName, document);
+                            if (chainedResult) {
+                                return chainedResult;
+                            }
+                        }
+                    }
+
                     // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
                     // Pass position.line to also resolve procedure parameters. Issue #215.
                     const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);

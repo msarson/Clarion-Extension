@@ -13,7 +13,10 @@
   "${workspaceFolder}/out/**/*.js"
 ],
 "sourceMaps": true,
-"preLaunchTask": "npm: watch"
+"preLaunchTask": "npm: watch",
+"env": {
+ "CLARION_TRACE_DOT_ACCESS": "1"
+}
   }
 ]
 }

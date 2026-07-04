@@ -25,13 +25,33 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
-logger.setLevel("error");
+const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
+logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
     private tokenCache = TokenCache.getInstance();
 
     constructor(private crossFileCache?: CrossFileCache) {}
+
+    private trace(message: string, ...args: any[]): void {
+        logger.test(`[DotAccessTrace] ${message}`, ...args);
+    }
+
+    private deriveOwnerClassFromMethodName(methodName: string, document: TextDocument): string | null {
+        const lines = document.getText().split(/\r?\n/);
+        const methodLower = methodName.toLowerCase();
+        for (const line of lines) {
+            const match = line.match(/^\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s+PROCEDURE\b/i);
+            if (!match) continue;
+            const className = match[1];
+            const candidateMethod = (match[3] ?? match[2]).toLowerCase();
+            if (candidateMethod === methodLower) {
+                return className;
+            }
+        }
+        return null;
+    }
 
     /**
      * Finds the declaration location of a variable.
@@ -225,6 +245,7 @@ export class MemberLocatorService {
         document: TextDocument,
         paramCount?: number
     ): Promise<MemberInfo | null> {
+        this.trace(`findMemberInClass start class="${className}" member="${memberName}" paramCount=${paramCount ?? 'n/a'}`);
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
@@ -233,14 +254,20 @@ export class MemberLocatorService {
             await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS') ??
             await this.scanBodyForMember(docPath, className, memberName, paramCount, 'GROUP') ??
             await this.scanBodyForMember(docPath, className, memberName, paramCount, 'QUEUE');
-        if (fromCurrentDoc) return fromCurrentDoc;
+        if (fromCurrentDoc) {
+            this.trace(`findMemberInClass hit current document file="${fromCurrentDoc.file}" line=${fromCurrentDoc.line}`);
+            return fromCurrentDoc;
+        }
 
         // 1. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInIncludeChain(
             className, memberName, tokens, path.dirname(docPath), paramCount,
             new Set([docPath.toLowerCase()])
         );
-        if (fromInclude) return fromInclude;
+        if (fromInclude) {
+            this.trace(`findMemberInClass hit include chain file="${fromInclude.file}" line=${fromInclude.line}`);
+            return fromInclude;
+        }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
         const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
@@ -253,7 +280,10 @@ export class MemberLocatorService {
                         this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'CLASS') ??
                         this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'GROUP') ??
                         this.findMemberFromTokens(parentData.tokens, parentData.doc, parentPath, className, memberName, paramCount, 'QUEUE');
-                    if (fromMemberParent) return fromMemberParent;
+                    if (fromMemberParent) {
+                        this.trace(`findMemberInClass hit MEMBER parent file="${fromMemberParent.file}" line=${fromMemberParent.line}`);
+                        return fromMemberParent;
+                    }
 
                     const fromMemberIncludes = await this.findInIncludeChain(
                         className,
@@ -263,22 +293,35 @@ export class MemberLocatorService {
                         paramCount,
                         new Set([docPath.toLowerCase(), parentPath.toLowerCase()])
                     );
-                    if (fromMemberIncludes) return fromMemberIncludes;
+                    if (fromMemberIncludes) {
+                        this.trace(`findMemberInClass hit MEMBER include chain file="${fromMemberIncludes.file}" line=${fromMemberIncludes.line}`);
+                        return fromMemberIncludes;
+                    }
                 }
             }
         }
 
-        // 2. StructureDeclarationIndexer (covers libsrc / accessory paths) + parent chain
-        await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
-        if (infos.length > 0) {
-            const info = infos.find(d => !d.isType) || infos[0];
-            const result = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-            if (result) return result;
-            if (info.structureType === 'CLASS' && info.parentName) {
-                return this.walkParentChain(info.parentName, memberName, paramCount, new Set([className.toLowerCase()]));
-            }
+        // 2. Resolve through declaration + parent chain (current doc / INCLUDE chain / index)
+        const fromHierarchy = await this.walkParentChain(
+            className,
+            memberName,
+            paramCount,
+            new Set(),
+            document
+        );
+        if (fromHierarchy) {
+            this.trace(`findMemberInClass hit parent chain file="${fromHierarchy.file}" line=${fromHierarchy.line}`);
+            return fromHierarchy;
         }
+
+        const ownerClass = this.deriveOwnerClassFromMethodName(className, document);
+        if (ownerClass && ownerClass.toLowerCase() !== className.toLowerCase()) {
+            this.trace(`findMemberInClass treating "${className}" as method name; retrying with owner class "${ownerClass}"`);
+            const ownerResult = await this.findMemberInClass(ownerClass, memberName, document, paramCount);
+            if (ownerResult) return ownerResult;
+        }
+
+        this.trace(`findMemberInClass miss class="${className}" member="${memberName}"`);
 
         return null;
     }
@@ -331,14 +374,26 @@ export class MemberLocatorService {
     ): Promise<MemberInfo | null> {
         const tokens = this.tokenCache.getTokens(document);
         const typeInfo = await this.resolveVariableType(objectName, tokens, document);
-        if (!typeInfo) return null;
-        logger.info(`resolveDotAccess: "${objectName}" → type "${typeInfo.typeName}", looking for "${memberName}"`);
+        if (!typeInfo) {
+            this.trace(`resolveDotAccess type miss object="${objectName}" member="${memberName}"`);
+            return null;
+        }
+        this.trace(`resolveDotAccess object="${objectName}" type="${typeInfo.typeName}" member="${memberName}" isRef=${typeInfo.isReference}`);
         // Try interface lookup first for reference variables (&TypeName), then fall back to class
         if (typeInfo.isReference) {
             const ifaceResult = await this.findMemberInInterface(typeInfo.typeName, memberName, document, paramCount);
-            if (ifaceResult) return ifaceResult;
+            if (ifaceResult) {
+                this.trace(`resolveDotAccess resolved via interface "${typeInfo.typeName}" at ${ifaceResult.file}:${ifaceResult.line}`);
+                return ifaceResult;
+            }
         }
-        return this.findMemberInClass(typeInfo.typeName, memberName, document, paramCount);
+        const classResult = await this.findMemberInClass(typeInfo.typeName, memberName, document, paramCount);
+        if (classResult) {
+            this.trace(`resolveDotAccess resolved via class "${classResult.className}" at ${classResult.file}:${classResult.line}`);
+            return classResult;
+        }
+        this.trace(`resolveDotAccess miss object="${objectName}" type="${typeInfo.typeName}" member="${memberName}"`);
+        return null;
     }
 
     /**
@@ -880,12 +935,32 @@ export class MemberLocatorService {
     ): Promise<StructureDeclarationInfo | null> {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentInfo = this.extractClassDeclarationInfoFromDocument(className, document, currentPath);
-        if (currentInfo) return currentInfo;
+        if (currentInfo) {
+            this.trace(`resolveClassDeclarationInfo "${className}" from current file "${currentInfo.filePath}" line=${currentInfo.line}`);
+            return currentInfo;
+        }
+
+        const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+        const fromInclude = await this.findClassDeclarationInfoInIncludeChain(
+            className,
+            tokens,
+            path.dirname(currentPath),
+            new Set([currentPath.toLowerCase()])
+        );
+        if (fromInclude) {
+            this.trace(`resolveClassDeclarationInfo "${className}" from include "${fromInclude.filePath}" line=${fromInclude.line}`);
+            return fromInclude;
+        }
 
         await this.ensureIndexBuilt();
         const infos = this.sdi.find(className);
-        if (infos.length === 0) return null;
-        return infos.find(d => !d.isType) || infos[0];
+        if (infos.length === 0) {
+            this.trace(`resolveClassDeclarationInfo "${className}" not found in SDI`);
+            return null;
+        }
+        const fromIndex = infos.find(d => !d.isType) || infos[0];
+        this.trace(`resolveClassDeclarationInfo "${className}" from SDI "${fromIndex.filePath}" line=${fromIndex.line}`);
+        return fromIndex;
     }
 
     private extractClassDeclarationInfoFromDocument(
@@ -893,7 +968,15 @@ export class MemberLocatorService {
         document: TextDocument,
         filePath: string
     ): StructureDeclarationInfo | null {
-        const lines = document.getText().split(/\r?\n/);
+        return this.extractClassDeclarationInfoFromText(className, document.getText(), filePath);
+    }
+
+    private extractClassDeclarationInfoFromText(
+        className: string,
+        text: string,
+        filePath: string
+    ): StructureDeclarationInfo | null {
+        const lines = text.split(/\r?\n/);
         const classNamePattern = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'i');
         const modulePattern = /,\s*MODULE\s*\(\s*['"]?([^'")\s]+)['"]?\s*\)/i;
         const parentPattern = /\bCLASS\s*\(\s*([A-Za-z_]\w*)\s*\)/i;
@@ -913,6 +996,35 @@ export class MemberLocatorService {
             };
         }
 
+        return null;
+    }
+
+    private async findClassDeclarationInfoInIncludeChain(
+        className: string,
+        tokens: Token[],
+        fromDir: string,
+        visited: Set<string>
+    ): Promise<StructureDeclarationInfo | null> {
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
+            visited.add(resolvedPath.toLowerCase());
+
+            const data = await this.loadDocument(resolvedPath);
+            if (!data) continue;
+
+            const found = this.extractClassDeclarationInfoFromText(className, data.doc.getText(), resolvedPath);
+            if (found) return found;
+
+            const nested = await this.findClassDeclarationInfoInIncludeChain(
+                className,
+                data.tokens,
+                path.dirname(resolvedPath),
+                visited
+            );
+            if (nested) return nested;
+        }
         return null;
     }
 
@@ -1061,21 +1173,37 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        document?: TextDocument
     ): Promise<MemberInfo | null> {
-        if (visited.has(className.toLowerCase())) return null;
-        visited.add(className.toLowerCase());
-
-        const classInfos = this.sdi.find(className);
-        if (classInfos.length === 0) return null;
-
-        const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-        if (result) return result;
-
-        if (classInfo.parentName) {
-            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited);
+        if (visited.has(className.toLowerCase())) {
+            this.trace(`walkParentChain cycle stop at "${className}"`);
+            return null;
         }
+        visited.add(className.toLowerCase());
+        this.trace(`walkParentChain class="${className}" member="${memberName}"`);
+
+        let classInfo: StructureDeclarationInfo | null = null;
+        if (document) {
+            classInfo = await this.resolveClassDeclarationInfo(className, document);
+        }
+        if (!classInfo) {
+            await this.ensureIndexBuilt();
+            const classInfos = this.sdi.find(className);
+            if (classInfos.length === 0) return null;
+            classInfo = classInfos.find(d => !d.isType) || classInfos[0];
+        }
+        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+        if (result) {
+            this.trace(`walkParentChain found "${memberName}" in "${classInfo.filePath}" line=${result.line}`);
+            return result;
+        }
+
+        if (classInfo.structureType === 'CLASS' && classInfo.parentName) {
+            this.trace(`walkParentChain ascend "${className}" -> "${classInfo.parentName}"`);
+            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited, document);
+        }
+        this.trace(`walkParentChain stop at "${className}" (no parent/no hit)`);
         return null;
     }
 

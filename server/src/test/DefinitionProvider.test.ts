@@ -459,6 +459,7 @@ MyClass.Process PROCEDURE(STRING pName)
             assert.ok(result, 'Should find matching overload');
             assert.strictEqual(getLocationLine(result), 2, 'Should jump to 1-parameter overload');
         });
+
     });
 
     suite('🔒 Behavior Lock: Routine Navigation', () => {
