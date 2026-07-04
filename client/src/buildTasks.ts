@@ -16,6 +16,7 @@ import { PlatformUtils } from "./platformUtils";
 import { SolutionCache } from "./SolutionCache";
 import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
+import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
 
@@ -421,6 +422,7 @@ export async function executeBuildTask(params: {
             ? `🔄 Building Clarion Solution: ${targetName}`
             : `🔄 Building Clarion Project: ${targetName}`;
 
+        startOperationStatusBar("build", buildTypeMessage.replace(/^🔄\s*/, ""));
         window.showInformationMessage(buildTypeMessage);
 
         // Execute the task and wait for it to complete
@@ -444,6 +446,7 @@ export async function executeBuildTask(params: {
         });
         
     } catch (error) {
+        failOperationStatusBar("build", "Failed to start build task");
         window.showErrorMessage("❌ Failed to start Clarion build task.");
         logger.error("❌ Clarion Build Task Error:", error);
     }
@@ -518,12 +521,14 @@ function processTaskCompletion(
                         ? `✅ Building Clarion Solution Complete: ${targetName}`
                         : `✅ Building Clarion Project Complete: ${targetName}`;
                 window.showInformationMessage(successMessage);
+                succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
             } else {
                 const failureMessage =
                     buildTarget === "Solution"
                         ? `❌ Build Failed (Solution: ${targetName}) - Check terminal output for details`
                         : `❌ Build Failed (Project: ${targetName}) - Check terminal output for details`;
                 window.showErrorMessage(failureMessage);
+                failOperationStatusBar("build", failureMessage.replace(/^❌\s*/, ""));
             }
             return; // Exit early since we don't have log data
         }
@@ -572,6 +577,7 @@ function processTaskCompletion(
                 }
 
                 window.showErrorMessage(message);
+                failOperationStatusBar("build", message.replace(/^❌\s*/, ""));
             } else {
                 // Exit code was non-zero but no errors/warnings found
                 // This can happen with some MSBuild configurations - treat as success
@@ -583,6 +589,7 @@ function processTaskCompletion(
                         ? `✅ Building Clarion Solution Complete: ${targetName}`
                         : `✅ Building Clarion Project Complete: ${targetName}`;
                 window.showInformationMessage(successMessage);
+                succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
             }
         } else {
             // ✅ Success: clear old diagnostics
@@ -593,6 +600,7 @@ function processTaskCompletion(
                     ? `✅ Building Clarion Solution Complete: ${targetName}`
                     : `✅ Building Clarion Project Complete: ${targetName}`;
             window.showInformationMessage(successMessage);
+            succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
         }
 
         // Check if we should preserve the log file
@@ -627,6 +635,7 @@ export async function buildSolutionWithDependencyOrder(
         return;
     }
 
+    startOperationStatusBar("build", "Analyzing project dependencies...");
     await saveBeforeBuildIfEnabled();
 
     const solutionCache = SolutionCache.getInstance();
@@ -639,6 +648,7 @@ export async function buildSolutionWithDependencyOrder(
         window.showInformationMessage(
             "No solution is currently open. Use the 'Open Solution' button in the Solution View."
         );
+        failOperationStatusBar("build", "No solution is currently open");
         return;
     }
 
@@ -669,6 +679,7 @@ export async function buildSolutionWithDependencyOrder(
             try {
                 logger.info(`Building project: ${project.name}`);
                 window.showInformationMessage(`Building: ${project.name}`);
+                startOperationStatusBar("build", `Building ${project.name} (${i + 1}/${buildOrder.length})...`);
                 
                 // Notify tree provider of build progress
                 if (solutionTreeDataProvider) {
@@ -714,6 +725,7 @@ export async function buildSolutionWithDependencyOrder(
                 failCount++;
                 logger.error(`Failed to build project ${project.name}: ${error}`);
                 window.showErrorMessage(`Build failed for ${project.name}. Stopping build.`);
+                failOperationStatusBar("build", `Build failed for ${project.name}`);
                 break; // Stop on first error
             }
         }
@@ -726,13 +738,16 @@ export async function buildSolutionWithDependencyOrder(
         // Show final status
         if (failCount === 0) {
             window.showInformationMessage(`✅ Solution build complete: ${successCount} projects built successfully`);
+            succeedOperationStatusBar("build", `Solution build complete: ${successCount} projects built successfully`);
         } else {
             window.showWarningMessage(`Solution build stopped: ${successCount} succeeded, ${failCount} failed`);
+            failOperationStatusBar("build", `Solution build stopped: ${successCount} succeeded, ${failCount} failed`);
         }
         
     } catch (error) {
         logger.error(`Solution build failed: ${error}`);
         window.showErrorMessage(`Solution build failed: ${error instanceof Error ? error.message : String(error)}`);
+        failOperationStatusBar("build", `Solution build failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
@@ -846,6 +861,7 @@ export async function buildSolutionOrProject(
         window.showInformationMessage(
             "No solution is currently open. Use the 'Open Solution' button in the Solution View."
         );
+        failOperationStatusBar("build", "No solution is currently open");
         return;
     }
 
@@ -855,7 +871,20 @@ export async function buildSolutionOrProject(
     };
 
     if (waitForCompletion) {
-        await executeBuildTaskSync(buildParams);
+        try {
+            const modeText = buildTarget === "Solution"
+                ? "Building Clarion Solution..."
+                : `Building Clarion Project: ${buildParams.targetName}`;
+            startOperationStatusBar("build", modeText);
+            await executeBuildTaskSync(buildParams);
+            const successText = buildTarget === "Solution"
+                ? "Building Clarion Solution Complete"
+                : `Building Clarion Project Complete: ${buildParams.targetName}`;
+            succeedOperationStatusBar("build", successText);
+        } catch (error) {
+            failOperationStatusBar("build", error instanceof Error ? error.message : String(error));
+            throw error;
+        }
     } else {
         await executeBuildTask(buildParams);
     }

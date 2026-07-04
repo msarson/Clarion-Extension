@@ -4,7 +4,7 @@ import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionCache } from '../SolutionCache';
-import { failInitializationStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar, hideInitializationStatusBar } from '../statusbar/StatusBarManager';
+import { failInitializationStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar, hideInitializationStatusBar, hideOperationStatusBar } from '../statusbar/StatusBarManager';
 import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
@@ -487,6 +487,7 @@ export async function closeClarionSolution(
         hideConfigurationStatusBar();
         hideBuildProjectStatusBar();
         hideInitializationStatusBar();
+        hideOperationStatusBar();
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);

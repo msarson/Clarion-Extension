@@ -3,6 +3,7 @@ import * as path from 'path';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
 import { buildInitializationStatusText, InitializationStatusPhase } from './InitializationStatusText';
+import { buildOperationStatusText, ClarionOperationType } from './OperationStatusText';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -19,12 +20,21 @@ let buildProjectStatusBarItem: StatusBarItem;
 // left on Left-aligned status bars).
 let versionStatusBarItem: StatusBarItem;
 let initializationStatusBarItem: StatusBarItem;
+let operationStatusBarItem: StatusBarItem;
 let initializationHideTimer: ReturnType<typeof setTimeout> | undefined;
+let operationHideTimer: ReturnType<typeof setTimeout> | undefined;
 
 function clearInitializationHideTimer(): void {
     if (initializationHideTimer) {
         clearTimeout(initializationHideTimer);
         initializationHideTimer = undefined;
+    }
+}
+
+function clearOperationHideTimer(): void {
+    if (operationHideTimer) {
+        clearTimeout(operationHideTimer);
+        operationHideTimer = undefined;
     }
 }
 
@@ -77,6 +87,63 @@ export function hideInitializationStatusBar(): void {
     clearInitializationHideTimer();
     if (initializationStatusBarItem) {
         initializationStatusBarItem.hide();
+    }
+}
+
+function ensureOperationStatusBarItem(): StatusBarItem {
+    if (!operationStatusBarItem) {
+        operationStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 102);
+    }
+    return operationStatusBarItem;
+}
+
+export function startOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'running', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} in progress: ${detail}`
+        : `Clarion ${operation} in progress`;
+    item.show();
+}
+
+export function succeedOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'success', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} completed: ${detail}`
+        : `Clarion ${operation} completed`;
+    item.show();
+    operationHideTimer = setTimeout(() => {
+        item.hide();
+        operationHideTimer = undefined;
+    }, 4000);
+}
+
+export function failOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'failure', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} failed: ${detail}`
+        : `Clarion ${operation} failed`;
+    item.show();
+}
+
+export function hideOperationStatusBar(): void {
+    clearOperationHideTimer();
+    if (operationStatusBarItem) {
+        operationStatusBarItem.hide();
     }
 }
 
@@ -234,6 +301,7 @@ export function hideBuildProjectStatusBar(): void {
  */
 export function disposeStatusBars(): void {
     clearInitializationHideTimer();
+    clearOperationHideTimer();
     if (configStatusBarItem) {
         configStatusBarItem.dispose();
     }
@@ -245,5 +313,8 @@ export function disposeStatusBars(): void {
     }
     if (initializationStatusBarItem) {
         initializationStatusBarItem.dispose();
+    }
+    if (operationStatusBarItem) {
+        operationStatusBarItem.dispose();
     }
 }
