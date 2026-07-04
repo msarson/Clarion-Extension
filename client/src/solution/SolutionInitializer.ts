@@ -4,7 +4,13 @@ import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, 
 import { SolutionCache } from '../SolutionCache';
 import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
-import { updateConfigurationStatusBar, updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
+import {
+    completeInitializationStatusBar,
+    failInitializationStatusBar,
+    updateConfigurationStatusBar,
+    updateBuildProjectStatusBar,
+    updateInitializationStatusBar
+} from '../statusbar/StatusBarManager';
 import { refreshSolutionTreeView, setToolbarGraphStatus } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
@@ -185,6 +191,7 @@ export async function workspaceHasBeenTrusted(
             }
         } catch (error) {
             logger.error(`❌ Error initializing solution: ${error instanceof Error ? error.message : String(error)}`);
+            failInitializationStatusBar(error instanceof Error ? error.message : String(error));
             vscodeWindow.showErrorMessage(`Error initializing Clarion solution. Try using the "Reinitialize Solution" command.`);
         }
     } else {
@@ -211,6 +218,9 @@ export async function initializeSolution(
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
     documentManager: DocumentManager | undefined
 ): Promise<void> {
+    const solutionName = globalSolutionFile ? path.basename(globalSolutionFile) : undefined;
+    updateInitializationStatusBar('loading-solution', solutionName);
+
     logger.info("🔄 Initializing Clarion Solution...");
     
     logger.info(`🔍 BEFORE CHECK - Global variables state:
@@ -223,6 +233,7 @@ export async function initializeSolution(
         logger.warn(`    - globalSolutionFile: ${globalSolutionFile || 'MISSING'}`);
         logger.warn(`    - globalClarionPropertiesFile: ${globalClarionPropertiesFile || 'MISSING'}`);
         logger.warn(`    - globalClarionVersion: ${globalClarionVersion || 'MISSING'}`);
+        failInitializationStatusBar('Missing required Clarion solution settings');
         return;
     }
 
@@ -322,6 +333,7 @@ export async function initializeSolution(
             solutionReadyDisposable = null;
 
             logger.info(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
+            updateInitializationStatusBar('indexing-solution', `${params.projectCount} projects`);
             const solutionCache = SolutionCache.getInstance();
             const refreshStart = Date.now();
             await solutionCache.refresh(true);
@@ -333,6 +345,7 @@ export async function initializeSolution(
             logger.info(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
             SolutionCache.getInstance().markActivationComplete();
             logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
+            completeInitializationStatusBar(solutionName);
         });
 
         // Track FileRelationshipGraph build progress in the Actions toolbar
@@ -363,6 +376,7 @@ export async function initializeSolution(
             referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled // #185 opt-out
         });
         logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
+        updateInitializationStatusBar('indexing-solution', solutionName);
         
         // Wait a moment for the server to process the notification and initialize
         // This prevents a race condition where we request the solution tree before it's built
@@ -371,6 +385,7 @@ export async function initializeSolution(
         logger.info(`⏱️ [STARTUP] 1s delay complete, calling reinitializeEnvironment`);
     } else {
         logger.error("❌ Language client is not available.");
+        failInitializationStatusBar('Language client is not available');
         vscodeWindow.showErrorMessage("Error initializing Clarion solution: Language client is not available.");
         return;
     }
@@ -409,6 +424,7 @@ export async function initializeSolution(
         logger.info(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
         solutionCache.markActivationComplete();
         logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
+        completeInitializationStatusBar(solutionName);
     } else {
         logger.info(`⏱️ [STARTUP] refreshOpenDocuments deferred — solution not ready yet (waiting for clarion/solutionReady)`);
     }
@@ -416,7 +432,7 @@ export async function initializeSolution(
     const endTime = performance.now();
     logger.info(`✅ Solution initialization completed in ${(endTime - startTime).toFixed(2)}ms`);
     
-    vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
+    // Status bar now carries startup/ready UX; avoid extra startup popups.
 }
 
 /**
@@ -500,4 +516,3 @@ export async function reinitializeEnvironment(
     
     return documentManager;
 }
-
