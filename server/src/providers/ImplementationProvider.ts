@@ -10,6 +10,7 @@
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Location, Position, Range } from 'vscode-languageserver-protocol';
+import { CancellationToken } from 'vscode-languageserver';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
@@ -60,7 +61,8 @@ export class ImplementationProvider {
      */
     public async provideImplementation(
         document: TextDocument,
-        position: Position
+        position: Position,
+        token?: CancellationToken
     ): Promise<Location | Location[] | null> {
         logger.info(`Implementation requested at ${position.line}:${position.character} in ${document.uri}`);
 
@@ -252,7 +254,7 @@ export class ImplementationProvider {
         }
 
         // 4. Check if this is a method call or reference
-        const methodLocation = await this.findMethodImplementation(document, position, line);
+        const methodLocation = await this.findMethodImplementation(document, position, line, token);
         if (methodLocation) {
             logger.info(`Found method implementation`);
             return methodLocation;
@@ -370,7 +372,8 @@ export class ImplementationProvider {
     private async findMethodImplementation(
         document: TextDocument,
         position: Position,
-        line: string
+        line: string,
+        token?: CancellationToken
     ): Promise<Location | null> {
         // Pattern 1b: Chained access like SELF.Order.MainKey or PARENT.Foo.Bar
         // Must be checked BEFORE Pattern 1 because Pattern 1's regex matches the last
@@ -405,7 +408,7 @@ export class ImplementationProvider {
                             if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file
+                                    picked?.signature ?? line, declInfo.file, token
                                 );
                                 if (implLoc) return implLoc;
                             }
@@ -436,7 +439,7 @@ export class ImplementationProvider {
                             if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file
+                                    picked?.signature ?? line, declInfo.file, token
                                 );
                                 if (implLoc) return implLoc;
                             }
@@ -472,7 +475,9 @@ export class ImplementationProvider {
                             document,
                             callInfo.paramCount,
                             parentInfo.moduleFile ?? null,
-                            picked?.signature ?? line
+                            picked?.signature ?? line,
+                            undefined,
+                            token
                         );
                         if (impl) return impl;
                     }
@@ -496,7 +501,8 @@ export class ImplementationProvider {
                             callInfo.paramCount,
                             null,
                             picked?.signature ?? line,
-                            memberInfo.file
+                            memberInfo.file,
+                            token
                         );
                         if (impl) return impl;
                     }
@@ -510,7 +516,7 @@ export class ImplementationProvider {
                     if (argClassifyInfo) {
                         if (argClassifyInfo.type.toUpperCase().includes('PROCEDURE')) {
                             const impl = await this.memberResolver.findImplementationCrossFile(
-                                argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document
+                                argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document, token
                             );
                             if (impl) {
                                 logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
@@ -525,7 +531,7 @@ export class ImplementationProvider {
                     if (memberInfo) {
                         if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
                             const impl = await this.memberResolver.findImplementationCrossFile(
-                                memberInfo.className, callInfo.methodName, memberInfo, document
+                                memberInfo.className, callInfo.methodName, memberInfo, document, token
                             );
                             if (impl) {
                                 logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);
@@ -605,7 +611,9 @@ export class ImplementationProvider {
                     document,
                     paramCount,
                     moduleFile,
-                    line
+                    line,
+                    undefined,
+                    token
                 );
                 
                 if (implementation) {
@@ -793,7 +801,8 @@ export class ImplementationProvider {
         paramCount?: number,
         moduleFile?: string | null,
         declarationSignature?: string,
-        declarationFile?: string
+        declarationFile?: string,
+        token?: CancellationToken
     ): Promise<Location | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
@@ -904,7 +913,7 @@ export class ImplementationProvider {
         let scanned = 0;
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
-                await cooperativeCheckpoint(scanned++);
+                if (await cooperativeCheckpoint(scanned++, token)) return null;
                 const fullPath = path.join(project.path, sourceFile.relativePath);
 
                 // Skip current file (already searched)

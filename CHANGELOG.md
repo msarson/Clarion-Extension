@@ -24,6 +24,7 @@ All notable changes to the Clarion Extension are documented here.
 **Performance**
 
 - ⚡ **#187 high-priority search-loop cooperation + cancellation wiring landed**: `WorkspaceSymbolProvider`, `ImplementationProvider`/`ClassMemberResolver` cross-file implementation scans, and `ReferencesProvider` now share cooperative checkpoints and honor LSP cancellation tokens, so superseded Ctrl+T/Ctrl+F12/FAR requests bail early instead of running full solution scans to completion.
+- ⚡ **#187 LSP handler cancellation propagation completed**: server handlers now pass request cancellation tokens into `onImplementation` and `onReferences`, and both providers now stop long-running scans promptly when requests are superseded.
 
 ---
 
