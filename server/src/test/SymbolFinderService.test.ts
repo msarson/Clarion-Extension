@@ -14,6 +14,10 @@ import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from '../utils/TokenHelper';
 import { setServerInitialized } from '../serverState';
 import { TokenType } from '../tokenizer/TokenTypes';
+import {
+    buildMultiFileFixture,
+    teardownMultiFileFixture
+} from './helpers/MultiFileFARFixture';
 
 suite('SymbolFinderService Tests', () => {
     let service: SymbolFinderService;
@@ -37,6 +41,7 @@ suite('SymbolFinderService Tests', () => {
         tokenCache.clearTokens('test://symbol3.clw');
         tokenCache.clearTokens('test://symbol4.clw');
         tokenCache.clearTokens('test://symbol5.clw');
+        teardownMultiFileFixture();
     });
 
     function createDocument(code: string, uri: string = 'test://symbol1.clw'): TextDocument {
@@ -325,6 +330,79 @@ MyProc PROCEDURE()
             const result = service.findModuleVariable('NonExistent', tokens, doc);
             
             assert.strictEqual(result, null, 'Should return null');
+        });
+    });
+
+    suite('findModuleVariableInSiblingMembers', () => {
+        test('Should find module-scope declaration in sibling MEMBER file', async () => {
+            const fixture = buildMultiFileFixture({
+                files: {
+                    'main.clw': [
+                        '  PROGRAM',
+                        '  MAP',
+                        '  END',
+                        '  CODE',
+                        '  RETURN',
+                    ].join('\n'),
+                    'MemberA.clw': [
+                        "  MEMBER('main.clw')",
+                        'SharedValue LONG',
+                        'ProcA PROCEDURE',
+                        '  CODE',
+                        '  RETURN',
+                    ].join('\n'),
+                    'MemberB.clw': [
+                        "  MEMBER('main.clw')",
+                        'ProcB PROCEDURE',
+                        '  CODE',
+                        '  SharedValue = 1',
+                        '  RETURN',
+                    ].join('\n'),
+                },
+                frg: { programFile: 'main.clw', memberFiles: ['MemberA.clw', 'MemberB.clw'] }
+            });
+
+            const memberBDoc = fixture.documents['MemberB.clw'];
+            const result = await service.findModuleVariableInSiblingMembers('SharedValue', memberBDoc, { line: 3, character: 3 });
+
+            assert.ok(result, 'Should find sibling MEMBER module-scope variable');
+            assert.strictEqual(result?.location.uri.toLowerCase(), fixture.uris['MemberA.clw'].toLowerCase());
+            assert.strictEqual(result?.location.line, 1);
+            assert.strictEqual(result?.scope.type, 'module');
+        });
+
+        test('Should return null when sibling MEMBER declaration does not exist', async () => {
+            const fixture = buildMultiFileFixture({
+                files: {
+                    'main.clw': [
+                        '  PROGRAM',
+                        '  MAP',
+                        '  END',
+                        '  CODE',
+                        '  RETURN',
+                    ].join('\n'),
+                    'MemberA.clw': [
+                        "  MEMBER('main.clw')",
+                        'OtherValue LONG',
+                        'ProcA PROCEDURE',
+                        '  CODE',
+                        '  RETURN',
+                    ].join('\n'),
+                    'MemberB.clw': [
+                        "  MEMBER('main.clw')",
+                        'ProcB PROCEDURE',
+                        '  CODE',
+                        '  MissingValue = 1',
+                        '  RETURN',
+                    ].join('\n'),
+                },
+                frg: { programFile: 'main.clw', memberFiles: ['MemberA.clw', 'MemberB.clw'] }
+            });
+
+            const memberBDoc = fixture.documents['MemberB.clw'];
+            const result = await service.findModuleVariableInSiblingMembers('MissingValue', memberBDoc, { line: 3, character: 3 });
+
+            assert.strictEqual(result, null, 'Should return null for undeclared sibling MEMBER variable');
         });
     });
 

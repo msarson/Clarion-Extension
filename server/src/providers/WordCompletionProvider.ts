@@ -197,9 +197,9 @@ export class WordCompletionProvider {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-        const programPath = graph.isBuilt
+        const programPath = (graph.isBuilt
             ? graph.getProgramFile(currentPath)
-            : this.getProgramFileFromTokens(tokens);  // fallback while graph is building
+            : undefined) ?? this.getProgramFileFromTokens(tokens);
 
         if (programPath) {
             const result = this.getTokensForFile(programPath);
@@ -224,10 +224,10 @@ export class WordCompletionProvider {
      */
     private getTokensForFile(filePath: string): { tokens: Token[], doc: TextDocument } | null {
         const uri = 'file:///' + filePath.replace(/\\/g, '/');
-        const cached = this.tokenCache.getTokensByUri(uri) ?? this.tokenCache.getTokensByUri(uri.toLowerCase());
+        const cached = this.tokenCache.getTokensByUriCaseInsensitive(uri);
         if (cached && cached.length > 0) {
             // Build a minimal doc just for line-text lookups (text comes from cache)
-            const text = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentText(uri.toLowerCase()) ?? '';
+            const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? '';
             const doc = TextDocument.create(uri, 'clarion', 1, text);
             return { tokens: cached, doc };
         }
@@ -416,9 +416,9 @@ export class WordCompletionProvider {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-        const programPathRaw = graph.isBuilt
+        const programPathRaw = (graph.isBuilt
             ? graph.getProgramFile(currentPath)
-            : this.getProgramFileFromTokens(tokens);
+            : undefined) ?? this.getProgramFileFromTokens(tokens);
         const programPath = programPathRaw
             ? (path.isAbsolute(programPathRaw) ? programPathRaw : path.join(path.dirname(currentPath), programPathRaw))
             : undefined;
