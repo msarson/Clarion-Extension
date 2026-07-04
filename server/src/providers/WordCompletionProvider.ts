@@ -195,6 +195,7 @@ export class WordCompletionProvider {
         // All procedures declared in ANY MODULE in the program's MAP are globally
         // accessible — the module/DLL name is irrelevant for completion purposes.
         const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
         const programPath = graph.isBuilt
             ? graph.getProgramFile(currentPath)
@@ -413,6 +414,7 @@ export class WordCompletionProvider {
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
         const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
         const programPathRaw = graph.isBuilt
             ? graph.getProgramFile(currentPath)

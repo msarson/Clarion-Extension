@@ -13,9 +13,12 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 import { SolutionManager } from './solution/solutionManager';
+import { serverSettings } from './serverSettings';
+import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
@@ -52,6 +55,10 @@ export class FileRelationshipGraph {
     private _buildDurationMs: number | undefined;
     private _buildStartTime: Date | undefined;
     private _buildEndTime: Date | undefined;
+    private _buildMode: 'solution' | 'no-solution' | null = null;
+    private _noSolutionSignature: string | undefined;
+    private _noSolutionSourceFile: string | undefined;
+    private _noSolutionSourceUri: string | undefined;
 
     private constructor() {}
 
@@ -88,6 +95,10 @@ export class FileRelationshipGraph {
         this.forwardEdges.clear();
         this.reverseEdges.clear();
         this.classModuleIndex.clear();
+        this._buildMode = 'solution';
+        this._noSolutionSignature = undefined;
+        this._noSolutionSourceFile = undefined;
+        this._noSolutionSourceUri = undefined;
 
         const buildStart = Date.now();
         const visited = new Set<string>();
@@ -134,6 +145,18 @@ export class FileRelationshipGraph {
      * No-op while the background build is running — the build will capture the latest state.
      */
     public async updateFile(uri: string): Promise<void> {
+        if (this._buildMode === 'no-solution' && this._noSolutionSourceFile && this._noSolutionSourceUri) {
+            const tokenCache = TokenCache.getInstance();
+            const sourceText = tokenCache.getDocumentText(this._noSolutionSourceUri)
+                ?? tokenCache.getDocumentText(this.pathToUri(this.denormalizePath(this._noSolutionSourceFile)))
+                ?? (fs.existsSync(this.denormalizePath(this._noSolutionSourceFile))
+                    ? fs.readFileSync(this.denormalizePath(this._noSolutionSourceFile), 'utf-8')
+                    : '');
+            const sourceDoc = TextDocument.create(this._noSolutionSourceUri, 'clarion', 1, sourceText);
+            this.buildNoSolutionGraph(this._noSolutionSourceFile, sourceDoc);
+            return;
+        }
+
         if (this._building) return;
         const filePath = this.normalizePath(this.uriToPath(uri));
 
@@ -170,7 +193,41 @@ export class FileRelationshipGraph {
         this.classModuleIndex.clear();
         this._built = false;
         this._building = false;
+        this._buildDurationMs = undefined;
+        this._buildStartTime = undefined;
+        this._buildEndTime = undefined;
+        this._buildMode = null;
+        this._noSolutionSignature = undefined;
+        this._noSolutionSourceFile = undefined;
+        this._noSolutionSourceUri = undefined;
         logger.debug(`🔄 [FRG] FileRelationshipGraph reset`);
+    }
+
+    /**
+     * Lazily builds a bounded FRG for no-solution mode around the active document.
+     *
+     * The build is intentionally narrower than the full solution walk: it seeds
+     * from the active document, follows resolved INCLUDE/MEMBER/MODULE targets,
+     * and non-recursively scans the active/source/libsrc directories so reverse
+     * INCLUDE and sibling MEMBER edges exist for nearby cross-file features.
+     */
+    public ensureNoSolutionGraphForDocument(document: TextDocument): void {
+        if (SolutionManager.getInstance()?.solution) return;
+
+        const sourcePath = this.normalizePath(this.uriToPath(document.uri));
+        if (this._built && this.forwardEdges.has(sourcePath)) {
+            return;
+        }
+        const signature = this.getNoSolutionSignature(sourcePath);
+        if (
+            this._built &&
+            this._buildMode === 'no-solution' &&
+            this._noSolutionSignature === signature
+        ) {
+            return;
+        }
+
+        this.buildNoSolutionGraph(sourcePath, document);
     }
 
     /**
@@ -193,6 +250,67 @@ export class FileRelationshipGraph {
             });
         }
         this._built = true;
+    }
+
+    private buildNoSolutionGraph(sourcePath: string, sourceDocument?: TextDocument): void {
+        this._building = true;
+        this._built = false;
+        this._buildDurationMs = undefined;
+        this._buildStartTime = new Date();
+        this._buildEndTime = undefined;
+        this.forwardEdges.clear();
+        this.reverseEdges.clear();
+        this.classModuleIndex.clear();
+        this._buildMode = 'no-solution';
+        this._noSolutionSignature = this.getNoSolutionSignature(sourcePath);
+        this._noSolutionSourceFile = sourcePath;
+        this._noSolutionSourceUri = sourceDocument?.uri ?? this.pathToUri(this.denormalizePath(sourcePath));
+
+        const buildStart = Date.now();
+        const visitedFiles = new Set<string>();
+        const queuedFiles = new Set<string>();
+        const scannedDirs = new Set<string>();
+        const queue: string[] = [];
+
+        const enqueueFile = (filePath: string | undefined | null) => {
+            if (!filePath) return;
+            const norm = this.normalizePath(filePath);
+            if (visitedFiles.has(norm) || queuedFiles.has(norm)) return;
+            queuedFiles.add(norm);
+            queue.push(norm);
+        };
+
+        enqueueFile(sourcePath);
+        this.enqueueDirectoryFiles(path.dirname(this.denormalizePath(sourcePath)), enqueueFile, scannedDirs);
+        for (const libsrcDir of serverSettings.libsrcPaths ?? []) {
+            this.enqueueDirectoryFiles(libsrcDir, enqueueFile, scannedDirs);
+        }
+
+        while (queue.length > 0) {
+            const filePath = queue.shift()!;
+            queuedFiles.delete(filePath);
+            if (visitedFiles.has(filePath)) continue;
+            visitedFiles.add(filePath);
+
+            this.enqueueDirectoryFiles(path.dirname(this.denormalizePath(filePath)), enqueueFile, scannedDirs);
+
+            const discovered = (
+                sourceDocument &&
+                filePath === sourcePath
+            )
+                ? this.processOpenDocument(sourcePath, sourceDocument)
+                : this.processFileSync(filePath);
+
+            for (const target of discovered) {
+                enqueueFile(target);
+                this.enqueueDirectoryFiles(path.dirname(this.denormalizePath(target)), enqueueFile, scannedDirs);
+            }
+        }
+
+        this._buildDurationMs = Date.now() - buildStart;
+        this._buildEndTime = new Date();
+        this._built = true;
+        this._building = false;
     }
 
     // ── Core processor ─────────────────────────────────────────────────────────
@@ -233,6 +351,41 @@ export class FileRelationshipGraph {
         } catch {
             return [];
         }
+    }
+
+    private processFileSync(filePath: string, originalUri?: string): string[] {
+        const tokenCache = TokenCache.getInstance();
+
+        let tokens = originalUri ? tokenCache.getTokensByUri(originalUri) : null;
+        if (!tokens || tokens.length === 0) {
+            const uri = this.pathToUri(this.denormalizePath(filePath));
+            tokens = tokenCache.getTokensByUri(uri);
+        }
+        if (!tokens || tokens.length === 0) {
+            const uriAlt = 'file:///' + this.denormalizePath(filePath).replace(/\\/g, '/');
+            tokens = tokenCache.getTokensByUri(uriAlt) ?? null;
+        }
+        if (tokens && tokens.length > 0) {
+            return this.processFileFromTokens(filePath, tokens);
+        }
+
+        try {
+            const actualPath = this.denormalizePath(filePath);
+            if (!fs.existsSync(actualPath)) return [];
+            const content = fs.readFileSync(actualPath, 'utf-8');
+            return this.processFileFromText(filePath, content);
+        } catch {
+            return [];
+        }
+    }
+
+    private processOpenDocument(filePath: string, document: TextDocument): string[] {
+        const tokenCache = TokenCache.getInstance();
+        const tokens = tokenCache.getTokensByUri(document.uri);
+        if (tokens && tokens.length > 0) {
+            return this.processFileFromTokens(filePath, tokens);
+        }
+        return this.processFileFromText(filePath, document.getText());
     }
 
     /**
@@ -509,6 +662,53 @@ export class FileRelationshipGraph {
         return filePath.toLowerCase().replace(/\\/g, '/');
     }
 
+    private denormalizePath(filePath: string): string {
+        return filePath.replace(/\//g, '\\');
+    }
+
+    private getNoSolutionSignature(sourcePath: string): string {
+        const libs = [...(serverSettings.libsrcPaths ?? [])]
+            .map(p => this.normalizePath(p))
+            .sort()
+            .join(';');
+        const exts = [...(serverSettings.defaultLookupExtensions ?? [])]
+            .map(ext => ext.toLowerCase())
+            .sort()
+            .join(';');
+        return [
+            sourcePath,
+            this.normalizePath(serverSettings.redirectionFile || ''),
+            libs,
+            exts
+        ].join('|');
+    }
+
+    private enqueueDirectoryFiles(
+        dirPath: string,
+        enqueueFile: (filePath: string) => void,
+        scannedDirs: Set<string>
+    ): void {
+        if (!dirPath) return;
+        const normalizedDir = this.normalizePath(dirPath);
+        if (scannedDirs.has(normalizedDir)) return;
+        scannedDirs.add(normalizedDir);
+
+        try {
+            const clarionExts = new Set(
+                ['.clw', '.inc', ...(serverSettings.defaultLookupExtensions ?? [])]
+                    .map(ext => ext.toLowerCase())
+            );
+            for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+                if (!entry.isFile()) continue;
+                const ext = path.extname(entry.name).toLowerCase();
+                if (!clarionExts.has(ext)) continue;
+                enqueueFile(path.join(dirPath, entry.name));
+            }
+        } catch {
+            // best-effort directory widening only
+        }
+    }
+
     private pathToUri(filePath: string): string {
         // Percent-encode the drive colon to match VS Code's URI format
         const encoded = filePath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, (_, d) => d + '%3A');
@@ -540,6 +740,12 @@ export class FileRelationshipGraph {
                     return resolved.path;
                 }
             }
+        }
+
+        const sourceUri = this.pathToUri(this.denormalizePath(this.normalizePath(_fromFile)));
+        const noSolutionHit = resolveFileInNoSolutionMode(filename, sourceUri);
+        if (noSolutionHit?.path && fs.existsSync(noSolutionHit.path)) {
+            return noSolutionHit.path;
         }
 
         return null;

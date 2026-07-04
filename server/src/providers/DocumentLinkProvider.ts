@@ -23,6 +23,7 @@ export class DocumentLinkProvider {
 
     provideDocumentLinks(document: TextDocument): DocumentLink[] {
         const frg = FileRelationshipGraph.getInstance();
+        frg.ensureNoSolutionGraphForDocument(document);
         if (!frg.isBuilt) return [];
 
         const filePath = uriToFsPath(document.uri);
