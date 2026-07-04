@@ -318,6 +318,7 @@ export class SymbolFinderService {
                         searchWord: word
                     };
                 }
+
             }
 
             // If the current scope is a ROUTINE, also search the parent procedure's data section.
@@ -468,6 +469,73 @@ export class SymbolFinderService {
                 character: varSymbol.range.start.character
             },
             declaration: varSymbol._clarionDeclaration,
+            originalWord: originalWord || word,
+            searchWord: word
+        };
+    }
+
+    /**
+     * Find a routine-local variable declared in a ROUTINE DATA section.
+     *
+     * Tier 1 shadows the parent procedure's locals, so this must run before the
+     * broader procedure-local search whenever the cursor is inside a ROUTINE.
+     */
+    findRoutineLocalVariable(
+        word: string,
+        tokens: Token[],
+        routineToken: Token,
+        document: TextDocument,
+        originalWord?: string
+    ): SymbolInfo | null {
+        if (routineToken.subType !== TokenType.Routine) {
+            return null;
+        }
+
+        const searchText = originalWord || word;
+        const searchLower = searchText.toLowerCase();
+        const routineDataEnd = routineToken.executionMarker?.line ?? routineToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+
+        const routineVar = tokens.find(t =>
+            t.line > routineToken.line &&
+            t.line < routineDataEnd &&
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === searchLower
+        );
+
+        if (!routineVar) {
+            return null;
+        }
+
+        const isProcDecl = tokens.some(t =>
+            t.line === routineVar.line &&
+            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
+            (t.subType === TokenType.MapProcedure ||
+             t.subType === TokenType.GlobalProcedure ||
+             t.subType === TokenType.MethodDeclaration)
+        );
+        if (isProcDecl) {
+            return null;
+        }
+
+        const declaration = tokens
+            .filter(t => t.line === routineVar.line)
+            .map(t => t.value)
+            .join(' ');
+
+        return {
+            token: routineVar,
+            type: SymbolFinderService.extractTypeInfo(routineVar, tokens),
+            scope: {
+                token: routineToken,
+                type: 'local'
+            },
+            location: {
+                uri: document.uri,
+                line: routineVar.line,
+                character: routineVar.start
+            },
+            declaration,
             originalWord: originalWord || word,
             searchWord: word
         };
@@ -1029,6 +1097,14 @@ export class SymbolFinderService {
         
         // Phase 1 fix: Try FULL word first
         logger.info(`Trying full word: "${word}"`);
+
+        if (currentScope.subType === TokenType.Routine) {
+            let result = this.findRoutineLocalVariable(word, tokens, currentScope, document);
+            if (result) {
+                logger.info(`✅ Found as routine-local variable: ${word}`);
+                return result;
+            }
+        }
         
         // 1. Try as parameter
         let result = this.findParameter(word, document, currentScope);
@@ -1081,6 +1157,14 @@ export class SymbolFinderService {
         if (colonIndex > 0) {
             const searchWord = word.substring(colonIndex + 1);
             logger.info(`Full word not found, trying stripped: "${searchWord}"`);
+
+            if (currentScope.subType === TokenType.Routine) {
+                result = this.findRoutineLocalVariable(searchWord, tokens, currentScope, document, word);
+                if (result) {
+                    logger.info(`✅ Found as routine-local variable (stripped): ${searchWord}`);
+                    return result;
+                }
+            }
             
             // Try parameter with stripped word
             result = this.findParameter(searchWord, document, currentScope);
