@@ -455,4 +455,69 @@ Name         STRING(40)
             assert.strictEqual(result.originalWord, 'GRP:Name');
         });
     });
+
+    suite('findSymbol routine-local Tier 1', () => {
+        test('Should resolve a routine-local variable from routine code', async () => {
+            const code = `
+MyProc PROCEDURE()
+ProcVar LONG
+  CODE
+  DO MyRoutine
+MyRoutine ROUTINE
+  DATA
+RoutineVar LONG
+  CODE
+  RoutineVar = 1
+  END`.trim();
+
+            const doc = createDocument(code, 'test://routine-tier1-1.clw');
+            const result = await service.findSymbol('RoutineVar', doc, { line: 8, character: 4 });
+
+            assert.ok(result, 'Should resolve routine-local variable');
+            assert.strictEqual(result?.location.line, 6);
+            assert.strictEqual(result?.scope.token.subType, TokenType.Routine);
+        });
+
+        test('Should prefer routine-local over same-name procedure-local variable', async () => {
+            const code = `
+MyProc PROCEDURE()
+Counter LONG
+  CODE
+  DO MyRoutine
+MyRoutine ROUTINE
+  DATA
+Counter LONG
+  CODE
+  Counter = 1
+  END`.trim();
+
+            const doc = createDocument(code, 'test://routine-tier1-2.clw');
+            const result = await service.findSymbol('Counter', doc, { line: 8, character: 4 });
+
+            assert.ok(result, 'Should resolve shadowing routine-local variable');
+            assert.strictEqual(result?.location.line, 6);
+            assert.strictEqual(result?.scope.token.subType, TokenType.Routine);
+        });
+
+        test('Should still fall back to procedure-local when no routine-local declaration exists', async () => {
+            const code = `
+MyProc PROCEDURE()
+Counter LONG
+  CODE
+  DO MyRoutine
+MyRoutine ROUTINE
+  DATA
+RoutineOnly LONG
+  CODE
+  Counter = 1
+  END`.trim();
+
+            const doc = createDocument(code, 'test://routine-tier1-3.clw');
+            const result = await service.findSymbol('Counter', doc, { line: 8, character: 4 });
+
+            assert.ok(result, 'Should still resolve parent procedure local');
+            assert.strictEqual(result?.location.line, 1);
+            assert.strictEqual(result?.scope.type, 'local');
+        });
+    });
 });

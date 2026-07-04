@@ -17,6 +17,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🐛 **`SymbolFinder.findSymbol` now honors Tier 1 routine-local shadowing** (#116): lookups from inside a `ROUTINE` now check that routine's `DATA` section before falling back to procedure-local scope, so Hover/F12/FAR resolve same-name locals to the routine declaration instead of the parent procedure variable.
 - 🐛 **Cross-file overload resolution no longer regresses when a stale/unrelated FRG is already built**: `MethodOverloadResolver` now falls back to the legacy INCLUDE walk when the graph has no edges for the active file, preventing chained/cross-file overload sites from silently dropping back to param-count-only selection after the new no-solution FRG work.
 - 🐛 **Cross-file return-value diagnostics now scan unopened project files deterministically** (#162): `validateDiscardedReturnValues` no longer depends on `TokenCache.getAllCachedUris()` alone; it now includes solution source files and uses shared cross-file loading (live buffer/cache/disk) so warnings do not silently depend on which files are open.
 - 🐛 **F12 on `DO RoutineName` now resolves to the matching `ROUTINE` label in the current procedure scope** (#211): DefinitionProvider now uses `DocumentStructure.findRoutines()` plus parent-scope matching, so routine references in `DO ...` statements navigate correctly and do not bleed into unrelated routines.
