@@ -50,6 +50,11 @@ export function canonicalLocationKey(uri: string, line: number): string {
     return `${normUri}:${line}`;
 }
 
+function fsPathToUri(filePath: string): string {
+    const encoded = filePath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, (_, d) => d + '%3A');
+    return `file:///${encoded}`;
+}
+
 type OverloadFilter = {
     minArgs: number;
     maxArgs: number;
@@ -2475,6 +2480,11 @@ export class ReferencesProvider {
      */
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] {
         const scopeType = symbolInfo.scope.type;
+        const solutionManager = SolutionManager.getInstance();
+        const graph = FileRelationshipGraph.getInstance();
+        if (!solutionManager?.solution) {
+            graph.ensureNoSolutionGraphForDocument(currentDocument);
+        }
 
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
             logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
@@ -2489,7 +2499,6 @@ export class ReferencesProvider {
                 // For a MAP-declared procedure, its implementation lives in a MODULE target file.
                 const declaringFilePath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, ''))
                     .replace(/\\/g, '/').toLowerCase();
-                const graph = FileRelationshipGraph.getInstance();
                 const implFiles: string[] = [symbolInfo.location.uri];
 
                 if (graph.isBuilt) {
@@ -2521,7 +2530,6 @@ export class ReferencesProvider {
         }
 
         // Global (or MEMBER-file procedure): all project source files when a solution is loaded
-        const solutionManager = SolutionManager.getInstance();
         const alwaysInclude = new Set<string>([
             currentDocument.uri,
             symbolInfo.location.uri  // always search the declaration file
@@ -2571,9 +2579,66 @@ export class ReferencesProvider {
             return allFiles;
         }
 
-        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
+        const noSolutionFiles = this.getNoSolutionConnectedFiles(alwaysInclude, currentDocument);
+        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${noSolutionFiles.length} connected file(s)`);
 
-        return [...alwaysInclude];
+        return noSolutionFiles;
+    }
+
+    private getNoSolutionConnectedFiles(seedUris: Set<string>, currentDocument: TextDocument): string[] {
+        const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(currentDocument);
+        if (!graph.isBuilt) {
+            return [...seedUris];
+        }
+
+        const results = new Set<string>(seedUris);
+        const visited = new Set<string>();
+        const queue: string[] = [...seedUris].map(uri =>
+            decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+        );
+
+        const enqueueFsPath = (filePath: string | undefined) => {
+            if (!filePath) return;
+            const uri = fsPathToUri(filePath);
+            if (!results.has(uri)) {
+                results.add(uri);
+            }
+            const norm = filePath.toLowerCase().replace(/\\/g, '/');
+            if (!visited.has(norm)) {
+                queue.push(filePath.replace(/\//g, '\\'));
+            }
+        };
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            const normCurrent = current.toLowerCase().replace(/\\/g, '/');
+            if (visited.has(normCurrent)) continue;
+            visited.add(normCurrent);
+
+            const programFile = graph.getProgramFile(current);
+            if (programFile) {
+                enqueueFsPath(programFile);
+                for (const memberFile of graph.getMemberFiles(programFile)) {
+                    enqueueFsPath(memberFile);
+                }
+            }
+
+            for (const memberFile of graph.getMemberFiles(current)) {
+                enqueueFsPath(memberFile);
+            }
+
+            for (const edge of graph.getReverseIncludes(current)) {
+                enqueueFsPath(edge.fromFile);
+            }
+
+            for (const edge of graph.getForwardEdges(current)) {
+                if (edge.type === 'IMPLICIT_INCLUDE') continue;
+                enqueueFsPath(edge.toFile);
+            }
+        }
+
+        return Array.from(results);
     }
 
     /**

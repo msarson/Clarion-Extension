@@ -7,7 +7,8 @@ import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { CompletionProvider } from '../providers/CompletionProvider';
 import { DocumentLinkProvider } from '../providers/DocumentLinkProvider';
-import { FileRelationshipGraph, FileEdge } from '../FileRelationshipGraph';
+import { ReferencesProvider } from '../providers/ReferencesProvider';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import {
     NoSolutionFixture,
     buildNoSolutionFixture,
@@ -458,6 +459,54 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
             assert.ok(tglo, `expected TGLO:PageReceived in completion; got: ${tgloItems.map(i => i.label).join(', ')}`);
             assert.strictEqual(glo?.insertText, 'SessionId');
             assert.strictEqual(tglo?.insertText, 'PageReceived');
+            assert.ok(FileRelationshipGraph.getInstance().isBuilt, 'completion should lazily build the FRG in no-solution mode');
+        });
+    });
+
+    suite('ReferencesProvider.provideReferences for no-solution global scope', () => {
+        test('includes sibling MEMBER callers connected through PROGRAM and INCLUDE edges', async () => {
+            const programBody =
+                "  PROGRAM\n" +
+                "GLO:SessionId  STRING(20)\n" +
+                "Main PROCEDURE\n" +
+                "  CODE\n" +
+                "  RETURN\n";
+            const memberOneBody =
+                "  MEMBER('MyProg.clw')\n" +
+                "WorkerOne PROCEDURE\n" +
+                "  CODE\n" +
+                "  GLO:SessionId = 'one'\n" +
+                "  RETURN\n";
+            const memberTwoBody =
+                "  MEMBER('MyProg.clw')\n" +
+                "WorkerTwo PROCEDURE\n" +
+                "  CODE\n" +
+                "  GLO:SessionId = 'two'\n" +
+                "  RETURN\n";
+
+            fix = buildNoSolutionFixture({
+                libsrcs: [{}],
+                sourceFile: {
+                    filename: 'MyProg001.clw',
+                    content: memberOneBody,
+                    siblings: {
+                        'MyProg.clw': programBody,
+                        'MyProg002.clw': memberTwoBody
+                    }
+                }
+            });
+
+            const provider = new ReferencesProvider();
+            const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, memberOneBody);
+            const position = cursorPositionOf(memberOneBody, 'GLO:SessionId');
+
+            const refs = await provider.provideReferences(sourceDoc, position, { includeDeclaration: true });
+
+            assert.ok(refs && refs.length >= 3, `expected declaration + two member references, got: ${(refs ?? []).map(r => r.uri).join(', ')}`);
+            const basenames = refs!.map(r => path.basename(fsPathFromUri(r.uri)).toLowerCase());
+            assert.ok(basenames.includes('myprog.clw'), 'references should include the PROGRAM/global declaration file');
+            assert.ok(basenames.includes('myprog001.clw'), 'references should include the current MEMBER file');
+            assert.ok(basenames.includes('myprog002.clw'), 'references should include the sibling MEMBER caller');
         });
     });
 
@@ -474,22 +523,12 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
                 sourceFile: { filename: 'MyProg.clw', content: sourceBody }
             });
 
-            const frg = FileRelationshipGraph.getInstance();
-            frg.reset();
-            frg.seedEdgesForTest([
-                {
-                    type: 'INCLUDE',
-                    fromFile: fix.sourceFile!,
-                    toFile: path.join(fix.libsrcDirs[0], 'MyClass.inc'),
-                    fromLine: 1
-                } as FileEdge
-            ]);
-
             const provider = new DocumentLinkProvider();
             const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, sourceBody);
             const links = provider.provideDocumentLinks(sourceDoc);
 
             assert.ok(links.length >= 1, 'provideDocumentLinks must return at least one link for INCLUDE in no-solution mode');
+            assert.ok(FileRelationshipGraph.getInstance().isBuilt, 'document links should lazily build the FRG in no-solution mode');
 
             const includeLink = links.find(link =>
                 !!link.target && path.basename(fsPathFromUri(link.target)).toLowerCase() === 'myclass.inc'
