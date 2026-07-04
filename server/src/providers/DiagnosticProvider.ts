@@ -80,9 +80,10 @@ export class DiagnosticProvider {
     public static async validateDiscardedReturnValues(
         tokens: Token[],
         document: TextDocument,
-        memberLocator: MemberLocatorService
+        memberLocator: MemberLocatorService,
+        getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return _validateDiscardedReturnValues(tokens, document, memberLocator);
+        return _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent);
     }
 
     /**

@@ -80,6 +80,27 @@ export class CrossFileResolver {
     }
 
     /**
+     * #162 B1 — shared cross-file TOKEN loader for diagnostics. Uses the same
+     * live-buffer/cache/disk policy as `loadExternalFileContent`, then tokenizes
+     * through TokenCache so downstream diagnostics get the same token surface they
+     * already consume today.
+     */
+    public static loadExternalFileTokens(
+        tokenCache: TokenCache,
+        uri: string | undefined,
+        fsPath: string,
+        getLiveText?: (fsPath: string) => string | null | undefined
+    ): { content: string; tokens: Token[]; uri: string } | undefined {
+        const content = CrossFileResolver.loadExternalFileContent(tokenCache, uri, fsPath, getLiveText);
+        if (content === undefined) return undefined;
+
+        const resolvedUri = uri ?? pathToCanonicalUri(fsPath);
+        const doc = TextDocument.create(resolvedUri, 'clarion', 1, content);
+        const tokens = tokenCache.getTokens(doc);
+        return { content, tokens, uri: resolvedUri };
+    }
+
+    /**
      * Resolves a filename to an absolute path using RedirectionParser
      * Tries solution-wide redirection first, then falls back to relative path
      * @param filename Unresolved filename (from MEMBER, MODULE, INCLUDE, etc.)

@@ -616,7 +616,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return result;
         };
         const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
-            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
+            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)),
             timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
             timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
             timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),

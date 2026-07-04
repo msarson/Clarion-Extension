@@ -7,6 +7,9 @@ import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
+import { SolutionManager } from '../../solution/solutionManager';
+import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import * as path from 'path';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
@@ -82,7 +85,8 @@ function validateCrossFilePlainCalls(
     currentTokens: Token[],
     document: TextDocument,
     docLines: string[],
-    codeRanges: { start: number; end: number }[]
+    codeRanges: { start: number; end: number }[],
+    getOpenDocumentContent?: (absPath: string) => string | null
 ): Diagnostic[] {
     const cache = TokenCache.getInstance();
     const currentUri = document.uri;
@@ -98,9 +102,43 @@ function validateCrossFilePlainCalls(
     const warnableProcs = new Map<string, string>(); // nameUpper → returnType
     const excluded = new Set<string>();
 
+    const filesToScan = new Map<string, { uri: string; fsPath?: string }>();
     for (const uri of cache.getAllCachedUris()) {
-        if (uri === currentUri) continue;
-        const otherTokens = cache.getTokensByUri(uri);
+        if (uri.toLowerCase() === currentUri.toLowerCase()) continue;
+        filesToScan.set(uri.toLowerCase(), { uri });
+    }
+
+    // #162 V1 — include unopened project files, not just TokenCache entries.
+    const solutionManager = SolutionManager.getInstance();
+    if (solutionManager?.solution?.projects?.length) {
+        for (const project of solutionManager.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const fullPath = path.isAbsolute(sourceFile.relativePath)
+                    ? sourceFile.relativePath
+                    : path.join(project.path, sourceFile.relativePath);
+                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                if (uri.toLowerCase() === currentUri.toLowerCase()) continue;
+                const key = uri.toLowerCase();
+                if (!filesToScan.has(key)) {
+                    filesToScan.set(key, { uri, fsPath: fullPath });
+                }
+            }
+        }
+    }
+
+    for (const { uri, fsPath } of filesToScan.values()) {
+        let otherTokens = cache.getTokensByUri(uri);
+        if (!otherTokens) {
+            const pathFromUri = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+            const loaded = CrossFileResolver.loadExternalFileTokens(
+                cache,
+                uri,
+                fsPath ?? pathFromUri,
+                getOpenDocumentContent
+            );
+            if (!loaded) continue;
+            otherTokens = loaded.tokens;
+        }
         if (!otherTokens) continue;
 
         for (let i = 0; i < otherTokens.length; i++) {
@@ -662,7 +700,8 @@ export function validateDiscardedReturnValuesForPlainCalls(
 export async function validateDiscardedReturnValues(
     tokens: Token[],
     document: TextDocument,
-    memberLocator: MemberLocatorService
+    memberLocator: MemberLocatorService,
+    getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
@@ -784,7 +823,7 @@ export async function validateDiscardedReturnValues(
     const dotCallMs = Date.now() - fnStart;
 
     const crossFileStart = Date.now();
-    const crossFileDiags = validateCrossFilePlainCalls(tokens, document, docLines, codeRanges);
+    const crossFileDiags = validateCrossFilePlainCalls(tokens, document, docLines, codeRanges, getOpenDocumentContent);
     diagnostics.push(...crossFileDiags);
     const crossFileMs = Date.now() - crossFileStart;
 
