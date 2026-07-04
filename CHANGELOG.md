@@ -6,6 +6,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [1.0.0] - Unreleased
+
+---
+
 ### [0.9.9] - 2026-07-04
 
 _Release focus: open-solution scope correctness and cross-file resolution; the no-solution changes below are additive hardening, not the primary target._
