@@ -191,6 +191,24 @@ suite('MemberLocatorService', () => {
             assert.ok(result, 'Should resolve GROUP(GroupType)');
             assert.strictEqual(result!.isClass, false);
         });
+
+        test('reference to LIKE alias resolves to underlying type', async () => {
+            const doc = makeDoc('rv10.clw', [
+                'BaseQ QUEUE,TYPE',
+                'Name STRING(20)',
+                'END',
+                'AliasQ LIKE(BaseQ)',
+                'rq &AliasQ',
+                'CODE',
+                'rq &= NEW(AliasQ)',
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const result = await service.resolveVariableType('rq', tokens, doc, 6);
+
+            assert.ok(result, 'Should resolve reference alias type');
+            assert.strictEqual(result!.typeName, 'BaseQ', `Expected alias dereference to BaseQ, got ${result!.typeName}`);
+            assert.strictEqual(result!.isReference, true);
+        });
     });
 
     // =========================================================================

@@ -124,7 +124,49 @@ export class MemberLocatorService {
             }
             return null;
         }
-        return this.extractTypeFromToken(found.token, found.tokens);
+        const extracted = this.extractTypeFromToken(found.token, found.tokens);
+        if (!extracted) return null;
+        return this.resolveTypeAlias(extracted, found.tokens, found.doc, scopeLine);
+    }
+
+    /**
+     * Follow type aliases declared with LIKE(...) so reference variables like
+     * `rq &AliasQ` where `AliasQ LIKE(BaseQ)` resolve to `BaseQ`.
+     */
+    private async resolveTypeAlias(
+        typeInfo: { typeName: string; isClass: boolean; isReference: boolean },
+        tokens: Token[],
+        document: TextDocument,
+        scopeLine?: number
+    ): Promise<{ typeName: string; isClass: boolean; isReference: boolean }> {
+        let current = typeInfo;
+        const visited = new Set<string>();
+
+        for (let i = 0; i < 8; i++) {
+            const key = current.typeName.toLowerCase();
+            if (visited.has(key)) break;
+            visited.add(key);
+
+            const aliasDecl = await this.findVariableTokenCrossFile(current.typeName, tokens, document, scopeLine);
+            if (!aliasDecl) break;
+
+            // Only dereference explicit LIKE(...) aliases; do not reinterpret
+            // concrete structure declarations (e.g. INTERFACE/CLASS/QUEUE labels).
+            const aliasTypeStr = SymbolFinderService.extractTypeInfo(aliasDecl.token, aliasDecl.tokens);
+            if (!/^LIKE\s*\(/i.test(aliasTypeStr)) break;
+
+            const aliasType = this.extractTypeFromToken(aliasDecl.token, aliasDecl.tokens);
+            if (!aliasType) break;
+            if (aliasType.typeName.toLowerCase() === current.typeName.toLowerCase()) break;
+
+            current = {
+                typeName: aliasType.typeName,
+                isClass: aliasType.isClass,
+                isReference: current.isReference || aliasType.isReference
+            };
+        }
+
+        return current;
     }
 
     /**
@@ -1365,9 +1407,23 @@ export class MemberLocatorService {
         const tokens = this.tokenCache.getTokens(document);
 
         // 1. Current document — token-based first, disk fallback
-        const tokenMembers = this.extractMembersFromTokens(tokens, document, className, docPath);
+        const tokenMembersClass = this.extractMembersFromTokens(tokens, document, className, docPath, 'CLASS');
+        const tokenMembersGroup = this.extractMembersFromTokens(tokens, document, className, docPath, 'GROUP');
+        const tokenMembersQueue = this.extractMembersFromTokens(tokens, document, className, docPath, 'QUEUE');
+        const tokenMembers = tokenMembersClass.length > 0
+            ? tokenMembersClass
+            : tokenMembersGroup.length > 0
+                ? tokenMembersGroup
+                : tokenMembersQueue;
         if (tokenMembers.length > 0) return tokenMembers;
-        const diskMembers = scanClassBodyForAllMembers(docPath, className);
+        const diskMembersClass = scanClassBodyForAllMembers(docPath, className, 'CLASS');
+        const diskMembersGroup = scanClassBodyForAllMembers(docPath, className, 'GROUP');
+        const diskMembersQueue = scanClassBodyForAllMembers(docPath, className, 'QUEUE');
+        const diskMembers = diskMembersClass.length > 0
+            ? diskMembersClass
+            : diskMembersGroup.length > 0
+                ? diskMembersGroup
+                : diskMembersQueue;
         if (diskMembers.length > 0) return diskMembers;
 
         // 2. INCLUDE chain
@@ -1408,10 +1464,24 @@ export class MemberLocatorService {
             // 🚀 Load once — use tokens for member extraction, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
-                const members = this.extractMembersFromTokens(data.tokens, data.doc, className, resolvedPath);
+                const membersClass = this.extractMembersFromTokens(data.tokens, data.doc, className, resolvedPath, 'CLASS');
+                const membersGroup = this.extractMembersFromTokens(data.tokens, data.doc, className, resolvedPath, 'GROUP');
+                const membersQueue = this.extractMembersFromTokens(data.tokens, data.doc, className, resolvedPath, 'QUEUE');
+                const members = membersClass.length > 0
+                    ? membersClass
+                    : membersGroup.length > 0
+                        ? membersGroup
+                        : membersQueue;
                 if (members.length > 0) return members;
                 // Fallback to disk scan if token-based found nothing (e.g. file not yet tokenized)
-                const diskMembers = scanClassBodyForAllMembers(resolvedPath, className);
+                const diskMembersClass = scanClassBodyForAllMembers(resolvedPath, className, 'CLASS');
+                const diskMembersGroup = scanClassBodyForAllMembers(resolvedPath, className, 'GROUP');
+                const diskMembersQueue = scanClassBodyForAllMembers(resolvedPath, className, 'QUEUE');
+                const diskMembers = diskMembersClass.length > 0
+                    ? diskMembersClass
+                    : diskMembersGroup.length > 0
+                        ? diskMembersGroup
+                        : diskMembersQueue;
                 if (diskMembers.length > 0) return diskMembers;
 
                 const nested = await this.findAllMembersInIncludeChain(

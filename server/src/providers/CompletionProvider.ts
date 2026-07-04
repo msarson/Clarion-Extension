@@ -10,6 +10,8 @@ import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { PropertyService } from '../utils/PropertyService';
 import { EventService } from '../utils/EventService';
+import { Token } from '../ClarionTokenizer';
+import { TokenType } from '../tokenizer/TokenTypes';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("CompletionProvider");
@@ -79,6 +81,11 @@ export class CompletionProvider {
             logger.info(`CompletionProvider: chain="${chain}" at line ${position.line}`);
 
             const tokens = this.tokenCache.getTokens(document);
+
+            // Dot after a structure label with PRE(prefix) should surface the same
+            // prefixed field set as qualifier completion (e.g. TestGloGroup. -> TGLO:*).
+            const structurePrefixItems = await this.completePrefixedStructureDot(chain, document, position, tokens);
+            if (structurePrefixItems) return structurePrefixItems;
 
             // Resolve the final class name for this chain
             const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
@@ -202,9 +209,83 @@ export class CompletionProvider {
      */
     private extractChainBeforeDot(lineBeforeCursor: string): string | null {
         const withoutDot = lineBeforeCursor.trimEnd().slice(0, -1); // remove trailing '.'
-        // Extract the rightmost alphanumeric/dot chain (the completion target)
-        const m = withoutDot.match(/([\w][\w.]*)\s*$/);
+        // Extract the rightmost alphanumeric/colon/dot chain (the completion target).
+        // Includes prefixed variables like TGLO:Pictionary.
+        const m = withoutDot.match(/([\w][\w.:]*)\s*$/);
         return m ? m[1] : null;
+    }
+
+    /**
+     * Resolve the class/type name for a prefixed structure field token like
+     * `TGLO:Pictionary` by reading its declaration line type.
+     */
+    private resolvePrefixedFieldType(prefixedName: string, tokens: Token[]): string | null {
+        const colonIdx = prefixedName.indexOf(':');
+        if (colonIdx <= 0) return null;
+
+        const qualifier = prefixedName.substring(0, colonIdx).toUpperCase();
+        const fieldName = prefixedName.substring(colonIdx + 1).toUpperCase();
+
+        const fieldToken = tokens.find(t =>
+            t.isStructureField === true &&
+            !!t.structurePrefix &&
+            t.structurePrefix.toUpperCase() === qualifier &&
+            t.value.toUpperCase() === fieldName
+        );
+        if (!fieldToken) return null;
+
+        const sameLine = tokens
+            .filter(t => t.line === fieldToken.line)
+            .sort((a, b) => a.start - b.start);
+        const idx = sameLine.findIndex(t => t.start === fieldToken.start && t.value === fieldToken.value);
+        if (idx < 0 || idx + 1 >= sameLine.length) return null;
+
+        const next = sameLine[idx + 1];
+        if (next.type === TokenType.ReferenceVariable) {
+            return next.value.replace(/^&\s*/, '');
+        }
+        if (next.type === TokenType.Type || next.type === TokenType.Variable || next.type === TokenType.Label) {
+            return next.value;
+        }
+        return null;
+    }
+
+    /**
+     * For `StructureLabel.` where StructureLabel is a PRE(...) structure declaration
+     * in scope, return the same prefix-qualified field list as `PREFIX:`.
+     */
+    private async completePrefixedStructureDot(
+        chain: string,
+        document: TextDocument,
+        position: { line: number; character: number },
+        tokens: Token[]
+    ): Promise<CompletionItem[] | null> {
+        if (!chain || chain.includes('.')) return null;
+
+        const chainUpper = chain.toUpperCase();
+        const structureKinds = new Set(['GROUP', 'QUEUE', 'RECORD']);
+        let best: Token | undefined;
+
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure || !t.structurePrefix) continue;
+            if (!structureKinds.has(t.value.toUpperCase())) continue;
+            if (t.line > position.line) continue;
+
+            const lineTokens = tokens
+                .filter(x => x.line === t.line)
+                .sort((a, b) => a.start - b.start);
+            const idx = lineTokens.findIndex(x => x === t);
+            if (idx <= 0) continue;
+            const nameToken = lineTokens[idx - 1];
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/i.test(nameToken.value)) continue;
+            if (nameToken.value.toUpperCase() !== chainUpper) continue;
+
+            if (!best || t.line > best.line) best = t;
+        }
+
+        if (!best) return null;
+        const items = await this.wordCompletion.provide(document, position, `${best.structurePrefix}:`);
+        return items.length > 0 ? items : null;
     }
 
     // -------------------------------------------------------------------------
@@ -220,7 +301,7 @@ export class CompletionProvider {
         chain: string,
         document: TextDocument,
         position: { line: number; character: number },
-        tokens: import('../ClarionTokenizer').Token[]
+        tokens: Token[]
     ): Promise<{ className: string; callerClass?: string } | null> {
         const chainUpper = chain.toUpperCase();
 
@@ -252,6 +333,14 @@ export class CompletionProvider {
             return { className: typeInfo.typeName, callerClass };
         }
 
+        // Prefixed field references (e.g. TGLO:Pictionary) are tokenized as
+        // structure fields and are not resolved by MemberLocator's plain-variable
+        // lookup path. Resolve the declared type directly from the token stream.
+        const prefixedTypeName = this.resolvePrefixedFieldType(chain, tokens);
+        if (prefixedTypeName) {
+            return { className: prefixedTypeName, callerClass };
+        }
+
         // Fallback: treat as direct class name (e.g. "ThisWindow." used outside any method)
         return { className: chain, callerClass };
     }
@@ -264,7 +353,7 @@ export class CompletionProvider {
         chain: string,
         document: TextDocument,
         position: { line: number; character: number },
-        tokens: import('../ClarionTokenizer').Token[],
+        tokens: Token[],
         callerClass: string | undefined
     ): Promise<{ className: string; callerClass?: string } | null> {
         const segments = chain.split('.').map(s => s.trim()).filter(Boolean);
@@ -288,13 +377,14 @@ export class CompletionProvider {
 
         if (!currentClass) return null;
 
-        // Walk intermediate segments (all but the last)
-        const memberResolver = new ClassMemberResolver();
+        // Walk each segment and carry the current structure type forward.
         for (let i = 1; i < segments.length; i++) {
             const seg = segments[i];
-            const memberInfo = await memberResolver.findMemberInNamedStructure(seg, currentClass, document);
-            if (!memberInfo) return null;
-            const nextClass = ClassMemberResolver.extractClassName(memberInfo.type);
+            const members = await this.memberLocator.enumerateMembersInClass(currentClass, document, callerClass);
+            const member = members.find(m => m.name.toUpperCase() === seg.toUpperCase());
+            if (!member) return null;
+
+            const nextClass = ClassMemberResolver.extractClassName(member.type);
             if (!nextClass) return null;
             currentClass = nextClass;
         }
@@ -361,9 +451,9 @@ export class CompletionProvider {
         const { paramDetail, returnDescription } = this.parseTypeForLabel(member.type, member.kind);
 
         // For methods, embed params in the label so overloads are distinct entries
-        const label = member.kind === 'method' && paramDetail
-            ? `${member.name}${paramDetail}`
-            : member.name;
+        const label = member.kind === 'method'
+            ? (paramDetail ? `${member.name}${paramDetail}` : member.name)
+            : (returnDescription ? `${member.name} ${returnDescription}` : member.name);
 
         // Show return type (or property type) in the detail column
         const detail = returnDescription || undefined;

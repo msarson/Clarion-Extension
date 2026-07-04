@@ -109,7 +109,7 @@ export class WordCompletionProvider {
             // ----------------------------------------------------------------
             // C. Variables / Labels
             // ----------------------------------------------------------------
-            this.collectVariables(tokens, scope, procDeclLines, add);
+            this.collectVariables(tokens, scope, position, procDeclLines, add);
             this.collectProgramGlobalDataSymbols(tokens, document, add);
 
             // ----------------------------------------------------------------
@@ -153,23 +153,56 @@ export class WordCompletionProvider {
             // Filter by prefix
             // ----------------------------------------------------------------
             if (!partial) return Array.from(seen.values());
-            const up = partial.toUpperCase();
-            const filtered = Array.from(seen.values()).filter(c => (c.label as string).toUpperCase().startsWith(up));
-
-            // If user already typed a prefix-style qualifier (e.g. "GLO:" or "TGLO:"),
-            // only insert the suffix so selection doesn't duplicate the qualifier.
             if (partial.includes(':')) {
-                return filtered.map(item => {
-                    const label = String(item.label);
-                    if (label.length > partial.length && label.toUpperCase().startsWith(up)) {
+                const colonIdx = partial.lastIndexOf(':');
+                const typedQualifier = partial.substring(0, colonIdx);
+                const fullQualifier = typedQualifier + ':';
+                const typedSuffix = partial.substring(colonIdx + 1);
+                const typedSuffixUpper = typedSuffix.toUpperCase();
+
+                // Qualifier mode: only return symbols that actually belong to the
+                // typed qualifier (e.g. TGLO:*). This prevents unrelated symbols
+                // from appearing when a specific prefix is requested.
+                const qualifierMatches = Array.from(seen.values())
+                    .filter(item =>
+                        (item.kind === CompletionItemKind.Variable || item.kind === CompletionItemKind.Constant)
+                    )
+                    .filter(item => {
+                        const label = String(item.label);
+                        if (!label.toUpperCase().startsWith(fullQualifier.toUpperCase())) return false;
+                        const qualifierTail = label.substring(fullQualifier.length);
+                        return qualifierTail.toUpperCase().startsWith(typedSuffixUpper);
+                    });
+
+                // If both split and canonical nested forms are present for the same
+                // trailing segment (e.g. TGLO:TGLO + TGLO:GLO:TGLO), prefer the
+                // canonical nested form and drop the split artifact.
+                const nestedTailLastSegments = new Set(
+                    qualifierMatches
+                        .map(item => String(item.label).substring(fullQualifier.length))
+                        .filter(tail => tail.includes(':'))
+                        .map(tail => tail.substring(tail.lastIndexOf(':') + 1).toUpperCase())
+                );
+
+                return qualifierMatches
+                    .filter(item => {
+                        const tail = String(item.label).substring(fullQualifier.length);
+                        if (tail.includes(':')) return true;
+                        return !nestedTailLastSegments.has(tail.toUpperCase());
+                    })
+                    .map(item => {
+                        const label = String(item.label);
+                        const qualifierTail = label.substring(fullQualifier.length);
+                        const remainder = qualifierTail.substring(typedSuffix.length);
                         return {
                             ...item,
-                            insertText: label.substring(partial.length),
+                            insertText: remainder,
                         };
-                    }
-                    return item;
-                });
+                    });
             }
+
+            const up = partial.toUpperCase();
+            const filtered = Array.from(seen.values()).filter(c => (c.label as string).toUpperCase().startsWith(up));
             return filtered;
 
         } catch (err) {
@@ -301,6 +334,7 @@ export class WordCompletionProvider {
     private collectVariables(
         tokens: Token[],
         scope: ReturnType<ScopeAnalyzer['getTokenScope']>,
+        position: Position,
         procDeclLines: Set<number>,
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
@@ -311,10 +345,11 @@ export class WordCompletionProvider {
             (!t.parent || t.parent.type !== TokenType.Structure) &&
             !procDeclLines.has(t.line);
 
-        if (!scope) return;
+        const inferredProcedure = this.findEnclosingToken(tokens, position.line, t => TokenHelper.isProcedureOrFunction(t));
+        const inferredRoutine = this.findEnclosingToken(tokens, position.line, t => t.type === TokenType.Routine);
 
-        const containingProc = scope.containingProcedure;
-        const containingRoutine = scope.containingRoutine;
+        const containingProc = scope?.containingProcedure ?? inferredProcedure;
+        const containingRoutine = scope?.containingRoutine ?? inferredRoutine;
 
         if (containingRoutine) {
             // Routine-local data section
@@ -324,10 +359,22 @@ export class WordCompletionProvider {
                     add(t.value, CompletionItemKind.Variable, t.type === TokenType.Variable ? 'variable' : undefined);
                 }
             }
+            this.collectPrefixedFieldsInRange(tokens, containingRoutine.line, routineEnd, add);
 
             // Routines also see parent procedure locals (Clarion scope rule)
             if (containingProc) {
                 this.collectProcLocals(tokens, containingProc, procDeclLines, add);
+                this.collectProcPrefixedFields(tokens, containingProc, add);
+
+                // Routine inside a MethodImplementation also sees the enclosing
+                // GlobalProcedure data section.
+                if (containingProc.subType === TokenType.MethodImplementation) {
+                    const ownerGlobal = this.findOwningGlobalProcedure(tokens, containingProc);
+                    if (ownerGlobal) {
+                        this.collectProcLocals(tokens, ownerGlobal, procDeclLines, add);
+                        this.collectProcPrefixedFields(tokens, ownerGlobal, add);
+                    }
+                }
             }
             // And file-level globals/equates
             this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
@@ -337,22 +384,17 @@ export class WordCompletionProvider {
 
         if (containingProc) {
             // Determine if cursor is inside a local MethodImplementation
-            const isInMethodImpl = scope.containingProcedure?.subType === TokenType.MethodImplementation;
+            const isInMethodImpl = containingProc.subType === TokenType.MethodImplementation;
 
             this.collectProcLocals(tokens, containingProc, procDeclLines, add);
+            this.collectProcPrefixedFields(tokens, containingProc, add);
 
             // MethodImplementation shares the enclosing GlobalProcedure's locals
             if (isInMethodImpl) {
-                for (const t of tokens) {
-                    if (
-                        t.subType === TokenType.GlobalProcedure &&
-                        t.finishesAt !== undefined &&
-                        containingProc.line >= t.line &&
-                        containingProc.line <= t.finishesAt
-                    ) {
-                        this.collectProcLocals(tokens, t, procDeclLines, add);
-                        break;
-                    }
+                const ownerGlobal = this.findOwningGlobalProcedure(tokens, containingProc);
+                if (ownerGlobal) {
+                    this.collectProcLocals(tokens, ownerGlobal, procDeclLines, add);
+                    this.collectProcPrefixedFields(tokens, ownerGlobal, add);
                 }
             }
 
@@ -365,6 +407,22 @@ export class WordCompletionProvider {
         // Global scope: collect Label tokens before the first procedure
         this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
         this.collectGlobalPrefixedFields(tokens, add);
+    }
+
+    /** Fallback scope inference from token ranges when ScopeAnalyzer has partial context. */
+    private findEnclosingToken(
+        tokens: Token[],
+        line: number,
+        predicate: (t: Token) => boolean
+    ): Token | undefined {
+        let best: Token | undefined;
+        for (const t of tokens) {
+            if (!predicate(t)) continue;
+            const end = t.finishesAt ?? Number.MAX_SAFE_INTEGER;
+            if (line < t.line || line > end) continue;
+            if (!best || t.line > best.line) best = t;
+        }
+        return best;
     }
 
     /** Collect Label tokens before the first procedure (file-level equates, constants, globals). */
@@ -395,15 +453,56 @@ export class WordCompletionProvider {
             TokenHelper.isProcedureOrFunction(t) &&
             (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)
         )?.line ?? Number.MAX_SAFE_INTEGER;
+        this.collectCanonicalPrefixedFields(tokens, line => line < firstProcLine, add);
+    }
 
+    /** Collect PRE-qualified structure fields in a given (start, end) line range. */
+    private collectPrefixedFieldsInRange(
+        tokens: Token[],
+        startExclusive: number,
+        endExclusive: number,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        this.collectCanonicalPrefixedFields(tokens, line => line > startExclusive && line < endExclusive, add);
+    }
+
+    /** Collect one canonical PRE-qualified field label per declaration line. */
+    private collectCanonicalPrefixedFields(
+        tokens: Token[],
+        includeLine: (line: number) => boolean,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const byLine = new Map<number, { prefix: string; fieldTokens: Token[] }>();
         for (const t of tokens) {
-            if (
-                t.isStructureField &&
-                !!t.structurePrefix &&
-                t.line < firstProcLine
-            ) {
-                add(`${t.structurePrefix}:${t.value}`, CompletionItemKind.Variable, 'prefixed field');
+            if (!t.isStructureField || !t.structurePrefix) continue;
+            if (!includeLine(t.line)) continue;
+            const lineEntry = byLine.get(t.line);
+            if (lineEntry) {
+                lineEntry.fieldTokens.push(t);
+            } else {
+                byLine.set(t.line, { prefix: t.structurePrefix, fieldTokens: [t] });
             }
+        }
+
+        for (const [line, lineEntry] of byLine.entries()) {
+            const fieldTokens = lineEntry.fieldTokens.sort((a, b) => a.start - b.start);
+            const lineTokens = tokens
+                .filter(t => t.line === line)
+                .sort((a, b) => a.start - b.start);
+            const prefix = lineEntry.prefix;
+
+            const explicitPrefixed = lineTokens.find(t =>
+                /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)+$/i.test(t.value)
+            );
+
+            const simpleName = fieldTokens.find(t =>
+                (t.type === TokenType.Label || t.type === TokenType.Variable || t.type === TokenType.ReferenceVariable) &&
+                /^[A-Za-z_][A-Za-z0-9_]*$/i.test(t.value)
+            );
+
+            const suffix = explicitPrefixed?.value ?? simpleName?.value;
+            if (!suffix) continue;
+            add(`${prefix}:${suffix}`, CompletionItemKind.Variable, 'prefixed field');
         }
     }
 
@@ -469,6 +568,33 @@ export class WordCompletionProvider {
                 add(t.value, CompletionItemKind.Variable);
             }
         }
+    }
+
+    /** Collect PRE-qualified fields from a procedure's data section (between PROCEDURE and CODE). */
+    private collectProcPrefixedFields(
+        tokens: Token[],
+        proc: Token,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const codeMarkerLine = proc.executionMarker?.line ?? proc.finishesAt ?? Number.MAX_SAFE_INTEGER;
+        this.collectPrefixedFieldsInRange(tokens, proc.line, codeMarkerLine, add);
+    }
+
+    /** Resolve the GlobalProcedure that owns a MethodImplementation token. */
+    private findOwningGlobalProcedure(tokens: Token[], methodProc: Token): Token | undefined {
+        const byRange = tokens.find(t =>
+            t.subType === TokenType.GlobalProcedure &&
+            t.finishesAt !== undefined &&
+            methodProc.line >= t.line &&
+            methodProc.line <= t.finishesAt
+        );
+        if (byRange) return byRange;
+
+        // Fallback for imperfect finishesAt metadata: pick nearest preceding GlobalProcedure.
+        const precedingGlobals = tokens
+            .filter(t => t.subType === TokenType.GlobalProcedure && t.line < methodProc.line)
+            .sort((a, b) => b.line - a.line);
+        return precedingGlobals[0];
     }
 
     // -------------------------------------------------------------------------
