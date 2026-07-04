@@ -10,13 +10,10 @@
   "--extensionDevelopmentPath=${workspaceFolder}"
 ],
 "outFiles": [
-  "${workspaceFolder}/out/**/*.js"
+ "${workspaceFolder}/out/**/*.js"
 ],
 "sourceMaps": true,
-"preLaunchTask": "npm: watch",
-"env": {
- "CLARION_TRACE_DOT_ACCESS": "1"
-}
+"preLaunchTask": "npm: watch"
   }
 ]
 }
