@@ -5,6 +5,7 @@ import { Hover, Location } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
 import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { CompletionProvider } from '../providers/CompletionProvider';
 import { DocumentLinkProvider } from '../providers/DocumentLinkProvider';
 import { FileRelationshipGraph, FileEdge } from '../FileRelationshipGraph';
 import {
@@ -407,6 +408,56 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
                     );
                 }
             }
+        });
+    });
+
+    suite('CompletionProvider.onCompletion for PROGRAM globals from MEMBER file', () => {
+        const sourceBody =
+            "  MEMBER('MyProg.clw')\n" +
+            "Worker PROCEDURE\n" +
+            "  CODE\n" +
+            "  GLO:\n" +
+            "  TGLO:\n" +
+            "  RETURN\n";
+        const programBody =
+            "  PROGRAM\n" +
+            "GLO:SessionId  STRING(20)\n" +
+            "TestGloGroup   GROUP,PRE(TGLO)\n" +
+            "PageReceived   LONG\n" +
+            "              END\n" +
+            "Main PROCEDURE\n" +
+            "  CODE\n" +
+            "  RETURN\n";
+
+        test('surfaces PROGRAM globals and prefix-safe insert text in no-solution mode', async () => {
+            fix = buildNoSolutionFixture({
+                libsrcs: [{}],
+                sourceFile: {
+                    filename: 'MyProg001.clw',
+                    content: sourceBody,
+                    siblings: { 'MyProg.clw': programBody }
+                }
+            });
+
+            const provider = new CompletionProvider();
+            const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, sourceBody);
+
+            const gloItems = await provider.onCompletion({
+                textDocument: { uri: sourceDoc.uri },
+                position: { line: 3, character: 6 }
+            } as any, sourceDoc);
+
+            const tgloItems = await provider.onCompletion({
+                textDocument: { uri: sourceDoc.uri },
+                position: { line: 4, character: 7 }
+            } as any, sourceDoc);
+
+            const glo = gloItems.find(i => i.label === 'GLO:SessionId');
+            const tglo = tgloItems.find(i => i.label === 'TGLO:PageReceived');
+            assert.ok(glo, `expected GLO:SessionId in completion; got: ${gloItems.map(i => i.label).join(', ')}`);
+            assert.ok(tglo, `expected TGLO:PageReceived in completion; got: ${tgloItems.map(i => i.label).join(', ')}`);
+            assert.strictEqual(glo?.insertText, 'SessionId');
+            assert.strictEqual(tglo?.insertText, 'PageReceived');
         });
     });
 

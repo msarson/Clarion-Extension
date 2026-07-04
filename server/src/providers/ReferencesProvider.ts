@@ -19,6 +19,7 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
@@ -1411,7 +1412,24 @@ export class ReferencesProvider {
      */
     private loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
         const graph = FileRelationshipGraph.getInstance();
-        if (!graph.isBuilt) return null;
+        if (!graph.isBuilt) {
+            // No-solution fallback: when editing a MEMBER file without FRG, resolve the
+            // parent PROGRAM via MEMBER('x.clw') and load its module-scope globals.
+            const docTokens = this.tokenCache.getTokens(document);
+            const memberToken = docTokens.find(t =>
+                t.type === TokenType.ClarionDocument &&
+                t.value.toUpperCase() === 'MEMBER' &&
+                !!t.referencedFile
+            );
+            if (memberToken?.referencedFile) {
+                const resolved = resolveFileInNoSolutionMode(memberToken.referencedFile, document.uri);
+                if (resolved) {
+                    const programUri = 'file:///' + resolved.path.replace(/\\/g, '/');
+                    return this.loadGlobalScopeFromProgramFile(programUri);
+                }
+            }
+            return null;
+        }
         const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
             .replace(/\//g, '\\');
 
@@ -1635,6 +1653,32 @@ export class ReferencesProvider {
             }
         }
 
+        // No-solution mode fallback: if we only have an INC declaration file and no explicit
+        // CLASS MODULE('x.clw') hint, probe same-basename CLW via the canonical resolver.
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution && declarationFile) {
+            const declPath = decodeURIComponent(declarationFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const inferredImpl = path.basename(declPath, path.extname(declPath)) + '.clw';
+            const resolvedImpl = resolveFileInNoSolutionMode(inferredImpl, declarationFile);
+            if (resolvedImpl) {
+                files.add(`file:///${resolvedImpl.path.replace(/\\/g, '/')}`);
+            }
+
+            // Also widen to sibling .clw files in the active file's directory so no-solution
+            // FAR can include cross-procedure callers in adjacent MEMBER modules.
+            const sourcePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const sourceDir = path.dirname(sourcePath);
+            try {
+                for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+                    if (entry.isFile() && entry.name.toLowerCase().endsWith('.clw')) {
+                        files.add(`file:///${path.join(sourceDir, entry.name).replace(/\\/g, '/')}`);
+                    }
+                }
+            } catch {
+                // best-effort widening only
+            }
+        }
+
         // Use the FileRelationshipGraph to narrow the search: find all files that
         // transitively include the class's declaration file (INC), rather than scanning
         // every project source file. This is a BFS over reverse INCLUDE edges.
@@ -1667,7 +1711,6 @@ export class ReferencesProvider {
         }
 
         // Graph not ready or returned no additional files — fall back to scanning all project files
-        const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution?.projects?.length) {
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
@@ -1712,6 +1755,12 @@ export class ReferencesProvider {
                         }
                     }
                 }
+            }
+
+            // 3. No-solution mode canonical resolver (local dir + libsrc + .red)
+            const noSolutionResolved = resolveFileInNoSolutionMode(moduleFileName, sourceUri);
+            if (noSolutionResolved) {
+                return `file:///${noSolutionResolved.path.replace(/\\/g, '/')}`;
             }
         } catch {
             // ignore resolution errors

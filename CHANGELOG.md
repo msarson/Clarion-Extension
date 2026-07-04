@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 **New Features**
 
 - ✨ **Cross-file global-data completion parity for MEMBER files** (#224): word completion now includes PROGRAM-file global symbols while editing MEMBER modules, including both direct globals (e.g. `GLO:*`) and `PRE(...)`-qualified global structure fields (e.g. `TGLO:FieldName`); prefixed completions now insert only the suffix after an already-typed qualifier, so accepting `GLO:Var` after typing `GLO:` no longer duplicates the prefix.
+- ✨ **No-solution entry-point completion coverage extended** (#113): no-solution LSP entry-point tests now include completion validation for MEMBER files consuming PROGRAM globals (`GLO:*` and `PRE(...)`-qualified fields), and FAR global-scope loading now has a no-solution MEMBER→PROGRAM fallback when FRG is unavailable.
 
 **Bug Fixes**
 
