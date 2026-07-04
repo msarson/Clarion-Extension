@@ -216,12 +216,14 @@ export class MethodOverloadResolver {
         document: TextDocument
     ): MethodDeclarationInfo[] {
         const frg = FileRelationshipGraph.getInstance();
-        if (!frg.isBuilt) {
+        const canonicalPath = decodeURIComponent(document.uri.replace('file:///', ''));
+        const currentDocEdges = frg.getForwardEdges(canonicalPath);
+
+        if (!frg.isBuilt || currentDocEdges.length === 0) {
             logger.warn(`[#128] FRG not built — falling back to direct-INCLUDE walk for ${className}.${methodName}`);
             return this.gatherIncludeMethodDeclarations(className, methodName, document);
         }
 
-        const canonicalPath = decodeURIComponent(document.uri.replace('file:///', ''));
         const currentDocKey = this.normalizeFilePath(canonicalPath);
 
         const topLines = document.getText().split('\n').slice(0, 10);
