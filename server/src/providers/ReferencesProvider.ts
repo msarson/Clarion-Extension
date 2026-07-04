@@ -51,8 +51,7 @@ export function canonicalLocationKey(uri: string, line: number): string {
 }
 
 function fsPathToUri(filePath: string): string {
-    const encoded = filePath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, (_, d) => d + '%3A');
-    return `file:///${encoded}`;
+    return `file:///${filePath.replace(/\\/g, '/')}`;
 }
 
 type OverloadFilter = {
@@ -2522,6 +2521,18 @@ export class ReferencesProvider {
                 // Non-MEMBER file procedure declaration at module level (PROGRAM file MAP entry) —
                 // fall through to global search so all call sites are found.
             } else {
+                if (isMember && !isProcDecl && graph.isBuilt) {
+                    const declaringPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    const programFile = graph.getProgramFile(declaringPath);
+                    if (programFile) {
+                        const siblingMemberUris = graph.getMemberFiles(programFile)
+                            .map(memberFile => fsPathToUri(memberFile.replace(/\//g, '\\')));
+                        if (siblingMemberUris.length > 0) {
+                            logger.test(`[FAR] Scope="module" cross-MEMBER variable → searching ${siblingMemberUris.length} sibling MEMBER file(s)`);
+                            return siblingMemberUris;
+                        }
+                    }
+                }
                 // MEMBER-file module symbols are visible only within that MEMBER module.
                 // PROGRAM-file module-level data (non-procedure) also stays local.
                 logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);

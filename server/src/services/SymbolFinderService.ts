@@ -20,6 +20,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
@@ -534,6 +535,51 @@ export class SymbolFinderService {
             searchWord: word
         };
     }
+
+    /**
+     * Find a module-scope variable declared in a sibling MEMBER file of the same PROGRAM.
+     *
+     * Uses FRG MEMBER edges to enumerate sibling MEMBER files, then scans each file's
+     * module scope (between MEMBER and first PROCEDURE) for a matching column-0 label.
+     */
+    public async findModuleVariableInSiblingMembers(
+        word: string,
+        document: TextDocument,
+        _position: { line: number; character: number }
+    ): Promise<SymbolInfo | null> {
+        const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(document);
+
+        if (!graph.isBuilt) {
+            return null;
+        }
+
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programFile = graph.getProgramFile(currentFilePath);
+        if (!programFile) {
+            return null;
+        }
+
+        const visited = new Set<string>();
+        for (const memberFile of graph.getMemberFiles(programFile)) {
+            const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
+            if (visited.has(normMember)) continue;
+            visited.add(normMember);
+
+            const memberPath = memberFile.replace(/\//g, '\\');
+            if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
+
+            const sibling = this.loadTokensForFile(memberPath);
+            if (!sibling) continue;
+
+            const result = this.findModuleVariable(word, sibling.tokens, sibling.document);
+            if (result) {
+                return result;
+            }
+        }
+
+        return null;
+    }
     
     /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
@@ -908,6 +954,35 @@ export class SymbolFinderService {
             return null;
         }
     }
+
+    private loadTokensForFile(filePath: string): { document: TextDocument; tokens: Token[] } | null {
+        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+
+        let tokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(uri);
+        let doc: TextDocument | null = null;
+        if (tokens) {
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri);
+            if (cachedText !== null) {
+                doc = TextDocument.create(uri, 'clarion', 1, cachedText);
+            }
+        }
+
+        try {
+            if (!tokens || !doc) {
+                if (!fs.existsSync(filePath)) {
+                    return null;
+                }
+                const contents = fs.readFileSync(filePath, 'utf-8');
+                doc = TextDocument.create(uri, 'clarion', 1, contents);
+                tokens = this.tokenCache.getTokens(doc);
+            }
+
+            return { document: doc, tokens };
+        } catch (err) {
+            logger.error(`Error loading sibling MEMBER file ${filePath}: ${err}`);
+            return null;
+        }
+    }
     
     /**
      * Search for a variable/symbol with full word first, then fallback to stripped prefix
@@ -937,6 +1012,9 @@ export class SymbolFinderService {
             // Try module variable
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
+
+            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
+            if (siblingModuleResult) return siblingModuleResult;
             
             // Try global variable
             const globalResult = await this.findGlobalVariable(word, tokens, document);
@@ -970,6 +1048,12 @@ export class SymbolFinderService {
         result = this.findModuleVariable(word, tokens, document);
         if (result) {
             logger.info(`✅ Found as module variable: ${word}`);
+            return result;
+        }
+
+        result = await this.findModuleVariableInSiblingMembers(word, document, position);
+        if (result) {
+            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
             return result;
         }
         
@@ -1017,6 +1101,13 @@ export class SymbolFinderService {
             result = this.findModuleVariable(searchWord, tokens, document);
             if (result) {
                 logger.info(`✅ Found as module variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+
+            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
+            if (result) {
+                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
                 result.originalWord = word;
                 return result;
             }

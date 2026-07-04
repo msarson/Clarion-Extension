@@ -13,6 +13,7 @@ All notable changes to the Clarion Extension are documented here.
 - ✨ **Cross-file global-data completion parity for MEMBER files** (#224): word completion now includes PROGRAM-file global symbols while editing MEMBER modules, including both direct globals (e.g. `GLO:*`) and `PRE(...)`-qualified global structure fields (e.g. `TGLO:FieldName`); prefixed completions now insert only the suffix after an already-typed qualifier, so accepting `GLO:Var` after typing `GLO:` no longer duplicates the prefix.
 - ✨ **No-solution entry-point completion coverage extended** (#113): no-solution LSP entry-point tests now include completion validation for MEMBER files consuming PROGRAM globals (`GLO:*` and `PRE(...)`-qualified fields), and FAR global-scope loading now has a no-solution MEMBER→PROGRAM fallback when FRG is unavailable.
 - ✨ **Lazy no-solution FRG substrate for DocumentLink / FAR / completion** (#140): `FileRelationshipGraph` now builds on demand around the active no-solution document using its reachable INCLUDE/MEMBER/MODULE neighborhood plus nearby libsrc/source directories, so INCLUDE links, cross-MEMBER global FAR, and MEMBER→PROGRAM completion all reuse the same graph-backed file relationships even with no `.sln` loaded.
+- ✨ **Sibling MEMBER module-scope symbol resolution** (#118): `SymbolFinderService` now walks FRG MEMBER edges to resolve module-scope declarations from sibling MEMBER files of the same PROGRAM, which restores Hover/F12/FAR and the undeclared-variable hybrid path for Tier 5b cross-MEMBER module data.
 
 **Bug Fixes**
 
