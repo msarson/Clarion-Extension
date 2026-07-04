@@ -1807,6 +1807,62 @@ CallerProc  PROCEDURE()
             );
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
         });
+
+        test('cross-file: unopened project file is scanned via solution sourceFiles', async () => {
+            const fs = require('fs');
+            const os = require('os');
+            const path = require('path');
+            const { SolutionManager } = require('../solution/solutionManager');
+
+            const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'diag-cross-file-162-'));
+            const programPath = path.join(tmpRoot, 'prog.clw');
+            const memberPath = path.join(tmpRoot, 'member.clw');
+            const programCode = `
+  PROGRAM
+  MAP
+TestProc  PROCEDURE(),LONG
+  END
+  CODE
+`;
+            const memberCode = `
+  MEMBER('prog.clw')
+CallerProc  PROCEDURE()
+  CODE
+  TestProc()
+`;
+
+            fs.writeFileSync(programPath, programCode, 'utf8');
+            fs.writeFileSync(memberPath, memberCode, 'utf8');
+
+            const savedSm = (SolutionManager as unknown as { instance: unknown }).instance;
+            try {
+                // Do not pre-populate program tokens in TokenCache — this pins V1:
+                // diagnostics must still discover returning MAP procs from unopened files.
+                TokenCache.getInstance().clearAllTokens();
+                const memberDoc = createDoc(`file:///${memberPath.replace(/\\/g, '/')}`, memberCode);
+                const tokens = TokenCache.getInstance().getTokens(memberDoc);
+
+                const fakeProject = {
+                    path: tmpRoot,
+                    sourceFiles: [{ relativePath: 'prog.clw' }]
+                };
+                const fakeSm = {
+                    solution: { projects: [fakeProject] }
+                };
+                (SolutionManager as unknown as { instance: unknown }).instance = fakeSm;
+
+                const locator = new MemberLocatorService();
+                const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+                const plain = diags.filter((d: { message: string }) =>
+                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                );
+                assert.strictEqual(plain.length, 1, 'should warn from unopened project file declaration');
+                assert.ok(plain[0].message.includes("'TestProc'"));
+            } finally {
+                (SolutionManager as unknown as { instance: unknown }).instance = savedSm;
+                try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
+            }
+        });
     });
 
     // ─── CYCLE / BREAK outside LOOP or ACCEPT (issue #64) ───────────────────
