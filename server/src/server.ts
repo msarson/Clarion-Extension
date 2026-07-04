@@ -2184,7 +2184,7 @@ connection.onDefinition(async (params) => {
 });
 
 // Handle implementation requests
-connection.onImplementation(async (params) => {
+connection.onImplementation(async (params, token) => {
     logger.info(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
@@ -2199,7 +2199,7 @@ connection.onImplementation(async (params) => {
     }
     
     try {
-        const implementation = await implementationProvider.provideImplementation(document, params.position);
+        const implementation = await implementationProvider.provideImplementation(document, params.position, token);
         if (implementation) {
             logger.info(`✅ Found implementation for ${params.textDocument.uri}`);
         } else {
@@ -2213,7 +2213,7 @@ connection.onImplementation(async (params) => {
 });
 
 // Handle find all references requests
-connection.onReferences(async (params: ReferenceParams) => {
+connection.onReferences(async (params: ReferenceParams, token) => {
     logger.info(`📂 Received references request for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character}`);
 
     if (!serverInitialized) {
@@ -2249,7 +2249,7 @@ connection.onReferences(async (params: ReferenceParams) => {
         }
 
         const references = await Promise.race([
-            referencesProvider.provideReferences(document, params.position, params.context),
+            referencesProvider.provideReferences(document, params.position, params.context, token),
             new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
         ]);
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);

@@ -1,4 +1,5 @@
 import { Location, Range, Position } from 'vscode-languageserver-protocol';
+import { CancellationToken } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,6 +20,7 @@ import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
 import { buildIncDirsToScan } from './incDirsScope';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -97,10 +99,8 @@ export class ReferencesProvider {
      * reference scan interleaves with (rather than blocks) interactive requests.
      * Call with a monotonically increasing per-loop counter.
      */
-    private async yieldIfNeeded(scannedCount: number): Promise<void> {
-        if (scannedCount > 0 && scannedCount % ReferencesProvider.FILES_PER_YIELD === 0) {
-            await new Promise<void>(resolve => setImmediate(resolve));
-        }
+    private async yieldIfNeeded(scannedCount: number, token?: CancellationToken): Promise<boolean> {
+        return cooperativeCheckpoint(scannedCount, token, ReferencesProvider.FILES_PER_YIELD);
     }
 
     /**
@@ -109,7 +109,8 @@ export class ReferencesProvider {
     public async provideReferences(
         document: TextDocument,
         position: { line: number; character: number },
-        context: { includeDeclaration: boolean }
+        context: { includeDeclaration: boolean },
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
@@ -181,11 +182,11 @@ export class ReferencesProvider {
 
             if (position.character >= methStart && position.character <= methEnd) {
                 logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
-                return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
+                return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration, token);
             }
             if (position.character >= ifaceStart && position.character <= ifaceEnd) {
                 logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
-                return this.provideImplementsReferences(ifacePart, document);
+                return this.provideImplementsReferences(ifacePart, document, token);
             }
         }
 
@@ -198,13 +199,13 @@ export class ReferencesProvider {
             const nameEnd   = nameStart + ifaceName.length;
             if (position.character >= nameStart && position.character <= nameEnd) {
                 logger.test(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
-                return this.provideImplementsReferences(ifaceName, document);
+                return this.provideImplementsReferences(ifaceName, document, token);
             }
         }
 
         // Route to member-access path when word contains a dot
         if (word.includes('.')) {
-            return this.provideMemberReferences(word, document, position, context);
+            return this.provideMemberReferences(word, document, position, context, undefined, undefined, token);
         }
 
         // Check if the cursor is inside a CLASS body BEFORE trying plain symbol search.
@@ -226,7 +227,7 @@ export class ReferencesProvider {
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
             logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
-            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token);
         }
 
         // Check if cursor is on a MethodImplementation line for a locally-declared class.
@@ -253,7 +254,7 @@ export class ReferencesProvider {
                 }) : '';
                 if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
                     logger.test(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
-                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
+                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName, token);
                 }
             }
         }
@@ -268,7 +269,7 @@ export class ReferencesProvider {
         );
         if (enclosingInterface) {
             logger.test(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
-            return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
+            return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration, token);
         }
 
         // ── Route C: cursor on interface name IN the declaration line itself ──
@@ -284,20 +285,20 @@ export class ReferencesProvider {
             const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
             if (word.toLowerCase() === ifaceLabelLower) {
                 logger.test(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
-                return this.provideImplementsReferences(ifaceDeclToken.label, document);
+                return this.provideImplementsReferences(ifaceDeclToken.label, document, token);
             }
         }
 
         // ── Route D: CLASS TYPE name — always global, never scope-limited ──
         // Must run before findSymbol to prevent parameter/local scope limiting.
-        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration);
+        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration, token);
         if (classTypeRef !== null) return classTypeRef;
 
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
-            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration);
+            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token);
         }
 
         const searchWord = symbolInfo.token.value;
@@ -350,7 +351,7 @@ export class ReferencesProvider {
             );
         let ycPlain = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycPlain++);
+            if (await this.yieldIfNeeded(ycPlain++, token)) return null;
             const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
@@ -370,7 +371,8 @@ export class ReferencesProvider {
         methodName: string,
         ifaceName: string,
         document: TextDocument,
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const methodLower = methodName.toLowerCase();
         const ifaceLower = ifaceName.toLowerCase();
@@ -461,7 +463,7 @@ export class ReferencesProvider {
         const implementingClassesByFile = new Map<string, Set<string>>();
         let ycIfaceMap = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceMap++);
+            if (await this.yieldIfNeeded(ycIfaceMap++, token)) return null;
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const fileContent = fileUri === document.uri
@@ -486,7 +488,7 @@ export class ReferencesProvider {
 
         let ycIfaceScan = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceScan++);
+            if (await this.yieldIfNeeded(ycIfaceScan++, token)) return null;
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -537,7 +539,7 @@ export class ReferencesProvider {
         // ── Call sites: varName.MethodName() where varName &IfaceName ──
         let ycIfaceCall = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceCall++);
+            if (await this.yieldIfNeeded(ycIfaceCall++, token)) return null;
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const varNames = this.collectInterfaceVarNames(ft, ifaceName);
@@ -567,7 +569,8 @@ export class ReferencesProvider {
      */
     private async provideImplementsReferences(
         ifaceName: string,
-        document: TextDocument
+        document: TextDocument,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const ifaceLower = ifaceName.toLowerCase();
         const locations: Location[] = [];
@@ -591,7 +594,7 @@ export class ReferencesProvider {
 
         let ycImpl = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycImpl++);
+            if (await this.yieldIfNeeded(ycImpl++, token)) return null;
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -648,7 +651,8 @@ export class ReferencesProvider {
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },
         classModuleFile?: string,
-        knownClassName?: string
+        knownClassName?: string,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -924,7 +928,7 @@ export class ReferencesProvider {
         }
         let ycMember = 0;
         for (const fileUri of filesToSearchDeduped) {
-            await this.yieldIfNeeded(ycMember++);
+            if (await this.yieldIfNeeded(ycMember++, token)) return null;
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
@@ -2954,7 +2958,8 @@ export class ReferencesProvider {
     private async findClassTypeReferences(
         word: string,
         document: TextDocument,
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         // Check if the word is a known CLASS type via the class definition indexer
         const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
@@ -2970,20 +2975,21 @@ export class ReferencesProvider {
 
         // It IS a class type — do a global search using the procedure-reference machinery
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
-        return this.findProcedureReferences(word, document, tokens, includeDeclaration);
+        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token);
     }
 
     private async findProcedureReferences(
         word: string,
         document: TextDocument,
         currentTokens: Token[],
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         // If the current file is a local-MAP implementation target, restrict search
         // to only files reachable via that same procedure-local MAP scope.
         const localScope = getLocalMapScope(document.uri);
         if (localScope?.containingProcedure) {
-            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope);
+            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope, token);
         }
 
         const wordLower = word.toLowerCase();
@@ -3100,7 +3106,7 @@ export class ReferencesProvider {
         const locations: Location[] = [];
         let ycProc = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycProc++);
+            if (await this.yieldIfNeeded(ycProc++, token)) return null;
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 
@@ -3117,7 +3123,8 @@ export class ReferencesProvider {
         word: string,
         document: TextDocument,
         includeDeclaration: boolean,
-        localScope: LocalMapScope
+        localScope: LocalMapScope,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const graph = FileRelationshipGraph.getInstance();
         const declaringUri = `file:///${localScope.declaringFile}`;
@@ -3152,7 +3159,7 @@ export class ReferencesProvider {
         const locations: Location[] = [];
         let ycLocalMap = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycLocalMap++);
+            if (await this.yieldIfNeeded(ycLocalMap++, token)) return null;
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
         }
 
@@ -3257,4 +3264,3 @@ export class ReferencesProvider {
         return varNames;
     }
 }
-
