@@ -257,6 +257,27 @@ suite('WordCompletionProvider', () => {
             const labels = items.map(i => i.label);
             assert.ok(labels.includes('ParentVar'), `Expected ParentVar visible in routine. Got: ${labels.join(', ')}`);
         });
+
+        test('routine sees parent procedure PRE-qualified fields with qualifier completion', async () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE()',
+                'TestGloGroup GROUP,PRE(TGLO)',
+                'Var1 LONG',
+                'Var2 STRING(20)',
+                'END',
+                'CODE',
+                'MyRoutine ROUTINE',
+                '  CODE',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+            const items = await p.provide(doc, { line: 8, character: 7 }, 'TGLO:');
+            const labels = items.map(i => i.label);
+
+            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
+        });
     });
 
     suite('Constants / equates', () => {
@@ -308,6 +329,183 @@ suite('WordCompletionProvider', () => {
             assert.ok(item, `Expected LOC_MAX in completions. Got: ${items.map(i => i.label).join(', ')}`);
             assert.strictEqual(item!.kind, CompletionItemKind.Constant, `Expected Constant kind, got ${item!.kind}`);
             assert.strictEqual(item!.detail, 'EQUATE(50)', `Expected detail 'EQUATE(50)', got '${item!.detail}'`);
+        });
+    });
+
+    suite('Cross-file global data (PROGRAM -> MEMBER)', () => {
+        test('surfaces PROGRAM globals with prefix names in MEMBER file', async () => {
+            const programUri = 'file:///C:/temp/testingdirectsecureserver.clw';
+            const memberUri = 'file:///C:/temp/testingdirectsecureserver001.clw';
+
+            const programDoc = TextDocument.create(programUri, 'clarion', 1, [
+                'TestingDirectSecureServer PROGRAM',
+                'GLO:SessionId   STRING(20)',
+                'SrvData         GROUP,PRE(TGLO)',
+                'PageReceived    LONG',
+                'SocketCount     LONG',
+                '               END',
+                '',
+                'Main PROCEDURE()',
+                'CODE',
+                'END',
+            ].join('\n'));
+
+            const memberDoc = TextDocument.create(memberUri, 'clarion', 1, [
+                '  MEMBER(\'C:\\temp\\testingdirectsecureserver.clw\')',
+                '',
+                'Worker PROCEDURE()',
+                'CODE',
+                '  GLO:',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+
+            const cache = TokenCache.getInstance();
+            cache.getTokens(programDoc);
+            cache.getTokens(memberDoc);
+
+            const scopeAnalyzer = new ScopeAnalyzer(cache, SolutionManager.getInstance());
+            const provider = new WordCompletionProvider(cache, scopeAnalyzer);
+
+            const gloItems = await provider.provide(memberDoc, { line: 4, character: 6 }, 'GLO:');
+            const tgloItems = await provider.provide(memberDoc, { line: 5, character: 7 }, 'TGLO:');
+            const gloLabels = gloItems.map(i => i.label);
+            const tgloLabels = tgloItems.map(i => i.label);
+            const gloItem = gloItems.find(i => i.label === 'GLO:SessionId');
+            const tgloItem = tgloItems.find(i => i.label === 'TGLO:PageReceived');
+
+            assert.ok(gloLabels.includes('GLO:SessionId'), `Expected GLO:SessionId in: ${gloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('TGLO:PageReceived'), `Expected TGLO:PageReceived in: ${tgloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('TGLO:SocketCount'), `Expected TGLO:SocketCount in: ${tgloLabels.join(', ')}`);
+            assert.strictEqual(gloItem?.insertText, 'SessionId', `Expected suffix insertText for GLO:, got: ${gloItem?.insertText}`);
+            assert.strictEqual(tgloItem?.insertText, 'PageReceived', `Expected suffix insertText for TGLO:, got: ${tgloItem?.insertText}`);
+        });
+    });
+
+    suite('Qualifier completion respects typed qualifier', () => {
+        test('procedure-local PRE-qualified fields appear for exact qualifier', async () => {
+            const doc = makeDoc([
+                'MyProc PROCEDURE()',
+                'TestGloGroup GROUP,PRE(TGLO)',
+                'Var1 LONG',
+                'Var2 STRING(20)',
+                'END',
+                'CODE',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+
+            const items = await p.provide(doc, { line: 6, character: 7 }, 'TGLO:');
+            const labels = items.map(i => i.label);
+            const tgloVar1 = items.find(i => i.label === 'TGLO:Var1');
+            const tgloVar2 = items.find(i => i.label === 'TGLO:Var2');
+
+            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
+            assert.strictEqual(tgloVar1?.insertText, 'Var1', `Expected Var1 suffix insertText, got: ${tgloVar1?.insertText}`);
+            assert.strictEqual(tgloVar2?.insertText, 'Var2', `Expected Var2 suffix insertText, got: ${tgloVar2?.insertText}`);
+        });
+
+        test('TGLO: still resolves from token-range fallback when scope analyzer has no containing procedure', async () => {
+            const doc = makeDoc([
+                'ThisWindow.Init PROCEDURE()',
+                'TestGloGroup GROUP,PRE(TGLO)',
+                'Var1 LONG',
+                'END',
+                'CODE',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc) as unknown as { provide: WordCompletionProvider['provide']; scopeAnalyzer: { getTokenScope: () => undefined } };
+            p.scopeAnalyzer.getTokenScope = () => undefined;
+
+            const items = await p.provide(doc, { line: 5, character: 7 }, 'TGLO:');
+            const labels = items.map(i => i.label);
+
+            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
+        });
+
+        test('TGLO: only returns TGLO-prefixed members', async () => {
+            const doc = makeDoc([
+                'MyProg PROGRAM',
+                'GLO:SessionId   STRING(20)',
+                'TestGloGroup GROUP,PRE(TGLO)',
+                'Var1 LONG',
+                'Var2 STRING(20)',
+                'GLO:TGLO LONG',
+                'END',
+                '',
+                'Worker PROCEDURE()',
+                'LocalVar LONG',
+                'CODE',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+
+            const items = await p.provide(doc, { line: 11, character: 7 }, 'TGLO:');
+            const labels = items.map(i => i.label);
+            const tgloVar1 = items.find(i => i.label === 'TGLO:Var1');
+            const tgloVar2 = items.find(i => i.label === 'TGLO:Var2');
+            const tgloNested = items.find(i => i.label === 'TGLO:GLO:TGLO');
+
+            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in: ${labels.join(', ')}`);
+            assert.ok(!labels.includes('TGLO:TGLO'), `Did not expect duplicate split form TGLO:TGLO. Got: ${labels.join(', ')}`);
+            assert.ok(!labels.includes('GLO:SessionId'), `Did not expect GLO:SessionId for TGLO qualifier. Got: ${labels.join(', ')}`);
+            assert.ok(!labels.includes('LocalVar'), `Did not expect LocalVar for TGLO qualifier. Got: ${labels.join(', ')}`);
+            assert.strictEqual(tgloVar1?.insertText, 'Var1', `Expected Var1 suffix insertText, got: ${tgloVar1?.insertText}`);
+            assert.strictEqual(tgloVar2?.insertText, 'Var2', `Expected Var2 suffix insertText, got: ${tgloVar2?.insertText}`);
+            assert.strictEqual(tgloNested?.insertText, 'GLO:TGLO', `Expected nested suffix insertText, got: ${tgloNested?.insertText}`);
+        });
+
+        test('typed unknown qualifier returns no items', async () => {
+            const doc = makeDoc([
+                'MyProg PROGRAM',
+                'GLO:SessionId   STRING(20)',
+                '',
+                'Worker PROCEDURE()',
+                'LocalVar LONG',
+                'CODE',
+                '  ANY:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+
+            const items = await p.provide(doc, { line: 6, character: 6 }, 'ANY:');
+            assert.strictEqual(items.length, 0, `Expected no completions for unknown qualifier. Got: ${items.map(i => i.label).join(', ')}`);
+        });
+
+        test('method and routine see procedure-scope PRE-qualified fields', async () => {
+            const doc = makeDoc([
+                'ThisWindow.Init PROCEDURE',
+                'TestGloGroup GROUP,PRE(TGLO)',
+                'Var1 LONG',
+                'GLO:TGLO LONG',
+                'END',
+                '',
+                'CODE',
+                '  TGLO:',
+                '  DoStuff',
+                'END',
+                '',
+                'DoStuff ROUTINE',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+
+            const methodItems = await p.provide(doc, { line: 7, character: 7 }, 'TGLO:');
+            const routineItems = await p.provide(doc, { line: 12, character: 7 }, 'TGLO:');
+            const methodLabels = methodItems.map(i => i.label);
+            const routineLabels = routineItems.map(i => i.label);
+
+            assert.ok(methodLabels.includes('TGLO:Var1'), `Expected TGLO:Var1 in method scope: ${methodLabels.join(', ')}`);
+            assert.ok(methodLabels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in method scope: ${methodLabels.join(', ')}`);
+            assert.ok(routineLabels.includes('TGLO:Var1'), `Expected TGLO:Var1 in routine scope: ${routineLabels.join(', ')}`);
+            assert.ok(routineLabels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in routine scope: ${routineLabels.join(', ')}`);
         });
     });
 

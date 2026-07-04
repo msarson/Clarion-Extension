@@ -172,7 +172,7 @@ suite('UndeclaredVariableDiagnostics — cross-file scope (6b40d7da, #115)', () 
      * flips GREEN with no diagnostic changes — the SymbolFinder fall-through
      * wired in #115 picks up the new tier transparently.
      */
-    test.skip('Tier 5b BUG PIN — cross-file MEMBER MODULE-scope → no fire', async () => {
+    test('Tier 5b BUG PIN — cross-file MEMBER MODULE-scope → no fire', async () => {
         const fixture = buildMultiFileFixture({
             files: {
                 'main.clw': [

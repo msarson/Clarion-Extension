@@ -146,7 +146,20 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v0.9.8 (2026-07-03) — Documentation corrections
+### Latest: v0.9.9 (2026-07-04) — Solution-wide scope correctness + no-solution resilience
+
+- Tightened **open-solution** scope correctness across cross-file PROGRAM globals, sibling-MEMBER module scope, Tier 1 routine-local shadowing in `SymbolFinder.findSymbol(...)`, and qualifier completion so `Prefix:` only returns symbols for that exact qualifier (e.g. `TGLO:*`).
+- Dot-completion member lists now show inline type information (for example `Var1 LONG`) while preserving clean insert text.
+- Clarion startup now uses a cleaner TypeScript-style status bar progress flow (activating → language server → solution loading/indexing → ready) instead of multiple transient load popups.
+- Build and generation commands now use a shared status-bar lifecycle (running/succeeded/failed) for clearer operation feedback.
+- Added lazy no-solution FRG coverage for DocumentLink/FAR/completion plus no-solution entry-point completion parity improvements as additive fallback hardening.
+- Landed cross-file overload fallback hardening when a built-but-irrelevant FRG is present.
+
+**[See full changelog →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.8 (2026-07-03) — Documentation corrections
 
 - Updated release documentation to reflect v0.9.8 as the current version.
 - Corrected release timeline references so v0.9.7 is clearly marked as released on 2026-07-02.

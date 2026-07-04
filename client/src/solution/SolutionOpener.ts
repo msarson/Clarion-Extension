@@ -4,7 +4,7 @@ import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { SolutionCache } from '../SolutionCache';
-import { hideConfigurationStatusBar, hideBuildProjectStatusBar } from '../statusbar/StatusBarManager';
+import { failInitializationStatusBar, hideConfigurationStatusBar, hideBuildProjectStatusBar, hideInitializationStatusBar, hideOperationStatusBar } from '../statusbar/StatusBarManager';
 import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
@@ -170,10 +170,10 @@ export async function openSolutionFromList(
         
         // Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
-        vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
     } catch (error) {
         const errMessage = error instanceof Error ? error.message : String(error);
         logger.error("❌ Error opening solution from list:", error);
+        failInitializationStatusBar(errMessage);
         vscodeWindow.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
     }
 }
@@ -312,8 +312,6 @@ export async function openClarionSolution(
                 // Mark solution as open
                 await commands.executeCommand("setContext", "clarion.solutionOpen", true);
                 
-                vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(selectedItem.solution.solutionFile)}`);
-                
                 return;
             }
             
@@ -424,11 +422,10 @@ export async function openClarionSolution(
         // ✅ Step 6: Mark solution as open
         await commands.executeCommand("setContext", "clarion.solutionOpen", true);
         
-        vscodeWindow.showInformationMessage(`Clarion Solution Loaded: ${path.basename(globalSolutionFile)}`);
-
     } catch (error) {
         const errMessage = error instanceof Error ? error.message : String(error);
         logger.error("❌ Error opening solution:", error);
+        failInitializationStatusBar(errMessage);
         vscodeWindow.showErrorMessage(`Error opening Clarion solution: ${errMessage}`);
     }
 }
@@ -489,6 +486,8 @@ export async function closeClarionSolution(
         // Hide the status bar items
         hideConfigurationStatusBar();
         hideBuildProjectStatusBar();
+        hideInitializationStatusBar();
+        hideOperationStatusBar();
         
         // Mark solution as closed
         await commands.executeCommand("setContext", "clarion.solutionOpen", false);

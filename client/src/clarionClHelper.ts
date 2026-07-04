@@ -2,6 +2,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { window, OutputChannel } from 'vscode';
 import { globalSettings, globalSolutionFile } from './globals';
+import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from './statusbar/StatusBarManager';
 import LoggerManager from './utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ClarionCl");
@@ -66,6 +67,7 @@ export async function runClarionCl(args: string[], cwd: string): Promise<void> {
 export async function generateAllApps(): Promise<void> {
     if (!globalSolutionFile) {
         window.showErrorMessage('No solution file is currently open');
+        failOperationStatusBar('generation', 'No solution file is currently open');
         return;
     }
 
@@ -73,9 +75,12 @@ export async function generateAllApps(): Promise<void> {
     const args = ['/win', '/ag', globalSolutionFile];
 
     try {
+        startOperationStatusBar('generation', `Generating all apps from ${path.basename(globalSolutionFile)}...`);
         await runClarionCl(args, solutionDir);
+        succeedOperationStatusBar('generation', 'Generation complete');
     } catch (error) {
         logger.error(`Generate all apps failed: ${error}`);
+        failOperationStatusBar('generation', error instanceof Error ? error.message : String(error));
     }
 }
 
@@ -88,12 +93,14 @@ export async function generateAllAppsWithProgress(
 ): Promise<void> {
     if (!globalSolutionFile) {
         window.showErrorMessage('No solution file is currently open');
+        failOperationStatusBar('generation', 'No solution file is currently open');
         return;
     }
 
     const solutionDir = path.dirname(globalSolutionFile);
     let successCount = 0;
     let failCount = 0;
+    startOperationStatusBar('generation', `Generating ${appPaths.length} apps...`);
 
     for (let i = 0; i < appPaths.length; i++) {
         const appPath = appPaths[i];
@@ -102,6 +109,7 @@ export async function generateAllAppsWithProgress(
         try {
             logger.info(`Generating app: ${appName}`);
             window.showInformationMessage(`Generating: ${appName}.app`);
+            startOperationStatusBar('generation', `Generating ${appName}.app (${i + 1}/${appPaths.length})...`);
             
             // Notify tree provider that this app is generating
             if (solutionTreeDataProvider) {
@@ -148,8 +156,10 @@ export async function generateAllAppsWithProgress(
     // Show final status
     if (failCount === 0) {
         window.showInformationMessage(`✅ All apps generated successfully: ${successCount} apps`);
+        succeedOperationStatusBar('generation', `All apps generated successfully: ${successCount} apps`);
     } else {
         window.showWarningMessage(`Generation complete: ${successCount} succeeded, ${failCount} failed`);
+        failOperationStatusBar('generation', `Generation complete: ${successCount} succeeded, ${failCount} failed`);
     }
 }
 
@@ -157,11 +167,13 @@ export async function generateAllAppsWithProgress(
 export async function generateApp(appPath: string): Promise<void> {
     if (!appPath) {
         window.showErrorMessage('No application path provided');
+        failOperationStatusBar('generation', 'No application path provided');
         return;
     }
 
     if (!globalSolutionFile) {
         window.showErrorMessage('No solution file is currently open');
+        failOperationStatusBar('generation', 'No solution file is currently open');
         return;
     }
 
@@ -169,9 +181,12 @@ export async function generateApp(appPath: string): Promise<void> {
     const args = ['/win', '/ag', appPath];
 
     try {
+        startOperationStatusBar('generation', `Generating ${path.basename(appPath)}...`);
         await runClarionCl(args, solutionDir);
+        succeedOperationStatusBar('generation', `Generation complete: ${path.basename(appPath)}`);
     } catch (error) {
         logger.error(`Generate app failed: ${error}`);
+        failOperationStatusBar('generation', error instanceof Error ? error.message : String(error));
     }
 }
 

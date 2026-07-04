@@ -52,8 +52,8 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             const members = scanClassBodyForAllMembers(CLW_PATH, 'StandaloneClass');
             assert.ok(members.length >= 2, `Expected ≥2 members, got ${members.length}`);
             const names = members.map(m => m.name.toUpperCase());
-            assert.ok(names.includes('ALPHA'), 'Should include Alpha');
-            assert.ok(names.includes('BETA'), 'Should include Beta');
+            assert.ok(names.some(n => n.startsWith('ALPHA')), 'Should include Alpha');
+            assert.ok(names.some(n => n.startsWith('BETA')), 'Should include Beta');
         });
 
         test('classifies methods and properties correctly', function () {
@@ -113,16 +113,16 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             this.timeout(10000);
             const members = await memberLocator.enumerateMembersInClass('DerivedClass', doc);
             const names = members.map(m => m.name.toUpperCase());
-            assert.ok(names.includes('OWNMETHOD'), `Expected OwnMethod in [${names.join(', ')}]`);
-            assert.ok(names.includes('OWNPROP'), `Expected OwnProp in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('OWNMETHOD')), `Expected OwnMethod in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('OWNPROP')), `Expected OwnProp in [${names.join(', ')}]`);
         });
 
         test('inherited public members from BaseClass are included', async function () {
             this.timeout(10000);
             const members = await memberLocator.enumerateMembersInClass('DerivedClass', doc);
             const names = members.map(m => m.name.toUpperCase());
-            assert.ok(names.includes('PUBLICMETHOD'), `Expected PublicMethod (inherited) in [${names.join(', ')}]`);
-            assert.ok(names.includes('PUBLICPROP'), `Expected PublicProp (inherited) in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('PUBLICMETHOD')), `Expected PublicMethod (inherited) in [${names.join(', ')}]`);
+            assert.ok(names.some(n => n.startsWith('PUBLICPROP')), `Expected PublicProp (inherited) in [${names.join(', ')}]`);
         });
 
         test('external caller: PRIVATE and PROTECTED members are excluded', async function () {
@@ -130,15 +130,15 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             // No callerClass → external → only public
             const members = await memberLocator.enumerateMembersInClass('DerivedClass', doc, undefined);
             const names = members.map(m => m.name.toUpperCase());
-            assert.ok(!names.includes('PRIVATEMETHOD'), `PrivateMethod should be hidden externally`);
-            assert.ok(!names.includes('PROTECTEDMETHOD'), `ProtectedMethod should be hidden externally`);
+            assert.ok(!names.some(n => n.startsWith('PRIVATEMETHOD')), `PrivateMethod should be hidden externally`);
+            assert.ok(!names.some(n => n.startsWith('PROTECTEDMETHOD')), `ProtectedMethod should be hidden externally`);
         });
 
         test('same-class caller: PRIVATE members are visible', async function () {
             this.timeout(10000);
             const members = await memberLocator.enumerateMembersInClass('BaseClass', doc, 'BaseClass');
             const names = members.map(m => m.name.toUpperCase());
-            assert.ok(names.includes('PRIVATEMETHOD'), `PrivateMethod should be visible to same class`);
+            assert.ok(names.some(n => n.startsWith('PRIVATEMETHOD')), `PrivateMethod should be visible to same class`);
         });
 
         test('child member shadows parent member with same name', async function () {
@@ -229,6 +229,170 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             assert.ok(publicMethod, 'PublicMethod not found');
             assert.strictEqual(publicMethod!.fromClass.toUpperCase(), 'BASECLASS',
                 `Expected fromClass=BaseClass, got ${publicMethod!.fromClass}`);
+        });
+
+        test('prefixed variable dot-completion resolves class members (TGLO:Var.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'DictionaryClass CLASS',
+                'Init PROCEDURE()',
+                'END',
+                '',
+                'ThisWindow.Init PROCEDURE',
+                '  TestGloGroup GROUP,PRE(TGLO)',
+                '  Pictionary DictionaryClass',
+                '  END',
+                '  CODE',
+                '  TGLO:Pictionary.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-prefixed.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 9, character: '  TGLO:Pictionary.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('INIT')), `Expected Init member in: [${names.join(', ')}]`);
+        });
+
+        test('structure label dot-completion surfaces prefixed field list (TestGloGroup.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'ThisWindow.Init PROCEDURE',
+                '  TestGloGroup GROUP,PRE(TGLO)',
+                '  Var1 LONG',
+                '  GLO:TGLO LONG',
+                '  END',
+                '  CODE',
+                '  TestGloGroup.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-struct-dot.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 6, character: '  TestGloGroup.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.includes('TGLO:VAR1'), `Expected TGLO:Var1 in: [${names.join(', ')}]`);
+            assert.ok(names.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in: [${names.join(', ')}]`);
+        });
+
+        test('reference LIKE alias dot-completion surfaces queue members (rq.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'BaseQ QUEUE,TYPE',
+                'Name STRING(20)',
+                'END',
+                'AliasQ LIKE(BaseQ)',
+                'rq &AliasQ',
+                'CODE',
+                'rq &= NEW(AliasQ)',
+                'rq.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-like-ref-dot.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 7, character: 'rq.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('NAME')), `Expected Name queue member in: [${names.join(', ')}]`);
+        });
+
+        test('SELF chained property dot-completion surfaces queue members (Self.MyQueue.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'Main PROCEDURE',
+                'MyQueueType QUEUE,TYPE',
+                'Var1 LONG',
+                'END',
+                'ThisWindow CLASS(WindowManager)',
+                'MyQueue &MyQueueType',
+                'Init PROCEDURE(),BYTE,PROC,DERIVED',
+                'END',
+                'CODE',
+                'ThisWindow.Init PROCEDURE',
+                '  CODE',
+                '  Self.MyQueue.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-self-myqueue-dot.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 11, character: '  Self.MyQueue.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('VAR1')), `Expected Var1 queue member in: [${names.join(', ')}]`);
+            const var1 = items.find(i => (i.label as string).toUpperCase().startsWith('VAR1'));
+            assert.ok(var1, `Expected to find completion item for Var1 in: [${names.join(', ')}]`);
+            assert.ok(((var1!.label as string).toUpperCase()).includes('LONG'),
+                `Expected Var1 label to include LONG, got "${var1!.label as string}"`);
+        });
+
+        test('nested queue chain completion resolves from local bare structure root (problems.Diabetes.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'problems QUEUE',
+                'Diabetes &DiabetesQueueType',
+                'END',
+                'DiabetesQueueType QUEUE,TYPE',
+                'medications &medicationsQueueType',
+                'END',
+                'medicationsQueueType QUEUE,TYPE',
+                'code STRING(10)',
+                'END',
+                'CODE',
+                'problems.Diabetes.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-nested-problems-dot.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 10, character: 'problems.Diabetes.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('MEDICATIONS')),
+                `Expected medications member in: [${names.join(', ')}]`);
         });
     });
 });

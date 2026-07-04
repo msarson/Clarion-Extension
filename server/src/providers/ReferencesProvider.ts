@@ -1,4 +1,5 @@
 import { Location, Range, Position } from 'vscode-languageserver-protocol';
+import { CancellationToken } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,7 +19,9 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
+import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -45,6 +48,10 @@ export function canonicalLocationKey(uri: string, line: number): string {
         normUri = uri.toLowerCase();
     }
     return `${normUri}:${line}`;
+}
+
+function fsPathToUri(filePath: string): string {
+    return `file:///${filePath.replace(/\\/g, '/')}`;
 }
 
 type OverloadFilter = {
@@ -97,10 +104,8 @@ export class ReferencesProvider {
      * reference scan interleaves with (rather than blocks) interactive requests.
      * Call with a monotonically increasing per-loop counter.
      */
-    private async yieldIfNeeded(scannedCount: number): Promise<void> {
-        if (scannedCount > 0 && scannedCount % ReferencesProvider.FILES_PER_YIELD === 0) {
-            await new Promise<void>(resolve => setImmediate(resolve));
-        }
+    private async yieldIfNeeded(scannedCount: number, token?: CancellationToken): Promise<boolean> {
+        return cooperativeCheckpoint(scannedCount, token, ReferencesProvider.FILES_PER_YIELD);
     }
 
     /**
@@ -109,7 +114,8 @@ export class ReferencesProvider {
     public async provideReferences(
         document: TextDocument,
         position: { line: number; character: number },
-        context: { includeDeclaration: boolean }
+        context: { includeDeclaration: boolean },
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
@@ -181,11 +187,11 @@ export class ReferencesProvider {
 
             if (position.character >= methStart && position.character <= methEnd) {
                 logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on method "${methPart}" (iface=${ifacePart})`);
-                return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration);
+                return this.provideInterfaceMethodReferences(methPart, ifacePart, document, context.includeDeclaration, token);
             }
             if (position.character >= ifaceStart && position.character <= ifaceEnd) {
                 logger.test(`🔌 [FAR] Route A — 3-part impl, cursor on interface name "${ifacePart}"`);
-                return this.provideImplementsReferences(ifacePart, document);
+                return this.provideImplementsReferences(ifacePart, document, token);
             }
         }
 
@@ -198,13 +204,13 @@ export class ReferencesProvider {
             const nameEnd   = nameStart + ifaceName.length;
             if (position.character >= nameStart && position.character <= nameEnd) {
                 logger.test(`🔌 [FAR] Route B — IMPLEMENTS(${ifaceName}), routing to IMPLEMENTS references`);
-                return this.provideImplementsReferences(ifaceName, document);
+                return this.provideImplementsReferences(ifaceName, document, token);
             }
         }
 
         // Route to member-access path when word contains a dot
         if (word.includes('.')) {
-            return this.provideMemberReferences(word, document, position, context);
+            return this.provideMemberReferences(word, document, position, context, undefined, undefined, token);
         }
 
         // Check if the cursor is inside a CLASS body BEFORE trying plain symbol search.
@@ -226,7 +232,7 @@ export class ReferencesProvider {
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
             logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
-            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label);
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token);
         }
 
         // Check if cursor is on a MethodImplementation line for a locally-declared class.
@@ -253,7 +259,7 @@ export class ReferencesProvider {
                 }) : '';
                 if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
                     logger.test(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
-                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName);
+                    return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName, token);
                 }
             }
         }
@@ -268,7 +274,7 @@ export class ReferencesProvider {
         );
         if (enclosingInterface) {
             logger.test(`🔌 [FAR] Route: INTERFACE body (iface=${enclosingInterface.label ?? '?'}) → interface-method path`);
-            return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration);
+            return this.provideInterfaceMethodReferences(word, enclosingInterface.label ?? word, document, context.includeDeclaration, token);
         }
 
         // ── Route C: cursor on interface name IN the declaration line itself ──
@@ -284,20 +290,20 @@ export class ReferencesProvider {
             const ifaceLabelLower = ifaceDeclToken.label.toLowerCase();
             if (word.toLowerCase() === ifaceLabelLower) {
                 logger.test(`🔌 [FAR] Route C — INTERFACE declaration name "${word}" → IMPLEMENTS references`);
-                return this.provideImplementsReferences(ifaceDeclToken.label, document);
+                return this.provideImplementsReferences(ifaceDeclToken.label, document, token);
             }
         }
 
         // ── Route D: CLASS TYPE name — always global, never scope-limited ──
         // Must run before findSymbol to prevent parameter/local scope limiting.
-        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration);
+        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration, token);
         if (classTypeRef !== null) return classTypeRef;
 
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
-            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration);
+            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token);
         }
 
         const searchWord = symbolInfo.token.value;
@@ -350,7 +356,7 @@ export class ReferencesProvider {
             );
         let ycPlain = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycPlain++);
+            if (await this.yieldIfNeeded(ycPlain++, token)) return null;
             const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
@@ -370,7 +376,8 @@ export class ReferencesProvider {
         methodName: string,
         ifaceName: string,
         document: TextDocument,
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const methodLower = methodName.toLowerCase();
         const ifaceLower = ifaceName.toLowerCase();
@@ -461,7 +468,7 @@ export class ReferencesProvider {
         const implementingClassesByFile = new Map<string, Set<string>>();
         let ycIfaceMap = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceMap++);
+            if (await this.yieldIfNeeded(ycIfaceMap++, token)) return null;
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const fileContent = fileUri === document.uri
@@ -486,7 +493,7 @@ export class ReferencesProvider {
 
         let ycIfaceScan = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceScan++);
+            if (await this.yieldIfNeeded(ycIfaceScan++, token)) return null;
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -537,7 +544,7 @@ export class ReferencesProvider {
         // ── Call sites: varName.MethodName() where varName &IfaceName ──
         let ycIfaceCall = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycIfaceCall++);
+            if (await this.yieldIfNeeded(ycIfaceCall++, token)) return null;
             const ft = this.getTokensForUri(fileUri);
             if (!ft || ft.length === 0) continue;
             const varNames = this.collectInterfaceVarNames(ft, ifaceName);
@@ -567,7 +574,8 @@ export class ReferencesProvider {
      */
     private async provideImplementsReferences(
         ifaceName: string,
-        document: TextDocument
+        document: TextDocument,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const ifaceLower = ifaceName.toLowerCase();
         const locations: Location[] = [];
@@ -591,7 +599,7 @@ export class ReferencesProvider {
 
         let ycImpl = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycImpl++);
+            if (await this.yieldIfNeeded(ycImpl++, token)) return null;
             const fileTokens = this.getTokensForUri(fileUri);
             if (!fileTokens || fileTokens.length === 0) continue;
 
@@ -648,7 +656,8 @@ export class ReferencesProvider {
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },
         classModuleFile?: string,
-        knownClassName?: string
+        knownClassName?: string,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -924,7 +933,7 @@ export class ReferencesProvider {
         }
         let ycMember = 0;
         for (const fileUri of filesToSearchDeduped) {
-            await this.yieldIfNeeded(ycMember++);
+            if (await this.yieldIfNeeded(ycMember++, token)) return null;
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
@@ -1407,7 +1416,24 @@ export class ReferencesProvider {
      */
     private loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
         const graph = FileRelationshipGraph.getInstance();
-        if (!graph.isBuilt) return null;
+        if (!graph.isBuilt) {
+            // No-solution fallback: when editing a MEMBER file without FRG, resolve the
+            // parent PROGRAM via MEMBER('x.clw') and load its module-scope globals.
+            const docTokens = this.tokenCache.getTokens(document);
+            const memberToken = docTokens.find(t =>
+                t.type === TokenType.ClarionDocument &&
+                t.value.toUpperCase() === 'MEMBER' &&
+                !!t.referencedFile
+            );
+            if (memberToken?.referencedFile) {
+                const resolved = resolveFileInNoSolutionMode(memberToken.referencedFile, document.uri);
+                if (resolved) {
+                    const programUri = 'file:///' + resolved.path.replace(/\\/g, '/');
+                    return this.loadGlobalScopeFromProgramFile(programUri);
+                }
+            }
+            return null;
+        }
         const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
             .replace(/\//g, '\\');
 
@@ -1631,6 +1657,32 @@ export class ReferencesProvider {
             }
         }
 
+        // No-solution mode fallback: if we only have an INC declaration file and no explicit
+        // CLASS MODULE('x.clw') hint, probe same-basename CLW via the canonical resolver.
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution && declarationFile) {
+            const declPath = decodeURIComponent(declarationFile.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const inferredImpl = path.basename(declPath, path.extname(declPath)) + '.clw';
+            const resolvedImpl = resolveFileInNoSolutionMode(inferredImpl, declarationFile);
+            if (resolvedImpl) {
+                files.add(`file:///${resolvedImpl.path.replace(/\\/g, '/')}`);
+            }
+
+            // Also widen to sibling .clw files in the active file's directory so no-solution
+            // FAR can include cross-procedure callers in adjacent MEMBER modules.
+            const sourcePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const sourceDir = path.dirname(sourcePath);
+            try {
+                for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+                    if (entry.isFile() && entry.name.toLowerCase().endsWith('.clw')) {
+                        files.add(`file:///${path.join(sourceDir, entry.name).replace(/\\/g, '/')}`);
+                    }
+                }
+            } catch {
+                // best-effort widening only
+            }
+        }
+
         // Use the FileRelationshipGraph to narrow the search: find all files that
         // transitively include the class's declaration file (INC), rather than scanning
         // every project source file. This is a BFS over reverse INCLUDE edges.
@@ -1663,7 +1715,6 @@ export class ReferencesProvider {
         }
 
         // Graph not ready or returned no additional files — fall back to scanning all project files
-        const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution?.projects?.length) {
             for (const project of solutionManager.solution.projects) {
                 for (const sourceFile of project.sourceFiles) {
@@ -1708,6 +1759,12 @@ export class ReferencesProvider {
                         }
                     }
                 }
+            }
+
+            // 3. No-solution mode canonical resolver (local dir + libsrc + .red)
+            const noSolutionResolved = resolveFileInNoSolutionMode(moduleFileName, sourceUri);
+            if (noSolutionResolved) {
+                return `file:///${noSolutionResolved.path.replace(/\\/g, '/')}`;
             }
         } catch {
             // ignore resolution errors
@@ -2422,6 +2479,11 @@ export class ReferencesProvider {
      */
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] {
         const scopeType = symbolInfo.scope.type;
+        const solutionManager = SolutionManager.getInstance();
+        const graph = FileRelationshipGraph.getInstance();
+        if (!solutionManager?.solution) {
+            graph.ensureNoSolutionGraphForDocument(currentDocument);
+        }
 
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
             logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
@@ -2436,7 +2498,6 @@ export class ReferencesProvider {
                 // For a MAP-declared procedure, its implementation lives in a MODULE target file.
                 const declaringFilePath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, ''))
                     .replace(/\\/g, '/').toLowerCase();
-                const graph = FileRelationshipGraph.getInstance();
                 const implFiles: string[] = [symbolInfo.location.uri];
 
                 if (graph.isBuilt) {
@@ -2460,6 +2521,18 @@ export class ReferencesProvider {
                 // Non-MEMBER file procedure declaration at module level (PROGRAM file MAP entry) —
                 // fall through to global search so all call sites are found.
             } else {
+                if (isMember && !isProcDecl && graph.isBuilt) {
+                    const declaringPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    const programFile = graph.getProgramFile(declaringPath);
+                    if (programFile) {
+                        const siblingMemberUris = graph.getMemberFiles(programFile)
+                            .map(memberFile => fsPathToUri(memberFile.replace(/\//g, '\\')));
+                        if (siblingMemberUris.length > 0) {
+                            logger.test(`[FAR] Scope="module" cross-MEMBER variable → searching ${siblingMemberUris.length} sibling MEMBER file(s)`);
+                            return siblingMemberUris;
+                        }
+                    }
+                }
                 // MEMBER-file module symbols are visible only within that MEMBER module.
                 // PROGRAM-file module-level data (non-procedure) also stays local.
                 logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
@@ -2468,7 +2541,6 @@ export class ReferencesProvider {
         }
 
         // Global (or MEMBER-file procedure): all project source files when a solution is loaded
-        const solutionManager = SolutionManager.getInstance();
         const alwaysInclude = new Set<string>([
             currentDocument.uri,
             symbolInfo.location.uri  // always search the declaration file
@@ -2518,9 +2590,66 @@ export class ReferencesProvider {
             return allFiles;
         }
 
-        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${[...alwaysInclude].length} file(s)`);
+        const noSolutionFiles = this.getNoSolutionConnectedFiles(alwaysInclude, currentDocument);
+        logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${noSolutionFiles.length} connected file(s)`);
 
-        return [...alwaysInclude];
+        return noSolutionFiles;
+    }
+
+    private getNoSolutionConnectedFiles(seedUris: Set<string>, currentDocument: TextDocument): string[] {
+        const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(currentDocument);
+        if (!graph.isBuilt) {
+            return [...seedUris];
+        }
+
+        const results = new Set<string>(seedUris);
+        const visited = new Set<string>();
+        const queue: string[] = [...seedUris].map(uri =>
+            decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\')
+        );
+
+        const enqueueFsPath = (filePath: string | undefined) => {
+            if (!filePath) return;
+            const uri = fsPathToUri(filePath);
+            if (!results.has(uri)) {
+                results.add(uri);
+            }
+            const norm = filePath.toLowerCase().replace(/\\/g, '/');
+            if (!visited.has(norm)) {
+                queue.push(filePath.replace(/\//g, '\\'));
+            }
+        };
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            const normCurrent = current.toLowerCase().replace(/\\/g, '/');
+            if (visited.has(normCurrent)) continue;
+            visited.add(normCurrent);
+
+            const programFile = graph.getProgramFile(current);
+            if (programFile) {
+                enqueueFsPath(programFile);
+                for (const memberFile of graph.getMemberFiles(programFile)) {
+                    enqueueFsPath(memberFile);
+                }
+            }
+
+            for (const memberFile of graph.getMemberFiles(current)) {
+                enqueueFsPath(memberFile);
+            }
+
+            for (const edge of graph.getReverseIncludes(current)) {
+                enqueueFsPath(edge.fromFile);
+            }
+
+            for (const edge of graph.getForwardEdges(current)) {
+                if (edge.type === 'IMPLICIT_INCLUDE') continue;
+                enqueueFsPath(edge.toFile);
+            }
+        }
+
+        return Array.from(results);
     }
 
     /**
@@ -2954,7 +3083,8 @@ export class ReferencesProvider {
     private async findClassTypeReferences(
         word: string,
         document: TextDocument,
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         // Check if the word is a known CLASS type via the class definition indexer
         const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
@@ -2970,20 +3100,21 @@ export class ReferencesProvider {
 
         // It IS a class type — do a global search using the procedure-reference machinery
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
-        return this.findProcedureReferences(word, document, tokens, includeDeclaration);
+        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token);
     }
 
     private async findProcedureReferences(
         word: string,
         document: TextDocument,
         currentTokens: Token[],
-        includeDeclaration: boolean
+        includeDeclaration: boolean,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         // If the current file is a local-MAP implementation target, restrict search
         // to only files reachable via that same procedure-local MAP scope.
         const localScope = getLocalMapScope(document.uri);
         if (localScope?.containingProcedure) {
-            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope);
+            return this.findLocalMapProcedureReferences(word, document, includeDeclaration, localScope, token);
         }
 
         const wordLower = word.toLowerCase();
@@ -3100,7 +3231,7 @@ export class ReferencesProvider {
         const locations: Location[] = [];
         let ycProc = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycProc++);
+            if (await this.yieldIfNeeded(ycProc++, token)) return null;
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 
@@ -3117,7 +3248,8 @@ export class ReferencesProvider {
         word: string,
         document: TextDocument,
         includeDeclaration: boolean,
-        localScope: LocalMapScope
+        localScope: LocalMapScope,
+        token?: CancellationToken
     ): Promise<Location[] | null> {
         const graph = FileRelationshipGraph.getInstance();
         const declaringUri = `file:///${localScope.declaringFile}`;
@@ -3152,7 +3284,7 @@ export class ReferencesProvider {
         const locations: Location[] = [];
         let ycLocalMap = 0;
         for (const fileUri of filesToSearch) {
-            await this.yieldIfNeeded(ycLocalMap++);
+            if (await this.yieldIfNeeded(ycLocalMap++, token)) return null;
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration));
         }
 
@@ -3257,4 +3389,3 @@ export class ReferencesProvider {
         return varNames;
     }
 }
-

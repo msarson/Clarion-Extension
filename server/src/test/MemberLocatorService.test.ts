@@ -88,6 +88,25 @@ suite('MemberLocatorService', () => {
             '  DoWork          PROCEDURE(STRING pArg, LONG pCount)',
             '               END',
         ].join('\n'));
+
+        // Deep inheritance fixtures used to validate parent-chain member resolution
+        fs.writeFileSync(path.join(tmpDir, 'BaseAncestor.inc'), [
+            'BaseAncestor CLASS,TYPE',
+            '  Error LONG',
+            'END',
+        ].join('\n'));
+
+        fs.writeFileSync(path.join(tmpDir, 'MidOne.inc'), [
+            `INCLUDE('BaseAncestor.inc'),ONCE`,
+            'MidOne CLASS(BaseAncestor),TYPE',
+            'END',
+        ].join('\n'));
+
+        fs.writeFileSync(path.join(tmpDir, 'MidTwo.inc'), [
+            `INCLUDE('MidOne.inc'),ONCE`,
+            'MidTwo CLASS(MidOne),TYPE',
+            'END',
+        ].join('\n'));
     });
 
     suiteTeardown(() => {
@@ -190,6 +209,38 @@ suite('MemberLocatorService', () => {
 
             assert.ok(result, 'Should resolve GROUP(GroupType)');
             assert.strictEqual(result!.isClass, false);
+        });
+
+        test('bare QUEUE declaration resolves to its own structure label', async () => {
+            const doc = makeDoc('rv11.clw', [
+                'problems QUEUE',
+                'Diabetes &DiabetesQueueType',
+                'END',
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const result = await service.resolveVariableType('problems', tokens, doc);
+
+            assert.ok(result, 'Should resolve bare QUEUE declaration');
+            assert.strictEqual(result!.typeName, 'problems');
+            assert.strictEqual(result!.isClass, false);
+        });
+
+        test('reference to LIKE alias resolves to underlying type', async () => {
+            const doc = makeDoc('rv10.clw', [
+                'BaseQ QUEUE,TYPE',
+                'Name STRING(20)',
+                'END',
+                'AliasQ LIKE(BaseQ)',
+                'rq &AliasQ',
+                'CODE',
+                'rq &= NEW(AliasQ)',
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const result = await service.resolveVariableType('rq', tokens, doc, 6);
+
+            assert.ok(result, 'Should resolve reference alias type');
+            assert.strictEqual(result!.typeName, 'BaseQ', `Expected alias dereference to BaseQ, got ${result!.typeName}`);
+            assert.strictEqual(result!.isReference, true);
         });
     });
 
@@ -300,6 +351,20 @@ suite('MemberLocatorService', () => {
             assert.ok(result, 'Should find Count property in same-document CLASS');
             assert.ok(result!.type.toUpperCase().includes('LONG'));
         });
+
+        test('resolves inherited member for local class through deep INCLUDE parent chain', async () => {
+            const src = [
+                `INCLUDE('MidTwo.inc'),ONCE`,
+                'LocalClient CLASS(MidTwo)',
+                'END',
+            ].join('\n');
+            const doc = makeDoc('fmic11.clw', src);
+            const result = await service.findMemberInClass('LocalClient', 'Error', doc);
+
+            assert.ok(result, 'Should resolve Error through LocalClient -> MidTwo -> MidOne -> BaseAncestor');
+            assert.ok(result!.file.toLowerCase().includes('baseancestor.inc'));
+            assert.ok(result!.type.toUpperCase().includes('LONG'));
+        });
     });
 
     // =========================================================================
@@ -367,6 +432,22 @@ suite('MemberLocatorService', () => {
             const result = await service.resolveDotAccess('mywidget', 'getname', doc);
 
             assert.ok(result, 'Should resolve case-insensitively end-to-end');
+        });
+
+        test('resolves dot-access member through local class deep parent chain', async () => {
+            const docContent = [
+                `INCLUDE('MidTwo.inc'),ONCE`,
+                'LocalClient CLASS(MidTwo)',
+                'END',
+                'obj LocalClient',
+                'CODE',
+                '  obj.Error',
+            ].join('\n');
+            const doc = makeDoc('da7.clw', docContent);
+            const result = await service.resolveDotAccess('obj', 'Error', doc);
+
+            assert.ok(result, 'Should resolve obj.Error through deep parent chain');
+            assert.ok(result!.file.toLowerCase().includes('baseancestor.inc'));
         });
     });
 

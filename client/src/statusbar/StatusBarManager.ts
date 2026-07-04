@@ -2,6 +2,8 @@ import { window, workspace, StatusBarItem, StatusBarAlignment } from 'vscode';
 import * as path from 'path';
 import { globalSolutionFile, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
+import { buildInitializationStatusText, InitializationStatusPhase } from './InitializationStatusText';
+import { buildOperationStatusText, ClarionOperationType } from './OperationStatusText';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -17,6 +19,133 @@ let buildProjectStatusBarItem: StatusBarItem;
 // of the build-config item at priority 100, since higher priority sits further
 // left on Left-aligned status bars).
 let versionStatusBarItem: StatusBarItem;
+let initializationStatusBarItem: StatusBarItem;
+let operationStatusBarItem: StatusBarItem;
+let initializationHideTimer: ReturnType<typeof setTimeout> | undefined;
+let operationHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearInitializationHideTimer(): void {
+    if (initializationHideTimer) {
+        clearTimeout(initializationHideTimer);
+        initializationHideTimer = undefined;
+    }
+}
+
+function clearOperationHideTimer(): void {
+    if (operationHideTimer) {
+        clearTimeout(operationHideTimer);
+        operationHideTimer = undefined;
+    }
+}
+
+function ensureInitializationStatusBarItem(): StatusBarItem {
+    if (!initializationStatusBarItem) {
+        // Keep this left of version/config/build items while active.
+        initializationStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 103);
+    }
+    return initializationStatusBarItem;
+}
+
+export function updateInitializationStatusBar(
+    phase: InitializationStatusPhase,
+    detail?: string
+): void {
+    clearInitializationHideTimer();
+    const item = ensureInitializationStatusBarItem();
+    item.text = buildInitializationStatusText(phase, detail);
+    item.tooltip = detail
+        ? `Clarion initialization: ${detail}`
+        : 'Clarion initialization in progress';
+    item.show();
+}
+
+export function completeInitializationStatusBar(detail?: string): void {
+    clearInitializationHideTimer();
+    const item = ensureInitializationStatusBarItem();
+    item.text = detail
+        ? `$(check) Clarion: Ready (${detail})`
+        : '$(check) Clarion: Ready';
+    item.tooltip = detail
+        ? `Clarion initialization completed: ${detail}`
+        : 'Clarion initialization completed';
+    item.show();
+    initializationHideTimer = setTimeout(() => {
+        item.hide();
+        initializationHideTimer = undefined;
+    }, 4000);
+}
+
+export function failInitializationStatusBar(message: string): void {
+    clearInitializationHideTimer();
+    const item = ensureInitializationStatusBarItem();
+    item.text = '$(error) Clarion: Initialization failed';
+    item.tooltip = `Clarion initialization failed: ${message}`;
+    item.show();
+}
+
+export function hideInitializationStatusBar(): void {
+    clearInitializationHideTimer();
+    if (initializationStatusBarItem) {
+        initializationStatusBarItem.hide();
+    }
+}
+
+function ensureOperationStatusBarItem(): StatusBarItem {
+    if (!operationStatusBarItem) {
+        operationStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 102);
+    }
+    return operationStatusBarItem;
+}
+
+export function startOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'running', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} in progress: ${detail}`
+        : `Clarion ${operation} in progress`;
+    item.show();
+}
+
+export function succeedOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'success', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} completed: ${detail}`
+        : `Clarion ${operation} completed`;
+    item.show();
+    operationHideTimer = setTimeout(() => {
+        item.hide();
+        operationHideTimer = undefined;
+    }, 4000);
+}
+
+export function failOperationStatusBar(
+    operation: ClarionOperationType,
+    detail?: string
+): void {
+    clearOperationHideTimer();
+    const item = ensureOperationStatusBarItem();
+    item.text = buildOperationStatusText(operation, 'failure', detail);
+    item.tooltip = detail
+        ? `Clarion ${operation} failed: ${detail}`
+        : `Clarion ${operation} failed`;
+    item.show();
+}
+
+export function hideOperationStatusBar(): void {
+    clearOperationHideTimer();
+    if (operationStatusBarItem) {
+        operationStatusBarItem.hide();
+    }
+}
 
 /**
  * Updates the configuration status bar with the current Clarion configuration
@@ -171,6 +300,8 @@ export function hideBuildProjectStatusBar(): void {
  * Call this during extension deactivation
  */
 export function disposeStatusBars(): void {
+    clearInitializationHideTimer();
+    clearOperationHideTimer();
     if (configStatusBarItem) {
         configStatusBarItem.dispose();
     }
@@ -179,5 +310,11 @@ export function disposeStatusBars(): void {
     }
     if (versionStatusBarItem) {
         versionStatusBarItem.dispose();
+    }
+    if (initializationStatusBarItem) {
+        initializationStatusBarItem.dispose();
+    }
+    if (operationStatusBarItem) {
+        operationStatusBarItem.dispose();
     }
 }

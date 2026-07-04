@@ -32,6 +32,7 @@ import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 import * as SolutionInitializer from './solution/SolutionInitializer';
 import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
+import { completeInitializationStatusBar, updateInitializationStatusBar } from './statusbar/StatusBarManager';
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
@@ -47,6 +48,8 @@ let documentManager: DocumentManager | undefined;
 // Helper function to escape special characters in file paths for RegExp
 
 export async function activate(context: ExtensionContext): Promise<void> {
+    updateInitializationStatusBar('activating');
+
     const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
@@ -118,6 +121,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const xmlFileCount = ActivationManager.checkForOpenXmlFiles();
     
     // Phase 6: Start language server
+    updateInitializationStatusBar('starting-language-server');
     await ActivationManager.startClientServer(context, state, xmlFileCount > 0);
     client = state.client;
     
@@ -159,6 +163,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
         workspaceHasBeenTrusted,
         disposables
     );
+
+    // If no solution is being initialized, mark activation ready here.
+    if (!globalSolutionFile) {
+        completeInitializationStatusBar();
+    }
     
     // Always create views
     await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
@@ -336,7 +345,6 @@ export function deactivate(): Thenable<void> | undefined {
     
     return undefined;
 }
-
 
 
 

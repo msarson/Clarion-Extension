@@ -167,6 +167,36 @@ function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[]
 }
 
 /**
+ * #189 Phase 4 (initial) — declaration-position probe for FAR fast-path.
+ *
+ * If the cursor is on a line that has a CodeLens declaration symbol, return its
+ * lens data so `onReferences` can hit the precomputed reference cache in O(1)
+ * (same cache used by CodeLens resolve) before falling back to live FAR scans.
+ */
+function findCodeLensDataAtPosition(
+    document: TextDocument,
+    position: { line: number; character: number }
+): { uri: string; line: number; character: number; symbolName: string } | null {
+    const lenses = codeLensProvider.provideCodeLenses(document);
+    const sameLine = lenses
+        .map(l => l.data as { uri: string; line: number; character: number; symbolName: string } | undefined)
+        .filter((d): d is { uri: string; line: number; character: number; symbolName: string } => !!d && d.line === position.line);
+    if (sameLine.length === 0) return null;
+
+    // Prefer a candidate whose method/proc segment range covers the cursor.
+    for (const data of sameLine) {
+        const shortName = (data.symbolName ?? '').split('.').pop() ?? '';
+        const start = data.character;
+        const end = start + shortName.length;
+        if (position.character >= start && position.character <= end) return data;
+    }
+
+    // Fallback: nearest declaration anchor on this line.
+    sameLine.sort((a, b) => Math.abs(position.character - a.character) - Math.abs(position.character - b.character));
+    return sameLine[0] ?? null;
+}
+
+/**
  * #189 Phase 2 — background precompute for CodeLens reference counts.
  * Builds the existing declaration-keyed cache (`uri:line:char`) once at solution-ready
  * so most `onCodeLensResolve` calls hit O(1) map lookups. Resolve still falls back to
@@ -586,7 +616,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return result;
         };
         const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
-            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator)),
+            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)),
             timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
             timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
             timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),
@@ -2154,7 +2184,7 @@ connection.onDefinition(async (params) => {
 });
 
 // Handle implementation requests
-connection.onImplementation(async (params) => {
+connection.onImplementation(async (params, token) => {
     logger.info(`⏱️ [SERVER] onImplementation received: ${params.textDocument.uri.split('/').pop()} at ${params.position.line}:${params.position.character}`);
     
     if (!serverInitialized) {
@@ -2169,7 +2199,7 @@ connection.onImplementation(async (params) => {
     }
     
     try {
-        const implementation = await implementationProvider.provideImplementation(document, params.position);
+        const implementation = await implementationProvider.provideImplementation(document, params.position, token);
         if (implementation) {
             logger.info(`✅ Found implementation for ${params.textDocument.uri}`);
         } else {
@@ -2183,7 +2213,7 @@ connection.onImplementation(async (params) => {
 });
 
 // Handle find all references requests
-connection.onReferences(async (params: ReferenceParams) => {
+connection.onReferences(async (params: ReferenceParams, token) => {
     logger.info(`📂 Received references request for: ${params.textDocument.uri} at ${params.position.line}:${params.position.character}`);
 
     if (!serverInitialized) {
@@ -2198,8 +2228,28 @@ connection.onReferences(async (params: ReferenceParams) => {
     }
 
     try {
+        // #189 Phase 4 (initial): if cursor is on a declaration symbol that has a
+        // precomputed CodeLens reference entry, serve FAR directly from that cache.
+        // Keeps FAR O(1) for the common declaration-path while preserving the full
+        // live provider fallback for every other case.
+        const lensData = findCodeLensDataAtPosition(document, params.position);
+        if (lensData) {
+            const cacheKey = `${lensData.uri}:${lensData.line}:${lensData.character}`;
+            const cached = codeLensRefCache.get(cacheKey);
+            if (cached) {
+                let refs = cached.refs;
+                if (!params.context.includeDeclaration) {
+                    refs = refs.filter(loc =>
+                        !(loc.uri === lensData.uri && loc.range.start.line === lensData.line)
+                    );
+                }
+                logger.info(`⚡ [FAR] Cache hit for declaration ${cacheKey}: ${refs.length} reference(s)`);
+                return refs;
+            }
+        }
+
         const references = await Promise.race([
-            referencesProvider.provideReferences(document, params.position, params.context),
+            referencesProvider.provideReferences(document, params.position, params.context, token),
             new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
         ]);
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
@@ -2519,8 +2569,8 @@ setTimeout(() => {
 }, 2000);
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection");
-console.error("🚀 SERVER: Starting to listen on connection at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

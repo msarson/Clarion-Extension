@@ -133,6 +133,8 @@ export class DefinitionProvider {
                 const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
                 const methodMatch = afterDot.match(/^(\w+)/);
+                const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
+                const isSelfParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
                 
                 // Extract just the method name from word if it includes the prefix (e.g., "self.SaveFile" -> "SaveFile")
                 let methodName = word;
@@ -204,7 +206,7 @@ export class DefinitionProvider {
                     }
 
                     // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-                    if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
+                    if (isSelfParentChain && beforeDot.includes('.')) {
                         // #131 — arg-classification overlay for chained calls like
                         // SELF.inner.SetValue(args). Resolve the chain to the class that
                         // owns the final member, then pick the matching overload by argument
@@ -233,7 +235,7 @@ export class DefinitionProvider {
                     }
 
                     // SELF.property or PARENT.property (no parentheses) — find the class member declaration
-                    if (!hasParentheses && /^\s*(self|parent)\b/i.test(beforeDot)) {
+                    if (!hasParentheses && isSelfParentChain) {
                         const isSelf = /\bself$/i.test(beforeDot);
                         logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
                         const memberInfo = isSelf
@@ -246,9 +248,9 @@ export class DefinitionProvider {
                     }
 
                     // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
-                    if (!/^\s*(self|parent)\b/i.test(beforeDot)) {
+                    if (!isSelfParentChain) {
                         // Multi-segment variable chain: variable.property.method
-                        if (beforeDot.includes('.')) {
+                        if (isPureChain && beforeDot.includes('.')) {
                             // #131 — arg-classification overlay for typed-var chained calls
                             // like outer.inner.SetValue(args). Same gap and same fix as the
                             // SELF/PARENT chained branch above: resolve the chain's final
@@ -278,8 +280,10 @@ export class DefinitionProvider {
                         const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
-                            const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
-                            const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
+                            // Pass position.line so resolveVariableType can also check procedure
+                            // parameters (e.g. `*WindowInfo Info`). Issue #215.
+                            const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
+                            const classType = typeInfo?.typeName ?? this.findVariableType(tokens, structureName, position.line, document);
                             if (classType) {
                                 logger.info(`Variable "${structureName}" is type "${classType}", looking for member "${methodName}"`);
                                 // #125 — arg-classification overlay: when the typed-var call has
@@ -304,6 +308,24 @@ export class DefinitionProvider {
                                     return result;
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // ✅ #211 DO routine reference: F12 on routine name in `DO RoutineName` → ROUTINE label
+            const doRoutineMatch = line.match(/\bDO\s+(\w+)/i);
+            if (doRoutineMatch) {
+                const routineName = doRoutineMatch[1];
+                if (routineName.toLowerCase() === word.toLowerCase()) {
+                    const routineStart = line.indexOf(routineName, line.toUpperCase().indexOf('DO'));
+                    const routineEnd = routineStart + routineName.length;
+                    if (position.character >= routineStart && position.character <= routineEnd) {
+                        logger.info(`F12 on routine reference: DO ${routineName} — looking for ROUTINE label`);
+                        const routineLocation = this.findRoutineDefinition(routineName, document, position, tokens);
+                        if (routineLocation) {
+                            logger.info(`✅ Found ROUTINE '${routineName}' definition`);
+                            return routineLocation;
                         }
                     }
                 }
@@ -746,9 +768,28 @@ export class DefinitionProvider {
                         return this.findClassMember(tokens, fieldName, document, position.line);
                     }
 
+                    // Multi-segment chain (e.g. obj.inner.error): resolve the final class of
+                    // the chain prefix before the last dot, then resolve member on that class.
+                    if (beforeDot.includes('.')) {
+                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, undefined);
+                        if (chainedInfo) {
+                            logger.info(`Resolved chained field "${beforeDot}.${fieldName}" at ${chainedInfo.file}:${chainedInfo.line}`);
+                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                        }
+                        const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+                        if (finalClass) {
+                            logger.info(`Resolved chain prefix "${beforeDot}" to class "${finalClass}" for field "${fieldName}"`);
+                            const chainedResult = await this.findClassMemberInType(tokens, finalClass, fieldName, document);
+                            if (chainedResult) {
+                                return chainedResult;
+                            }
+                        }
+                    }
+
                     // Try to find as a typed variable (e.g., otherValue.value where otherValue is StringTheory)
-                    const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document);
-                    const classType = typeInfo?.isClass ? typeInfo.typeName : this.findVariableType(tokens, structureName, position.line);
+                    // Pass position.line to also resolve procedure parameters. Issue #215.
+                    const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
+                    const classType = typeInfo?.typeName ?? this.findVariableType(tokens, structureName, position.line, document);
                     if (classType) {
                         logger.info(`Variable ${structureName} is of type ${classType}, looking for member ${fieldName}`);
                         const result = await this.findClassMemberInType(tokens, classType, fieldName, document);
@@ -2171,7 +2212,7 @@ export class DefinitionProvider {
         }
     }
 
-    private findVariableType(tokens: Token[], variableName: string, currentLine: number): string | null {
+    private findVariableType(tokens: Token[], variableName: string, currentLine: number, document?: TextDocument): string | null {
         logger.info(`Looking for type of variable ${variableName}`);
 
         // Find the variable declaration
@@ -2185,11 +2226,32 @@ export class DefinitionProvider {
         );
 
         if (varTokens.length === 0) {
-            // Check if it's a parameter
+            // Check if it's a parameter — parse the enclosing procedure's PROCEDURE() signature
             const currentScope = TokenHelper.getInnermostScopeAtLine(tokens, currentLine);
             if (currentScope) {
-                // TODO: Parse parameters to get type - for now return null
-                logger.info('Variable might be a parameter - parameter type detection not yet implemented');
+                const content = document?.getText();
+                if (content) {
+                    const lines = content.split('\n');
+                    const procedureLine = lines[currentScope.line] ?? '';
+                    const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+                    if (sigMatch?.[1]) {
+                        const wordLower = variableName.toLowerCase();
+                        for (const param of sigMatch[1].split(',')) {
+                            const trimmed = param.trim().replace(/^<(.*)>$/, '$1').trim();
+                            const m = trimmed.match(/^([*&]?\s*[\w:]+)\s+([A-Za-z_][\w:]*)(?:\s*=.*)?$/i);
+                            if (!m) continue;
+                            const paramName = m[2];
+                            const pLower = paramName.toLowerCase();
+                            if (pLower === wordLower || pLower.endsWith(':' + wordLower)) {
+                                const typeName = m[1].trim().replace(/^[*&]\s*/, '').trim();
+                                if (typeName) {
+                                    logger.info(`findVariableType: "${variableName}" is parameter of type "${typeName}"`);
+                                    return typeName;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             return null;
         }
@@ -2343,6 +2405,43 @@ export class DefinitionProvider {
 
         logger.info(`📋 SCOPE-FILTER: Returning ${accessible.length} candidates (sorted by scope distance)`);
         return accessible;
+    }
+
+    /**
+     * #211 — Resolves F12 on a routine name in a `DO RoutineName` statement to the `RoutineName ROUTINE` label
+     * Routines are procedure-local labels; this method scopes the search to the enclosing procedure only.
+     * @param routineName The name of the routine to find (case-insensitive)
+     * @param document The text document
+     * @param position The position of the DO reference
+     * @param tokens The tokens array
+     * @returns A Location pointing to the routine definition, or null if not found
+     */
+    private findRoutineDefinition(routineName: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
+        logger.info(`🔍 [#211] Resolving DO routine reference: "${routineName}"`);
+        
+        const structure = this.tokenCache.getStructure(document);
+        
+        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, position.line);
+        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
+            logger.info(`❌ No enclosing procedure found at line ${position.line}`);
+            return null;
+        }
+        
+        logger.info(`Found enclosing procedure: "${enclosingProc.value}" (lines ${enclosingProc.line}-${enclosingProc.finishesAt})`);
+
+        const routineTokens = structure.findRoutines(routineName).filter(routineToken => {
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+            return parentScope?.line === enclosingProc.line && parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
+        });
+
+        if (routineTokens.length === 0) {
+            logger.info(`❌ No ROUTINE label found for "${routineName}" in procedure "${enclosingProc.value}"`);
+            return null;
+        }
+
+        const routineToken = routineTokens[0];
+        logger.info(`✅ Found ROUTINE "${routineName}" at line ${routineToken.line}`);
+        return Location.create(document.uri, Range.create(routineToken.line, 0, routineToken.line, routineToken.value.length));
     }
 
 }

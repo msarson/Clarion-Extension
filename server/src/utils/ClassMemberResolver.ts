@@ -1,5 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Location, Range } from 'vscode-languageserver-protocol';
+import { CancellationToken } from 'vscode-languageserver';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
@@ -999,7 +1000,8 @@ export class ClassMemberResolver {
         className: string,
         methodName: string,
         memberInfo: MemberInfo,
-        document: TextDocument
+        document: TextDocument,
+        token?: CancellationToken
     ): Promise<Location | null> {
         const declarationSig = ClassMemberResolver.getDeclarationLineText(memberInfo.file, memberInfo.line) ?? undefined;
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -1086,7 +1088,7 @@ export class ClassMemberResolver {
             let scanned = 0;
             for (const project of sm.solution.projects) {
                 for (const sf of project.sourceFiles) {
-                    await cooperativeCheckpoint(scanned++);
+                    if (await cooperativeCheckpoint(scanned++, token)) return null;
                     const fullPath = path.join(project.path, sf.relativePath);
                     if (!fullPath.toLowerCase().endsWith('.clw') || !fs.existsSync(fullPath)) continue;
                     const loc = this.findImplementationInFile(fullPath, className, methodName, declarationSig);

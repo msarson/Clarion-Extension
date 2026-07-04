@@ -20,6 +20,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
@@ -317,6 +318,7 @@ export class SymbolFinderService {
                         searchWord: word
                     };
                 }
+
             }
 
             // If the current scope is a ROUTINE, also search the parent procedure's data section.
@@ -471,6 +473,73 @@ export class SymbolFinderService {
             searchWord: word
         };
     }
+
+    /**
+     * Find a routine-local variable declared in a ROUTINE DATA section.
+     *
+     * Tier 1 shadows the parent procedure's locals, so this must run before the
+     * broader procedure-local search whenever the cursor is inside a ROUTINE.
+     */
+    findRoutineLocalVariable(
+        word: string,
+        tokens: Token[],
+        routineToken: Token,
+        document: TextDocument,
+        originalWord?: string
+    ): SymbolInfo | null {
+        if (routineToken.subType !== TokenType.Routine) {
+            return null;
+        }
+
+        const searchText = originalWord || word;
+        const searchLower = searchText.toLowerCase();
+        const routineDataEnd = routineToken.executionMarker?.line ?? routineToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
+
+        const routineVar = tokens.find(t =>
+            t.line > routineToken.line &&
+            t.line < routineDataEnd &&
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === searchLower
+        );
+
+        if (!routineVar) {
+            return null;
+        }
+
+        const isProcDecl = tokens.some(t =>
+            t.line === routineVar.line &&
+            (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
+            (t.subType === TokenType.MapProcedure ||
+             t.subType === TokenType.GlobalProcedure ||
+             t.subType === TokenType.MethodDeclaration)
+        );
+        if (isProcDecl) {
+            return null;
+        }
+
+        const declaration = tokens
+            .filter(t => t.line === routineVar.line)
+            .map(t => t.value)
+            .join(' ');
+
+        return {
+            token: routineVar,
+            type: SymbolFinderService.extractTypeInfo(routineVar, tokens),
+            scope: {
+                token: routineToken,
+                type: 'local'
+            },
+            location: {
+                uri: document.uri,
+                line: routineVar.line,
+                character: routineVar.start
+            },
+            declaration,
+            originalWord: originalWord || word,
+            searchWord: word
+        };
+    }
     
     /**
      * Find a module-level variable (declared before first PROCEDURE)
@@ -533,6 +602,51 @@ export class SymbolFinderService {
             originalWord: word,
             searchWord: word
         };
+    }
+
+    /**
+     * Find a module-scope variable declared in a sibling MEMBER file of the same PROGRAM.
+     *
+     * Uses FRG MEMBER edges to enumerate sibling MEMBER files, then scans each file's
+     * module scope (between MEMBER and first PROCEDURE) for a matching column-0 label.
+     */
+    public async findModuleVariableInSiblingMembers(
+        word: string,
+        document: TextDocument,
+        _position: { line: number; character: number }
+    ): Promise<SymbolInfo | null> {
+        const graph = FileRelationshipGraph.getInstance();
+        graph.ensureNoSolutionGraphForDocument(document);
+
+        if (!graph.isBuilt) {
+            return null;
+        }
+
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programFile = graph.getProgramFile(currentFilePath);
+        if (!programFile) {
+            return null;
+        }
+
+        const visited = new Set<string>();
+        for (const memberFile of graph.getMemberFiles(programFile)) {
+            const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
+            if (visited.has(normMember)) continue;
+            visited.add(normMember);
+
+            const memberPath = memberFile.replace(/\//g, '\\');
+            if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
+
+            const sibling = this.loadTokensForFile(memberPath);
+            if (!sibling) continue;
+
+            const result = this.findModuleVariable(word, sibling.tokens, sibling.document);
+            if (result) {
+                return result;
+            }
+        }
+
+        return null;
     }
     
     /**
@@ -908,6 +1022,35 @@ export class SymbolFinderService {
             return null;
         }
     }
+
+    private loadTokensForFile(filePath: string): { document: TextDocument; tokens: Token[] } | null {
+        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+
+        let tokens: Token[] | null = this.tokenCache.getTokensByUriCaseInsensitive(uri);
+        let doc: TextDocument | null = null;
+        if (tokens) {
+            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri);
+            if (cachedText !== null) {
+                doc = TextDocument.create(uri, 'clarion', 1, cachedText);
+            }
+        }
+
+        try {
+            if (!tokens || !doc) {
+                if (!fs.existsSync(filePath)) {
+                    return null;
+                }
+                const contents = fs.readFileSync(filePath, 'utf-8');
+                doc = TextDocument.create(uri, 'clarion', 1, contents);
+                tokens = this.tokenCache.getTokens(doc);
+            }
+
+            return { document: doc, tokens };
+        } catch (err) {
+            logger.error(`Error loading sibling MEMBER file ${filePath}: ${err}`);
+            return null;
+        }
+    }
     
     /**
      * Search for a variable/symbol with full word first, then fallback to stripped prefix
@@ -937,6 +1080,9 @@ export class SymbolFinderService {
             // Try module variable
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
+
+            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
+            if (siblingModuleResult) return siblingModuleResult;
             
             // Try global variable
             const globalResult = await this.findGlobalVariable(word, tokens, document);
@@ -951,6 +1097,14 @@ export class SymbolFinderService {
         
         // Phase 1 fix: Try FULL word first
         logger.info(`Trying full word: "${word}"`);
+
+        if (currentScope.subType === TokenType.Routine) {
+            let result = this.findRoutineLocalVariable(word, tokens, currentScope, document);
+            if (result) {
+                logger.info(`✅ Found as routine-local variable: ${word}`);
+                return result;
+            }
+        }
         
         // 1. Try as parameter
         let result = this.findParameter(word, document, currentScope);
@@ -970,6 +1124,12 @@ export class SymbolFinderService {
         result = this.findModuleVariable(word, tokens, document);
         if (result) {
             logger.info(`✅ Found as module variable: ${word}`);
+            return result;
+        }
+
+        result = await this.findModuleVariableInSiblingMembers(word, document, position);
+        if (result) {
+            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
             return result;
         }
         
@@ -997,6 +1157,14 @@ export class SymbolFinderService {
         if (colonIndex > 0) {
             const searchWord = word.substring(colonIndex + 1);
             logger.info(`Full word not found, trying stripped: "${searchWord}"`);
+
+            if (currentScope.subType === TokenType.Routine) {
+                result = this.findRoutineLocalVariable(searchWord, tokens, currentScope, document, word);
+                if (result) {
+                    logger.info(`✅ Found as routine-local variable (stripped): ${searchWord}`);
+                    return result;
+                }
+            }
             
             // Try parameter with stripped word
             result = this.findParameter(searchWord, document, currentScope);
@@ -1017,6 +1185,13 @@ export class SymbolFinderService {
             result = this.findModuleVariable(searchWord, tokens, document);
             if (result) {
                 logger.info(`✅ Found as module variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+
+            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
+            if (result) {
+                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
                 result.originalWord = word;
                 return result;
             }

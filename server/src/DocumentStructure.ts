@@ -631,10 +631,14 @@ export class DocumentStructure {
                 this.handleStructureToken(token, i);
             } else if (token.type === TokenType.EndStatement) {
                 this.handleEndStatementForStructure(token, i);
-            } else if (token.type === TokenType.Label && token.start === 0) {
+            } else if (
+                (token.type === TokenType.Label && token.start === 0) ||
+                token.type === TokenType.Variable ||
+                token.type === TokenType.StructurePrefix
+            ) {
                 // Special case: CODE/DATA at column 0 should be execution markers, not field labels
                 const upperValue = token.value.toUpperCase();
-                if (upperValue === 'CODE' || upperValue === 'DATA') {
+                if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA')) {
                     logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
@@ -646,6 +650,11 @@ export class DocumentStructure {
                     if (structureTypes.includes(parentStructure.value.toUpperCase())) {
                         this.addChildOnce(parentStructure, token);
                         token.parent = parentStructure;
+                        token.isStructureField = true;
+                        token.structureParent = parentStructure;
+                        if (parentStructure.structurePrefix) {
+                            token.structurePrefix = parentStructure.structurePrefix;
+                        }
                         logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
                     }
                 }
