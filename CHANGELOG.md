@@ -16,6 +16,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Bug Fixes**
 
+- 🐛 **Cross-file overload resolution no longer regresses when a stale/unrelated FRG is already built**: `MethodOverloadResolver` now falls back to the legacy INCLUDE walk when the graph has no edges for the active file, preventing chained/cross-file overload sites from silently dropping back to param-count-only selection after the new no-solution FRG work.
 - 🐛 **Cross-file return-value diagnostics now scan unopened project files deterministically** (#162): `validateDiscardedReturnValues` no longer depends on `TokenCache.getAllCachedUris()` alone; it now includes solution source files and uses shared cross-file loading (live buffer/cache/disk) so warnings do not silently depend on which files are open.
 - 🐛 **F12 on `DO RoutineName` now resolves to the matching `ROUTINE` label in the current procedure scope** (#211): DefinitionProvider now uses `DocumentStructure.findRoutines()` plus parent-scope matching, so routine references in `DO ...` statements navigate correctly and do not bleed into unrelated routines.
 - 🐛 **`CLIP(...)` hover now resolves as a built-in function in expression contexts** (#213): hover routing no longer misclassifies keyword collisions (e.g. `CLIP`) as control attributes outside control declarations.
