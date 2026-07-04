@@ -360,5 +360,39 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             assert.ok(((var1!.label as string).toUpperCase()).includes('LONG'),
                 `Expected Var1 label to include LONG, got "${var1!.label as string}"`);
         });
+
+        test('nested queue chain completion resolves from local bare structure root (problems.Diabetes.)', async function () {
+            this.timeout(10000);
+            const content = [
+                'problems QUEUE',
+                'Diabetes &DiabetesQueueType',
+                'END',
+                'DiabetesQueueType QUEUE,TYPE',
+                'medications &medicationsQueueType',
+                'END',
+                'medicationsQueueType QUEUE,TYPE',
+                'code STRING(10)',
+                'END',
+                'CODE',
+                'problems.Diabetes.'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-nested-problems-dot.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 10, character: 'problems.Diabetes.'.length },
+                context: { triggerKind: 2, triggerCharacter: '.' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('MEDICATIONS')),
+                `Expected medications member in: [${names.join(', ')}]`);
+        });
     });
 });

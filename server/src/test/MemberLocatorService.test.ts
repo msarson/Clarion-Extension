@@ -211,6 +211,20 @@ suite('MemberLocatorService', () => {
             assert.strictEqual(result!.isClass, false);
         });
 
+        test('bare QUEUE declaration resolves to its own structure label', async () => {
+            const doc = makeDoc('rv11.clw', [
+                'problems QUEUE',
+                'Diabetes &DiabetesQueueType',
+                'END',
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const result = await service.resolveVariableType('problems', tokens, doc);
+
+            assert.ok(result, 'Should resolve bare QUEUE declaration');
+            assert.strictEqual(result!.typeName, 'problems');
+            assert.strictEqual(result!.isClass, false);
+        });
+
         test('reference to LIKE alias resolves to underlying type', async () => {
             const doc = makeDoc('rv10.clw', [
                 'BaseQ QUEUE,TYPE',

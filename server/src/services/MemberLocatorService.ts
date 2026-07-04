@@ -91,7 +91,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -455,7 +455,7 @@ export class MemberLocatorService {
 
         // 1. Current file (column 0 label or structure)
         const local = tokens.find(t =>
-            t.start === 0 &&
+            this.isVariableLookupCandidate(t) &&
             this.tokenMatchesName(t, varNameLower) &&
             !isExcluded(t.line)
         );
@@ -472,7 +472,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        t.start === 0 && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -504,7 +504,7 @@ export class MemberLocatorService {
             if (!data) continue;
 
             const found = data.tokens.find(t =>
-                t.start === 0 &&
+                this.isVariableLookupCandidate(t) &&
                 this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
@@ -629,6 +629,10 @@ export class MemberLocatorService {
             return t.label?.toLowerCase() === nameLower;
         }
         return false;
+    }
+
+    private isVariableLookupCandidate(t: Token): boolean {
+        return t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0;
     }
 
     /**
@@ -1291,12 +1295,11 @@ export class MemberLocatorService {
 
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
-            if (token.type !== TokenType.Label) continue;
-            if (token.start !== 0) continue;
+            if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (isInsideNested(token.line)) continue;
 
             const raw = docLines[token.line] ?? '';
-            const memberMatch = raw.match(/^(\w+)\s+(.+?)(\s*!.*)?$/);
+            const memberMatch = raw.match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/);
             if (!memberMatch) continue;
 
             const name = memberMatch[1];
@@ -1350,13 +1353,12 @@ export class MemberLocatorService {
 
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
-            if (token.type !== TokenType.Label) continue;
-            if (token.start !== 0) continue;
+            if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
             if (isInsideNested(token.line)) continue;
 
             const memberLine = docLines[token.line] ?? '';
-            const afterMember = memberLine.substring(token.value.length).trimStart();
+            const afterMember = memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart();
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
             if (type.toUpperCase().startsWith('PROCEDURE')) {
@@ -1380,12 +1382,38 @@ export class MemberLocatorService {
      */
     private extractTypeFromToken(token: Token, tokens: Token[]): { typeName: string; isClass: boolean; isReference: boolean } | null {
         const typeStr = SymbolFinderService.extractTypeInfo(token, tokens);
-        if (!typeStr || typeStr === 'UNKNOWN') return null;
 
         // Check whether the next token on the declaration line is a reference (&TypeName)
         const lineTokens = tokens.filter(t => t.line === token.line);
         const idx = lineTokens.indexOf(token);
         const isReference = idx + 1 < lineTokens.length && lineTokens[idx + 1].type === TokenType.ReferenceVariable;
+
+        if (!typeStr || typeStr === 'UNKNOWN') {
+            if (token.type === TokenType.Structure && token.label) {
+                const structureKeyword = token.value.toUpperCase();
+                if (structureKeyword === 'CLASS') return null;
+                return {
+                    typeName: token.label,
+                    isClass: structureKeyword === 'CLASS',
+                    isReference
+                };
+            }
+            if (token.type === TokenType.Label) {
+                const structureToken = lineTokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.start > token.start &&
+                    ['QUEUE', 'GROUP', 'FILE'].includes(t.value.toUpperCase())
+                );
+                if (structureToken) {
+                    return {
+                        typeName: token.value,
+                        isClass: false,
+                        isReference
+                    };
+                }
+            }
+            return null;
+        }
 
         // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
         const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\((\w+)\)$/i);
@@ -1399,7 +1427,37 @@ export class MemberLocatorService {
 
         // Bare structure keywords — can't resolve members
         const bareStructures = new Set(['CLASS', 'QUEUE', 'GROUP', 'FILE', 'RECORD', 'WINDOW', 'VIEW', 'REPORT', 'LIKE', 'PROCEDURE']);
-        if (bareStructures.has(typeStr.toUpperCase())) return null;
+        if (bareStructures.has(typeStr.toUpperCase())) {
+            // Local structure declaration without explicit type argument:
+            //   problems QUEUE
+            //   END
+            // Use its own label as navigable structure name for chained lookups.
+            if (token.type === TokenType.Structure && token.label) {
+                const structureKeyword = typeStr.toUpperCase();
+                if (structureKeyword === 'CLASS') return null;
+                return {
+                    typeName: token.label,
+                    isClass: structureKeyword === 'CLASS',
+                    isReference
+                };
+            }
+            if (token.type === TokenType.Label) {
+                const structureToken = lineTokens.find(t =>
+                    t.type === TokenType.Structure &&
+                    t.start > token.start &&
+                    ['QUEUE', 'GROUP', 'FILE'].includes(t.value.toUpperCase())
+                );
+                if (structureToken) {
+                    const structureKeyword = structureToken.value.toUpperCase();
+                    return {
+                        typeName: token.value,
+                        isClass: structureKeyword === 'CLASS',
+                        isReference
+                    };
+                }
+            }
+            return null;
+        }
 
         // Plain user-defined type name (assumed to be a CLASS/INTERFACE for member access)
         return { typeName: typeStr, isClass: true, isReference };

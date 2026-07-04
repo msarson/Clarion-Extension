@@ -32,6 +32,7 @@ const MAX_CHAIN_DEPTH = 10;
 export class ChainedPropertyResolver {
     private tokenCache = TokenCache.getInstance();
     private memberResolver = new ClassMemberResolver();
+    private memberLocator = new MemberLocatorService();
 
     /**
      * Extracts the rightmost SELF/PARENT chain from a full line prefix.
@@ -68,8 +69,8 @@ export class ChainedPropertyResolver {
 
         // Step 3: look up the final target member in the resolved class
         logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${currentClassName}"`);
-        const result = await this.memberResolver.findMemberInNamedStructure(
-            memberName, currentClassName, document, paramCount
+        const result = await this.memberLocator.findMemberInClass(
+            currentClassName, memberName, document, paramCount
         );
 
         if (result) {
@@ -115,9 +116,8 @@ export class ChainedPropertyResolver {
             currentClassName = await this.resolveParentClassName(document, position, tokens);
         } else {
             // Non-SELF/PARENT root: resolve the variable's declared type
-            const memberLocator = new MemberLocatorService();
-            const typeInfo = await memberLocator.resolveVariableType(segments[0], tokens, document);
-            if (!typeInfo || !typeInfo.isClass) {
+            const typeInfo = await this.memberLocator.resolveVariableType(segments[0], tokens, document);
+            if (!typeInfo) {
                 logger.info(`ChainedPropertyResolver: root "${segments[0]}" not found as class variable`);
                 return null;
             }
@@ -143,8 +143,8 @@ export class ChainedPropertyResolver {
             const segmentName = intermediateSegments[depth];
             logger.info(`ChainedPropertyResolver: resolving segment "${segmentName}" in "${currentClassName}"`);
 
-            const memberInfo = await this.memberResolver.findMemberInNamedStructure(
-                segmentName, currentClassName, document
+            const memberInfo = await this.memberLocator.findMemberInClass(
+                currentClassName, segmentName, document
             );
 
             if (!memberInfo) {

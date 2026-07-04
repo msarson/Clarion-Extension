@@ -321,8 +321,8 @@ export class CompletionProvider {
             return { className: parentClass, callerClass };
         }
 
-        // --- Chained SELF.Segment or PARENT.Segment ---
-        if (chainUpper.startsWith('SELF.') || chainUpper.startsWith('PARENT.')) {
+        // --- Chained expression (SELF/PARENT/variable chains) ---
+        if (chain.includes('.')) {
             return this.resolveChainedSegments(chain, document, position, tokens, callerClass);
         }
 

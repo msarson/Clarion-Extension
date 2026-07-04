@@ -34,6 +34,7 @@ _Release focus: open-solution scope correctness and cross-file resolution; the n
 - 🐛 **Real-world `abutil.clw` dot-access fixes (expression-safe chain detection + MEMBER-parent type resolution)** (#219): typed member access inside expressions like `CHOOSE(NOT Info.Maximized, ...)` now resolves correctly for both hover and F12; lookup now properly reaches MEMBER parent/include layouts and GROUP/QUEUE type members.
 - 🐛 **Removed false `invalid-attribute-context` diagnostics for `Type` identifier usage** (#220): diagnostics now skip attribute validation when keyword-like tokens are used as dot-member suffixes (e.g. `SELF.Sectors.Type`) or as parameter names inside `PROCEDURE(...)` / `FUNCTION(...)` signatures.
 - 🐛 **Deep inherited member lookup now resolves from local classes through INCLUDE ancestors** (#239): when a local class derives from an included library chain (e.g. `LocalClient CLASS(MidType)`), hover/F12/dot-member resolution now continues parent traversal using class declarations resolved from current file, INCLUDE graph, and SDI, instead of stopping when the local class is not present in the declaration index.
+- 🐛 **Nested local structure chains now complete correctly from bare GROUP/QUEUE roots** (#235): dot-completion now resolves non-`SELF` chained expressions like `problems.Diabetes.` by traversing structure members through local queue/group declarations (including indented members), instead of treating the chain as a literal class name and returning no members.
 
 **Performance**
 
