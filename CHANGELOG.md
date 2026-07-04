@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [0.9.9] - Unreleased
 
+**New Features**
+
+- ✨ **Cross-file global-data completion parity for MEMBER files** (#224): word completion now includes PROGRAM-file global symbols while editing MEMBER modules, including both direct globals (e.g. `GLO:*`) and `PRE(...)`-qualified global structure fields (e.g. `TGLO:FieldName`); prefixed completions now insert only the suffix after an already-typed qualifier, so accepting `GLO:Var` after typing `GLO:` no longer duplicates the prefix.
+
 **Bug Fixes**
 
 - 🐛 **F12 on `DO RoutineName` now resolves to the matching `ROUTINE` label in the current procedure scope** (#211): DefinitionProvider now uses `DocumentStructure.findRoutines()` plus parent-scope matching, so routine references in `DO ...` statements navigate correctly and do not bleed into unrelated routines.
@@ -16,6 +20,10 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **Parameter hover on declaration lines now prefers the declaration scope** (#217): hovering `Info` directly in `PROCEDURE(... *WindowInfo Info)` no longer resolves to a same-named local from a sibling procedure.
 - 🐛 **Real-world `abutil.clw` dot-access fixes (expression-safe chain detection + MEMBER-parent type resolution)** (#219): typed member access inside expressions like `CHOOSE(NOT Info.Maximized, ...)` now resolves correctly for both hover and F12; lookup now properly reaches MEMBER parent/include layouts and GROUP/QUEUE type members.
 - 🐛 **Removed false `invalid-attribute-context` diagnostics for `Type` identifier usage** (#220): diagnostics now skip attribute validation when keyword-like tokens are used as dot-member suffixes (e.g. `SELF.Sectors.Type`) or as parameter names inside `PROCEDURE(...)` / `FUNCTION(...)` signatures.
+
+**Performance**
+
+- ⚡ **#187 high-priority search-loop cooperation + cancellation wiring landed**: `WorkspaceSymbolProvider`, `ImplementationProvider`/`ClassMemberResolver` cross-file implementation scans, and `ReferencesProvider` now share cooperative checkpoints and honor LSP cancellation tokens, so superseded Ctrl+T/Ctrl+F12/FAR requests bail early instead of running full solution scans to completion.
 
 ---
 

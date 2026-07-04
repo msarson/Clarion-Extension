@@ -2,6 +2,7 @@ import { CompletionItem, CompletionItemKind } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver';
 import * as fs from 'fs';
+import * as path from 'path';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
@@ -109,6 +110,7 @@ export class WordCompletionProvider {
             // C. Variables / Labels
             // ----------------------------------------------------------------
             this.collectVariables(tokens, scope, procDeclLines, add);
+            this.collectProgramGlobalDataSymbols(tokens, document, add);
 
             // ----------------------------------------------------------------
             // D. Parameters from PROCEDURE(...) signature
@@ -152,7 +154,23 @@ export class WordCompletionProvider {
             // ----------------------------------------------------------------
             if (!partial) return Array.from(seen.values());
             const up = partial.toUpperCase();
-            return Array.from(seen.values()).filter(c => (c.label as string).toUpperCase().startsWith(up));
+            const filtered = Array.from(seen.values()).filter(c => (c.label as string).toUpperCase().startsWith(up));
+
+            // If user already typed a prefix-style qualifier (e.g. "GLO:" or "TGLO:"),
+            // only insert the suffix so selection doesn't duplicate the qualifier.
+            if (partial.includes(':')) {
+                return filtered.map(item => {
+                    const label = String(item.label);
+                    if (label.length > partial.length && label.toUpperCase().startsWith(up)) {
+                        return {
+                            ...item,
+                            insertText: label.substring(partial.length),
+                        };
+                    }
+                    return item;
+                });
+            }
+            return filtered;
 
         } catch (err) {
             logger.error(`WordCompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
@@ -312,6 +330,7 @@ export class WordCompletionProvider {
             }
             // And file-level globals/equates
             this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+            this.collectGlobalPrefixedFields(tokens, add);
             return;
         }
 
@@ -338,11 +357,13 @@ export class WordCompletionProvider {
 
             // Also collect file-level labels (global equates, constants declared before first proc)
             this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+            this.collectGlobalPrefixedFields(tokens, add);
             return;
         }
 
         // Global scope: collect Label tokens before the first procedure
         this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+        this.collectGlobalPrefixedFields(tokens, add);
     }
 
     /** Collect Label tokens before the first procedure (file-level equates, constants, globals). */
@@ -362,6 +383,66 @@ export class WordCompletionProvider {
                 add(t.value, CompletionItemKind.Variable);
             }
         }
+    }
+
+    /** Collect PRE-qualified structure fields in global scope as Prefix:Field labels. */
+    private collectGlobalPrefixedFields(
+        tokens: Token[],
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const firstProcLine = tokens.find(t =>
+            TokenHelper.isProcedureOrFunction(t) &&
+            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)
+        )?.line ?? Number.MAX_SAFE_INTEGER;
+
+        for (const t of tokens) {
+            if (
+                t.isStructureField &&
+                !!t.structurePrefix &&
+                t.line < firstProcLine
+            ) {
+                add(`${t.structurePrefix}:${t.value}`, CompletionItemKind.Variable, 'prefixed field');
+            }
+        }
+    }
+
+    /** Add PROGRAM-file global labels + PRE-qualified fields for MEMBER-file completion parity. */
+    private collectProgramGlobalDataSymbols(
+        tokens: Token[],
+        document: TextDocument,
+        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+    ): void {
+        const graph = FileRelationshipGraph.getInstance();
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programPathRaw = graph.isBuilt
+            ? graph.getProgramFile(currentPath)
+            : this.getProgramFileFromTokens(tokens);
+        const programPath = programPathRaw
+            ? (path.isAbsolute(programPathRaw) ? programPathRaw : path.join(path.dirname(currentPath), programPathRaw))
+            : undefined;
+
+        if (!programPath) return;
+
+        const result = this.getTokensForFile(programPath);
+        if (!result || result.tokens.length === 0) return;
+
+        const programTokens = result.tokens;
+        const procDeclLines = new Set<number>();
+        for (const t of programTokens) {
+            if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
+                procDeclLines.add(t.line);
+            }
+        }
+
+        const isLabel = (t: Token) =>
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.start === 0 &&
+            !t.isStructureField &&
+            (!t.parent || t.parent.type !== TokenType.Structure) &&
+            !procDeclLines.has(t.line);
+
+        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, add);
+        this.collectGlobalPrefixedFields(programTokens, add);
     }
 
     /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */

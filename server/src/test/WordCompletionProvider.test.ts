@@ -311,6 +311,56 @@ suite('WordCompletionProvider', () => {
         });
     });
 
+    suite('Cross-file global data (PROGRAM -> MEMBER)', () => {
+        test('surfaces PROGRAM globals with prefix names in MEMBER file', async () => {
+            const programUri = 'file:///C:/temp/testingdirectsecureserver.clw';
+            const memberUri = 'file:///C:/temp/testingdirectsecureserver001.clw';
+
+            const programDoc = TextDocument.create(programUri, 'clarion', 1, [
+                'TestingDirectSecureServer PROGRAM',
+                'GLO:SessionId   STRING(20)',
+                'SrvData         GROUP,PRE(TGLO)',
+                'PageReceived    LONG',
+                'SocketCount     LONG',
+                '               END',
+                '',
+                'Main PROCEDURE()',
+                'CODE',
+                'END',
+            ].join('\n'));
+
+            const memberDoc = TextDocument.create(memberUri, 'clarion', 1, [
+                '  MEMBER(\'C:\\temp\\testingdirectsecureserver.clw\')',
+                '',
+                'Worker PROCEDURE()',
+                'CODE',
+                '  GLO:',
+                '  TGLO:',
+                'END',
+            ].join('\n'));
+
+            const cache = TokenCache.getInstance();
+            cache.getTokens(programDoc);
+            cache.getTokens(memberDoc);
+
+            const scopeAnalyzer = new ScopeAnalyzer(cache, SolutionManager.getInstance());
+            const provider = new WordCompletionProvider(cache, scopeAnalyzer);
+
+            const gloItems = await provider.provide(memberDoc, { line: 4, character: 6 }, 'GLO:');
+            const tgloItems = await provider.provide(memberDoc, { line: 5, character: 7 }, 'TGLO:');
+            const gloLabels = gloItems.map(i => i.label);
+            const tgloLabels = tgloItems.map(i => i.label);
+            const gloItem = gloItems.find(i => i.label === 'GLO:SessionId');
+            const tgloItem = tgloItems.find(i => i.label === 'TGLO:PageReceived');
+
+            assert.ok(gloLabels.includes('GLO:SessionId'), `Expected GLO:SessionId in: ${gloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('TGLO:PageReceived'), `Expected TGLO:PageReceived in: ${tgloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('TGLO:SocketCount'), `Expected TGLO:SocketCount in: ${tgloLabels.join(', ')}`);
+            assert.strictEqual(gloItem?.insertText, 'SessionId', `Expected suffix insertText for GLO:, got: ${gloItem?.insertText}`);
+            assert.strictEqual(tgloItem?.insertText, 'PageReceived', `Expected suffix insertText for TGLO:, got: ${tgloItem?.insertText}`);
+        });
+    });
+
     suite('No completions in comments or strings', () => {
         test('returns results regardless — comment guard is in CompletionProvider', async () => {
             // WordCompletionProvider itself has no comment guard (CompletionProvider handles it)
