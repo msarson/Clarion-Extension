@@ -135,10 +135,14 @@ export class CallSiteArgumentClassifier {
         }
 
         // Step 3: classify each slice.
-        return argSlices.map(slice => this.classifySlice(slice, ctx));
+        // #240: build a name→value map of EQUATE declarations once, so a bare EQUATE
+        // argument can be classified by its constant's literal shape without a resolver
+        // (the hover/def path calls us with no ctx).
+        const equates = this.buildEquateValueMap(tokens);
+        return argSlices.map(slice => this.classifySlice(slice, ctx, equates));
     }
 
-    private classifySlice(slice: Token[], ctx?: ClassifierContext): ArgClassification {
+    private classifySlice(slice: Token[], ctx?: ClassifierContext, equates?: Map<string, string>): ArgClassification {
         // Trim purely-syntactic leading tokens (defensive; tokenizer normally produces clean slices).
         const significant = slice.filter(t =>
             t.type !== TokenType.Comment &&
@@ -157,7 +161,7 @@ export class CallSiteArgumentClassifier {
 
         // Single-token slices: the simple buckets.
         if (significant.length === 1) {
-            return this.classifySingleToken(first, rawText, line, character, ctx);
+            return this.classifySingleToken(first, rawText, line, character, ctx, equates);
         }
 
         // Multi-token: distinguish dotted/prefixed/call-result/expression.
@@ -169,7 +173,8 @@ export class CallSiteArgumentClassifier {
         rawText: string,
         line: number,
         character: number,
-        ctx?: ClassifierContext
+        ctx?: ClassifierContext,
+        equates?: Map<string, string>
     ): ArgClassification {
         switch (first.type) {
             case TokenType.String:
@@ -205,6 +210,15 @@ export class CallSiteArgumentClassifier {
                 // Picture-format may slip through as Variable if tokenizer didn't tag it.
                 if (PICTURE_FORMAT_PATTERN.test(first.value)) {
                     return { kind: 'literal_picture', inferredType: 'STRING', rawText, line, character };
+                }
+                // #240: a bare identifier that names an EQUATE is a named constant. Classify it
+                // by the literal shape of its value (numeric / string / picture) so the overload
+                // resolver treats it like the underlying literal — a constant has no address, so
+                // this also correctly excludes reference-parameter (`*TYPE`) overloads.
+                if (equates) {
+                    const equateArg = this.classifyEquateArgument(
+                        this.stripRefSigil(first.value), rawText, line, character, equates);
+                    if (equateArg) return equateArg;
                 }
                 return {
                     kind: 'variable',
@@ -409,5 +423,81 @@ export class CallSiteArgumentClassifier {
 
     private numericBaseType(literal: string): string {
         return literal.includes('.') ? 'REAL' : 'LONG';
+    }
+
+    // ── #240: EQUATE argument type inference ────────────────────────────────────
+    // An EQUATE is a compile-time named constant (`Label EQUATE(value)`). When it is
+    // passed as a call argument, the compiler resolves overloads by the value's type.
+    // We derive that type from the raw value text captured on the declaration token
+    // (`Token.dataValue`), so it works purely from the token stream (no resolver).
+
+    /** name(upper) → raw parenthesised EQUATE value text (e.g. '100', "'hi'", '@P##'). */
+    private buildEquateValueMap(tokens: Token[]): Map<string, string> {
+        const map = new Map<string, string>();
+        for (const t of tokens) {
+            if (t.dataType === 'EQUATE' && t.dataValue !== undefined && t.value) {
+                const key = t.value.toUpperCase();
+                if (!map.has(key)) map.set(key, t.dataValue); // first declaration wins
+            }
+        }
+        return map;
+    }
+
+    /** Classify a bare identifier that names an EQUATE, or undefined if it isn't one
+     *  (or its value can't be resolved to a literal type — caller falls back to `variable`). */
+    private classifyEquateArgument(
+        name: string,
+        rawText: string,
+        line: number,
+        character: number,
+        equates: Map<string, string>
+    ): ArgClassification | undefined {
+        const inf = this.resolveEquateInferredType(name, equates, new Set<string>());
+        if (!inf) return undefined;
+        return { kind: inf.kind, inferredType: inf.inferredType, rawText, line, character };
+    }
+
+    /** Map an EQUATE's value to a literal kind/type, following alias chains (bounded). */
+    private resolveEquateInferredType(
+        name: string,
+        equates: Map<string, string>,
+        visited: Set<string>
+    ): { kind: ArgKind; inferredType: string } | undefined {
+        const key = name.toUpperCase();
+        if (visited.has(key)) return undefined; // cycle guard
+        const raw = equates.get(key);
+        if (raw === undefined) return undefined;
+        visited.add(key);
+
+        const t = raw.trim();
+        if (t.length === 0) return undefined;                                   // ITEMIZE auto-value etc.
+        if (t.startsWith("'") || t.startsWith('"')) {
+            return { kind: 'literal_string', inferredType: 'STRING' };
+        }
+        if (PICTURE_FORMAT_PATTERN.test(t)) {
+            return { kind: 'literal_picture', inferredType: 'STRING' };
+        }
+        const num = this.classifyNumericLiteral(t);
+        if (num) return num;
+        // Alias to another label, e.g. `Init EQUATE(SetUpProg)` — resolve transitively.
+        if (/^[A-Za-z_][A-Za-z0-9_:]*$/.test(t)) {
+            return this.resolveEquateInferredType(t, equates, visited);
+        }
+        // Constant expression (1+2, BOR(...)), a type keyword (SIGNED EQUATE(LONG)), or
+        // anything unrecognised → let the caller fall back to conservative match-all.
+        return undefined;
+    }
+
+    /** Numeric literal → { literal_numeric, LONG|REAL }, else undefined. Handles decimal,
+     *  scientific, and Clarion radix integers (1111b binary, 777o octal, 1AFh hex). */
+    private classifyNumericLiteral(t: string): { kind: ArgKind; inferredType: string } | undefined {
+        if (/^[+-]?(\d+\.\d+|\.\d+|\d+)([eE][+-]?\d+)?$/.test(t)) {
+            const isReal = t.includes('.') || /[eE]/.test(t);
+            return { kind: 'literal_numeric', inferredType: isReal ? 'REAL' : 'LONG' };
+        }
+        if (/^[+-]?[0-9][0-9a-fA-F]*[bBoOhH]$/.test(t)) {
+            return { kind: 'literal_numeric', inferredType: 'LONG' };
+        }
+        return undefined;
     }
 }
