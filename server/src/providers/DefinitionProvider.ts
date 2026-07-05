@@ -13,6 +13,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
+import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
@@ -38,6 +39,7 @@ export class DefinitionProvider {
     private memberResolver = new ClassMemberResolver();
     private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private argTypeResolver = new ArgumentTypeResolver();
     private mapResolver = new MapProcedureResolver();
     private symbolResolver = new SymbolDefinitionResolver();
     private fileResolver = new FileDefinitionResolver();
@@ -159,7 +161,7 @@ export class DefinitionProvider {
                         // overloads that differ only by argument type).
                         const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
                         if (selfClass) {
-                            const argResolved = this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
+                            const argResolved = await this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
                             if (argResolved) {
                                 logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
                                 return argResolved;
@@ -191,7 +193,7 @@ export class DefinitionProvider {
                         // first-declared overload regardless of argument type).
                         const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
                         if (parentInfo?.parentClassName) {
-                            const argResolved = this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
+                            const argResolved = await this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
                             if (argResolved) {
                                 logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
                                 return argResolved;
@@ -217,7 +219,7 @@ export class DefinitionProvider {
                         if (hasParentheses) {
                             const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                             if (finalClass) {
-                                const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
                                 if (argResolved) {
                                     logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
                                     return argResolved;
@@ -260,7 +262,7 @@ export class DefinitionProvider {
                             if (hasParentheses) {
                                 const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                                 if (finalClass) {
-                                    const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
                                     if (argResolved) {
                                         logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
                                         return argResolved;
@@ -293,7 +295,7 @@ export class DefinitionProvider {
                                 // empty candidates or matchedAll fallback (preserves UX for cross-
                                 // file classes / un-disambiguatable calls).
                                 if (hasParentheses) {
-                                    const argClassifyResult = this.tryArgClassifyResolve(
+                                    const argClassifyResult = await this.tryArgClassifyResolve(
                                         tokens, document, classType, methodName, position.line);
                                     if (argClassifyResult) {
                                         logger.info(`✅ Arg-classify resolved typed-var "${methodName}" in "${classType}" to line ${argClassifyResult.range.start.line}`);
@@ -1890,13 +1892,13 @@ export class DefinitionProvider {
      *   - the resolver returns `matchedAll=true` (un-disambiguatable; conservative
      *     fallback preserves UX per `feedback_silent_regression_pushback`).
      */
-    private tryArgClassifyResolve(
+    private async tryArgClassifyResolve(
         tokens: Token[],
         document: TextDocument,
         className: string,
         methodName: string,
         callLine: number
-    ): Location | null {
+    ): Promise<Location | null> {
         // The call site's name token is either:
         //   - a bare identifier matching methodName (`Foo(...)`)
         //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
@@ -1912,6 +1914,10 @@ export class DefinitionProvider {
 
         const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
         if (!args) return null;
+
+        // #245 — type member/reference/typed-variable args via the shared resolver so F12
+        // disambiguates the same overload signature help does.
+        await this.argTypeResolver.enrichArgs(args, tokens, document, { line: callLine, character: 0 });
 
         const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
         if (candidates.length < 2) return null;
