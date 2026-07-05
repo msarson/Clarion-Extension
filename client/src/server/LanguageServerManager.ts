@@ -152,10 +152,12 @@ export async function startLanguageServer(
     logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     const client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
-    
-    // Start the language client
-    const disposable = client.start();
-    context.subscriptions.push(disposable);
+
+    // Start the language client. In vscode-languageclient@8, start() returns a Promise that
+    // resolves once the client is ready (the @7 onReady() + Disposable-return API was removed);
+    // register stop() for cleanup.
+    await client.start();
+    context.subscriptions.push({ dispose: () => { void client.stop(); } });
 
     // Set the client in the LanguageClientManager
     setLanguageClient(client);

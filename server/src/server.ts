@@ -75,6 +75,7 @@ import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
 import { RenameProvider } from './providers/RenameProvider';
 import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider';
+import { ClarionInlayHintsProvider } from './providers/ClarionInlayHintsProvider';
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
@@ -279,6 +280,7 @@ const referencesProvider = new ReferencesProvider();
 const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
+const inlayHintsProvider = new ClarionInlayHintsProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
 const completionProvider = new CompletionProvider();
 const documentLinkProvider = new DocumentLinkProvider();
@@ -349,6 +351,7 @@ connection.onInitialize((params) => {
                 referencesProvider: true,
                 renameProvider: { prepareProvider: true },
                 documentHighlightProvider: true,
+                inlayHintProvider: true,
                 workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
@@ -2305,6 +2308,21 @@ connection.onDocumentHighlight(async (params) => {
     }
 });
 
+// Inlay hints — implicit-variable types + parameter-name hints at call sites.
+connection.languages.inlayHint.on((params) => {
+    if (!serverInitialized) return null;
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    try {
+        const tokens = getTokens(document);
+        if (!tokens || tokens.length === 0) return [];
+        return inlayHintsProvider.provideInlayHints(document, params.range, tokens);
+    } catch (error) {
+        logger.error(`❌ Error providing inlay hints: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
 // Handle workspace symbol search
 connection.onWorkspaceSymbol(async (params, token) => {
     if (!serverInitialized) return [];
@@ -2423,12 +2441,9 @@ connection.onSignatureHelp(async (params) => {
         if (signatureHelp) {
             logger.debug(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
             logger.debug(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
-            // Convert undefined to null for activeSignature and activeParameter to match protocol
-            return {
-                ...signatureHelp,
-                activeSignature: signatureHelp.activeSignature ?? null,
-                activeParameter: signatureHelp.activeParameter ?? null
-            };
+            // vscode-languageclient@8: activeSignature/activeParameter are optional uinteger
+            // (number | undefined) — the old undefined→null conversion is no longer valid.
+            return signatureHelp;
         } else {
             logger.debug(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
         }

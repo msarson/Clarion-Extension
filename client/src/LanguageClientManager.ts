@@ -38,21 +38,14 @@ export class LanguageClientManager {
      */
     public setClient(client: LanguageClient): void {
         this.client = client;
-        this._isReady = false;
-        
-        // Set up a listener for when the client is ready
-        client.onReady().then(() => {
-            logger.info("✅ Language client is ready");
-            this._isReady = true;
-            
-            // Resolve the ready promise
-            if (this._readyPromiseResolve) {
-                this._readyPromiseResolve();
-                this._readyPromiseResolve = null;
-            }
-        }).catch(error => {
-            logger.error(`❌ Error waiting for language client: ${error instanceof Error ? error.message : String(error)}`);
-        });
+        // vscode-languageclient@8 removed onReady(); the caller awaits client.start() (which
+        // resolves when ready) BEFORE calling setClient, so the client is already ready here.
+        this._isReady = true;
+        logger.info("✅ Language client is ready");
+        if (this._readyPromiseResolve) {
+            this._readyPromiseResolve();
+            this._readyPromiseResolve = null;
+        }
     }
 
     /**
