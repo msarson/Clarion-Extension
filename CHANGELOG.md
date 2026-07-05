@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.0] - Unreleased
 
+**New Features**
+
+- ✨ **Signature help highlights the type-matching overload as you type** (#242): while typing arguments, the active signature now reflects the *types* of the arguments so far — using the same inference as hover / go-to-definition (literals, `EQUATE` values, implicit variables, and typed variables) rather than the previous literal-only heuristic. Passing an `EQUATE`, an implicit variable (`Counter#`), a typed local, or a literal now highlights the overload whose parameter type actually matches.
+
 **Bug Fixes**
 
 - 🐛 **Implicit variables passed as arguments now resolve the correct overload** (#241): sibling of #240 — a Clarion implicit variable (`Counter#`, `Percent$`, `Address"`) was classified as an unknown argument → conservative match-all → wrong/ambiguous overload for hover / go-to-definition. The classifier now infers its type from the label suffix (`#`→`LONG`, `$`→`REAL`, `"`→`STRING`), keeping it a variable (so it can bind the base type or a `*TYPE` reference parameter).

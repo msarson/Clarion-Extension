@@ -6,7 +6,7 @@ import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
-import { ArgClassification } from '../utils/CallSiteArgumentClassifier';
+import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
@@ -28,6 +28,7 @@ logger.setLevel("error");
 export class SignatureHelpProvider {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver = new MethodOverloadResolver();
+    private argClassifier = new CallSiteArgumentClassifier();
     private memberResolver = new ClassMemberResolver();
     private memberLocator = new MemberLocatorService();
     private builtinService = BuiltinFunctionService.getInstance();
@@ -114,7 +115,14 @@ export class SignatureHelpProvider {
             // legacy paramCount-only `selectActiveSignature` when no segments classify
             // (empty call shape, etc.).
             let activeSignature: number;
-            const partialArgs = argSegments.map(s => this.classifyArgText(s));
+            // #242 — classify each already-typed argument with the SAME token-based inference
+            // the hover/go-to-definition path uses (literals, EQUATE #240, implicit vars #241,
+            // dotted/prefixed) plus a resolver for typed variables, so the highlighted overload
+            // matches the argument types. Replaces the former literal-only text heuristic.
+            const ctx: ClassifierContext = {
+                resolveSymbolType: (name) => this.findVariableType(tokens, name, position.line) ?? undefined
+            };
+            const partialArgs = argSegments.map(s => this.argClassifier.classifyArgumentText(s, tokens, ctx));
             const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
             if (hasClassifiableArgs) {
                 // Reshape each SignatureInformation.label (`methodName(...)`) into a
@@ -233,27 +241,6 @@ export class SignatureHelpProvider {
             segments.push(current);
         }
         return segments;
-    }
-
-    /**
-     * #126 — text-based arg classifier for partial-arg shapes the user is
-     * mid-typing. The CallSiteArgumentClassifier's token-based pipeline
-     * needs a closed `(...)` shape; signature help fires while the user is
-     * typing, so we classify the raw segment text via simple heuristics
-     * sufficient for picking the active overload.
-     */
-    private classifyArgText(text: string): ArgClassification {
-        const trimmed = text.trim();
-        if (trimmed === '') {
-            return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
-        }
-        if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
-            return { kind: 'literal_string', rawText: trimmed, line: 0, character: 0 };
-        }
-        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-            return { kind: 'literal_numeric', rawText: trimmed, line: 0, character: 0 };
-        }
-        return { kind: 'variable', rawText: trimmed, line: 0, character: 0 };
     }
 
     /**
@@ -726,7 +713,8 @@ export class SignatureHelpProvider {
         const varTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
              token.type === TokenType.ReferenceVariable ||
-             token.type === TokenType.ImplicitVariable) &&
+             token.type === TokenType.ImplicitVariable ||
+             token.type === TokenType.Label) && // #242: a column-0 typed local declares as a Label
             token.value.toLowerCase() === variableName.toLowerCase() &&
             token.start === 0 &&
             token.line < currentLine

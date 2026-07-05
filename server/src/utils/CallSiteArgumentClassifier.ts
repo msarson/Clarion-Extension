@@ -1,4 +1,5 @@
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { ClarionTokenizer } from '../ClarionTokenizer';
 
 /**
  * Classification of a single call-site argument.
@@ -140,6 +141,29 @@ export class CallSiteArgumentClassifier {
         // (the hover/def path calls us with no ctx).
         const equates = this.buildEquateValueMap(tokens);
         return argSlices.map(slice => this.classifySlice(slice, ctx, equates));
+    }
+
+    /**
+     * #242: classify a single argument given as RAW TEXT (e.g. a signature-help partial
+     * segment, which has no closed `(...)` for the token pipeline above). Tokenizes the text
+     * and runs the same per-argument classification, using `docTokens` for EQUATE resolution
+     * (#240) and an optional `ctx` resolver for typed variables. Lets signature help highlight
+     * the type-matching overload as the user types, identical to the hover/go-to-definition path.
+     */
+    public classifyArgumentText(
+        argText: string,
+        docTokens: Token[],
+        ctx?: ClassifierContext
+    ): ArgClassification {
+        const trimmed = argText.trim();
+        if (trimmed === '') return { kind: 'unknown', rawText: '', line: 0, character: 0 };
+        // Indent before tokenizing: a fragment at column 0 tokenizes in declaration mode
+        // (everything becomes a Label and the implicit-variable suffix is dropped). Two leading
+        // spaces put it in expression context so literals/variables/implicits classify correctly.
+        const significant = new ClarionTokenizer('  ' + argText).tokenize()
+            .filter(t => t.type !== TokenType.Comment && t.value.trim() !== '');
+        if (significant.length === 0) return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
+        return this.classifySlice(significant, ctx, this.buildEquateValueMap(docTokens));
     }
 
     private classifySlice(slice: Token[], ctx?: ClassifierContext, equates?: Map<string, string>): ArgClassification {
