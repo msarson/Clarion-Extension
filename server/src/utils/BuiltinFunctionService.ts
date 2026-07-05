@@ -126,14 +126,18 @@ export class BuiltinFunctionService {
         }
 
         return builtin.signatures.map(sig => {
+            // Defensive: some builtin JSON entries have a signature with no `params` field
+            // (e.g. bare-keyword forms). Treat a missing list as zero parameters rather than
+            // crashing any consumer that maps over it.
+            const sigParams = sig.params ?? [];
             // Create parameter information for each parameter
-            const params = sig.params.map(p => {
+            const params = sigParams.map(p => {
                 const paramName = typeof p === 'string' ? p : p.name;
                 return ParameterInformation.create(paramName);
             });
-            
+
             // Create the signature label: FUNCTIONNAME(param1, param2, ...) → ReturnType
-            const paramLabels = sig.params.map(p => {
+            const paramLabels = sigParams.map(p => {
                 if (typeof p === 'string') {
                     return p;
                 }
