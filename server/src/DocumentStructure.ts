@@ -6,6 +6,7 @@ import { isAttributeKeyword } from './utils/AttributeKeywords';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 import { ControlService } from './utils/ControlService';
+import { ScopeResolver } from './scope/ScopeResolver';
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
@@ -106,6 +107,9 @@ export class DocumentStructure {
     /** Issue #233 (Rule 4): declaring-procedure line -> its Local Derived Method impl tokens.
      * Built by linkLocalDerivedMethodsPass(); read via getMethodsForDeclaringProcedure(). */
     private methodsByDeclaringProcedureLine: Map<number, Token[]> = new Map();
+    /** Issue #233 (Stage 2): lazily-built canonical scope resolver over this structure's tokens.
+     * Cleared at the start of process() so a re-run doesn't serve a stale resolver. */
+    private _scopeResolver?: ScopeResolver;
     /**
      * Flat ?name → all matching FieldEquateLabel tokens across the document.
      * Used by `findControl(name)` (no scope) and `findControlAll(name)`.
@@ -342,6 +346,21 @@ export class DocumentStructure {
      */
     public getTokensByLine(line: number): Token[] | undefined {
         return this.tokensByLine.get(line);
+    }
+
+    /** All tokens backing this structure. Issue #233 — lets ScopeResolver operate over a
+     * cached structure without re-tokenizing. */
+    public getTokens(): Token[] {
+        return this.tokens;
+    }
+
+    /** Issue #233 (Stage 2): the canonical scope resolver for this structure, built once and
+     * cached. Use this instead of ad-hoc range scans for "what scope encloses this line?". */
+    public getScopeResolver(): ScopeResolver {
+        if (!this._scopeResolver) {
+            this._scopeResolver = new ScopeResolver(this.tokens);
+        }
+        return this._scopeResolver;
     }
 
     /**
@@ -593,6 +612,8 @@ export class DocumentStructure {
     }
 
     public process(): void {
+        // Issue #233: any cached scope resolver is stale once we re-derive structure.
+        this._scopeResolver = undefined;
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
 

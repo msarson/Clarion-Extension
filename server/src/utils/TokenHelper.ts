@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
+import { ScopeResolver } from '../scope/ScopeResolver';
 
 /**
  * Shared utility for token and scope navigation
@@ -30,47 +31,16 @@ export class TokenHelper {
      * Implementation of getInnermostScopeAtLine
      */
     public static getInnermostScopeAtLine(tokensOrStructure: Token[] | DocumentStructure, line: number): Token | undefined {
-        // Check if we received a DocumentStructure
-        if ('getParent' in tokensOrStructure) {
-            // 🚀 PERFORMANCE: Use structure's parent index
-            const structure = tokensOrStructure as DocumentStructure;
-            
-            // Get all tokens on this line
-            const lineTokens = structure.getTokensByLine(line);
-            if (!lineTokens || lineTokens.length === 0) {
-                return undefined;
-            }
-            
-            // Find any token on this line
-            const anyToken = lineTokens[0];
-            
-            // Walk up the parent chain to find the innermost scope
-            let current: Token | undefined = anyToken;
-            let innermostScope: Token | undefined = undefined;
-            
-            while (current) {
-                if (this.isScopeDefiningToken(current)) {
-                    innermostScope = current;
-                }
-                current = structure.getParent(current);
-            }
-            
-            return innermostScope;
-        } else {
-            // Legacy implementation using token array (O(n) filter)
-            const tokens = tokensOrStructure as Token[];
-            const scopes = tokens.filter(token =>
-                // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
-                (token.subType === TokenType.Procedure ||
-                    token.subType === TokenType.GlobalProcedure ||
-                    token.subType === TokenType.MethodImplementation ||
-                    token.subType === TokenType.Routine) &&
-                token.line <= line &&
-                (token.finishesAt === undefined || token.finishesAt >= line)
-            );
-
-            return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
-        }
+        // Issue #233 Stage 2: one rule-driven source of truth. Both overloads now return the
+        // INNERMOST enclosing scope (a ROUTINE for a routine-body line — with the procedure as
+        // its parent — a procedure/method for procedure-body lines), Rule-1 aware. Previously
+        // the DocumentStructure path returned the OUTERMOST procedure for routine lines (silently
+        // dropping routine scope) while the legacy Token[] path returned the routine; the two
+        // disagreed. Returns undefined at global/module scope.
+        const resolver = ('getParent' in tokensOrStructure)
+            ? (tokensOrStructure as DocumentStructure).getScopeResolver()
+            : new ScopeResolver(tokensOrStructure as Token[]);
+        return resolver.resolveScopeAt(line).token ?? undefined;
     }
 
     /**
@@ -119,16 +89,6 @@ export class TokenHelper {
             // Return the closest parent (highest line number)
             return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
         }
-    }
-
-    /**
-     * Check if a token defines a scope (procedure, routine, etc.)
-     */
-    private static isScopeDefiningToken(token: Token): boolean {
-        return token.subType === TokenType.Procedure ||
-               token.subType === TokenType.GlobalProcedure ||
-               token.subType === TokenType.MethodImplementation ||
-               token.subType === TokenType.Routine;
     }
 
     /**
