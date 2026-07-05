@@ -71,23 +71,11 @@ export class TokenHelper {
             const structure = tokensOrStructure as DocumentStructure;
             return structure.getParentScope(routineScope);
         } else {
-            // Legacy implementation using token array (O(n) filter)
-            const tokens = tokensOrStructure as Token[];
-            const parentScopes = tokens.filter(token =>
-                (token.subType === TokenType.Procedure ||
-                    token.subType === TokenType.GlobalProcedure ||
-                    token.subType === TokenType.MethodImplementation ||
-                    token.subType === TokenType.MethodDeclaration) &&
-                token.line < routineScope.line &&
-                (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
-            );
-
-            if (parentScopes.length === 0) {
-                return undefined;
-            }
-
-            // Return the closest parent (highest line number)
-            return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
+            // Issue #233 Stage 2: unify the legacy path onto the resolver — the parent scope of
+            // a routine is the enclosing procedure/method in its visible chain. Replaces the old
+            // "closest parent by highest line" range reduce.
+            const node = new ScopeResolver(tokensOrStructure as Token[]).resolveScopeAt(routineScope.line);
+            return node.parent?.token ?? undefined;
         }
     }
 

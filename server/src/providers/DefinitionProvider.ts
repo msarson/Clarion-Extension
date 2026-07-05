@@ -10,6 +10,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -957,31 +958,11 @@ export class DefinitionProvider {
      * Find the current procedure/method context for a given line
      */
     private findCurrentContext(tokens: Token[], currentLine: number): Token | undefined {
-        // First, look for method implementations (Class.Method)
-        for (const token of tokens) {
-            if (token.subType === TokenType.Class &&
-                token.line <= currentLine &&
-                (token.finishesAt === undefined || token.finishesAt >= currentLine)) {
-
-                // Check if this is a method implementation (Class.Method)
-                if (token.value && token.value.includes('.')) {
-                    logger.info(`Found method context: ${token.value} for line ${currentLine}`);
-                    return token;
-                }
-            }
-        }
-
-        // If no method found, look for procedure/routine
-        for (const token of tokens) {
-            if ((token.subType === TokenType.Procedure || token.subType === TokenType.Routine) &&
-                token.line <= currentLine &&
-                (token.finishesAt === undefined || token.finishesAt >= currentLine)) {
-                logger.info(`Found procedure/routine context: ${token.value} for line ${currentLine}`);
-                return token;
-            }
-        }
-
-        return undefined;
+        // Issue #233 Stage 2: use the canonical resolver's innermost scope (procedure / method
+        // impl / routine). Replaces the former FIRST-match scan, which only matched the bare
+        // TokenType.Procedure subtype (missing GlobalProcedure / MethodImplementation) and had a
+        // CLASS-with-dot branch that never fired (a CLASS token's value is 'CLASS').
+        return new ScopeResolver(tokens).resolveScopeAt(currentLine).token ?? undefined;
     }
 
     /**
@@ -1748,29 +1729,15 @@ export class DefinitionProvider {
  * Gets all enclosing scopes from innermost outward (L4 to L2) for fallback resolution
  */
     private getEnclosingScopes(tokens: Token[], innermost: Token): Token[] {
-        const allScopes: Token[] = [];
-
-        let current: Token | undefined = innermost;
-        while (current) {
-            allScopes.push(current);
-            current = this.findEnclosingScope(tokens, current);
-        }
-
-        return allScopes;
-    }
-
-    /**
-     * Finds the next outer scope that encloses the given token
-     */
-    private findEnclosingScope(tokens: Token[], inner: Token): Token | undefined {
-        const candidates = tokens.filter(token =>
-            (token.subType === TokenType.Procedure || token.subType === TokenType.Routine || token.subType === TokenType.Class) &&
-            token.line < inner.line &&
-            (token.finishesAt === undefined || token.finishesAt > inner.line)
-        );
-
-        // Return the closest enclosing one
-        return candidates.length > 0 ? candidates[candidates.length - 1] : undefined;
+        // Issue #233 Stage 2: the enclosing scopes are the resolver's visible scope chain from
+        // the innermost scope outward (routine → procedure/method → declaring procedure of a
+        // Local Derived Method → …), which is Rule-4 aware — the prior range-walk missed the
+        // declaring procedure because its range ends before the method impl. Synthetic
+        // global/module tiers (null token) are skipped: they carry no scope token to
+        // range-filter against, matching the prior walk which only yielded scope tokens.
+        const chain = new ScopeResolver(tokens).getVisibleScopeChain(innermost.line);
+        const scopes = chain.map(n => n.token).filter((t): t is Token => t != null);
+        return scopes.length > 0 ? scopes : [innermost];
     }
 
     /**
