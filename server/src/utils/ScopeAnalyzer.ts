@@ -4,6 +4,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from './TokenHelper';
+import { ScopeKind } from '../scope/ScopeTypes';
 import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
 import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
@@ -55,8 +56,20 @@ export class ScopeAnalyzer {
 
         const isProgramFile = this.isProgramFile(tokens);
         const memberModuleName = this.getMemberModuleName(tokens);
-        const containingProcedure = this.findContainingProcedure(tokens, position.line);
-        const containingRoutine = this.findContainingRoutine(tokens, position.line);
+
+        // Issue #233 Stage 2: derive the containing scope from the canonical ScopeResolver
+        // (innermost, Rule-1 aware) instead of the former independent FIRST-match range scans.
+        // For a routine-body line this yields the routine plus its enclosing procedure, matching
+        // the previous ScopeInfo shape; for overlapping/nested ranges it is strictly more correct.
+        const node = this.tokenCache.getStructure(document).getScopeResolver().resolveScopeAt(position.line);
+        let containingProcedure: Token | undefined;
+        let containingRoutine: Token | undefined;
+        if (node.kind === ScopeKind.Routine) {
+            containingRoutine = node.token ?? undefined;
+            containingProcedure = node.parent?.token ?? undefined;
+        } else if (node.kind === ScopeKind.Procedure || node.kind === ScopeKind.Method) {
+            containingProcedure = node.token ?? undefined;
+        }
 
         // Determine scope level
         let scopeLevel: ScopeLevel;
@@ -396,23 +409,8 @@ export class ScopeAnalyzer {
         return undefined;
     }
 
-    private findContainingProcedure(tokens: Token[], line: number): Token | undefined {
-        return tokens.find(token =>
-            (token.subType === TokenType.Procedure ||
-             token.subType === TokenType.GlobalProcedure ||
-             token.subType === TokenType.MethodImplementation) &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-    }
-
-    private findContainingRoutine(tokens: Token[], line: number): Token | undefined {
-        return tokens.find(token =>
-            token.subType === TokenType.Routine &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-    }
+    // findContainingProcedure / findContainingRoutine removed in #233 Stage 2 — getTokenScope
+    // now derives the containing scope from ScopeResolver.resolveScopeAt (see above).
 
     /**
      * Get tokens from a MAP block, including tokens from INCLUDEd files

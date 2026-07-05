@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 **Bug Fixes**
 
 - 🐛 **Local Derived Method scope no longer leaks other procedures' locals** (#233): hover / F12 inside a method of a class declared in a procedure's local data now resolve variables against *only* that declaring procedure (not a broad scan of every global procedure), so completion and hover agree and same-named locals in unrelated procedures are no longer mixed in.
+- 🐛 **Routine-body scope is no longer silently dropped** (#233): the shared "innermost scope at line" helper returned the enclosing *procedure* for lines inside a `ROUTINE` (via its dominant code path), losing routine scope for hover / definition / member resolution; it now consistently returns the `ROUTINE`. Also hardens class-member INCLUDE resolution against a missing redirection parser.
 
 **Internal / Substrate**
 

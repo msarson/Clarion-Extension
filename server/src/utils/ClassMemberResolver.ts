@@ -418,6 +418,7 @@ export class ClassMemberResolver {
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
+                    if (!redirectionParser) continue; // #233 Stage 2: project may have no redirection parser
                     const resolved = redirectionParser.findFile(includeFileName);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         resolvedPath = resolved.path;
