@@ -117,3 +117,8 @@ jobs:
           git add package.json package-lock.json CHANGELOG.md
           git commit -m "chore: Bump version to ${{ inputs.next_version }} and add changelog stub"
           git push origin version-${{ inputs.next_version }}
+
+      - name: Delete released version branch
+        # Runs only if every prior step succeeded (merge, release, publish, next-branch).
+        # History is preserved in master and the v${{ inputs.version }} tag, so the branch is safe to remove.
+        run: git push origin --delete version-${{ inputs.version }}
