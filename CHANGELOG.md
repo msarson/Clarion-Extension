@@ -10,6 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **New Features**
 
+- ✨ **Member / reference / cross-file arguments now type-resolve for signature help** (#243): a dotted member access (`Self.Probs`), a reference variable (`x &SomeType`), or a cross-file-declared argument now resolves to its declared type — both the type **name** (to match a user parameter like `*MyQueueType`) and its structure **kind** (to match a built-in parameter typed `QUEUE`/`GROUP`/`FILE`). So `GET(Self.Probs, )` where `Probs` is a `&QUEUE` reference now highlights a `GET(QUEUE …)` overload instead of the default `GET(FILE …)`, and the active-overload fallback highlights the first *compatible* overload rather than an arbitrary one. Builds on #242 by wiring the existing member resolver into argument classification.
 - ✨ **Signature help highlights the type-matching overload as you type** (#242): while typing arguments, the active signature now reflects the *types* of the arguments so far — using the same inference as hover / go-to-definition (literals, `EQUATE` values, implicit variables, and typed variables) rather than the previous literal-only heuristic. Passing an `EQUATE`, an implicit variable (`Counter#`), a typed local, or a literal now highlights the overload whose parameter type actually matches.
 
 **Bug Fixes**

@@ -8,6 +8,7 @@ import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
@@ -30,6 +31,7 @@ export class SignatureHelpProvider {
     private overloadResolver = new MethodOverloadResolver();
     private argClassifier = new CallSiteArgumentClassifier();
     private memberResolver = new ClassMemberResolver();
+    private chainedResolver = new ChainedPropertyResolver();
     private memberLocator = new MemberLocatorService();
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
@@ -123,6 +125,20 @@ export class SignatureHelpProvider {
                 resolveSymbolType: (name) => this.findVariableType(tokens, name, position.line) ?? undefined
             };
             const partialArgs = argSegments.map(s => this.argClassifier.classifyArgumentText(s, tokens, ctx));
+            // #243 — the sync ctx above can't type dotted-member / reference / cross-file args
+            // (e.g. `Self.Probs` where `Probs &Problems`). Resolve their declared TYPE NAME via
+            // the (async) member resolver so the type-matching overload is selected.
+            for (let i = 0; i < partialArgs.length; i++) {
+                const a = partialArgs[i];
+                if ((a.kind === 'dotted_var' || a.kind === 'variable') && !a.inferredType) {
+                    const resolved = await this.resolveArgType(argSegments[i], tokens, document, position);
+                    if (resolved) {
+                        a.inferredType = resolved.typeName;
+                        // Structure kind (QUEUE/GROUP/FILE) lets it match a kind-typed builtin param.
+                        if (resolved.structureKind) a.structureKind = resolved.structureKind;
+                    }
+                }
+            }
             const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
             if (hasClassifiableArgs) {
                 // Reshape each SignatureInformation.label (`methodName(...)`) into a
@@ -736,6 +752,76 @@ export class SignatureHelpProvider {
         );
 
         return typeToken ? typeToken.value : null;
+    }
+
+    /**
+     * #243 — resolve the declared TYPE NAME of an argument that the sync classifier context
+     * can't type: a dotted member access (`Self.Probs`, `obj.field`), a reference variable, or
+     * a cross-file declaration. Returns the type name (e.g. `Problems` for `Probs &Problems`)
+     * so overload matching can compare it against a `*Problems` / `Problems` parameter, or
+     * undefined when it can't be resolved (caller keeps the conservative match-all fallback).
+     */
+    private async resolveArgType(
+        segment: string,
+        tokens: Token[],
+        document: TextDocument,
+        position: Position
+    ): Promise<{ typeName: string; structureKind?: string } | undefined> {
+        const text = segment.trim();
+        if (!text) return undefined;
+
+        let typeName: string | undefined;
+
+        const dot = text.lastIndexOf('.');
+        if (dot > 0) {
+            const beforeDot = text.slice(0, dot).trim();
+            const member = text.slice(dot + 1).trim();
+            if (!/^\w+$/.test(member)) return undefined;
+
+            // Resolve the class that owns `member`.
+            let ownerClass: string | null = null;
+            if (beforeDot.toLowerCase() === 'self') {
+                ownerClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
+            } else if (/^&?\w+$/.test(beforeDot)) {
+                const t = await this.memberLocator.resolveVariableType(
+                    beforeDot.replace(/^&/, ''), tokens, document, position.line);
+                ownerClass = t?.typeName ?? null;
+            } else {
+                ownerClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
+            }
+            if (!ownerClass) return undefined;
+
+            const memberInfo = await this.memberLocator.findMemberInClass(ownerClass, member, document);
+            if (!memberInfo?.type) return undefined;
+            // extractClassName strips a leading `&` (reference) / LIKE(...) and returns undefined
+            // for Clarion primitives — for a queue/group/file TYPE it yields the TYPE name.
+            typeName = ClassMemberResolver.extractClassName(memberInfo.type) ?? undefined;
+        } else if (/^&?\w+$/.test(text)) {
+            // Simple identifier: typed / reference / cross-file variable (resolver dereferences `&`).
+            const t = await this.memberLocator.resolveVariableType(
+                text.replace(/^&/, ''), tokens, document, position.line);
+            typeName = t?.typeName ?? undefined;
+        }
+
+        if (!typeName) return undefined;
+        return { typeName, structureKind: this.resolveTypeStructureKind(typeName, tokens) };
+    }
+
+    /**
+     * #243 — the structure KIND (`QUEUE` / `GROUP` / `FILE` / `RECORD` / …) of a declared type,
+     * so a structure-instance argument can match a builtin parameter typed by kind (e.g. GET's
+     * `QUEUE queue`). Found from the type's column-0 declaration line in the current file.
+     * Undefined for class/scalar types or when the declaration isn't local.
+     */
+    private resolveTypeStructureKind(typeName: string, tokens: Token[]): string | undefined {
+        const nameU = typeName.toUpperCase();
+        const decl = tokens.find(t =>
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toUpperCase() === nameU);
+        if (!decl) return undefined;
+        const structTok = tokens.find(t => t.line === decl.line && t.type === TokenType.Structure);
+        return structTok?.value.toUpperCase();
     }
 
     /**
