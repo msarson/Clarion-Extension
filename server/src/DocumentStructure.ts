@@ -103,6 +103,9 @@ export class DocumentStructure {
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
     private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
+    /** Issue #233 (Rule 4): declaring-procedure line -> its Local Derived Method impl tokens.
+     * Built by linkLocalDerivedMethodsPass(); read via getMethodsForDeclaringProcedure(). */
+    private methodsByDeclaringProcedureLine: Map<number, Token[]> = new Map();
     /**
      * Flat ?name → all matching FieldEquateLabel tokens across the document.
      * Used by `findControl(name)` (no scope) and `findControlAll(name)`.
@@ -691,6 +694,16 @@ export class DocumentStructure {
         // `implementedInterfaces` array (set in handleStructureToken).
         this.linkImplementorsPass();
 
+        // Issue #233 (Rule 1): stamp each procedure/method-impl/routine with its executable
+        // extent end (`codeFinishesAt`). Runs after the parentIndex rebuild + closures so
+        // `children` and `finishesAt` are final. Additive — never mutates `finishesAt`.
+        this.computeCodeExtents();
+
+        // Issue #233 (Rule 4): link Local Derived Method implementations to the procedure
+        // whose LOCAL data declared their CLASS. Depends on structuresByType (CLASS) and the
+        // parentIndex, both final by now.
+        this.linkLocalDerivedMethodsPass();
+
         // Invalidate the lazy logical-line cache. process() can run more than
         // once on the same DS (e.g. TokenCache fallbacks), and stale chains
         // would point at out-of-date Token references.
@@ -1130,6 +1143,134 @@ export class DocumentStructure {
                 else this.implementorsByInterface.set(key, [cls]);
             }
         }
+    }
+
+    /**
+     * Issue #233 (Rule 1). Stamps `codeFinishesAt` on every PROCEDURE / METHODIMPL / ROUTINE.
+     *
+     * Clarion rule: a procedure's executable code ends at the first of {its first ROUTINE,
+     * the next PROCEDURE, EOF}. `finishesAt` already handles "next PROCEDURE / EOF" (it is set
+     * only at those boundaries), but it deliberately spans PAST the procedure's own routines.
+     * So the only missing case is the first-ROUTINE truncation, derived here from the already
+     * populated `children`. For a routine (which cannot contain routines) and for a procedure
+     * with no routines, `codeFinishesAt` == `finishesAt`.
+     *
+     * Purely additive: `finishesAt` is never changed, so the ~30 existing consumers are untouched.
+     */
+    private computeCodeExtents(): void {
+        for (const token of this.tokens) {
+            const sub = token.subType;
+            const isProcedure =
+                sub === TokenType.Procedure ||
+                sub === TokenType.GlobalProcedure ||
+                sub === TokenType.MethodImplementation;
+            const isRoutine = sub === TokenType.Routine;
+            if (!isProcedure && !isRoutine) continue;
+            if (token.finishesAt === undefined) continue;
+
+            if (isRoutine) {
+                token.codeFinishesAt = token.finishesAt;
+                continue;
+            }
+
+            // Procedure / method-impl: pull back to the line before the first child ROUTINE.
+            let firstRoutineLine: number | undefined;
+            for (const child of token.children ?? []) {
+                if (child.subType === TokenType.Routine) {
+                    if (firstRoutineLine === undefined || child.line < firstRoutineLine) {
+                        firstRoutineLine = child.line;
+                    }
+                }
+            }
+            token.codeFinishesAt =
+                firstRoutineLine !== undefined
+                    ? Math.min(firstRoutineLine - 1, token.finishesAt)
+                    : token.finishesAt;
+        }
+    }
+
+    /**
+     * Issue #233 (Rule 4). Links "Local Derived Methods" to their declaring procedure.
+     *
+     * A CLASS declared in a procedure's LOCAL data section produces methods that share the
+     * declaring procedure's scope (its local data AND routines are visible inside them). The
+     * language requires such methods to be implemented in the same module, immediately after
+     * the declaring procedure. We therefore:
+     *   1. Collect every CLASS whose enclosing scope is a GlobalProcedure (a procedure-local
+     *      class) → record it on `procedure.localClassTokens` and index by class name.
+     *   2. For each MethodImplementation `Class.Method`, if `Class` names a procedure-local
+     *      class, bind it to the NEAREST PRECEDING such procedure (deterministic per the
+     *      "immediately after" placement rule) via `declaringProcedureLine`.
+     *
+     * This replaces the prior heuristic of broad-scanning ALL global procedures.
+     */
+    private linkLocalDerivedMethodsPass(): void {
+        this.methodsByDeclaringProcedureLine.clear();
+
+        // class-name (upper) -> declaring GlobalProcedure tokens, in source order
+        const localClassesByName: Map<string, Token[]> = new Map();
+
+        const classes = this.structuresByType.get('CLASS');
+        if (classes) {
+            for (const cls of classes) {
+                const owner = this.getParentScope(cls);
+                if (!owner || owner.subType !== TokenType.GlobalProcedure) continue;
+
+                const className = this.getStructureLabelName(cls);
+                if (!className) continue;
+
+                (owner.localClassTokens ??= []).push(cls);
+                const key = className.toUpperCase();
+                const arr = localClassesByName.get(key);
+                if (arr) arr.push(owner); else localClassesByName.set(key, [owner]);
+            }
+        }
+
+        if (localClassesByName.size === 0) return;
+
+        for (const token of this.tokens) {
+            if (token.subType !== TokenType.MethodImplementation) continue;
+            const label = token.label;
+            if (!label || !label.includes('.')) continue;
+
+            const className = label.split('.')[0].toUpperCase();
+            const candidates = localClassesByName.get(className);
+            if (!candidates) continue;
+
+            // Nearest preceding declaring procedure (a local derived method is implemented
+            // immediately after the procedure that declares its class).
+            let best: Token | undefined;
+            for (const proc of candidates) {
+                if (proc.line <= token.line && (!best || proc.line > best.line)) {
+                    best = proc;
+                }
+            }
+            if (!best) continue;
+
+            token.declaringProcedureLine = best.line;
+            const arr = this.methodsByDeclaringProcedureLine.get(best.line);
+            if (arr) arr.push(token); else this.methodsByDeclaringProcedureLine.set(best.line, [token]);
+        }
+    }
+
+    /**
+     * Returns the column-0 label name declared on a structure token's own line
+     * (e.g. `MyClass` for `MyClass CLASS(Parent)`). Mirrors the topLabel lookup used
+     * by assignMaxLabelLengths. Undefined for anonymous / inline structures.
+     */
+    private getStructureLabelName(structureToken: Token): string | undefined {
+        const sameLine = this.tokensByLine.get(structureToken.line);
+        if (!sameLine) return undefined;
+        const topLabel = sameLine.find(t => t.type === TokenType.Label && t.start === 0);
+        return topLabel?.value;
+    }
+
+    /**
+     * Issue #233 (Rule 4): the Local Derived Method implementation tokens bound to the
+     * GlobalProcedure that begins on `procedureLine`. Empty when none.
+     */
+    public getMethodsForDeclaringProcedure(procedureLine: number): Token[] {
+        return this.methodsByDeclaringProcedureLine.get(procedureLine) ?? [];
     }
 
     /**
