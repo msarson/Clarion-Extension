@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.0] - Unreleased
 
+**Internal / Substrate**
+
+- 🧱 **Canonical scope model foundation** (#233): new deterministic `ScopeResolver` codifying Clarion procedure / routine / local-derived-method scope rules (executable extent, tier visibility, Rule-4 declaring-procedure linkage), plus an additive `Token.codeFinishesAt`. Groundwork toward converging completion/hover/definition scope resolution — no user-facing behavior change yet.
+
 ---
 
 ### [0.9.9] - 2026-07-04

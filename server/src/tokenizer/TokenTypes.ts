@@ -97,6 +97,23 @@ export interface Token {
     executionMarker?: Token;  // ✅ First explicit "CODE" statement (if present)
     hasLocalData?: boolean;   // ✅ True if "DATA" exists before "CODE"
     inferredCode?: boolean;   // ✅ True if "CODE" is implied (not explicitly written)
+    /** Issue #233 (Rule 1): end line of a PROCEDURE / METHODIMPL / ROUTINE's *executable*
+     * extent. Per the Clarion docs, "The end of executable code for the PROCEDURE is defined
+     * as the end of the source file, or the first encounter of a ROUTINE or another PROCEDURE."
+     * So for a procedure that contains routines this is `firstChildRoutine.line - 1`; otherwise
+     * it equals `finishesAt`. Distinct from `finishesAt` (the STRUCTURAL span, which deliberately
+     * runs past a procedure's own routines to the next procedure/EOF and is read by ~30 consumers).
+     * Set by DocumentStructure.computeCodeExtents(). Undefined for non-scope tokens. */
+    codeFinishesAt?: number;
+    /** Issue #233 (Rule 4): on a MethodImplementation token, the `line` of the GlobalProcedure
+     * whose LOCAL data declared this method's CLASS (a "Local Derived Method"). Such methods share
+     * the declaring procedure's scope — its local data AND routines are visible inside them.
+     * Undefined when the method's class is declared at module/global level (an ordinary method).
+     * Set by DocumentStructure.linkLocalDerivedMethodsPass(). */
+    declaringProcedureLine?: number;
+    /** Issue #233 (Rule 4, inverse): on a GlobalProcedure token, the CLASS structure tokens
+     * declared in its LOCAL data section. Populated by DocumentStructure.linkLocalDerivedMethodsPass(). */
+    localClassTokens?: Token[];
     maxLabelLength: number;   // ✅ Store max label length
     structurePrefix?: string; // ✅ Store structure prefix (e.g., "INV" from PRE(INV))
     isStructureField?: boolean; // ✅ Flag to identify structure fields
