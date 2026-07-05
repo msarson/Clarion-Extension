@@ -205,6 +205,16 @@ export class CallSiteArgumentClassifier {
                     inferredType: ctx?.resolveSymbolType?.(first.value, line, character),
                     rawText, line, character
                 };
+            case TokenType.ImplicitVariable:
+                // #241: an undeclared implicit variable — the compiler infers its type from the
+                // label's trailing suffix (# → LONG, $ → REAL, " → STRING(32)). It is a real
+                // addressable variable, so it keeps the `variable` kind (can bind a base type or
+                // a `*TYPE` ref parameter), unlike an EQUATE constant (#240).
+                return {
+                    kind: 'variable',
+                    inferredType: this.implicitVariableType(first.value),
+                    rawText, line, character
+                };
             case TokenType.Variable:
             case TokenType.ReferenceVariable:
                 // Picture-format may slip through as Variable if tokenizer didn't tag it.
@@ -423,6 +433,16 @@ export class CallSiteArgumentClassifier {
 
     private numericBaseType(literal: string): string {
         return literal.includes('.') ? 'REAL' : 'LONG';
+    }
+
+    /** #241: implicit-variable type from its trailing suffix (# LONG, $ REAL, " STRING(32)). */
+    private implicitVariableType(name: string): string | undefined {
+        switch (name.charAt(name.length - 1)) {
+            case '#': return 'LONG';
+            case '$': return 'REAL';
+            case '"': return 'STRING';
+            default:  return undefined;
+        }
     }
 
     // ── #240: EQUATE argument type inference ────────────────────────────────────
