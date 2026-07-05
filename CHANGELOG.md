@@ -8,9 +8,13 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.0] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **Local Derived Method scope no longer leaks other procedures' locals** (#233): hover / F12 inside a method of a class declared in a procedure's local data now resolve variables against *only* that declaring procedure (not a broad scan of every global procedure), so completion and hover agree and same-named locals in unrelated procedures are no longer mixed in.
+
 **Internal / Substrate**
 
-- 🧱 **Canonical scope model foundation** (#233): new deterministic `ScopeResolver` codifying Clarion procedure / routine / local-derived-method scope rules (executable extent, tier visibility, Rule-4 declaring-procedure linkage), plus an additive `Token.codeFinishesAt`. Groundwork toward converging completion/hover/definition scope resolution — no user-facing behavior change yet.
+- 🧱 **Canonical scope model foundation** (#233): new deterministic `ScopeResolver` codifying Clarion procedure / routine / local-derived-method scope rules (executable extent via the additive `Token.codeFinishesAt`, tier visibility, Rule-4 declaring-procedure linkage). Groundwork toward converging all scope resolution onto one rule set; completion (`WordCompletionProvider`) and hover (`SymbolFinderService`) are the first two consumers migrated.
 
 ---
 

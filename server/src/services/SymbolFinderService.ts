@@ -19,6 +19,7 @@ import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../provide
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
@@ -361,25 +362,25 @@ export class SymbolFinderService {
                 }
             }
 
-            // If the current scope is a method implementation, the class was declared inside
-            // a GlobalProcedure whose locals are shared with the method. Search all GlobalProcedure
-            // data sections (before their CODE line) for the variable.
+            // If the current scope is a Local Derived Method, it shares ONLY its declaring
+            // procedure's scope (Issue #233, Rule 4) — the procedure whose LOCAL data declared
+            // this method's CLASS. Resolve that single procedure deterministically instead of
+            // scanning every GlobalProcedure (the former broad scan leaked unrelated procedures'
+            // locals, so hover disagreed with completion in files with multiple procedures).
             if (scopeToken.subType === TokenType.MethodImplementation) {
-                logger.info(`Scope is MethodImplementation — searching GlobalProcedure scopes for "${searchText}"`);
-                const globalProcs = tokens.filter(t =>
-                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
-                    t.subType === TokenType.GlobalProcedure
-                );
-                for (const gp of globalProcs) {
-                    // Check parameters of the outer procedure first
-                    const paramResult = this.findParameter(word, document, gp);
+                const declaringProc = new ScopeResolver(tokens).findDeclaringProcedureForMethod(scopeToken);
+                if (declaringProc) {
+                    logger.info(`Scope is a Local Derived Method — searching declaring procedure at line ${declaringProc.line} for "${searchText}"`);
+
+                    // Check parameters of the declaring procedure first.
+                    const paramResult = this.findParameter(word, document, declaringProc);
                     if (paramResult) {
-                        logger.info(`✅ Found "${searchText}" as parameter of outer GlobalProcedure at line ${gp.line}`);
+                        logger.info(`✅ Found "${searchText}" as parameter of declaring procedure at line ${declaringProc.line}`);
                         return paramResult;
                     }
 
-                    const gpStart = gp.line;
-                    const gpEnd = gp.finishesAt ?? Number.MAX_SAFE_INTEGER;
+                    const gpStart = declaringProc.line;
+                    const gpEnd = declaringProc.finishesAt ?? Number.MAX_SAFE_INTEGER;
                     const found = tokens.find(t =>
                         t.line >= gpStart && t.line <= gpEnd &&
                         t.start === 0 &&
@@ -395,17 +396,17 @@ export class SymbolFinderService {
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
                         );
-                        if (isProcDecl) continue;
-
-                        logger.info(`✅ Found "${searchText}" in GlobalProcedure scope at line ${found.line}`);
-                        return {
-                            token: found,
-                            type: SymbolFinderService.extractTypeInfo(found, tokens),
-                            scope: { token: gp, type: 'local' },
-                            location: { uri: document.uri, line: found.line, character: found.start },
-                            originalWord: originalWord || word,
-                            searchWord: word
-                        };
+                        if (!isProcDecl) {
+                            logger.info(`✅ Found "${searchText}" in declaring procedure scope at line ${found.line}`);
+                            return {
+                                token: found,
+                                type: SymbolFinderService.extractTypeInfo(found, tokens),
+                                scope: { token: declaringProc, type: 'local' },
+                                location: { uri: document.uri, line: found.line, character: found.start },
+                                originalWord: originalWord || word,
+                                searchWord: word
+                            };
+                        }
                     }
                 }
             }
