@@ -181,7 +181,11 @@ export class MethodOverloadResolver {
 
         scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
         if (scored.length >= 2 && scored[0].score === scored[1].score) {
-            return { activeIndex: 0, ambiguous: true };
+            // #243: ambiguous among the top scorers — highlight the FIRST of them (lowest index),
+            // not a global index 0. When the args narrow it to a family (e.g. the QUEUE overloads
+            // of GET), this keeps the highlight inside that family instead of falling back to an
+            // unrelated overload (the FILE-first GET signature at index 0).
+            return { activeIndex: scored[0].idx, ambiguous: true };
         }
         return { activeIndex: scored[0].idx, ambiguous: false };
     }
@@ -1026,13 +1030,19 @@ export class MethodOverloadResolver {
             case 'dotted_var':
             case 'prefixed_var':
             case 'control_equate': {
-                if (!arg.inferredType) {
+                if (!arg.inferredType && !arg.structureKind) {
                     // Type unknown — default match-all; strict drops `*TYPE`.
                     return strict ? !paramIsRef : true;
                 }
-                const argBase = this.normalizeBaseType(arg.inferredType);
-                // Variable can match either base or ref form of the same type.
-                return this.typesMatch(argBase, paramBase);
+                // #243: match by type NAME (user param `*MyQueueType`) OR by structure KIND
+                // (builtin param typed `QUEUE`/`GROUP`/`FILE`). Either is a valid match.
+                if (arg.inferredType && this.typesMatch(this.normalizeBaseType(arg.inferredType), paramBase)) {
+                    return true;
+                }
+                if (arg.structureKind && this.normalizeBaseType(arg.structureKind) === paramBase) {
+                    return true;
+                }
+                return false;
             }
 
             case 'call_result':
@@ -1080,11 +1090,18 @@ export class MethodOverloadResolver {
             case 'dotted_var':
             case 'prefixed_var':
             case 'control_equate': {
-                if (!arg.inferredType) return 1;
-                const argBase = this.normalizeBaseType(arg.inferredType);
-                const exactMatch = argBase === this.normalizeBaseType(paramBase);
-                if (exactMatch) return paramIsRef ? 2 : 3;
-                if (this.typesMatch(argBase, paramBase)) return paramIsRef ? 0 : 1;
+                if (!arg.inferredType && !arg.structureKind) return 1;
+                if (arg.inferredType) {
+                    const argBase = this.normalizeBaseType(arg.inferredType);
+                    const exactMatch = argBase === this.normalizeBaseType(paramBase);
+                    if (exactMatch) return paramIsRef ? 2 : 3;
+                    if (this.typesMatch(argBase, paramBase)) return paramIsRef ? 0 : 1;
+                }
+                // #243: structure-kind match (e.g. QUEUE arg → `QUEUE` param) — as specific as an
+                // exact type-name match.
+                if (arg.structureKind && this.normalizeBaseType(arg.structureKind) === paramBase) {
+                    return paramIsRef ? 2 : 3;
+                }
                 return 0;
             }
 

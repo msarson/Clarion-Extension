@@ -131,8 +131,12 @@ export class SignatureHelpProvider {
             for (let i = 0; i < partialArgs.length; i++) {
                 const a = partialArgs[i];
                 if ((a.kind === 'dotted_var' || a.kind === 'variable') && !a.inferredType) {
-                    const resolvedType = await this.resolveArgTypeName(argSegments[i], tokens, document, position);
-                    if (resolvedType) a.inferredType = resolvedType;
+                    const resolved = await this.resolveArgType(argSegments[i], tokens, document, position);
+                    if (resolved) {
+                        a.inferredType = resolved.typeName;
+                        // Structure kind (QUEUE/GROUP/FILE) lets it match a kind-typed builtin param.
+                        if (resolved.structureKind) a.structureKind = resolved.structureKind;
+                    }
                 }
             }
             const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
@@ -757,14 +761,16 @@ export class SignatureHelpProvider {
      * so overload matching can compare it against a `*Problems` / `Problems` parameter, or
      * undefined when it can't be resolved (caller keeps the conservative match-all fallback).
      */
-    private async resolveArgTypeName(
+    private async resolveArgType(
         segment: string,
         tokens: Token[],
         document: TextDocument,
         position: Position
-    ): Promise<string | undefined> {
+    ): Promise<{ typeName: string; structureKind?: string } | undefined> {
         const text = segment.trim();
         if (!text) return undefined;
+
+        let typeName: string | undefined;
 
         const dot = text.lastIndexOf('.');
         if (dot > 0) {
@@ -789,16 +795,33 @@ export class SignatureHelpProvider {
             if (!memberInfo?.type) return undefined;
             // extractClassName strips a leading `&` (reference) / LIKE(...) and returns undefined
             // for Clarion primitives — for a queue/group/file TYPE it yields the TYPE name.
-            return ClassMemberResolver.extractClassName(memberInfo.type) ?? undefined;
-        }
-
-        // Simple identifier: typed / reference / cross-file variable (member resolver dereferences `&`).
-        if (/^&?\w+$/.test(text)) {
+            typeName = ClassMemberResolver.extractClassName(memberInfo.type) ?? undefined;
+        } else if (/^&?\w+$/.test(text)) {
+            // Simple identifier: typed / reference / cross-file variable (resolver dereferences `&`).
             const t = await this.memberLocator.resolveVariableType(
                 text.replace(/^&/, ''), tokens, document, position.line);
-            return t?.typeName ?? undefined;
+            typeName = t?.typeName ?? undefined;
         }
-        return undefined;
+
+        if (!typeName) return undefined;
+        return { typeName, structureKind: this.resolveTypeStructureKind(typeName, tokens) };
+    }
+
+    /**
+     * #243 — the structure KIND (`QUEUE` / `GROUP` / `FILE` / `RECORD` / …) of a declared type,
+     * so a structure-instance argument can match a builtin parameter typed by kind (e.g. GET's
+     * `QUEUE queue`). Found from the type's column-0 declaration line in the current file.
+     * Undefined for class/scalar types or when the declaration isn't local.
+     */
+    private resolveTypeStructureKind(typeName: string, tokens: Token[]): string | undefined {
+        const nameU = typeName.toUpperCase();
+        const decl = tokens.find(t =>
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toUpperCase() === nameU);
+        if (!decl) return undefined;
+        const structTok = tokens.find(t => t.line === decl.line && t.type === TokenType.Structure);
+        return structTok?.value.toUpperCase();
     }
 
     /**

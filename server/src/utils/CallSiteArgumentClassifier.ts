@@ -29,6 +29,11 @@ export interface ArgClassification {
     kind: ArgKind;
     /** Base Clarion type when known (e.g. 'STRING', 'LONG', 'MyClass'). Undefined for kinds that need external resolution and no resolver supplied. */
     inferredType?: string;
+    /** #243: structure KIND of the argument's type when it is a structure instance
+     *  (e.g. 'QUEUE', 'GROUP', 'FILE'). Lets a queue argument match a builtin parameter typed
+     *  by kind (`GET(QUEUE queue, …)`) in addition to matching a user parameter by type name
+     *  (`*MyQueueType`). Set by consumers that resolve types (e.g. SignatureHelpProvider). */
+    structureKind?: string;
     /** Text of the argument as written at the call site (whitespace-collapsed). For diagnostics. */
     rawText: string;
     /** 0-based line number of the first token in the argument. */

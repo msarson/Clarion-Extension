@@ -83,4 +83,41 @@ suite('SignatureHelpProvider — dotted-member / reference argument type (#243)'
         assert.strictEqual(result!.activeSignature, 1,
             'a &problems reference variable should highlight the *problems overload');
     });
+
+    // The ACTUAL reported repro: a built-in whose overloads are typed by structure KIND.
+    // GET has 8 overloads; the QUEUE-first ones are indices 2/5/6/7, FILE ones are 0/1/3.
+    // Self.Probs is a QUEUE, so the highlighted overload must have a QUEUE first parameter,
+    // NOT the default FILE one (index 0).
+    const GET_SRC = [
+        '  PROGRAM',                       // 0
+        '  MAP',                           // 1
+        '  END',                           // 2
+        '',                                // 3
+        'problems  QUEUE,TYPE',            // 4
+        'Name        STRING(20)',          // 5
+        '          END',                   // 6
+        '',                                // 7
+        'ThisWindow  CLASS,TYPE',          // 8
+        'Probs         &problems',         // 9
+        'Init          PROCEDURE()',       // 10
+        '            END',                 // 11
+        '',                                // 12
+        '  CODE',                          // 13
+        '',                                // 14
+        'ThisWindow.Init  PROCEDURE()',    // 15
+        '  CODE',                          // 16
+        '  GET(Self.Probs',                // 17  call site (first arg is the queue)
+    ].join('\n');
+
+    test('GET(Self.Probs) highlights a QUEUE overload, not the FILE default (real repro)', async () => {
+        const doc = TextDocument.create('file:///member-arg-243-get.clw', 'clarion', 1, GET_SRC);
+        TokenCache.getInstance().getTokens(doc);
+        const provider = new SignatureHelpProvider();
+        const result = await provider.provideSignatureHelp(doc, { line: 17, character: '  GET(Self.Probs'.length });
+        assert.ok(result && result.signatures.length >= 4, `expected GET overloads, got ${result?.signatures.length}`);
+        const active = result!.signatures[result!.activeSignature as number];
+        const label = (typeof active.label === 'string' ? active.label : '').toUpperCase();
+        assert.ok(/\(\s*QUEUE\b/.test(label),
+            `Self.Probs is a QUEUE — active overload first param must be QUEUE, got: ${active.label}`);
+    });
 });
