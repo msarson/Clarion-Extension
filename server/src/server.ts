@@ -1448,6 +1448,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
     undeclaredVariablesEnabled?: boolean; // #62 opt-in
     indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
     referencesCodeLensEnabled?: boolean; // #185 opt-out
+    inlayHintsParameterNames?: boolean;  // inlay hints opt-out
+    inlayHintsImplicitTypes?: boolean;   // inlay hints opt-out
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1484,6 +1486,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
         if (params.indistinguishablePrototypesEnabled !== undefined) {
             serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
+        }
+        if (params.inlayHintsParameterNames !== undefined) {
+            serverSettings.inlayHintsParameterNames = params.inlayHintsParameterNames === true;
+        }
+        if (params.inlayHintsImplicitTypes !== undefined) {
+            serverSettings.inlayHintsImplicitTypes = params.inlayHintsImplicitTypes === true;
         }
         if (params.referencesCodeLensEnabled !== undefined) {
             serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;

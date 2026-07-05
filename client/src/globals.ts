@@ -346,6 +346,14 @@ export const globalSettings = {
         return workspace.getConfiguration("clarion").get<boolean>("referencesCodeLens.enabled", true);
     },
 
+    get inlayHintsParameterNames() {
+        return workspace.getConfiguration("clarion").get<boolean>("inlayHints.parameterNames.enabled", true);
+    },
+
+    get inlayHintsImplicitTypes() {
+        return workspace.getConfiguration("clarion").get<boolean>("inlayHints.implicitVariableTypes.enabled", true);
+    },
+
     get configuration() {
         return _globalClarionConfiguration;
     },

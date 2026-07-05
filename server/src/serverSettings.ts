@@ -36,6 +36,15 @@ export const serverSettings = {
      */
     referencesCodeLensEnabled: true,
 
+    /**
+     * Inlay hints. Populated from `clarion.inlayHints.*` via the `clarion/updatePaths`
+     * notification; default true so hints appear out of the box. Independently of these,
+     * VS Code's own `editor.inlayHints.enabled` toggles all inlay hints. Toggling requires
+     * a VS Code reload.
+     */
+    inlayHintsParameterNames: true,   // parameter-name hints at call sites
+    inlayHintsImplicitTypes: true,    // implicit-variable type hints (Counter# : LONG)
+
     get primaryRedirectionPath(): string {
         return this.redirectionPaths[0] ?? "";
     },

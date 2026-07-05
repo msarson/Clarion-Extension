@@ -58,6 +58,20 @@ suite('ClarionInlayHintsProvider', () => {
         assert.ok(paramHints.includes('pFlags:'), `expected pFlags: hint; got ${JSON.stringify(paramHints)}`);
     });
 
+    test('parameter-name hints for a built-in function (single signature)', () => {
+        const src = [
+            'MyProc PROCEDURE',
+            'Result STRING(80)',
+            '  CODE',
+            "  Result = CENTER('hi', 40)",   // CENTER(string, length)
+        ].join('\n');
+        const { doc, tokens } = build(src);
+        const hints = provider.provideInlayHints(doc, fullRange(src), tokens);
+        const paramHints = hints.filter(h => label(h.label).trim().endsWith(':')).map(h => label(h.label).trim());
+        assert.ok(paramHints.includes('string:'), `expected string: hint; got ${JSON.stringify(paramHints)}`);
+        assert.ok(paramHints.includes('length:'), `expected length: hint; got ${JSON.stringify(paramHints)}`);
+    });
+
     test('does not emit parameter-name hints for overloaded procedures', () => {
         const src = [
             '  PROGRAM',
