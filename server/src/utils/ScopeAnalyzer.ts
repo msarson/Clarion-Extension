@@ -258,33 +258,32 @@ export class ScopeAnalyzer {
             return false;
         }
 
-        // Same file - check scope hierarchy
-        // Global scope is accessible from anywhere
-        if (declScope.type === 'global') {
+        // Same file — global and module data are always visible within the file/module.
+        if (declScope.type === 'global' || declScope.type === 'module') {
             return true;
         }
 
-        // Module-local is accessible within the same module (file)
-        if (declScope.type === 'module') {
-            return true; // Same file, so same module
-        }
+        // Procedure- and routine-local visibility is decided by the reference's VISIBLE SCOPE
+        // CHAIN (Issue #233, Rules 3–5): the set of scopes reachable from the reference,
+        // innermost → outermost. This is what makes a Local Derived Method see its declaring
+        // procedure's locals (Rule 4) and a ROUTINE see its enclosing procedure's locals (Rule 3),
+        // while still denying access to unrelated procedures/routines.
+        const refChain = this.tokenCache
+            .getStructure(referenceDocument)
+            .getScopeResolver()
+            .getVisibleScopeChain(referenceLocation.line);
 
-        // Procedure-local: accessible from same procedure and its routines
         if (declScope.type === 'procedure') {
-            // Check if reference is in same procedure or a routine within it
-            if (refScope.containingProcedure?.line === declScope.containingProcedure?.line) {
-                return true;
-            }
-            return false;
+            // Visible iff the declaring procedure is one of the reference's visible scopes
+            // (same procedure, one of its routines, or a Local Derived Method of it).
+            const declProcLine = declScope.containingProcedure?.line;
+            return refChain.some(n => n.token != null && n.token.line === declProcLine);
         }
 
-        // Routine-local: only accessible within that routine
         if (declScope.type === 'routine') {
-            // Must be in the exact same routine
-            if (refScope.containingRoutine?.line === declScope.containingRoutine?.line) {
-                return true;
-            }
-            return false;
+            // Routine-local data is visible only from the exact same routine.
+            const declRoutineLine = declScope.containingRoutine?.line;
+            return refChain.some(n => n.kind === ScopeKind.Routine && n.token?.line === declRoutineLine);
         }
 
         return false;

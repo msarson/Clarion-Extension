@@ -12,6 +12,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - 🐛 **Local Derived Method scope no longer leaks other procedures' locals** (#233): hover / F12 inside a method of a class declared in a procedure's local data now resolve variables against *only* that declaring procedure (not a broad scan of every global procedure), so completion and hover agree and same-named locals in unrelated procedures are no longer mixed in.
 - 🐛 **Routine-body scope is no longer silently dropped** (#233): the shared "innermost scope at line" helper returned the enclosing *procedure* for lines inside a `ROUTINE` (via its dominant code path), losing routine scope for hover / definition / member resolution; it now consistently returns the `ROUTINE`. Also hardens class-member INCLUDE resolution against a missing redirection parser.
+- 🐛 **Local Derived Methods can now see their declaring procedure's locals** (#233): the same-file visibility check (`canAccess`, used by go-to-definition/reference filtering) denied a method access to the local data of the procedure that declared its class; it now honors that Rule-4 visibility (and a routine's access to its enclosing procedure's data) via the resolver's visible-scope chain, while still denying unrelated procedures.
 
 **Internal / Substrate**
 
