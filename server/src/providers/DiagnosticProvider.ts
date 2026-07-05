@@ -17,6 +17,7 @@ import { validateMissingMapDeclarations, validateMissingImplementations } from '
 import { validateUnicodeCharacters } from './diagnostics/UnicodeDiagnostics';
 import { validateAttributeApplicability } from './diagnostics/AttributeDiagnostics';
 import { validateItemizeBlocks } from './diagnostics/ItemizeDiagnostics';
+import { validateByRefArguments } from './diagnostics/ByRefArgumentDiagnostics';
 import { validateIndistinguishablePrototypes } from './diagnostics/IndistinguishablePrototypeDiagnostics';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
@@ -65,6 +66,7 @@ export class DiagnosticProvider {
             ...validateAttributeApplicability(tokens, document),
             ...validateItemizeBlocks(tokens, document),
             ...validateIndistinguishablePrototypes(tokens, document),
+            ...validateByRefArguments(tokens, document),
         ];
 
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
