@@ -1233,6 +1233,13 @@ export class DocumentStructure {
 
         const classes = this.structuresByType.get('CLASS');
         if (classes) {
+            // #258: process() runs more than once on shared tokens — a bare push is
+            // non-idempotent (each extra pass duplicated every entry). Reset owners
+            // before rebuilding, mirroring the `branches` reset in populateBranches.
+            for (const cls of classes) {
+                const owner = this.getParentScope(cls);
+                if (owner) owner.localClassTokens = undefined;
+            }
             for (const cls of classes) {
                 const owner = this.getParentScope(cls);
                 if (!owner || owner.subType !== TokenType.GlobalProcedure) continue;

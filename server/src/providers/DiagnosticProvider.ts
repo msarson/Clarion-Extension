@@ -1,6 +1,8 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic } from 'vscode-languageserver/node';
 import { ClarionTokenizer, Token } from '../ClarionTokenizer';
+import { DocumentStructure } from '../DocumentStructure';
+import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
@@ -37,9 +39,17 @@ export class DiagnosticProvider {
     ): Diagnostic[] {
         const perfStart = performance.now();
 
+        // #258: supply ONE DocumentStructure to the validators that need it, instead of
+        // each building + process()ing its own over the same token array (3 redundant
+        // passes per validation cycle, previously). Fresh-tokenize path reuses the
+        // structure tokenize() already built; cache-tokens path reuses the cached one.
+        let structure: DocumentStructure | undefined;
         if (!tokens) {
             const tokenizer = new ClarionTokenizer(document.getText());
             tokens = tokenizer.tokenize();
+            structure = tokenizer.getDocumentStructure() ?? undefined;
+        } else {
+            structure = TokenCache.getInstance().getStructure(document);
         }
 
         const diagnostics: Diagnostic[] = [
@@ -53,7 +63,7 @@ export class DiagnosticProvider {
             // resolves cross-file interfaces via the INCLUDE chain (MemberLocator).
             // See DiagnosticProvider.validateClassInterfaceImplementation + the
             // server.ts await site.
-            ...validateReturnStatements(tokens, document),
+            ...validateReturnStatements(tokens, document, structure),
             ...validateClassProperties(tokens, document),
             ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
             ...validateCycleBreakOutsideLoop(tokens, document),
@@ -63,7 +73,7 @@ export class DiagnosticProvider {
             // and the await at server.ts:340+ next to `validateDiscardedReturnValues`.
             ...validateReservedKeywordLabels(tokens, document),
             ...validateUnicodeCharacters(document),
-            ...validateAttributeApplicability(tokens, document),
+            ...validateAttributeApplicability(tokens, document, structure),
             ...validateItemizeBlocks(tokens, document),
             ...validateIndistinguishablePrototypes(tokens, document),
             ...validateByRefArguments(tokens, document),
@@ -98,7 +108,9 @@ export class DiagnosticProvider {
         document: TextDocument,
         memberLocator: MemberLocatorService
     ): Promise<Diagnostic[]> {
-        return _validateClassInterfaceImplementationAsync(tokens, document, memberLocator);
+        // #258: production callers pass cache tokens — reuse the cached structure.
+        const structure = TokenCache.getInstance().getStructure(document);
+        return _validateClassInterfaceImplementationAsync(tokens, document, memberLocator, structure);
     }
 
     /** Async pass: warn when a procedure implementation has no MAP declaration in the parent file. Closes #89 */

@@ -195,36 +195,52 @@ export class TokenCache {
     }
 
     /**
-     * Get DocumentStructure for a document
-     * DocumentStructure is built on-demand and not cached to avoid performance bottlenecks
-     * @param document The text document
-     * @returns DocumentStructure
+     * Get the DocumentStructure for a document — the SAME instance the tokenize
+     * pipeline built and cached alongside the tokens.
+     *
+     * #258: this method previously snapshotted the cache entry BEFORE calling
+     * getTokens() and then unconditionally re-built + re-processed on any miss —
+     * discarding the structure getTokens() had just cached and running the exact
+     * "second process() pass on shared tokens" hazard warned about elsewhere in
+     * this file. It now re-checks the cache AFTER getTokens() (which populates
+     * `structure` on both the full and incremental paths) and only builds fresh
+     * as a last-resort fallback, storing it on the LIVE cache entry.
      */
     public getStructure(document: TextDocument): DocumentStructure {
         const perfStart = performance.now();
         const uri = document.uri;
         const cached = this.cache.get(uri);
-        
-        // Return cached structure if available and up-to-date
+
+        // Fast path: cached structure, current version.
         if (cached && cached.structure && cached.version === document.version) {
             const perfEnd = performance.now();
             logger.perf(`getStructure`, { result: 'cached', time_ms: (perfEnd - perfStart).toFixed(2) });
             return cached.structure;
         }
-        
-        // Build and cache new structure
-        logger.info(`Building new DocumentStructure for ${uri} (cached=${!!cached}, hasStructure=${!!(cached?.structure)}, version match=${cached?.version === document.version})`);
+
+        // getTokens() tokenizes (full or incremental) and caches the structure it built.
         const tokens = this.getTokens(document);
+
+        // #258: re-fetch — getTokens() replaced/populated the cache entry.
+        const refreshed = this.cache.get(uri);
+        if (refreshed && refreshed.structure && refreshed.version === document.version) {
+            const perfEnd = performance.now();
+            logger.perf(`getStructure`, { result: 'built_by_getTokens', time_ms: (perfEnd - perfStart).toFixed(2) });
+            return refreshed.structure;
+        }
+
+        // Fallback (should be rare — e.g. tokenizer returned no structure): build once
+        // and store on the LIVE entry so repeat calls return the same instance.
+        logger.info(`Building fallback DocumentStructure for ${uri} (entry=${!!refreshed}, hasStructure=${!!(refreshed?.structure)})`);
         const structure = new DocumentStructure(tokens);
         structure.process();
-        
-        if (cached) {
-            cached.structure = structure;
+        if (refreshed) {
+            refreshed.structure = structure;
         }
-        
+
         const perfEnd = performance.now();
         logger.perf(`getStructure`, { result: 'built_new', time_ms: (perfEnd - perfStart).toFixed(2), tokens: tokens.length });
-        
+
         return structure;
     }
 

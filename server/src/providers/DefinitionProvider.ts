@@ -398,7 +398,8 @@ export class DefinitionProvider {
                         tokens,
                         document,
                         position,
-                        line // Pass declaration signature for overload matching
+                        line, // Pass declaration signature for overload matching
+                        this.tokenCache.getStructure(document) // #258: reuse cached structure
                     );
                     
                     if (implLocation) {
@@ -666,7 +667,8 @@ export class DefinitionProvider {
                 const parenClose = line.lastIndexOf(')');
                 return parenOpen >= 0 && position.character > parenOpen && position.character <= parenClose;
             })();
-            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line,
+                this.tokenCache.getStructure(document)); // #258: reuse cached structure
             if (mapProcImpl) {
                 return mapProcImpl;
             }

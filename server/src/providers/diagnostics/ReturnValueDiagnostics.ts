@@ -265,15 +265,19 @@ function isInsideMapOrClass(structure: DocumentStructure, token: Token): boolean
     return false;
 }
 
-export function validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
+export function validateReturnStatements(tokens: Token[], document: TextDocument, documentStructure?: DocumentStructure): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
 
-    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership
-    // (replaces the bespoke depth tracking below). Fresh instance + single process(),
-    // mirroring AttributeDiagnostics/ClassDiagnostics.
-    const structure = new DocumentStructure(tokens);
-    structure.process();
+    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership.
+    // #258: production callers (DiagnosticProvider) pass the CACHED structure — this
+    // previously re-processed the shared token array on every validation cycle. The
+    // build-from-passed-tokens fallback remains for direct callers (tests).
+    let structure = documentStructure;
+    if (!structure) {
+        structure = new DocumentStructure(tokens);
+        structure.process();
+    }
 
     const declarationsWithReturnTypes: Array<{
         name: string;

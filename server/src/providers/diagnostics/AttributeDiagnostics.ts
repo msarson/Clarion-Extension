@@ -28,13 +28,19 @@ const VALIDATABLE_CONTROLS = new Set([
  * that are present in clarion-attributes.json — unknown tokens are silently ignored.
  * Only validates against unambiguous window controls (see VALIDATABLE_CONTROLS).
  */
-export function validateAttributeApplicability(tokens: Token[], document: TextDocument): Diagnostic[] {
+export function validateAttributeApplicability(tokens: Token[], document: TextDocument, documentStructure?: DocumentStructure): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const lines = document.getText().split(/\r?\n/);
 
-    // Build DocumentStructure so we can call getControlContextAt per token
-    const structure = new DocumentStructure(tokens);
-    structure.process();
+    // #258: production callers (DiagnosticProvider) pass the CACHED structure — this
+    // previously re-processed the shared token array on every validation cycle. The
+    // build-from-passed-tokens fallback remains for direct callers (tests) whose
+    // tokens are authoritative and may not be cache-backed.
+    let structure = documentStructure;
+    if (!structure) {
+        structure = new DocumentStructure(tokens);
+        structure.process();
+    }
 
     // Index-based loop (not `for ... of`) so the #175 compound-label-suffix guard
     // can look at neighboring tokens in O(1) per check rather than O(N) per

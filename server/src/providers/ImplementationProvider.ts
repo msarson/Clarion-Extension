@@ -139,7 +139,8 @@ export class ImplementationProvider {
                             tokens,
                             document,
                             mapPosition, // Use MAP position, not call position
-                            line
+                            line,
+                            this.tokenCache.getStructure(document) // #258: reuse cached structure
                         );
                     }
                     
@@ -243,7 +244,8 @@ export class ImplementationProvider {
                         tokens,
                         document,
                         position,
-                        line // Pass declaration signature for overload matching
+                        line, // Pass declaration signature for overload matching
+                        this.tokenCache.getStructure(document) // #258: reuse cached structure
                     );
                     
                     if (implLocation) {

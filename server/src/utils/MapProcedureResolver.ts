@@ -424,11 +424,12 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Check if position is inside a MAP block using DocumentStructure
-        // Use provided structure or create new one (for tests)
+        // Check if position is inside a MAP block using DocumentStructure.
+        // #258: production call sites now pass the CACHED structure via `documentStructure`
+        // (previously all omitted it, re-processing the shared cache tokens on every
+        // hover/F12/Ctrl+F12). The build-from-passed-tokens fallback remains for direct
+        // callers (tests) whose tokens are authoritative and may not be cache-backed.
         const docStructure = documentStructure || new DocumentStructure(tokens);
-        
-        // If we created a new DocumentStructure, ensure it's processed
         if (!documentStructure) {
             docStructure.process();
         }

@@ -97,7 +97,8 @@ export class ProcedureHoverResolver {
                     tokens,
                     document,
                     mapPosition,
-                    line
+                    line,
+                    this.tokenCache.getStructure(document) // #258: reuse cached structure
                 );
                 logger.info(`Implementation found in current document: ${!!procImpl}`);
             }
