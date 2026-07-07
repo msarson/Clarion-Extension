@@ -41,14 +41,17 @@ logger.setLevel("error");
  * source, for every consumer. decodeURIComponent can throw on a malformed escape;
  * fall back to the lowercased raw uri in that case.
  */
-export function canonicalLocationKey(uri: string, line: number): string {
+export function canonicalLocationKey(uri: string, line: number, character?: number): string {
     let normUri: string;
     try {
         normUri = decodeURIComponent(uri).toLowerCase();
     } catch {
         normUri = uri.toLowerCase();
     }
-    return `${normUri}:${line}`;
+    // #253: include the column when provided — keying on uri:line alone collapsed two
+    // genuinely distinct references on one physical line (and rename then edited only
+    // one occurrence per line, silently breaking the compile).
+    return character !== undefined ? `${normUri}:${line}:${character}` : `${normUri}:${line}`;
 }
 
 function fsPathToUri(filePath: string): string {
@@ -555,11 +558,12 @@ export class ReferencesProvider {
             }
         }
 
-        // Deduplicate by uri+line — canonicalize the uri so mixed encodings
-        // (file:///f%3A/… vs file:///f:/…) for the same file collapse (#196).
+        // Deduplicate by uri+line+column — canonicalize the uri so mixed encodings
+        // (file:///f%3A/… vs file:///f:/…) for the same file collapse (#196); the
+        // column keeps two genuine same-line references distinct (#253).
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line, loc.range.start.character);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -948,13 +952,15 @@ export class ReferencesProvider {
         }
 
         logger.info(`✅ Found ${locations.length} member reference(s) to "${memberName}"`);
-        // Deduplicate by uri+line. Canonicalize the uri (decode + lowercase) so the
-        // same file in different case OR encoding shapes — FRG-derived (encoded) vs
+        // Deduplicate by uri+line+column. Canonicalize the uri (decode + lowercase) so
+        // the same file in different case OR encoding shapes — FRG-derived (encoded) vs
         // project-scan-derived (un-encoded file:///f:/…) — collapses (#196). A prior
         // version lowercased but did NOT decode, so f%3a ≠ f: still slipped through.
+        // The column keeps two genuine same-line references distinct (#253) — line-only
+        // keying made rename edit just one occurrence per line (broken compile).
         const seen = new Set<string>();
         const deduped = locations.filter(loc => {
-            const key = canonicalLocationKey(loc.uri, loc.range.start.line);
+            const key = canonicalLocationKey(loc.uri, loc.range.start.line, loc.range.start.character);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
