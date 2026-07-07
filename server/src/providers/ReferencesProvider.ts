@@ -894,6 +894,54 @@ export class ReferencesProvider {
             ? this.gatherClassMemberOverloads(className, memberName, filterDeclFile, document)
             : [];
 
+        // #249: cursor-side anchor enrichment. findClassMemberInfo anchors by ARITY
+        // only, so for same-arity different-type overloads the FIRST-DECLARED overload
+        // won regardless of the cursor call's argument types — and the type-aware
+        // per-call-site filter then EXCLUDED every call site of the correct overload,
+        // including the line FAR was invoked from (rename then rewrote the wrong
+        // family and skipped the renamed occurrence). When the cursor is on a CALL
+        // SITE of an overloaded member, classify its arguments with FAR's own sync
+        // type index and re-point the anchor to the arg-type-matched overload.
+        // Decl/impl-header cursors no-op naturally: the token after the name is
+        // PROCEDURE/FUNCTION, not '(', so classifyArguments returns null.
+        if (candidateOverloads.length > 1 && overloadFilter) {
+            const cursorTokens = this.tokenCache.getTokens(document);
+            const memberLower = memberName.toLowerCase();
+            const callIdx = cursorTokens.findIndex(t =>
+                t.line === position.line && !!t.value &&
+                (t.value.toLowerCase() === memberLower ||
+                 t.value.toLowerCase().endsWith('.' + memberLower)));
+            if (callIdx >= 0) {
+                const cursorVarIndex = this.buildFileVarTypeIndex(cursorTokens);
+                const cursorGlobalScope = this.loadGlobalScopeForCursor(document);
+                const cursorCtx: ClassifierContext = {
+                    resolveSymbolType: (name, line) =>
+                        this.lookupVarTypeAtLine(cursorVarIndex, cursorGlobalScope ?? null, line, name.toLowerCase())
+                };
+                const args = new CallSiteArgumentClassifier().classifyArguments(cursorTokens, callIdx, cursorCtx);
+                if (args && args.length > 0) {
+                    const result = new MethodOverloadResolver().findOverloadByArgClassifications(
+                        args, candidateOverloads.map(c => c.signature));
+                    if (!result.matchedAll && result.matchedIndex >= 0) {
+                        const matched = candidateOverloads[result.matchedIndex];
+                        if (matched.declarationLine !== overloadFilter.declarationLine) {
+                            logger.info(`🎯 [#249] Cursor-call args re-point anchor: decl line ${overloadFilter.declarationLine} → ${matched.declarationLine}`);
+                            declarationLine = matched.declarationLine;
+                            const maxArgs = this.memberResolver.countParametersInDeclaration(matched.signature);
+                            const defaultCount = ClarionPatterns.countDefaultParams(matched.signature);
+                            overloadFilter = {
+                                minArgs: maxArgs - defaultCount,
+                                maxArgs,
+                                declarationLine: matched.declarationLine,
+                                declarationFileNorm: overloadFilter.declarationFileNorm,
+                                declSignature: matched.signature
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const classFamily = className

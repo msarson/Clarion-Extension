@@ -532,15 +532,25 @@ export class ClassMemberResolver {
      * Simple implementation: counts commas at parenthesis depth 0
      */
     public countParametersInCall(line: string, methodName: string): number {
-        // Find the opening parenthesis after the method name
-        const methodIndex = line.toLowerCase().indexOf(methodName.toLowerCase());
-        if (methodIndex === -1) return 0;
-        
-        const afterMethod = line.substring(methodIndex + methodName.length);
-        const parenIndex = afterMethod.indexOf('(');
-        if (parenIndex === -1) return 0;
-        
-        const paramList = afterMethod.substring(parenIndex + 1);
+        // #249: anchor by WORD BOUNDARY — a bare substring indexOf locked onto a longer
+        // identifier containing the name (resolving `SetValue` on a line with
+        // `SetValueEx(1,2)` counted SetValueEx's args). Prefer a direct call shape
+        // `name(`; fall back to a standalone `name` followed later by '(' (covers
+        // declaration lines like `SetValue PROCEDURE(STRING)`, whose param count the
+        // decl-cursor anchor relies on).
+        const escaped = methodName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(line);
+        let paramList: string;
+        if (callMatch) {
+            paramList = line.substring(callMatch.index + callMatch[0].length);
+        } else {
+            const wordMatch = new RegExp(`\\b${escaped}\\b`, 'i').exec(line);
+            if (!wordMatch) return 0;
+            const afterMethod = line.substring(wordMatch.index + methodName.length);
+            const parenIndex = afterMethod.indexOf('(');
+            if (parenIndex === -1) return 0;
+            paramList = afterMethod.substring(parenIndex + 1);
+        }
         
         let depth = 0;
         let commaCount = 0;

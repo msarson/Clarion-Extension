@@ -237,9 +237,11 @@ export class ClarionPatterns {
     }
 
     /**
-     * Counts parameters with default values in a procedure declaration.
-     * A parameter has a default if it contains ' = ' (assignment) outside nested parens/angles.
-     * Example: PROCEDURE(STRING s, UNSIGNED nvType, LONG extraData = 0) → 1
+     * Counts OMITTABLE parameters in a procedure declaration — used by overload
+     * resolution to compute the compatible-arity band [max - omittable, max].
+     * A parameter is omittable when it has an `=` default value OR is wrapped in
+     * angle brackets (`<LONG x>` — optional with no default; #249).
+     * Example: PROCEDURE(STRING s, LONG extraData = 0, <SHORT flag>) → 2
      */
     public static countDefaultParams(line: string): number {
         const match = line.match(this.PROCEDURE_WITH_PARAMS);
@@ -247,6 +249,10 @@ export class ClarionPatterns {
         const paramList = match[1].trim();
         if (paramList === '') return 0;
 
+        const isOmittable = (param: string) => {
+            const trimmed = param.trim();
+            return /=/.test(trimmed) || trimmed.startsWith('<');
+        };
         let depth = 0, angleDepth = 0, defaults = 0;
         let currentParam = '';
         for (let i = 0; i < paramList.length; i++) {
@@ -256,13 +262,13 @@ export class ClarionPatterns {
             else if (ch === '<') angleDepth++;
             else if (ch === '>') angleDepth--;
             else if (ch === ',' && depth === 0 && angleDepth === 0) {
-                if (/=/.test(currentParam)) defaults++;
+                if (isOmittable(currentParam)) defaults++;
                 currentParam = '';
                 continue;
             }
             currentParam += ch;
         }
-        if (currentParam.trim() && /=/.test(currentParam)) defaults++;
+        if (currentParam.trim() && isOmittable(currentParam)) defaults++;
         return defaults;
     }
 }
