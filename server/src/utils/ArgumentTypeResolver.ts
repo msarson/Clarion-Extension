@@ -5,6 +5,9 @@ import { ArgClassification } from './CallSiteArgumentClassifier';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { ChainedPropertyResolver } from './ChainedPropertyResolver';
 import { ClassMemberResolver } from './ClassMemberResolver';
+import { ScopeTypeIndexService } from '../services/ScopeTypeIndexService';
+import { CrossFileCache } from '../providers/hover/CrossFileCache';
+import { TokenCache } from '../TokenCache';
 
 /**
  * Issue #245 — the single argument-type resolver shared by every overload consumer
@@ -20,8 +23,11 @@ import { ClassMemberResolver } from './ClassMemberResolver';
  * confined here, applied as a post-classification enrichment.
  */
 export class ArgumentTypeResolver {
-    private memberLocator = new MemberLocatorService();
+    // #257 Phase 3 — MLS gets a CrossFileCache so its INCLUDE/MEMBER-chain walks
+    // stop re-reading unchanged files from disk on every argument (mtime-validated).
+    private memberLocator = new MemberLocatorService(new CrossFileCache(TokenCache.getInstance()));
     private chainedResolver = new ChainedPropertyResolver();
+    private scopeTypeIndex = new ScopeTypeIndexService();
 
     /**
      * Enrich already-classified args in place: for each `variable` / `dotted_var` argument that
@@ -34,7 +40,11 @@ export class ArgumentTypeResolver {
         position: Position
     ): Promise<void> {
         for (const a of args) {
-            if ((a.kind === 'dotted_var' || a.kind === 'variable') && !a.inferredType) {
+            // 'prefixed_var' (#257 Phase 3): a PRE-prefixed field (`QUE:Fld`) is typed by
+            // the scope-tier index's alias keys. FAR always typed these via the classifier
+            // ctx it supplies; sighelp/F12 classify WITHOUT a ctx and rely on this
+            // enrichment, so excluding the kind here left them conservative match-all.
+            if ((a.kind === 'dotted_var' || a.kind === 'variable' || a.kind === 'prefixed_var') && !a.inferredType) {
                 const resolved = await this.resolveArgType(a.rawText, tokens, document, position);
                 if (resolved) {
                     a.inferredType = resolved.typeName;
@@ -71,9 +81,7 @@ export class ArgumentTypeResolver {
             if (beforeDot.toLowerCase() === 'self') {
                 ownerClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
             } else if (/^&?\w+$/.test(beforeDot)) {
-                const t = await this.memberLocator.resolveVariableType(
-                    beforeDot.replace(/^&/, ''), tokens, document, position.line);
-                ownerClass = t?.typeName ?? null;
+                ownerClass = await this.resolveSimpleVarType(beforeDot, tokens, document, position.line) ?? null;
             } else {
                 ownerClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
             }
@@ -84,15 +92,45 @@ export class ArgumentTypeResolver {
             // extractClassName strips a leading `&` (reference) / LIKE(...) and returns undefined
             // for Clarion primitives — for a queue/group/file TYPE it yields the TYPE name.
             typeName = ClassMemberResolver.extractClassName(memberInfo.type) ?? undefined;
-        } else if (/^&?\w+$/.test(text)) {
-            // Simple identifier: typed / reference / cross-file variable (resolver dereferences `&`).
-            const t = await this.memberLocator.resolveVariableType(
-                text.replace(/^&/, ''), tokens, document, position.line);
-            typeName = t?.typeName ?? undefined;
+        } else if (/^&?[\w:]+$/.test(text)) {
+            // Simple identifier (the `:` admits PRE-prefixed fields like `QUE:Fld`):
+            // typed / reference / PRE:Field / cross-file variable.
+            typeName = await this.resolveSimpleVarType(text, tokens, document, position.line);
         }
 
         if (!typeName) return undefined;
         return { typeName, structureKind: this.resolveTypeStructureKind(typeName, tokens) };
+    }
+
+    /**
+     * #257 Phase 3 — resolve a simple (non-dotted) variable name to its declared type.
+     *
+     * Precedence rule (documented on #257): the sync scope-tier index is AUTHORITATIVE
+     * for names it can key — it is the only resolver with correct Clarion scope
+     * priority (routine-local shadowing > proc params/locals > module scope; the
+     * MemberLocatorService walk scans document order, so a module var declared above
+     * the procedure wrongly shadowed a later proc-local) and the only one that keys
+     * PRE-prefix aliases (`que:fld`). A MISS or a LIKE(...)-shaped hit falls back to
+     * MemberLocatorService, which owns the capabilities the index lacks: INCLUDE/
+     * MEMBER-chain walks, LIKE dereference, and enclosing-procedure parameter parsing.
+     * Reference declarations (`&Type`) are stored deref'd in the index — same shape
+     * the MLS path returned (`typeName` sans `&`), so consumers are unaffected.
+     */
+    private async resolveSimpleVarType(
+        name: string,
+        tokens: Token[],
+        document: TextDocument,
+        line: number
+    ): Promise<string | undefined> {
+        const key = name.replace(/^&/, '').toLowerCase();
+        const index = this.scopeTypeIndex.buildFileVarTypeIndex(tokens);
+        const indexHit = this.scopeTypeIndex.lookupVarTypeAtLine(index, null, line, key);
+        if (indexHit && !/^LIKE\s*\(/i.test(indexHit)) {
+            return indexHit;
+        }
+        const t = await this.memberLocator.resolveVariableType(
+            name.replace(/^&/, ''), tokens, document, line);
+        return t?.typeName ?? undefined;
     }
 
     /**
