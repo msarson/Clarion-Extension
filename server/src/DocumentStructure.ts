@@ -1374,69 +1374,14 @@ export class DocumentStructure {
                     }
                 }
 
-                if (this.structureStack.length > 0) {
-                    let parentStructure = this.structureStack[this.structureStack.length - 1];
-                    logger.info(`📌 Parent structure: '${parentStructure.value}' at line ${parentStructure.line}`);
-                    parentStructure.maxLabelLength = Math.max(parentStructure.maxLabelLength || 0, token.value.length);
-
-                    // ✅ If we're inside a structure that can have fields, mark this as a structure field
-                    // This includes RECORD, GROUP, QUEUE, FILE, etc.
-                    const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
-                    if (structureTypes.includes(parentStructure.value.toUpperCase())) {
-                        token.isStructureField = true;
-                        token.structureParent = parentStructure;
-
-                        // ✅ Add field as child of the parent structure
-                        this.addChildOnce(parentStructure, token);
-                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
-
-                        // Find the label of the parent structure (if any)
-                        // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
-                        const lineTokens = this.tokensByLine.get(parentStructure.line);
-                        if (lineTokens) {
-                            const structIndex = lineTokens.indexOf(parentStructure);
-                            if (structIndex > 0) {
-                                // Check if the token before the structure is a label
-                                const prevToken = lineTokens[structIndex - 1];
-                                if (prevToken && prevToken.type === TokenType.Label) {
-                                    // Set the nestedLabel property to the parent structure's label
-                                    token.nestedLabel = prevToken.value;
-                                    logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
-                                }
-                            }
-                        }
-
-                        // Check for a prefix in the structure hierarchy
-                        let prefixFound = false;
-
-                        // First check the immediate parent structure
-                        if (parentStructure.structurePrefix) {
-                            // Set the structurePrefix property on the label token
-                            token.structurePrefix = parentStructure.structurePrefix;
-                            logger.info(`📌 Field '${token.value}' associated with prefix '${parentStructure.structurePrefix}'`);
-                            prefixFound = true;
-                        }
-
-                        // If no prefix found and we're in a nested structure, look up the structure stack
-                        if (!prefixFound && parentStructure.parent) {
-                            // Start from the parent's parent and go up the chain
-                            let currentParent: Token | undefined = parentStructure.parent;
-
-                            // Traverse up the parent chain
-                            while (currentParent) {
-                                if (currentParent.type === TokenType.Structure && currentParent.structurePrefix) {
-                                    // Found a prefix in an ancestor structure
-                                    token.structurePrefix = currentParent.structurePrefix;
-                                    logger.info(`📌 Field '${token.value}' inherited prefix '${currentParent.structurePrefix}' from ancestor structure`);
-                                    prefixFound = true;
-                                    break;
-                                }
-                                // Move to the next parent in the chain
-                                currentParent = currentParent.parent;
-                            }
-                        }
-                    }
-                }
+                // #262: a ~60-line "field-of-structure" branch gated on
+                // `this.structureStack.length > 0` was deleted here — provably dead:
+                // processLabels() runs ONLY from the constructor, before process() has
+                // ever pushed to structureStack, so the gate was always false. The live
+                // equivalent (isStructureField / structureParent / structurePrefix /
+                // addChildOnce) is process()'s field-of-structure block. The dead branch
+                // was also the only writer of the never-read `nestedLabel` field,
+                // removed from TokenTypes with it.
             }
         }
 

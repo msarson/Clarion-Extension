@@ -33,6 +33,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **Internal / Substrate**
 
+- 🧹 **Hygiene** (#262): deleted a provably-unreachable ~60-line branch in `DocumentStructure.processLabels` (constructor-time guard on a stack only populated during `process()`) together with the never-read `nestedLabel` token field it was the sole writer of; removed a no-op `DocumentStructure` construction in `ScopeAnalyzer` whose comment claimed processing that `getTokens()` already performs.
 - 🧱 **Canonical scope model foundation** (#233): new deterministic `ScopeResolver` codifying Clarion procedure / routine / local-derived-method scope rules (executable extent via the additive `Token.codeFinishesAt`, tier visibility, Rule-4 declaring-procedure linkage). Groundwork toward converging all scope resolution onto one rule set; completion (`WordCompletionProvider`) and hover (`SymbolFinderService`) are the first two consumers migrated.
 
 ---

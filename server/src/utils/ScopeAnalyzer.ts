@@ -646,12 +646,11 @@ export class ScopeAnalyzer {
             if (tokens) {
                 logger.info(`         ✅ Tokenized file: ${tokens.length} tokens`);
                 
-                // Process tokens through DocumentStructure to set referencedFile on MODULE/INCLUDE/LINK tokens
-                // This is critical for MODULE resolution to work from INCLUDE files
-                const DocumentStructure = require('../DocumentStructure').DocumentStructure;
-                const docStructure = new DocumentStructure(tokens);
-                logger.info(`         ✅ Processed tokens through DocumentStructure to set referencedFile properties`);
-                
+                // #262: tokens from getTokens() are ALREADY processed — the tokenize
+                // pipeline runs DocumentStructure.process(), which sets referencedFile
+                // on MODULE/INCLUDE/LINK tokens. A previous no-op `new DocumentStructure`
+                // construction here (never used, never process()ed) claimed to do this.
+
                 // Cache the tokens with modification time
                 this.includeFileCache.set(filePath, { tokens, mtime });
                 
