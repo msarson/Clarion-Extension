@@ -110,13 +110,19 @@ export class CallSiteArgumentClassifier {
         if (openParenIdx < 0) return null;
 
         // Step 2: collect argument slices via depth-aware comma split.
+        // #250: an OMITTED argument (`GET(Q,,3)`, `F(a,)`, `F(,a)`) produces an EMPTY slice
+        // that must still occupy its position — dropping it shifts every following argument
+        // and per-position overload type-checks compare the wrong pairs. So commas always
+        // push (even an empty slice), and the close-paren pushes the final slice whenever
+        // the list is non-empty (any content OR any prior comma). `Foo()` stays [].
         const argSlices: Token[][] = [];
         let current: Token[] = [];
         let depth = 1;
         let j = openParenIdx + 1;
         while (j < tokens.length && depth > 0) {
             const t = tokens[j];
-            if (t.type === TokenType.Comment) { j++; continue; }
+            // #250: `|` line-continuation tokens are pure syntax — never part of an argument.
+            if (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) { j++; continue; }
             if (t.type === TokenType.Delimiter) {
                 if (t.value === '(') {
                     depth++;
@@ -124,12 +130,12 @@ export class CallSiteArgumentClassifier {
                 } else if (t.value === ')') {
                     depth--;
                     if (depth === 0) {
-                        if (current.length > 0) argSlices.push(current);
+                        if (current.length > 0 || argSlices.length > 0) argSlices.push(current);
                         break;
                     }
                     current.push(t);
                 } else if (t.value === ',' && depth === 1) {
-                    if (current.length > 0) argSlices.push(current);
+                    argSlices.push(current); // even if empty — omitted arg keeps its position
                     current = [];
                 } else {
                     current.push(t);
@@ -166,7 +172,9 @@ export class CallSiteArgumentClassifier {
         // (everything becomes a Label and the implicit-variable suffix is dropped). Two leading
         // spaces put it in expression context so literals/variables/implicits classify correctly.
         const significant = new ClarionTokenizer('  ' + argText).tokenize()
-            .filter(t => t.type !== TokenType.Comment && t.value.trim() !== '');
+            .filter(t => t.type !== TokenType.Comment &&
+                         t.type !== TokenType.LineContinuation && // #250
+                         t.value.trim() !== '');
         if (significant.length === 0) return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
         return this.classifySlice(significant, ctx, this.buildEquateValueMap(docTokens));
     }
@@ -175,6 +183,7 @@ export class CallSiteArgumentClassifier {
         // Trim purely-syntactic leading tokens (defensive; tokenizer normally produces clean slices).
         const significant = slice.filter(t =>
             t.type !== TokenType.Comment &&
+            t.type !== TokenType.LineContinuation && // #250: `|` is never part of an argument
             !(t.type === TokenType.Delimiter && (t.value === ' ' || t.value === '\t'))
         );
 
@@ -344,7 +353,9 @@ export class CallSiteArgumentClassifier {
         }
 
         // Prefix-namespace: identifier `:` identifier (Clarion's PRE convention).
-        if (first.type === TokenType.Variable &&
+        // #250: a keyword-colliding prefix (`PRE`, `NAME`, `MAX`, …) tokenizes as Attribute,
+        // not Variable (#193 asymmetry) — accept both, mirroring sliceAccess's 3-token head.
+        if ((first.type === TokenType.Variable || first.type === TokenType.Attribute) &&
             second && second.type === TokenType.Delimiter && second.value === ':' &&
             significant.length >= 3) {
             const name = significant.slice(0, 3).map(t => t.value).join('');
