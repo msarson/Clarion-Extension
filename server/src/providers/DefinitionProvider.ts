@@ -10,6 +10,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
@@ -2035,7 +2036,7 @@ export class DefinitionProvider {
                 t.label?.toLowerCase() === ifaceName.toLowerCase()
             );
             if (eq) {
-                const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+                const uri = pathToCanonicalUri(equatesPath); // #251: client-facing Location
                 return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
             }
         }
@@ -2178,7 +2179,7 @@ export class DefinitionProvider {
             const info = await this.symbolFinder.findIndexedTypeDeclaration(word, document);
             if (!info) return null;
 
-            const uri = `file:///${info.filePath.replace(/\\/g, '/')}`;
+            const uri = pathToCanonicalUri(info.filePath); // #251: client-facing Location
             logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
             return Location.create(uri, Range.create(info.line, 0, info.line, 0));
         } catch (e) {

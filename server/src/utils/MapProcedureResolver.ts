@@ -352,7 +352,7 @@ export class MapProcedureResolver {
                     if (t.sourceFile && t.sourceContext?.isFromInclude) {
                         // Token is from an INCLUDE file
                         logger.info(`   Token found in INCLUDE file: ${t.sourceFile}`);
-                        sourceUri = 'file:///' + t.sourceFile.replace(/\\/g, '/');
+                        sourceUri = pathToCanonicalUri(t.sourceFile); // #251
                         
                         // Read the INCLUDE file to get the signature
                         try {
@@ -390,7 +390,7 @@ export class MapProcedureResolver {
         if (candidates.length === 1) {
             const candidate = candidates[0];
             const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
-                ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                 : document.uri;
             
             logger.info(`Found single MAP declaration for ${procName} at line ${candidate.token.line}`);
@@ -416,7 +416,7 @@ export class MapProcedureResolver {
             if (picked >= 0) {
                 const candidate = candidates[picked];
                 const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
-                    ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                    ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                     : document.uri;
                 logger.info(`✅ [#248] Call-args matched MAP decl at line ${candidate.token.line}`);
                 return Location.create(targetUri, {
@@ -437,7 +437,7 @@ export class MapProcedureResolver {
                 
                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                     const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
-                        ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                        ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                         : document.uri;
                     
                     logger.info(`✅ Found exact type match at line ${candidate.token.line}`);
@@ -458,7 +458,7 @@ export class MapProcedureResolver {
         // Fallback to first candidate
         const firstCandidate = candidates[0];
         const targetUri = firstCandidate.token.sourceFile && firstCandidate.token.sourceContext?.isFromInclude
-            ? 'file:///' + firstCandidate.token.sourceFile.replace(/\\/g, '/')
+            ? pathToCanonicalUri(firstCandidate.token.sourceFile) // #251
             : document.uri;
         
         logger.info(`Returning first MAP declaration at line ${firstCandidate.token.line}`);
@@ -882,7 +882,7 @@ export class MapProcedureResolver {
                                 
                                 if (impl) {
                                     logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                    return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                    return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                         start: { line: impl.line, character: 0 },
                                         end: { line: impl.line, character: impl.value.length }
                                     });
@@ -919,7 +919,7 @@ export class MapProcedureResolver {
                     // Search in the MAP for the procedure declaration
                     const mapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(
                         mapBlocks[0],
-                        { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => extracted.text } as TextDocument,
+                        { uri: pathToCanonicalUri(resolvedPath), getText: () => extracted.text } as TextDocument, // #251
                         moduleTokens
                     );
                     
@@ -966,7 +966,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                                 start: { line: impl.line, character: 0 },
                                                 end: { line: impl.line, character: impl.value.length }
                                             });
@@ -1009,7 +1009,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found implementation directly in file at line ${impl.line}`);
-                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                         start: { line: impl.line, character: 0 },
                         end: { line: impl.line, character: impl.value.length }
                     });
@@ -1025,7 +1025,7 @@ export class MapProcedureResolver {
             // Get all tokens from the MAP (including INCLUDEs)
             const mapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(
                 mapBlock, 
-                { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => content } as TextDocument,
+                { uri: pathToCanonicalUri(resolvedPath), getText: () => content } as TextDocument, // #251
                 moduleTokens
             );
             
@@ -1052,7 +1052,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found direct implementation in file at line ${impl.line}`);
-                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                         start: { line: impl.line, character: 0 },
                         end: { line: impl.line, character: impl.value.length }
                     });
@@ -1113,7 +1113,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                                 start: { line: impl.line, character: 0 },
                                                 end: { line: impl.line, character: impl.value.length }
                                             });
@@ -1129,7 +1129,7 @@ export class MapProcedureResolver {
                             return await this.findImplementationInModuleFile(
                                 procName,
                                 moduleToken.referencedFile,
-                                { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => content } as TextDocument,
+                                { uri: pathToCanonicalUri(resolvedPath), getText: () => content } as TextDocument, // #251
                                 declarationSignature
                             );
                         }
@@ -1153,7 +1153,7 @@ export class MapProcedureResolver {
             if (implementations.length === 1) {
                 const impl = implementations[0];
                 logger.info(`✅ Found implementation in MODULE file at line ${impl.line}`);
-                return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                     start: { line: impl.line, character: 0 },
                     end: { line: impl.line, character: impl.value.length }
                 });
@@ -1172,7 +1172,7 @@ export class MapProcedureResolver {
                 if (picked >= 0) {
                     const impl = implementations[picked];
                     logger.info(`✅ [#248] Call-args matched MODULE implementation at line ${impl.line}`);
-                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                         start: { line: impl.line, character: 0 },
                         end: { line: impl.line, character: impl.value.length }
                     });
@@ -1187,7 +1187,7 @@ export class MapProcedureResolver {
 
                         if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                             logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
-                            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                                 start: { line: impl.line, character: 0 },
                                 end: { line: impl.line, character: impl.value.length }
                             });
@@ -1199,7 +1199,7 @@ export class MapProcedureResolver {
             // Fallback to first implementation
             const impl = implementations[0];
             logger.info(`Returning first implementation from MODULE file at line ${impl.line}`);
-            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                 start: { line: impl.line, character: 0 },
                 end: { line: impl.line, character: impl.value.length }
             });

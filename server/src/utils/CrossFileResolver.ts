@@ -542,7 +542,7 @@ export class CrossFileResolver {
                         }
                     }
 
-                    const location = Location.create('file:///' + frgFilePath, {
+                    const location = Location.create(pathToCanonicalUri(osDiskPath), { // #251
                         start: { line: decl.line, character: 0 },
                         end: { line: decl.line, character: decl.value.length }
                     });

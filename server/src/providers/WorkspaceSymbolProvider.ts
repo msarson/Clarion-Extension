@@ -8,6 +8,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer } from '../ClarionTokenizer';
 import { CancellationToken } from 'vscode-languageserver';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WorkspaceSymbolProvider");
@@ -55,7 +56,7 @@ export class WorkspaceSymbolProvider {
                 for (const sourceFile of project.sourceFiles) {
                     if (await cooperativeCheckpoint(scanned++, token)) return results;
                     const fullPath = path.join(project.path, sourceFile.relativePath);
-                    const uri = 'file:///' + fullPath.replace(/\\/g, '/');
+                    const uri = pathToCanonicalUri(fullPath); // #251: client-facing Locations + cache key matching VS Code's form
                     if (seenUris.has(uri)) continue;
                     seenUris.add(uri);
 

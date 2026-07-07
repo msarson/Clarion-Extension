@@ -9,6 +9,7 @@ import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
 import { ProcedureUtils } from './ProcedureUtils';
+import { pathToCanonicalUri } from './UriUtils';
 import { cooperativeCheckpoint } from './cooperativeScan';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -184,7 +185,7 @@ export function scanClassBodyForMember(
 
             const bestMatch = selectBestOverload(candidates, paramCount);
             if (bestMatch) {
-                const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                const fileUri = pathToCanonicalUri(filePath); // #251
                 return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
             }
         }
@@ -500,7 +501,7 @@ export class ClassMemberResolver {
                         const bestMatch = this.selectBestOverload(candidates, paramCount);
                         if (bestMatch) {
                             // Convert file path to URI format
-                            const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                            const fileUri = pathToCanonicalUri(resolvedPath); // #251
                             return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
                         }
 
@@ -828,7 +829,7 @@ export class ClassMemberResolver {
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
-        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+        const uri = pathToCanonicalUri(filePath); // #251
         const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         const result = scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
@@ -997,7 +998,7 @@ export class ClassMemberResolver {
             }
 
             const best = candidates[bestIdx];
-            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            const fileUri = pathToCanonicalUri(filePath); // #251
             return Location.create(fileUri, Range.create(best.lineNum, 0, best.lineNum, 0));
         } catch {
             return null;

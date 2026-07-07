@@ -268,8 +268,8 @@ export async function validateMissingMapDeclarations(
                     data: {
                         procName,
                         parentFileUri: resolvedParent
-                            ? 'file:///' + resolvedParent.replace(/\\/g, '/')
-                            : 'file:///' + memberToken.referencedFile!.replace(/\\/g, '/'),
+                            ? pathToCanonicalUri(resolvedParent) // #251
+                            : pathToCanonicalUri(memberToken.referencedFile!),
                         implLine: proc.line,
                         currentFileUri: document.uri
                     }
@@ -304,7 +304,7 @@ export async function validateMissingMapDeclarations(
                             code: 'map-signature-mismatch',
                             data: {
                                 procName,
-                                parentFileUri: 'file:///' + result.file.replace(/\\/g, '/'),
+                                parentFileUri: pathToCanonicalUri(result.file), // #251
                                 declLine: result.line,
                                 implLine: proc.line,
                                 currentFileUri: document.uri

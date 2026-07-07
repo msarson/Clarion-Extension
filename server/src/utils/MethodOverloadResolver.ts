@@ -7,6 +7,7 @@ import { TokenHelper } from './TokenHelper';
 import { ArgClassification, CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
@@ -295,7 +296,7 @@ export class MethodOverloadResolver {
                 if (new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i').test(methodLine)) {
                     const signature = methodLine.trim();
                     const declParamCount = ClarionPatterns.countParameters(signature);
-                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                    const fileUri = pathToCanonicalUri(filePath); // #251
                     candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
                 }
             }
@@ -453,7 +454,7 @@ export class MethodOverloadResolver {
                     if (methodMatch) {
                         const signature = includeLines[k].trim();
                         const declParamCount = ClarionPatterns.countParameters(signature);
-                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        const fileUri = pathToCanonicalUri(resolvedPath); // #251
                         candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
                         logger.info(`Found interface method in INCLUDE at line ${k}`);
                     }
@@ -558,7 +559,7 @@ export class MethodOverloadResolver {
                     if (methodMatch) {
                         const signature = methodLine.trim();
                         const declParamCount = ClarionPatterns.countParameters(signature);
-                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        const fileUri = pathToCanonicalUri(resolvedPath); // #251
                         candidates.push({
                             signature,
                             file: fileUri,
