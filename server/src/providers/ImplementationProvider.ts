@@ -396,7 +396,7 @@ export class ImplementationProvider {
                             // #182 — arg-classification overlay: re-point at the matching
                             // overload's declaration so both the returned decl and the impl
                             // lookup target the arg-matched overload, not the paramCount one.
-                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                                 chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
                             const declInfo = picked
                                 ? { ...chainedInfo, line: picked.line, file: picked.file }
@@ -428,7 +428,7 @@ export class ImplementationProvider {
                         if (chainedInfo) {
                             logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
                             // #182 — arg-classification overlay (var-chain variant).
-                            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                                 chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
                             const declInfo = picked
                                 ? { ...chainedInfo, line: picked.line, file: picked.file }
@@ -464,7 +464,7 @@ export class ImplementationProvider {
                         // #182 — arg-classification overlay: pick the matching overload by
                         // argument type and target its implementation via the matched decl
                         // signature, instead of the paramCount-only call line.
-                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                             parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             parentInfo.parentClassName,
@@ -489,7 +489,7 @@ export class ImplementationProvider {
                     );
                     if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                         // #182 — arg-classification overlay (symmetric with PARENT/Definition).
-                        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                             memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
                         const impl = await this.findMethodImplementationCrossFile(
                             memberInfo.className,

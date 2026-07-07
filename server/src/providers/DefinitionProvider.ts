@@ -1902,34 +1902,13 @@ export class DefinitionProvider {
         methodName: string,
         callLine: number
     ): Promise<Location | null> {
-        // The call site's name token is either:
-        //   - a bare identifier matching methodName (`Foo(...)`)
-        //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
-        //     shape for `prefix.method` style calls). Either way, the classifier just
-        //     needs the token immediately before `(`.
-        const lowerMethod = methodName.toLowerCase();
-        const callNameIdx = tokens.findIndex(t =>
-            t.line === callLine && (
-                t.value.toLowerCase() === lowerMethod ||
-                t.value.toLowerCase().endsWith('.' + lowerMethod)
-            ));
-        if (callNameIdx < 0) return null;
-
-        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
-        if (!args) return null;
-
-        // #245 — type member/reference/typed-variable args via the shared resolver so F12
-        // disambiguates the same overload signature help does.
-        await this.argTypeResolver.enrichArgs(args, tokens, document, { line: callLine, character: 0 });
-
-        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
-        if (candidates.length < 2) return null;
-
-        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
-            args, candidates.map(c => c.signature));
-        if (matchedAll || matchedIndex < 0) return null;
-
-        const picked = candidates[matchedIndex];
+        // #252 — delegates to the single enriched choke point. This was F12's own
+        // classify + enrich + resolve copy (#245); hover/Ctrl+F12 gained the same
+        // enrichment inside resolveOverloadDeclByArgs, so all consumers now share
+        // one implementation and cannot drift.
+        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
+            className, methodName, document, tokens, callLine);
+        if (!picked) return null;
         return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
     }
 

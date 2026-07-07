@@ -253,6 +253,17 @@ export class CallSiteArgumentClassifier {
                     inferredType: this.implicitVariableType(first.value),
                     rawText, line, character
                 };
+            case TokenType.Attribute:
+            case TokenType.Keyword:
+                // #252 — a keyword-colliding IDENTIFIER used as a bare argument (`ref`,
+                // `name`, `max`, …) tokenizes as Attribute/Keyword, not Variable — the
+                // single-token sibling of #250's PRE:Field finding. A genuine attribute/
+                // keyword cannot appear as a bare call argument, so a lone word-shaped
+                // token here IS a variable; fall through to the variable branch.
+                if (!/^[A-Za-z_]\w*$/.test(first.value)) {
+                    return { kind: 'unknown', rawText, line, character };
+                }
+            // eslint-disable-next-line no-fallthrough
             case TokenType.Variable:
             case TokenType.ReferenceVariable:
                 // Picture-format may slip through as Variable if tokenizer didn't tag it.

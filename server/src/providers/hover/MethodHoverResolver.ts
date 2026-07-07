@@ -271,7 +271,7 @@ export class MethodHoverResolver {
         // branch): when the SELF call has overloaded candidates differing by arg
         // type, classify the call's args and re-point memberInfo at the matching
         // overload before the paramCount-only result is shown.
-        const matchedSignature = this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
+        const matchedSignature = await this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
 
         // Check if this is a method (not a property)
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
@@ -305,16 +305,16 @@ export class MethodHoverResolver {
      * implementation lookup, or undefined when no disambiguation applied (falls
      * through to the existing paramCount-only behaviour).
      */
-    private applyArgClassifyOverlay(
+    private async applyArgClassifyOverlay(
         memberInfo: { type: string; className: string; line: number; file: string },
         fieldName: string,
         document: TextDocument,
         tokens: Token[],
         position: Position,
         paramCount?: number
-    ): string | undefined {
+    ): Promise<string | undefined> {
         if (paramCount === undefined) return undefined; // no-paren access — nothing to classify
-        const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
             memberInfo.className, fieldName, document, tokens, position.line);
         if (!picked) return undefined;
         memberInfo.line = picked.line;
@@ -345,7 +345,7 @@ export class MethodHoverResolver {
             // Definition's PARENT branch, whose overlay is the actual working path.
             const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
             if (parentInfo?.parentClassName && paramCount !== undefined) {
-                const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+                const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                     parentInfo.parentClassName, fieldName, document, tokens, position.line);
                 if (picked) {
                     memberInfo = { type: 'PROCEDURE', className: parentInfo.parentClassName, line: picked.line, file: picked.file };
@@ -358,7 +358,7 @@ export class MethodHoverResolver {
             }
         } else {
             // #182 — arg-classification overlay (symmetric with Goto Definition's PARENT branch).
-            matchedSignature = this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
+            matchedSignature = await this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
         }
 
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
@@ -401,7 +401,7 @@ export class MethodHoverResolver {
         // for callers that already arg-classified (re-picks the same overload).
         if (position && paramCount !== undefined) {
             const tokens = this.tokenCache.getTokens(document);
-            const picked = this.overloadResolver.resolveOverloadDeclByArgs(
+            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                 chainedInfo.className, fieldName, document, tokens, position.line);
             if (picked) {
                 chainedInfo = { ...chainedInfo, line: picked.line, file: picked.file };

@@ -10,8 +10,15 @@ import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { TokenCache } from '../TokenCache';
 
 /**
- * Issue #245 — the single argument-type resolver shared by every overload consumer
- * (signature help, go-to-definition, Find-All-References). Given call arguments already
+ * Issue #245 — the single argument-type resolver shared by the overload consumers:
+ * signature help and go-to-definition directly, and hover / Ctrl+F12 via the
+ * #252 choke point (`MethodOverloadResolver.resolveOverloadDeclByArgs`).
+ * Find-All-References deliberately does NOT use this class — its call-site
+ * classification runs against the synchronous `ScopeTypeIndexService` index
+ * (see the #257 assessment: FAR's matching core is sync and per-arg cross-file
+ * I/O there would be an #188-class regression).
+ *
+ * Given call arguments already
  * classified by {@link CallSiteArgumentClassifier} (which types literals / EQUATE / implicit
  * variables from the token stream alone), it fills in the types that need real resolution:
  * dotted member access (`Self.Probs`, `obj.field`), reference variables (`x &Type`), and

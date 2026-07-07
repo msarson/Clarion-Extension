@@ -5,6 +5,7 @@ import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
 import { ArgClassification, CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
+import { ArgumentTypeResolver } from './ArgumentTypeResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToCanonicalUri } from './UriUtils';
@@ -28,7 +29,10 @@ export interface MethodDeclarationInfo {
  * Used by both HoverProvider and DefinitionProvider
  */
 export class MethodOverloadResolver {
-    
+
+    /** #252 — lazily constructed (import cycle with ClassMemberResolver via ArgumentTypeResolver). */
+    private argTypeResolver: ArgumentTypeResolver | null = null;
+
     /**
      * Finds the best matching method declaration for a method implementation or call
      * @param className The name of the class containing the method
@@ -116,14 +120,21 @@ export class MethodOverloadResolver {
      *   - fewer than 2 candidates (nothing to disambiguate, or cross-file miss),
      *   - the resolver reports `matchedAll` / no match (un-disambiguatable —
      *     conservative fallback preserves existing UX).
+     *
+     * #252 — this is the single enriched choke point for the Hover / Ctrl+F12
+     * overlays: classified args are typed through the same shared
+     * ArgumentTypeResolver sighelp and F12 use, so a typed argument (dotted
+     * member, reference, typed local) disambiguates the same overload in every
+     * consumer instead of hover falling to first-declared while F12 jumps to
+     * the type-matched one.
      */
-    public resolveOverloadDeclByArgs(
+    public async resolveOverloadDeclByArgs(
         className: string,
         methodName: string,
         document: TextDocument,
         tokens: Token[],
         callLine: number
-    ): MethodDeclarationInfo | null {
+    ): Promise<MethodDeclarationInfo | null> {
         const lowerMethod = methodName.toLowerCase();
         const callNameIdx = tokens.findIndex(t =>
             t.line === callLine && (
@@ -134,6 +145,11 @@ export class MethodOverloadResolver {
 
         const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
         if (!args) return null;
+
+        // #252 — type the args that need real resolution (lazily constructed:
+        // ArgumentTypeResolver ↔ this module sit in a benign import cycle).
+        if (!this.argTypeResolver) this.argTypeResolver = new ArgumentTypeResolver();
+        await this.argTypeResolver.enrichArgs(args, tokens, document, { line: callLine, character: 0 });
 
         const candidates = this.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
         if (candidates.length < 2) return null;
