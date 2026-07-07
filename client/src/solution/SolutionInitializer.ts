@@ -19,6 +19,7 @@ import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { readIdePreferences } from './ClarionIdePreferences';
 import LoggerManager from '../utils/LoggerManager';
+import { PathUtils } from '../PathUtils';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -319,8 +320,11 @@ export async function initializeSolution(
         // flooding the LSP pipe when getSolutionTree returns 0 projects on startup.
         let solutionReadyDisposable: Disposable | null = null;
         solutionReadyDisposable = client.onNotification('clarion/solutionReady', async (params: { solutionFilePath: string, projectCount: number }) => {
-            // Ignore stale notifications from a previous solution load
-            if (params.solutionFilePath !== globalSolutionFile) {
+            // Ignore stale notifications from a previous solution load.
+            // #263: compare via PathUtils.equalPath (normalized, case-insensitive) — a strict
+            // !== here rejected every notification when the server echoed a differently-spelled
+            // path, permanently blocking the deferred-activation path below.
+            if (!PathUtils.equalPath(params.solutionFilePath, globalSolutionFile)) {
                 logger.warn(`⚠️ clarion/solutionReady ignored — path mismatch (got ${params.solutionFilePath}, expected ${globalSolutionFile})`);
                 return;
             }

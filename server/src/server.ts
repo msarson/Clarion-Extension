@@ -1612,7 +1612,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // until after we have real project data (avoids flooding the LSP pipe with
             // thousands of clarion/findFile requests when getSolutionTree returns 0 projects).
             connection.sendNotification('clarion/solutionReady', {
-                solutionFilePath: solutionPath,
+                // #263: must be the solution FILE path — the client compares it against its
+                // globalSolutionFile to reject stale notifications. `solutionPath` here is the
+                // solution DIRECTORY (projectPaths[0]), which never matches and silently killed
+                // the deferred-activation path for slow-loading solutions.
+                solutionFilePath: serverSettings.solutionFilePath || solutionPath,
                 projectCount: globalSolution.projects.length
             });
             logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
