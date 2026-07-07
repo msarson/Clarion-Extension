@@ -60,6 +60,18 @@ export class ScopeTypeIndexService {
     constructor(private tokenCache: TokenCache = TokenCache.getInstance()) { }
 
     /**
+     * #257 Phase 2 — per-token-array index cache. Keyed on Token[] IDENTITY:
+     * every TokenCache path (full tokenize, incremental merge, closed-file
+     * cache) hands out a NEW array when content changes and the SAME array
+     * only while content is unchanged, so array identity is a correct and
+     * zero-bookkeeping invalidation key. De-quadratifies the #189 CodeLens
+     * precompute, which rebuilt this index once per CodeLens for the same file.
+     * WeakMap → dropping the token array (cache eviction, doc close) drops
+     * the index with it; no explicit eviction needed.
+     */
+    private readonly indexCache = new WeakMap<Token[], FileVarTypeIndex>();
+
+    /**
      * Get tokens for a URI — uses the in-memory cache for open documents,
      * falls back to reading and tokenizing from disk for closed files.
      */
@@ -87,6 +99,15 @@ export class ScopeTypeIndexService {
      * passes it into `lookupVarTypeAtLine`.
      */
     public buildFileVarTypeIndex(tokens: Token[]): FileVarTypeIndex {
+        const cached = this.indexCache.get(tokens);
+        if (cached) return cached;
+        const built = this.buildFileVarTypeIndexUncached(tokens);
+        this.indexCache.set(tokens, built);
+        return built;
+    }
+
+    /** The actual index build — see `buildFileVarTypeIndex` for the tier model. */
+    private buildFileVarTypeIndexUncached(tokens: Token[]): FileVarTypeIndex {
         const procScopes: ProcScopeEntry[] = [];
         const moduleScope = new Map<string, string>();
 

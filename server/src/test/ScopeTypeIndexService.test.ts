@@ -172,6 +172,54 @@ suite('ScopeTypeIndexService (#257 Phase 1)', () => {
             'method declarations must be excluded from classFields (fields only)');
     });
 
+    // ─── Index caching (#257 Phase 2) ───────────────────────────────────────
+
+    suite('index caching (Phase 2)', () => {
+
+        test('same Token[] identity returns the SAME index object (cache hit)', () => {
+            const svc = new ScopeTypeIndexService();
+            const tokens = tokenize(SHADOW_FIXTURE);
+            const first = svc.buildFileVarTypeIndex(tokens);
+            const second = svc.buildFileVarTypeIndex(tokens);
+            assert.strictEqual(second, first,
+                'rebuilding for the same token array must return the cached index object — ' +
+                'this is what de-quadratifies the #189 CodeLens precompute');
+        });
+
+        test('a different Token[] gets a fresh index reflecting its own content', () => {
+            const svc = new ScopeTypeIndexService();
+            const idx1 = svc.buildFileVarTypeIndex(tokenize(SHADOW_FIXTURE));
+            const edited = SHADOW_FIXTURE.replace('x          REAL', 'x          DATE');
+            const idx2 = svc.buildFileVarTypeIndex(tokenize(edited));
+            assert.notStrictEqual(idx2, idx1, 'a new token array must not serve the old index');
+            assert.strictEqual(svc.lookupVarTypeAtLine(idx2, null, 9, 'x'), 'DATE',
+                'the fresh index must reflect the edited declaration');
+            assert.strictEqual(svc.lookupVarTypeAtLine(idx1, null, 9, 'x'), 'REAL',
+                'the old index must be untouched (no cross-contamination)');
+        });
+
+        test('TokenCache version bump invalidates end-to-end (new array → fresh index)', () => {
+            const uri = 'file:///stix-invalidation.clw';
+            const cache = TokenCache.getInstance();
+            const svc = new ScopeTypeIndexService(cache);
+
+            const docV1 = TextDocument.create(uri, 'clarion', 1, SHADOW_FIXTURE);
+            const tokensV1 = cache.getTokens(docV1);
+            const idxV1 = svc.buildFileVarTypeIndex(tokensV1);
+            assert.strictEqual(svc.lookupVarTypeAtLine(idxV1, null, 9, 'x'), 'REAL');
+
+            const edited = SHADOW_FIXTURE.replace('x          REAL', 'x          DATE');
+            const docV2 = TextDocument.create(uri, 'clarion', 2, edited);
+            const tokensV2 = cache.getTokens(docV2);
+            assert.notStrictEqual(tokensV2, tokensV1,
+                'precondition: TokenCache must hand out a new Token[] for changed content ' +
+                '(the identity the WeakMap keys on)');
+            const idxV2 = svc.buildFileVarTypeIndex(tokensV2);
+            assert.strictEqual(svc.lookupVarTypeAtLine(idxV2, null, 9, 'x'), 'DATE',
+                'post-edit lookups must see the edited declaration, not a stale cached index');
+        });
+    });
+
     // ─── Tier 6 symmetry ────────────────────────────────────────────────────
 
     suite('Tier 6 — loadGlobalScopeForCursor symmetry', () => {
