@@ -8,6 +8,9 @@ import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
+import { ProcedureUtils } from './ProcedureUtils';
+import { CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
+import { MethodOverloadResolver } from './MethodOverloadResolver';
 import { DocumentStructure } from '../DocumentStructure';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
@@ -187,6 +190,76 @@ export class MapProcedureResolver {
     }
 
     /**
+     * #248: when the "signature" callers pass is actually a raw CALL-SITE line
+     * (`x = Rep(4)` — no PROCEDURE/FUNCTION keyword), pick the overload by
+     * classifying the call's ARGUMENTS, exactly like the other overload consumers.
+     * The legacy extractParameterTypes path required the text to start with
+     * `name(` or contain `PROCEDURE(...)`, so a mid-line call yielded [] — which
+     * then "exactly matched" a zero-parameter overload.
+     *
+     * @returns matched candidate index, or -1 when the line isn't a call to
+     *   `procName` / the args don't disambiguate (callers keep their existing
+     *   conservative fallbacks).
+     */
+    private pickCandidateByCallArgs(
+        procName: string,
+        maybeCallLine: string,
+        tokens: Token[],
+        candidateSignatures: string[]
+    ): number {
+        // A line containing PROCEDURE/FUNCTION is a genuine signature — not a call.
+        if (ProcedureUtils.containsProcedureKeyword(maybeCallLine)) return -1;
+        if (candidateSignatures.length < 2) return -1;
+
+        const escaped = procName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(maybeCallLine);
+        if (!callMatch) return -1;
+
+        // Extract the balanced-paren argument text (Clarion strings are '...' with '' escapes).
+        const openIdx = callMatch.index + callMatch[0].length - 1;
+        let depth = 0, inString = false, closeIdx = -1;
+        for (let i = openIdx; i < maybeCallLine.length; i++) {
+            const ch = maybeCallLine[i];
+            if (inString) {
+                if (ch === "'") inString = false; // '' re-enters on the next quote
+                continue;
+            }
+            if (ch === "'") { inString = true; continue; }
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+                depth--;
+                if (depth === 0) { closeIdx = i; break; }
+            }
+        }
+        if (closeIdx < 0) return -1;
+        const argText = maybeCallLine.substring(openIdx + 1, closeIdx);
+
+        // Split top-level commas (depth- and string-aware); keep empty segments —
+        // omitted args hold their position (#250).
+        const segments: string[] = [];
+        let current = '', segDepth = 0, segInString = false;
+        for (const ch of argText) {
+            if (segInString) {
+                current += ch;
+                if (ch === "'") segInString = false;
+                continue;
+            }
+            if (ch === "'") { segInString = true; current += ch; continue; }
+            if (ch === '(') segDepth++;
+            else if (ch === ')') segDepth--;
+            if (ch === ',' && segDepth === 0) { segments.push(current); current = ''; continue; }
+            current += ch;
+        }
+        if (current.trim() !== '' || segments.length > 0) segments.push(current);
+
+        const classifier = new CallSiteArgumentClassifier();
+        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
+        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
+            args, candidateSignatures);
+        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    }
+
+    /**
      * Finds MAP procedure declaration for a PROCEDURE implementation
      * Searches for MapProcedure tokens or Function tokens inside MAP blocks
      * NOW INCLUDES tokens from MAP INCLUDE files
@@ -333,9 +406,28 @@ export class MapProcedureResolver {
 
         // Multiple candidates - use overload resolution
         logger.info(`Found ${candidates.length} overloaded MAP declarations for ${procName}`);
-        
-        // If implementation signature provided, try type matching
+
+        // #248: callers routinely pass the raw CALL-SITE line here — pick the overload
+        // by classifying the call's arguments before attempting signature-vs-signature
+        // matching (which mis-fired on call lines: [] "matched" a 0-param overload).
         if (implementationSignature) {
+            const picked = this.pickCandidateByCallArgs(
+                procName, implementationSignature, tokens, candidates.map(c => c.signature));
+            if (picked >= 0) {
+                const candidate = candidates[picked];
+                const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
+                    ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                    : document.uri;
+                logger.info(`✅ [#248] Call-args matched MAP decl at line ${candidate.token.line}`);
+                return Location.create(targetUri, {
+                    start: { line: candidate.token.line, character: 0 },
+                    end: { line: candidate.token.line, character: candidate.token.value.length }
+                });
+            }
+        }
+
+        // If implementation signature provided, try type matching
+        if (implementationSignature && ProcedureUtils.containsProcedureKeyword(implementationSignature)) {
             const implParams = ProcedureSignatureUtils.extractParameterTypes(implementationSignature);
             logger.info(`Implementation parameter types: [${implParams.join(', ')}]`);
             
@@ -593,9 +685,24 @@ export class MapProcedureResolver {
 
         // Multiple candidates - use overload resolution
         logger.info(`Found ${candidates.length} overloaded implementations for ${procName}`);
-        
-        // If declaration signature provided, try type matching
+
+        // #248: callers routinely pass the raw CALL-SITE line here — pick the overload
+        // by classifying the call's arguments before signature-vs-signature matching.
         if (declarationSignature) {
+            const picked = this.pickCandidateByCallArgs(
+                procName, declarationSignature, tokens, candidates.map(c => c.signature));
+            if (picked >= 0) {
+                const candidate = candidates[picked];
+                logger.info(`✅ [#248] Call-args matched implementation at line ${candidate.token.line}`);
+                return Location.create(document.uri, {
+                    start: { line: candidate.token.line, character: 0 },
+                    end: { line: candidate.token.line, character: candidate.token.value.length }
+                });
+            }
+        }
+
+        // If declaration signature provided, try type matching
+        if (declarationSignature && ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
             logger.info(`Declaration parameter types: [${declParams.join(', ')}]`);
             
@@ -1054,21 +1161,37 @@ export class MapProcedureResolver {
             
             // Multiple implementations - try overload resolution
             logger.info(`Found ${implementations.length} overloaded implementations in MODULE file`);
-            
+
             if (declarationSignature) {
                 const lines = content.split('\n');
-                const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
-                
-                for (const impl of implementations) {
-                    const signature = lines[impl.line].trim();
-                    const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
-                    
-                    if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
-                        logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
-                        return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                            start: { line: impl.line, character: 0 },
-                            end: { line: impl.line, character: impl.value.length }
-                        });
+
+                // #248: raw call-line "signatures" pick by classified call args first.
+                const moduleSigs = implementations.map(impl => (lines[impl.line] ?? '').trim());
+                const picked = this.pickCandidateByCallArgs(
+                    procName, declarationSignature, moduleTokens, moduleSigs);
+                if (picked >= 0) {
+                    const impl = implementations[picked];
+                    logger.info(`✅ [#248] Call-args matched MODULE implementation at line ${impl.line}`);
+                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                        start: { line: impl.line, character: 0 },
+                        end: { line: impl.line, character: impl.value.length }
+                    });
+                }
+
+                if (ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
+                    const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
+
+                    for (const impl of implementations) {
+                        const signature = lines[impl.line].trim();
+                        const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+
+                        if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
+                            logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
+                            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                                start: { line: impl.line, character: 0 },
+                                end: { line: impl.line, character: impl.value.length }
+                            });
+                        }
                     }
                 }
             }
