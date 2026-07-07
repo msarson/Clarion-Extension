@@ -9,7 +9,6 @@ logger.setLevel("error");
 class ClarionFoldingProvider {
     private tokens: Token[];
     private foldingRanges: FoldingRange[];
-    private inferenceUsedCount: number = 0;
     private readonly MAX_FOLDING_RANGES = 10000; // Safety limit
     private processedTokens: Set<Token> = new Set(); // Prevent circular references
     private document: TextDocument | undefined;
@@ -23,7 +22,6 @@ class ClarionFoldingProvider {
     public computeFoldingRanges(): FoldingRange[] {
         const perfStart = performance.now();
         this.foldingRanges = [];
-        this.inferenceUsedCount = 0; // Reset counter for this computation
         this.processedTokens.clear(); // Reset processed tokens set
     
         // 🚀 PERFORMANCE: Filter once and collect regions in same pass
@@ -58,17 +56,15 @@ class ClarionFoldingProvider {
         logger.perf('Folding: filter', { time_ms: filterTime.toFixed(2), foldable: foldableTokens.length, regions: regionComments.length });
         
     
-        // 🔍 Infer missing finishesAt for PROCEDUREs
-        // NOTE: finishesAt is the preferred boundary for folding (set by DocumentStructure).
-        // Inference exists as a fallback to support incomplete/malformed code and editor-time states.
-        for (let i = 0; i < foldableTokens.length; i++) {
-            const token = foldableTokens[i];
-    
-            if (token.subType === TokenType.Procedure && token.finishesAt == null) {
-                this.inferProcedureEnd(token, foldableTokens);
-                this.inferenceUsedCount++;
-            }
-        }
+        // #259: a "finishesAt inference" fallback used to live here, MUTATING the shared
+        // cached tokens (token.finishesAt) — a cross-provider contamination channel into
+        // TokenCache.expandToDependencies. It was also UNREACHABLE dead code: its gate
+        // required `subType === TokenType.Procedure`, which is never assigned anywhere
+        // (procedures get GlobalProcedure/MethodImplementation/MapProcedure subTypes;
+        // the bare-Procedure assignment in DocumentStructure is commented out). Deleted
+        // rather than fixed — enabling never-run inference would be a behavior change.
+        // If malformed-code folding gaps ever surface, reintroduce with a provider-local
+        // Map<Token, number>, never by assigning onto shared tokens.
 
         for (const t of foldableTokens) {
             const subTypeName = t.subType !== undefined ? TokenType[t.subType] : TokenType[t.type];
@@ -90,34 +86,11 @@ class ClarionFoldingProvider {
             this.foldCompileBlocks();
         }
     
-        // Log aggregate inference fallback usage at debug level
-        if (this.inferenceUsedCount > 0) {
-            logger.debug(`FoldingProvider: finishesAt missing for ${this.inferenceUsedCount} structures; inference fallback used`);
-        }
         
         logger.info(`📏 [FOLDING] Returning ${this.foldingRanges.length} ranges`);
         return this.foldingRanges;
     }
     
-    private inferProcedureEnd(token: Token, procedures: Token[]): void {
-        const index = procedures.indexOf(token);
-    
-        for (let j = index + 1; j < procedures.length; j++) {
-            const next = procedures[j];
-            if (next.subType === TokenType.Procedure && next.line > token.line) {
-                token.finishesAt = next.line - 1;
-                return;
-            }
-        }
-    
-        // 📌 Fallback to EOF if no next procedure found
-        const lastLine = this.tokens[this.tokens.length - 1]?.line ?? token.line;
-        token.finishesAt = lastLine;
-    
-        logger.info(`📌 [FoldingProvider] Inferred finishesAt for '${token.value}' as Line ${token.finishesAt}`);
-    }
-    
-
     private processFolding(token: Token): void {
         // Prevent circular references and excessive ranges
         if (this.processedTokens.has(token)) {
