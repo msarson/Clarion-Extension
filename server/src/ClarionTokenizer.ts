@@ -602,25 +602,19 @@ export class ClarionTokenizer {
                     if (varMatch) {
                         const varName = varMatch[1];
                         const isReference = varMatch[2].startsWith('&');
-                        
-                        // Create a Variable or ReferenceVariable token
-                        const varToken: Token = {
-                            type: TokenType.Label,
-                            subType: isReference ? TokenType.ReferenceVariable : TokenType.Variable,
-                            value: varName,
-                            line: lineNum,
-                            start: 0,
-                            maxLabelLength: 0
-                        };
-                        
-                        // Insert the token in the correct position
-                        // Find insertion point: after the last token on this line or before first token on next line
-                        let insertIndex = this.tokens.findIndex(t => t.line > lineNum);
-                        if (insertIndex === -1) {
-                            insertIndex = this.tokens.length;
+
+                        // #267 — mark the EXISTING col-0 Label in place. The main tokenize
+                        // pass already produced this token; splicing a second one here put a
+                        // phantom duplicate in the raw array (never processed by
+                        // DocumentStructure, so its metadata diverged from the original).
+                        // Only fill an empty subType — DocumentStructure's assignments win.
+                        const existing = this.tokens.find(t =>
+                            t.line === lineNum && t.start === 0 &&
+                            t.type === TokenType.Label &&
+                            t.value.toLowerCase() === varName.toLowerCase());
+                        if (existing && existing.subType === undefined) {
+                            existing.subType = isReference ? TokenType.ReferenceVariable : TokenType.Variable;
                         }
-                        
-                        this.tokens.splice(insertIndex, 0, varToken);
                     }
                 }
             }
