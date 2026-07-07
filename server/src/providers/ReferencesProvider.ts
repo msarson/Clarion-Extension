@@ -1832,37 +1832,45 @@ export class ReferencesProvider {
                                                      token.line, token.start + token.value.length)));
                                 }
                             }
+                        } else if (parts.length === 2 && classLower) {
+                            // P2b track-(b) + #269: var.member call — resolve the RECEIVER's
+                            // declared type via the tier index and gate on class family, for
+                            // BOTH cursor sides. Pre-#269 the cursor-on-call-site path matched
+                            // receivers TEXTUALLY against the cursor's chainPrefix name: a
+                            // routine-shadowed same-name receiver of a DIFFERENT class leaked
+                            // in (rename rewrote the wrong class's method) and a same-class
+                            // receiver under another name (`minst.Check()`) was missed.
+                            // Resolves receivers declared at any tier: routine-local /
+                            // parameter / procedure-local / module / global.
+                            const varNameLower = parts[0].toLowerCase();
+                            const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
+                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
+                            const varTypeBase = varType?.toLowerCase().split('(')[0].trim();
+                            const matchesFamily = varTypeBase !== undefined &&
+                                (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
+                            // Conservative fallback: an UNRESOLVABLE receiver that matches the
+                            // cursor's receiver name stays included (rename safety — same bias
+                            // as the ambiguous-call-site rule).
+                            const unresolvedNameMatch = varType === undefined &&
+                                !!chainPrefixLower && varNameLower === chainPrefixLower;
+                            if (matchesFamily || unresolvedNameMatch) {
+                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                                if (isCompatibleCallSite(i)) {
+                                    locations.push(Location.create(fileUri,
+                                        Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
+                                                     token.line, token.start + token.value.length)));
+                                }
+                            }
                         } else if (parts.length === 2 && chainPrefixLower &&
                                    parts[0].toLowerCase() === chainPrefixLower) {
-                            // Typed variable direct access: e.g. INIMgr.Init
-                            // where chainPrefix is the variable name (INIMgr).
+                            // No class context available — retain the legacy textual
+                            // receiver-name match (e.g. INIMgr.Init where chainPrefix is
+                            // the variable name and the class could not be resolved).
                             if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
                             if (isCompatibleCallSite(i)) {
                                 locations.push(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                  token.line, token.start + token.value.length)));
-                            }
-                        } else if (parts.length === 2 && !chainPrefixLower && classLower) {
-                            // P2b track-(b): no chainPrefix from cursor side (cursor is on
-                            // the class-body decl, not a call site). Recognize var.member
-                            // calls where var's declared type is in the target class family.
-                            // Resolves cross-procedure callers like `inst.Append('x')` where
-                            // `inst MyClass` is declared at any of: parameter / procedure-local /
-                            // module / global scope (Tiers 2/3/5/6).
-                            const varNameLower = parts[0].toLowerCase();
-                            const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
-                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
-                            if (varType) {
-                                const varTypeBase = varType.toLowerCase().split('(')[0].trim();
-                                const matchesFamily = classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower;
-                                if (matchesFamily) {
-                                    if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
-                                    if (isCompatibleCallSite(i)) {
-                                        locations.push(Location.create(fileUri,
-                                            Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                         token.line, token.start + token.value.length)));
-                                    }
-                                }
                             }
                         } else if (parts.length === 3 && !chainPrefixLower && classLower &&
                                    parts[0].toLowerCase() === 'self') {
