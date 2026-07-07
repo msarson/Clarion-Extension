@@ -60,3 +60,43 @@ suite('PathUtils — clarion/solutionReady path comparison (#263)', () => {
         assert.strictEqual(PathUtils.equalPath('', ''), false);
     });
 });
+
+/**
+ * #266 — normalizeForKey is now the key discipline for findSourceInProject's
+ * exact/relative path strategies and every path-keyed cache/comparison the
+ * batch converted. These pin the key-equality semantics those sites rely on.
+ */
+suite('PathUtils — normalizeForKey key discipline (#266)', () => {
+
+    test('separator and case variants of one file produce the SAME key', () => {
+        const a = PathUtils.normalizeForKey('F:/Dev/MyApp/main.clw');
+        const b = PathUtils.normalizeForKey('f:\\DEV\\myapp\\MAIN.CLW');
+        assert.ok(a.length > 0, 'key must not be empty');
+        assert.strictEqual(a, b);
+    });
+
+    test('trailing slashes are stripped from directory keys', () => {
+        assert.strictEqual(
+            PathUtils.normalizeForKey('F:\\Dev\\MyApp\\'),
+            PathUtils.normalizeForKey('F:\\Dev\\MyApp')
+        );
+    });
+
+    test('a relative path resolves against the provided base', () => {
+        assert.strictEqual(
+            PathUtils.normalizeForKey('src\\main.clw', 'F:\\Dev\\MyApp'),
+            PathUtils.normalizeForKey('F:\\Dev\\MyApp\\src\\main.clw')
+        );
+    });
+
+    test('a relative path WITHOUT a base returns empty (cannot be keyed)', () => {
+        assert.strictEqual(PathUtils.normalizeForKey('src\\main.clw'), '');
+    });
+
+    test('dot segments normalize into the same key', () => {
+        assert.strictEqual(
+            PathUtils.normalizeForKey('F:\\Dev\\MyApp\\sub\\..\\main.clw'),
+            PathUtils.normalizeForKey('F:\\Dev\\MyApp\\main.clw')
+        );
+    });
+});

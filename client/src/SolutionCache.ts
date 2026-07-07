@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { ClarionSolutionTreeNode, ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from '../../common/types';
 import LoggerManager from './utils/LoggerManager';
+import { PathUtils } from './PathUtils';
 import { globalSettings } from './globals';
 import { LanguageClientManager, isClientReady, getClientReadyPromise } from './LanguageClientManager';
 import { SolutionParser } from './SolutionParser';
@@ -1591,8 +1592,10 @@ export class SolutionCache {
         if (!this.solutionInfo) return undefined;
 
         try {
-            // Normalize the file path for case-insensitive comparison
-            const normalizedFilePath = filePath.toLowerCase();
+            // #266: full normalization (separators/trailing-slash/case), not bare
+            // toLowerCase — the exact/relative path strategies never matched
+            // separator variants before.
+            const normalizedFilePath = PathUtils.normalizeForKey(filePath) || filePath.toLowerCase();
             const baseFileName = path.basename(filePath).toLowerCase();
             
             logger.info(`[SOURCE_LOOKUP] Looking for source file: ${baseFileName} (from ${filePath})`);
@@ -1607,12 +1610,13 @@ export class SolutionCache {
                 for (const sourceFile of project.sourceFiles) {
                     if (!sourceFile.relativePath) continue;
                     
-                    // Check if the file's absolute path matches the input path
-                    const fullPath = path.isAbsolute(sourceFile.relativePath)
-                        ? sourceFile.relativePath.toLowerCase()
-                        : path.join(project.path, sourceFile.relativePath).toLowerCase();
-                    
-                    if (fullPath === normalizedFilePath) {
+                    // Check if the file's absolute path matches the input path (#266: normalized)
+                    const fullPath = PathUtils.normalizeForKey(
+                        path.isAbsolute(sourceFile.relativePath)
+                            ? sourceFile.relativePath
+                            : path.join(project.path, sourceFile.relativePath));
+
+                    if (fullPath && fullPath === normalizedFilePath) {
                         logger.info(`[SOURCE_LOOKUP] Exact path match found: ${fullPath} in project ${project.name}`);
                         logger.info(`✅ Found source file by exact path in project: ${project.name} (${project.guid})`);
                         return sourceFile;
@@ -2104,7 +2108,7 @@ export class SolutionCache {
             return null;
         }
 
-        const project = instance.solutionInfo.projects.find(p => p.path === projectPath);
+        const project = instance.solutionInfo.projects.find(p => PathUtils.equalPath(p.path, projectPath)); // #266
         return project || null;
     }
 

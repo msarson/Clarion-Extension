@@ -2,6 +2,7 @@ import { ExtensionContext } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from './LoggerManager';
+import { PathUtils } from '../PathUtils';
 
 const logger = LoggerManager.getLogger("GlobalSolutionHistory");
 logger.setLevel("error");
@@ -63,8 +64,8 @@ export class GlobalSolutionHistory {
         const references = await this.getReferences();
 
         // Remove any existing reference to this solution (to update timestamp)
-        const filtered = references.filter(ref => 
-            ref.solutionFile.toLowerCase() !== solutionFile.toLowerCase()
+        const filtered = references.filter(ref =>
+            !PathUtils.equalPath(ref.solutionFile, solutionFile) // #266
         );
 
         // Add to the beginning (most recent first)
@@ -162,8 +163,8 @@ export class GlobalSolutionHistory {
         }
 
         const references = await this.getReferences();
-        const filtered = references.filter(ref => 
-            ref.solutionFile.toLowerCase() !== solutionFile.toLowerCase()
+        const filtered = references.filter(ref =>
+            !PathUtils.equalPath(ref.solutionFile, solutionFile) // #266
         );
 
         await this.context.globalState.update(GLOBAL_STATE_KEY, filtered);

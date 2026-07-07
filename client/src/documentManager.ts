@@ -19,6 +19,7 @@ import * as fs from 'fs';
 
 import { globalSettings } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { PathUtils } from './PathUtils';
 import { SolutionCache } from './SolutionCache';
 import { isInsideMapBlock } from '../../common/clarionUtils';
 const logger = LoggerManager.getLogger("DocumentManager");
@@ -595,11 +596,14 @@ export class DocumentManager implements Disposable {
             logger.info(`No MODULE file specified for ${location.className}.${location.methodName}, searching in same file`);
             
             try {
-                // Try to find implementation in the current document
+                // Try to find implementation in the current document.
+                // #266: equalPath — a strict uri === here was case-SENSITIVE, so a
+                // drive-letter-case mismatch made the open-editor lookup miss and
+                // unsaved edits were silently dropped in favor of the disk copy.
                 const currentDocument = workspace.textDocuments.find(doc =>
-                    doc.uri.toString() === Uri.file(location.fullFileName).toString()
+                    PathUtils.equalPath(doc.uri.fsPath, location.fullFileName)
                 );
-                
+
                 if (currentDocument) {
                     const currentContent = currentDocument.getText();
                     const implLine = this.findMethodImplementationLine(
@@ -608,7 +612,7 @@ export class DocumentManager implements Disposable {
                         location.methodName,
                         location.parameterSignature
                     );
-                    
+
                     if (implLine !== null) {
                         logger.info(`✅ Found method implementation for ${location.className}.${location.methodName} in same file at line ${implLine}`);
                         location.sectionLineLocation = new Position(implLine, 0);
@@ -644,9 +648,8 @@ export class DocumentManager implements Disposable {
             // Try to read from open editor first (to include unsaved changes), fallback to disk
             let moduleContent: string;
             try {
-                const moduleUri = Uri.file(moduleFilePath);
-                const openDoc = workspace.textDocuments.find(doc => 
-                    doc.uri.toString().toLowerCase() === moduleUri.toString().toLowerCase()
+                const openDoc = workspace.textDocuments.find(doc =>
+                    PathUtils.equalPath(doc.uri.fsPath, moduleFilePath) // #266
                 );
                 
                 if (openDoc) {
@@ -679,7 +682,7 @@ export class DocumentManager implements Disposable {
             } else {
                 // Try to find implementation in the current document (fallback)
                 const currentDocument = workspace.textDocuments.find(doc =>
-                    doc.uri.toString() === Uri.file(location.fullFileName).toString()
+                    PathUtils.equalPath(doc.uri.fsPath, location.fullFileName) // #266
                 );
                 
                 if (currentDocument) {
@@ -1094,8 +1097,12 @@ export class DocumentManager implements Disposable {
         const documentPath = document.uri.fsPath;
         const fileName = path.basename(documentPath);
 
-        // Find which project this file belongs to using SolutionCache
-        const sourceFile = this.solutionCache.findSourceInProject(fileName);
+        // Find which project this file belongs to using SolutionCache.
+        // #266: pass the FULL path — the basename-only argument made
+        // findSourceInProject's precise path-match strategies unreachable, so
+        // attribution fell to the weak name-only match whenever two projects
+        // share a filename.
+        const sourceFile = this.solutionCache.findSourceInProject(documentPath);
         const project = this.solutionCache.findProjectForFile(fileName);
 
         if (project) {
