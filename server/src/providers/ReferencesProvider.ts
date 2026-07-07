@@ -332,7 +332,7 @@ export class ReferencesProvider {
                 TokenType.GlobalProcedure, TokenType.MapProcedure,
                 TokenType.MethodDeclaration, TokenType.MethodImplementation
             ]);
-            const incDecl = await this.findProcedureInMapIncludes(searchWord.toLowerCase(), currentPath, procedureSubTypes);
+            const incDecl = await this.findProcedureInMapIncludes(searchWord.toLowerCase(), currentPath, procedureSubTypes, new Set(), token);
             if (incDecl && !filesToSearch.includes(incDecl.uri)) {
                 filesToSearch.push(incDecl.uri);
             }
@@ -729,7 +729,7 @@ export class ReferencesProvider {
                         // that declares this class, then look up the member there.
                         className = implClass;
                         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                        const incUri = await this.findClassDeclarationInIncludes(implClass, currentPath);
+                        const incUri = await this.findClassDeclarationInIncludes(implClass, currentPath, new Set(), token);
                         if (incUri) {
                             const incTokens = this.getTokensForUri(incUri);
                             if (incTokens) {
@@ -1383,7 +1383,7 @@ export class ReferencesProvider {
             if (solutionManager?.solution?.projects?.length) {
                 const ext = moduleFileName.substring(moduleFileName.lastIndexOf('.'));
                 for (const project of solutionManager.solution.projects) {
-                    const searchPaths = project.getSearchPaths(ext);
+                    const searchPaths = typeof project.getSearchPaths === 'function' ? project.getSearchPaths(ext) : [];
                     for (const searchPath of searchPaths) {
                         const candidate2 = `${searchPath}\\${moduleFileName}`;
                         if (fs.existsSync(candidate2)) {
@@ -1409,12 +1409,17 @@ export class ReferencesProvider {
      * and return the URI of the first file that contains a CLASS declaration with
      * the given class name. Returns null if not found.
      */
-    private async findClassDeclarationInIncludes(className: string, fromPath: string, visited: Set<string> = new Set()): Promise<string | null> {
+    private async findClassDeclarationInIncludes(className: string, fromPath: string, visited: Set<string> = new Set(), token?: CancellationToken): Promise<string | null> {
         if (visited.has(fromPath.toLowerCase())) return null;
         visited.add(fromPath.toLowerCase());
+        // #256 — cancellable + cooperative: early-out on a superseded request and
+        // yield the event loop every FILES_PER_YIELD files so a deep/wide .inc
+        // chain can't stall interactive requests (visited.size is the shared
+        // monotone per-file counter across the recursion).
+        if (await this.yieldIfNeeded(visited.size, token)) return null;
 
-        let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        const content = this.readIncludeWalkSource(fromPath);
+        if (content === null) return null;
 
         const classLower = className.toLowerCase();
         const lines = content.split('\n');
@@ -1435,7 +1440,7 @@ export class ReferencesProvider {
             } else if (solutionManager?.solution?.projects?.length) {
                 const ext = includeFileName.substring(includeFileName.lastIndexOf('.'));
                 for (const project of solutionManager.solution.projects) {
-                    for (const sp of project.getSearchPaths(ext)) {
+                    for (const sp of (typeof project.getSearchPaths === 'function' ? project.getSearchPaths(ext) : [])) {
                         const c2 = `${sp}\\${includeFileName}`;
                         if (fs.existsSync(c2)) { resolvedPath = c2; break; }
                     }
@@ -2611,13 +2616,16 @@ export class ReferencesProvider {
     private async findLabelInIncludes(
         wordLower: string,
         fromPath: string,
-        visited: Set<string> = new Set()
+        visited: Set<string> = new Set(),
+        token?: CancellationToken
     ): Promise<{ uri: string; line: number } | null> {
         if (visited.has(fromPath.toLowerCase())) return null;
         visited.add(fromPath.toLowerCase());
+        // #256 — cancellable + cooperative (see findClassDeclarationInIncludes).
+        if (await this.yieldIfNeeded(visited.size, token)) return null;
 
-        let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf-8'); } catch { return null; }
+        const content = this.readIncludeWalkSource(fromPath);
+        if (content === null) return null;
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
@@ -2633,7 +2641,7 @@ export class ReferencesProvider {
                 if (solutionManager?.solution?.projects?.length) {
                     const ext = incFileName.substring(incFileName.lastIndexOf('.'));
                     for (const project of solutionManager.solution.projects) {
-                        const searchPaths = project.getSearchPaths(ext);
+                        const searchPaths = typeof project.getSearchPaths === 'function' ? project.getSearchPaths(ext) : [];
                         for (const sp of searchPaths) {
                             const candidate = `${sp}\\${incFileName}`;
                             if (fs.existsSync(candidate)) { incPath = candidate; break; }
@@ -2647,7 +2655,7 @@ export class ReferencesProvider {
             const incTokens = this.getTokensForUri(incUri);
             const line = this.findLabelDeclarationLine(wordLower, incTokens);
             if (line !== null) return { uri: incUri, line };
-            const nested = await this.findLabelInIncludes(wordLower, incPath, visited);
+            const nested = await this.findLabelInIncludes(wordLower, incPath, visited, token);
             if (nested) return nested;
         }
         return null;
@@ -2785,7 +2793,7 @@ export class ReferencesProvider {
         // 3. Walk MAP INCLUDE files from current CLW — always, so we can include the INC
         //    declaration site in results even when a project-file implementation was found first.
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const incDecl = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes);
+        const incDecl = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes, new Set(), token);
 
         if (!declarationUri && incDecl) {
             declarationUri = incDecl.uri;
@@ -2816,7 +2824,7 @@ export class ReferencesProvider {
                 }
                 // Also walk INCLUDE files
                 if (!declarationUri) {
-                    const incDecl2 = await this.findLabelInIncludes(wordLower, currentPath);
+                    const incDecl2 = await this.findLabelInIncludes(wordLower, currentPath, new Set(), token);
                     if (incDecl2) { declarationUri = incDecl2.uri; declarationLine = incDecl2.line; }
                 }
             }
@@ -2933,17 +2941,16 @@ export class ReferencesProvider {
         wordLower: string,
         fromPath: string,
         procedureSubTypes: Set<TokenType>,
-        visited: Set<string> = new Set()
+        visited: Set<string> = new Set(),
+        token?: CancellationToken
     ): Promise<{ uri: string; line: number } | null> {
         if (visited.has(fromPath.toLowerCase())) return null;
         visited.add(fromPath.toLowerCase());
+        // #256 — cancellable + cooperative (see findClassDeclarationInIncludes).
+        if (await this.yieldIfNeeded(visited.size, token)) return null;
 
-        let content: string;
-        try {
-            content = fs.readFileSync(fromPath, 'utf-8');
-        } catch {
-            return null;
-        }
+        const content = this.readIncludeWalkSource(fromPath);
+        if (content === null) return null;
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
@@ -2962,7 +2969,7 @@ export class ReferencesProvider {
                 if (solutionManager?.solution?.projects?.length) {
                     const ext = incFileName.substring(incFileName.lastIndexOf('.'));
                     for (const project of solutionManager.solution.projects) {
-                        const searchPaths = project.getSearchPaths(ext);
+                        const searchPaths = typeof project.getSearchPaths === 'function' ? project.getSearchPaths(ext) : [];
                         for (const sp of searchPaths) {
                             const candidate = `${sp}\\${incFileName}`;
                             if (fs.existsSync(candidate)) { incPath = candidate; break; }
@@ -2980,11 +2987,23 @@ export class ReferencesProvider {
             if (declLine !== null) return { uri: incUri, line: declLine };
 
             // Recurse into nested INCLUDEs
-            const nested = await this.findProcedureInMapIncludes(wordLower, incPath, procedureSubTypes, visited);
+            const nested = await this.findProcedureInMapIncludes(wordLower, incPath, procedureSubTypes, visited, token);
             if (nested) return nested;
         }
 
         return null;
+    }
+
+    /**
+     * #256 — source text for the INCLUDE-chain walkers: prefer the live editor
+     * buffer (open-but-unsaved edits to INCLUDE lines are honored) over a disk
+     * read. TokenCache keys are canonical (#260), so any URI spelling of
+     * `fromPath` hits. Returns null when the file is unreadable.
+     */
+    private readIncludeWalkSource(fromPath: string): string | null {
+        const live = this.tokenCache.getDocumentTextByUriCaseInsensitive(fsPathToUri(fromPath));
+        if (live !== null) return live;
+        try { return fs.readFileSync(fromPath, 'utf-8'); } catch { return null; }
     }
 
     /**
