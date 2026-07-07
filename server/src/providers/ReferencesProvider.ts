@@ -23,6 +23,7 @@ import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
+import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import LoggerManager from '../logger';
 
@@ -121,8 +122,73 @@ export class ReferencesProvider {
 
     /**
      * Find all references to the symbol at the given position.
+     *
+     * #255 — occurrences inside unconditional OMIT blocks are EXCLUDED from the
+     * result (the index reflects the ACTIVE configuration, as in clangd), unless
+     * `opts.includeOmitted` is set. RenameProvider sets it: Clarion projects
+     * routinely ship multiple configurations off one source, so rename must
+     * rewrite compiled-out occurrences too — excluding them silently breaks
+     * the other configurations.
      */
     public async provideReferences(
+        document: TextDocument,
+        position: { line: number; character: number },
+        context: { includeDeclaration: boolean },
+        token?: CancellationToken,
+        opts?: { includeOmitted?: boolean }
+    ): Promise<Location[] | null> {
+        const locations = await this.provideReferencesUnfiltered(document, position, context, token);
+        if (!locations || opts?.includeOmitted) return locations;
+        const filtered = this.filterOmittedLocations(locations, document);
+        return filtered.length > 0 ? filtered : null;
+    }
+
+    /**
+     * #255 — drop locations on OMIT-omitted lines, per containing file. Blocks
+     * are computed once per distinct file in the result set, and only when that
+     * file actually contains an unconditional OMIT directive (the common case
+     * exits after a cheap token scan).
+     */
+    private filterOmittedLocations(locations: Location[], cursorDocument: TextDocument): Location[] {
+        const blocksByUri = new Map<string, DirectiveBlock[]>();
+        const blocksFor = (uri: string): DirectiveBlock[] => {
+            const key = uri.toLowerCase();
+            let blocks = blocksByUri.get(key);
+            if (blocks === undefined) {
+                const tokens = this.getTokensForUri(uri);
+                if (!tokens || tokens.length === 0) {
+                    blocks = [];
+                } else {
+                    const text = uri.toLowerCase() === cursorDocument.uri.toLowerCase()
+                        ? cursorDocument.getText()
+                        : this.tokenCache.getDocumentTextByUriCaseInsensitive(uri)
+                          ?? this.readFileTextForUri(uri);
+                    blocks = text !== null
+                        ? OmitCompileDetector.findDirectiveBlocks(tokens, TextDocument.create(uri, 'clarion', 1, text))
+                        : [];
+                }
+                blocksByUri.set(key, blocks);
+            }
+            return blocks;
+        };
+        return locations.filter(loc => {
+            const blocks = blocksFor(loc.uri);
+            return blocks.length === 0 ||
+                !OmitCompileDetector.isLineOmittedWithBlocks(loc.range.start.line, blocks);
+        });
+    }
+
+    /** Disk-read fallback for #255 block scanning of closed files. */
+    private readFileTextForUri(uri: string): string | null {
+        try {
+            const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            return fs.readFileSync(filePath, 'utf-8');
+        } catch {
+            return null;
+        }
+    }
+
+    private async provideReferencesUnfiltered(
         document: TextDocument,
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },

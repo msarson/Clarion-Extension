@@ -85,7 +85,8 @@ export class RenameProvider {
             // includeDeclaration:true, line below) would succeed. The pre-flight must
             // not be stricter than the operation it gates.
             const locations = await this.referencesProvider.provideReferences(
-                document, position, { includeDeclaration: true }
+                document, position, { includeDeclaration: true },
+                undefined, { includeOmitted: true } // #255 — pre-flight must match provideRename's scope
             );
             if (!locations || locations.length === 0) {
                 throw new ResponseError(
@@ -131,11 +132,17 @@ export class RenameProvider {
         const oldName = document.getText(wordRange);
         if (!oldName) return null;
 
-        // Gather all reference locations (include declaration so it gets renamed too)
+        // Gather all reference locations (include declaration so it gets renamed too).
+        // #255 — includeOmitted: rename must ALSO rewrite occurrences inside OMIT'd
+        // blocks (deliberate deviation from the C++-IDE model): Clarion projects
+        // routinely build multiple configurations from one source, and skipping
+        // inactive regions silently breaks the other configurations.
         const locations = await this.referencesProvider.provideReferences(
             document,
             position,
-            { includeDeclaration: true }
+            { includeDeclaration: true },
+            undefined,
+            { includeOmitted: true }
         );
 
         if (!locations || locations.length === 0) {

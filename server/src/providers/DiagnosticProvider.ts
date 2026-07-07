@@ -21,6 +21,7 @@ import { validateAttributeApplicability } from './diagnostics/AttributeDiagnosti
 import { validateItemizeBlocks } from './diagnostics/ItemizeDiagnostics';
 import { validateByRefArguments } from './diagnostics/ByRefArgumentDiagnostics';
 import { validateIndistinguishablePrototypes } from './diagnostics/IndistinguishablePrototypeDiagnostics';
+import { OmitCompileDetector } from '../utils/OmitCompileDetector';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -85,7 +86,28 @@ export class DiagnosticProvider {
             'diagnostics': diagnostics.length
         });
 
-        return diagnostics;
+        return this.filterOmitted(diagnostics, tokens, document);
+    }
+
+    /**
+     * #255 — drop diagnostics whose line is inside an unconditional OMIT block:
+     * compiled-out code isn't in the active build, so flagging it is pure noise
+     * (matches how C++ IDEs treat inactive `#if 0` regions). Conditional
+     * OMIT/COMPILE stays live (defines aren't evaluated yet), and rename
+     * deliberately still sees omitted code — this filter is diagnostics-only.
+     * Applied at the facade so every validator (sync + async passes) is covered.
+     */
+    private static filterOmitted(diagnostics: Diagnostic[], tokens: Token[], document: TextDocument): Diagnostic[] {
+        if (diagnostics.length === 0) return diagnostics;
+        const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, document);
+        if (blocks.length === 0) return diagnostics;
+        // Diagnostics ON a directive start line are STRUCTURAL (e.g. "unterminated
+        // OMIT") — they must survive even when that directive sits inside another
+        // omitted range, or nesting problems would hide their own reports.
+        const directiveStartLines = new Set(blocks.map(b => b.startLine));
+        return diagnostics.filter(d =>
+            directiveStartLines.has(d.range.start.line) ||
+            !OmitCompileDetector.isLineOmittedWithBlocks(d.range.start.line, blocks));
     }
 
     /** Async pass: warn when dot-access method call discards a return value. Closes #61 */
@@ -95,7 +117,7 @@ export class DiagnosticProvider {
         memberLocator: MemberLocatorService,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent);
+        return this.filterOmitted(await _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent), tokens, document);
     }
 
     /**
@@ -110,7 +132,7 @@ export class DiagnosticProvider {
     ): Promise<Diagnostic[]> {
         // #258: production callers pass cache tokens — reuse the cached structure.
         const structure = TokenCache.getInstance().getStructure(document);
-        return _validateClassInterfaceImplementationAsync(tokens, document, memberLocator, structure);
+        return this.filterOmitted(await _validateClassInterfaceImplementationAsync(tokens, document, memberLocator, structure), tokens, document);
     }
 
     /** Async pass: warn when a procedure implementation has no MAP declaration in the parent file. Closes #89 */
@@ -119,7 +141,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return validateMissingMapDeclarations(tokens, document, getOpenDocumentContent);
+        return this.filterOmitted(await validateMissingMapDeclarations(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
     /** Async pass: warn when a MAP/MODULE declaration has no implementation in the referenced CLW. Closes #89 */
@@ -128,7 +150,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
-        return validateMissingImplementations(tokens, document, getOpenDocumentContent);
+        return this.filterOmitted(await validateMissingImplementations(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
     /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */
@@ -136,7 +158,7 @@ export class DiagnosticProvider {
         tokens: Token[],
         document: TextDocument
     ): Promise<Diagnostic[]> {
-        return validateMissingIncludes(tokens, document);
+        return this.filterOmitted(await validateMissingIncludes(tokens, document), tokens, document);
     }
 
     /** Async pass: info when a variable's class requires Link/DLL project constants not yet defined. Closes #83 */
@@ -144,7 +166,7 @@ export class DiagnosticProvider {
         tokens: Token[],
         document: TextDocument
     ): Promise<Diagnostic[]> {
-        return validateMissingConstants(tokens, document);
+        return this.filterOmitted(await validateMissingConstants(tokens, document), tokens, document);
     }
 
     /**
@@ -160,6 +182,6 @@ export class DiagnosticProvider {
         symbolFinder: SymbolFinderService
     ): Promise<Diagnostic[]> {
         if (!serverSettings.undeclaredVariablesEnabled) return [];
-        return _validateUndeclaredVariablesAsync(tokens, document, symbolFinder);
+        return this.filterOmitted(await _validateUndeclaredVariablesAsync(tokens, document, symbolFinder), tokens, document);
     }
 }
