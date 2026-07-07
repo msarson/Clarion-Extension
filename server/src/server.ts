@@ -880,22 +880,24 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
     // Get current document text
     const text = document.getText();
     
-    // 🚀 PERF: Get cached tokens to detect what changed
+    // 🚀 PERF: Get cached text to detect what changed
     // If no cache exists, this is first edit - let incremental handle it
-    const cached = tokenCache['cache'].get(document.uri);
-    if (!cached || !cached.documentText) {
+    // #260: use the public accessor (the private-map reach would silently miss
+    // now that cache keys are canonicalized).
+    const cachedText = tokenCache.getDocumentText(document.uri);
+    if (!cachedText) {
         return false; // No baseline to compare, incremental will handle
     }
-    
+
     // 🚀 PERF: Quick length check - if document length changed significantly, likely structural
-    const lengthDiff = Math.abs(text.length - cached.documentText.length);
+    const lengthDiff = Math.abs(text.length - cachedText.length);
     if (lengthDiff > 50) {
         return true; // Large changes likely affect structure
     }
-    
+
     // 🔍 CORRECTNESS: Detect changed lines by comparing text
     const newLines = text.split(/\r?\n/);
-    const oldLines = cached.documentText.split(/\r?\n/);
+    const oldLines = cachedText.split(/\r?\n/);
     
     // Check each changed line for structure-affecting keywords
     const maxLines = Math.max(newLines.length, oldLines.length);
