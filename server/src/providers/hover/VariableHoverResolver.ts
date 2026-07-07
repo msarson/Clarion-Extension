@@ -9,6 +9,7 @@ import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
@@ -256,7 +257,7 @@ export class VariableHoverResolver {
             ``
         ];
         
-        const isProcedure = typeInfo === 'PROCEDURE';
+        const isProcedure = ProcedureUtils.isProcedureKeyword(typeInfo); // #247: PROCEDURE ≡ FUNCTION
         const isEquate = typeInfo === 'EQUATE';
 
         if (isClassProperty) {

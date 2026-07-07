@@ -2577,7 +2577,7 @@ export class DocumentStructure {
         // Find first procedure declaration
         const firstProc = this.tokens.find(t =>
             t.subType === TokenType.GlobalProcedure ||
-            t.value.toUpperCase() === 'PROCEDURE'
+            ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
         );
         
         // If no procedure exists, everything is in global scope

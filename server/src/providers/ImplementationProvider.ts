@@ -20,6 +20,7 @@ import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier'
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
@@ -405,7 +406,7 @@ export class ImplementationProvider {
                                 ? { ...chainedInfo, line: picked.line, file: picked.file }
                                 : chainedInfo;
                             // For methods, try to find the implementation; for properties just return declaration
-                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
                                     picked?.signature ?? line, declInfo.file, token
@@ -436,7 +437,7 @@ export class ImplementationProvider {
                             const declInfo = picked
                                 ? { ...chainedInfo, line: picked.line, file: picked.file }
                                 : chainedInfo;
-                            if (declInfo.type.toUpperCase().startsWith('PROCEDURE')) {
+                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
                                     picked?.signature ?? line, declInfo.file, token
@@ -490,7 +491,7 @@ export class ImplementationProvider {
                     const memberInfo = this.memberResolver.findClassMemberInfo(
                         callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
                     );
-                    if (memberInfo && memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                    if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                         // #182 — arg-classification overlay (symmetric with PARENT/Definition).
                         const picked = this.overloadResolver.resolveOverloadDeclByArgs(
                             memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
@@ -514,7 +515,7 @@ export class ImplementationProvider {
                     // #125 — arg-classify overlay for typed-var dot-access call→impl resolution.
                     const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
                     if (argClassifyInfo) {
-                        if (argClassifyInfo.type.toUpperCase().includes('PROCEDURE')) {
+                        if (ProcedureUtils.containsProcedureKeyword(argClassifyInfo.type)) { // #247
                             const impl = await this.memberResolver.findImplementationCrossFile(
                                 argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document, token
                             );
@@ -529,7 +530,7 @@ export class ImplementationProvider {
                         callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
                     );
                     if (memberInfo) {
-                        if (memberInfo.type.toUpperCase().includes('PROCEDURE')) {
+                        if (ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                             const impl = await this.memberResolver.findImplementationCrossFile(
                                 memberInfo.className, callInfo.methodName, memberInfo, document, token
                             );
@@ -567,10 +568,10 @@ export class ImplementationProvider {
                 position.character <= t.start + t.value.length
             );
             
-            const procedureToken = lineTokens.find(t => 
-                t.value.toUpperCase() === 'PROCEDURE'
+            const procedureToken = lineTokens.find(t =>
+                ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
             );
-            
+
             if (labelToken && procedureToken) {
                 logger.info(`Found method declaration pattern: Label="${labelToken.value}" + PROCEDURE on line ${position.line}`);
                 tokenAtPosition = labelToken;

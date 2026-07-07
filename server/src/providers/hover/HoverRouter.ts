@@ -152,7 +152,7 @@ export class HoverRouter {
             return this.contextHandler.handleElseKeyword(tokens, position);
         }
 
-        if (upperWord === 'PROCEDURE') {
+        if (upperWord === 'PROCEDURE' || upperWord === 'FUNCTION') { // #247: PROCEDURE ≡ FUNCTION
             return this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
         }
 

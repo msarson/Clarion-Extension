@@ -431,8 +431,9 @@ export class TokenCache {
             const lineData = cached.lineTokens.get(lineNum);
             if (lineData) {
                 const lineUpper = lineData.lineText.toUpperCase();
-                // Check if this line contains a structure keyword
-                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('CLASS') || 
+                // Check if this line contains a structure keyword (#247: PROCEDURE ≡ FUNCTION)
+                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('FUNCTION') ||
+                    lineUpper.includes('CLASS') ||
                     lineUpper.includes('MAP') || lineUpper.includes('INTERFACE') ||
                     lineUpper.includes('MODULE')) {
                     // Find all tokens that are children of this structure
@@ -455,8 +456,9 @@ export class TokenCache {
                         const nextLineData = cached.lineTokens.get(line);
                         if (nextLineData) {
                             const nextUpper = nextLineData.lineText.trim().toUpperCase();
-                            // Stop at next procedure/class or at column 0 keywords that end structures
-                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('CLASS ') ||
+                            // Stop at next procedure/class or at column 0 keywords that end structures (#247)
+                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('FUNCTION ') ||
+                                nextUpper.startsWith('CLASS ') ||
                                 (nextUpper === 'END' && nextLineData.lineText.trim() === 'END')) {
                                 foundEnd = true;
                                 break;

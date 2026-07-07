@@ -314,7 +314,7 @@ export class SignatureHelpProvider {
                     const content = document.getText();
                     const lines = content.split('\n');
                     const scopeLine = lines[currentScope.line];
-                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
                     if (classMethodMatch) {
                         className = classMethodMatch[1];
                         logger.info(`Extracted class name from line: ${className}`);
@@ -610,7 +610,7 @@ export class SignatureHelpProvider {
                             }
                             
                             // Check if line starts with the method name (label at column 0)
-                            const methodMatch = methodLine.match(new RegExp(`^${methodName}\\s+PROCEDURE`, 'i'));
+                            const methodMatch = methodLine.match(new RegExp(`^${methodName}\\s+(?:PROCEDURE|FUNCTION)`, 'i')); // #247
                             if (methodMatch) {
                                 const signature = methodLine.trim();
                                 const declParamCount = this.overloadResolver.countParametersInDeclaration(signature);

@@ -182,7 +182,7 @@ export class ChainedPropertyResolver {
 
         const lines = document.getText().split('\n');
         const scopeLine = lines[currentScope.line];
-        const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+        const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
         return m ? m[1] : null;
     }
 

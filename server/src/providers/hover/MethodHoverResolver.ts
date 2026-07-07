@@ -9,6 +9,7 @@ import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
 import { resolveFileInNoSolutionMode } from '../../solution/findFileNoSolution';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import LoggerManager from '../../logger';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
@@ -153,8 +154,8 @@ export class MethodHoverResolver {
                 position.character <= t.start + t.value.length
             );
             
-            const procedureToken = lineTokens.find(t => 
-                t.value.toUpperCase() === 'PROCEDURE'
+            const procedureToken = lineTokens.find(t =>
+                ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
             );
             
             // If we have a label at start of line and PROCEDURE on same line, it's likely a method declaration

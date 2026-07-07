@@ -14,6 +14,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
@@ -42,7 +43,7 @@ export class MemberLocatorService {
         const lines = document.getText().split(/\r?\n/);
         const methodLower = methodName.toLowerCase();
         for (const line of lines) {
-            const match = line.match(/^\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s+PROCEDURE\b/i);
+            const match = line.match(/^\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s+(?:PROCEDURE|FUNCTION)\b/i); // #247
             if (!match) continue;
             const className = match[1];
             const candidateMethod = (match[3] ?? match[2]).toLowerCase();
@@ -208,7 +209,7 @@ export class MemberLocatorService {
         const procedureLine = lines[scopeToken.line];
         if (!procedureLine) return null;
 
-        const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
         if (!sigMatch || !sigMatch[1]) return null;
 
         const wordLower = varName.toLowerCase();
@@ -1241,7 +1242,7 @@ export class MemberLocatorService {
     }
 
     private countParamsInDecl(line: string): number {
-        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
         if (!match) return 0;
         const paramList = match[1].trim();
         if (!paramList) return 0;
@@ -1305,7 +1306,7 @@ export class MemberLocatorService {
             const name = memberMatch[1];
             const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
             const access = detectMemberAccess(raw);
-            const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+            const kind: 'method' | 'property' = /^(?:PROCEDURE|FUNCTION)\b/i.test(typeStr) ? 'method' : 'property'; // #247
 
             results.push({ name, kind, signature: raw.trim(), type: typeStr, access, fromClass: className, line: token.line, file: filePath });
         }
@@ -1361,7 +1362,7 @@ export class MemberLocatorService {
             const afterMember = memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart();
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
-            if (type.toUpperCase().startsWith('PROCEDURE')) {
+            if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
                 declParamCount = this.countParamsInDecl(memberLine);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });

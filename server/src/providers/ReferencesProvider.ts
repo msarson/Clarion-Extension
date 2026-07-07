@@ -14,6 +14,7 @@ import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedProp
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
@@ -867,7 +868,7 @@ export class ReferencesProvider {
             if (!declLineText) {
                 declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFsPath, filterDeclLine);
             }
-            if (declLineText && /\bPROCEDURE\b/i.test(declLineText)) {
+            if (declLineText && ProcedureUtils.containsProcedureKeyword(declLineText)) { // #247: PROCEDURE ≡ FUNCTION
                 const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
                 const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
                 const minArgs = maxArgs - defaultCount;
@@ -1571,7 +1572,7 @@ export class ReferencesProvider {
                     if (child.subType === TokenType.MethodDeclaration &&
                         child.label?.toLowerCase() === memberLower) {
                         const sig = getLineText(child.line).trim();
-                        if (sig && /\bPROCEDURE\b/i.test(sig)) {
+                        if (sig && ProcedureUtils.containsProcedureKeyword(sig)) { // #247: PROCEDURE ≡ FUNCTION
                             result.push({ signature: sig, declarationLine: child.line });
                         }
                     }
@@ -2458,7 +2459,7 @@ export class ReferencesProvider {
             const declFile = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
             declLineText = ClassMemberResolver.getDeclarationLineText(declFile, symbolInfo.location.line);
         }
-        if (!declLineText || !/\bPROCEDURE\b/i.test(declLineText)) return undefined;
+        if (!declLineText || !ProcedureUtils.containsProcedureKeyword(declLineText)) return undefined; // #247: PROCEDURE ≡ FUNCTION
 
         const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
         const defaultCount = ClarionPatterns.countDefaultParams(declLineText);

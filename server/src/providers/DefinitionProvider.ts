@@ -661,8 +661,8 @@ export class DefinitionProvider {
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
             // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
-            const isInsideProcSignature = /\bPROCEDURE\s*\(/i.test(line) && (() => {
-                const parenOpen = line.indexOf('(', line.search(/\bPROCEDURE\s*\(/i));
+            const isInsideProcSignature = /\b(?:PROCEDURE|FUNCTION)\s*\(/i.test(line) && (() => { // #247
+                const parenOpen = line.indexOf('(', line.search(/\b(?:PROCEDURE|FUNCTION)\s*\(/i));
                 const parenClose = line.lastIndexOf(')');
                 return parenOpen >= 0 && position.character > parenOpen && position.character <= parenClose;
             })();
@@ -1774,7 +1774,7 @@ export class DefinitionProvider {
         }
         
         // Match PROCEDURE(...) pattern to extract parameters
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
         if (!match || !match[1]) {
             logger.info(`No parameters found in procedure signature`);
             return null;
@@ -1862,7 +1862,7 @@ export class DefinitionProvider {
             logger.info(`Scope line text: "${scopeLine}"`);
             
             // Match ClassName.MethodName PROCEDURE pattern
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
                 logger.info(`Extracted class name from line: ${className}`);
@@ -2206,7 +2206,7 @@ export class DefinitionProvider {
                 if (content) {
                     const lines = content.split('\n');
                     const procedureLine = lines[currentScope.line] ?? '';
-                    const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+                    const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
                     if (sigMatch?.[1]) {
                         const wordLower = variableName.toLowerCase();
                         for (const param of sigMatch[1].split(',')) {

@@ -8,6 +8,7 @@ import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
+import { ProcedureUtils } from './ProcedureUtils';
 import { cooperativeCheckpoint } from './cooperativeScan';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -94,7 +95,8 @@ export function scanClassBodyForAllMembers(
                 const name = memberMatch[1];
                 const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
                 const access = detectMemberAccess(raw);
-                const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+                // #247: PROCEDURE ≡ FUNCTION — both declare methods.
+                const kind: 'method' | 'property' = ProcedureUtils.startsWithProcedureKeyword(typeStr) ? 'method' : 'property';
 
                 results.push({
                     name,
@@ -173,7 +175,7 @@ export function scanClassBodyForMember(
                     const afterMember = memberLine.substring(memberMatch[0].length).trim();
                     const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
                     let declParamCount = 0;
-                    if (type.toUpperCase().startsWith('PROCEDURE')) {
+                    if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
                         declParamCount = countParamsInDecl(memberLine);
                     }
                     candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
@@ -282,7 +284,7 @@ export class ClassMemberResolver {
             const content = document.getText();
             const lines = content.split('\n');
             const scopeLine = lines[currentScope.line];
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+PROCEDURE/i);
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
             }
@@ -353,9 +355,9 @@ export class ClassMemberResolver {
                         const type = typeToken ? typeToken.value : 'Unknown';
                         logger.info(`   Type token: ${type}, line: ${i}`);
                         
-                        // Count parameters in declaration if it's a PROCEDURE
+                        // Count parameters in declaration if it's a PROCEDURE/FUNCTION (#247)
                         let declParamCount = 0;
-                        if (type.toUpperCase() === 'PROCEDURE') {
+                        if (ProcedureUtils.isProcedureKeyword(type)) {
                             const fullLine = lines[i];
                             declParamCount = this.countParametersInDeclaration(fullLine);
                         }
@@ -481,9 +483,9 @@ export class ClassMemberResolver {
                                 const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
                                 const type = typeWithoutComment.trim() || 'Unknown';
                                 
-                                // Count parameters if it's a PROCEDURE
+                                // Count parameters if it's a PROCEDURE/FUNCTION (#247)
                                 let declParamCount = 0;
-                                if (type.toUpperCase().startsWith('PROCEDURE')) {
+                                if (ProcedureUtils.startsWithProcedureKeyword(type)) {
                                     declParamCount = this.countParametersInDeclaration(memberLine);
                                     logger.info(`Counting params in: ${memberLine}`);
                                     logger.info(`Detected ${declParamCount} parameters`);
@@ -593,7 +595,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;
@@ -657,7 +659,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;
@@ -906,7 +908,7 @@ export class ClassMemberResolver {
      * Extracts parameter list from PROCEDURE(...) 
      */
     public countParametersInDeclaration(line: string): number {
-        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
         if (!match) return 0;
         
         const paramList = match[1].trim();

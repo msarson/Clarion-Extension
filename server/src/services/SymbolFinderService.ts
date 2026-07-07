@@ -19,6 +19,7 @@ import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../provide
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -190,8 +191,8 @@ export class SymbolFinderService {
             return null;
         }
         
-        // Match PROCEDURE(...) signature
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        // Match PROCEDURE(...)/FUNCTION(...) signature (#247)
+        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i);
         if (!match || !match[1]) {
             return null;
         }
@@ -559,7 +560,7 @@ export class SymbolFinderService {
         const firstProcToken = tokens.find(t =>
             (t.subType === TokenType.GlobalProcedure ||
              t.subType === TokenType.MethodImplementation) &&
-            t.value.toUpperCase() === 'PROCEDURE'
+            ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
         );
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
