@@ -69,6 +69,10 @@ type OverloadFilter = {
      *  filtering (fe254d6f). Optional — dot-access path doesn't populate it; its
      *  filter remains arity-only via minArgs/maxArgs. */
     declSignature?: string;
+    /** #268 — ALL same-name sibling declaration signatures from the declaration
+     *  file (the full overload set), so call sites can be classified against
+     *  them. Populated only when there is more than one overload. */
+    candidates?: Array<{ signature: string; declarationLine: number }>;
 };
 
 /**
@@ -2107,7 +2111,34 @@ export class ReferencesProvider {
             declarationFileNorm: symbolInfo.location.uri.toLowerCase(),
             declSignature: declLineText.trim()
         };
-        logger.test(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, sig="${filter.declSignature}"`);
+
+        // #268 — gather ALL same-name declaration signatures from the declaration
+        // file (the sibling overload set) so `findReferencesInFile` can classify
+        // call-site arguments against them and drop other-overload call sites.
+        const declTokens = this.getTokensForUri(symbolInfo.location.uri);
+        if (declTokens && declTokens.length > 0) {
+            const nameLower = symbolInfo.token.value.toLowerCase();
+            const declFsPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const sameDocLines = (document && document.uri === symbolInfo.location.uri)
+                ? document.getText().split(/\r?\n/)
+                : null;
+            const readDeclLine = (line: number): string | null =>
+                sameDocLines ? (sameDocLines[line] ?? null)
+                             : ClassMemberResolver.getDeclarationLineText(declFsPath, line);
+            const candidates: Array<{ signature: string; declarationLine: number }> = [];
+            for (const t of declTokens) {
+                if (!TokenHelper.isProcedureOrFunction(t)) continue;
+                if (t.subType !== TokenType.MapProcedure && t.subType !== TokenType.MethodDeclaration) continue;
+                if ((t.label ?? '').toLowerCase() !== nameLower) continue;
+                const sig = readDeclLine(t.line);
+                if (sig && ProcedureUtils.containsProcedureKeyword(sig)) {
+                    candidates.push({ signature: sig.trim(), declarationLine: t.line });
+                }
+            }
+            if (candidates.length > 1) filter.candidates = candidates;
+        }
+
+        logger.test(`🎯 [FAR] Plain-symbol OverloadFilter: args ${minArgs}–${maxArgs}, ${filter.candidates?.length ?? 1} overload(s), sig="${filter.declSignature}"`);
         return filter;
     }
 
@@ -2455,6 +2486,11 @@ export class ReferencesProvider {
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
 
+            // #268 — lazily-built per-file classifier context for call-site
+            // overload filtering (only when this file actually contains a call).
+            let callSiteCtx: ClassifierContext | null = null;
+            let callSiteClassifier: CallSiteArgumentClassifier | null = null;
+
             for (let i = 0; i < tokens.length; i++) {
                 const token = tokens[i];
                 if (!validLineRanges.some(([s, e]) => token.line >= s && token.line <= e)) continue;
@@ -2523,14 +2559,47 @@ export class ReferencesProvider {
                 if (!includeDeclaration && fileUri === declarationUri && token.line === declarationLine) continue;
 
                 // OverloadFilter: skip wrong-overload decl/impl matches via type-aware
-                // signaturesMatch (fe254d6f). Bare references with no parens AND
-                // call-site matches pass through (call-site type-aware filtering is
-                // P2b out-of-scope; arity-only filtering on call sites kept as best-effort).
+                // signaturesMatch (fe254d6f). Bare references with no parens pass through.
                 if (overloadFilter && overloadFilter.declSignature && procedureDeclLines.has(token.line)) {
                     const lines = getCandidateFileLines();
                     const candidateSig = lines?.[token.line]?.trim();
                     if (!candidateSig || !this.overloadResolver.signaturesMatch(overloadFilter.declSignature, candidateSig)) {
                         continue;
+                    }
+                }
+
+                // #268 — type-aware CALL-SITE filtering (mirrors the member path's
+                // isCompatibleCallSite): arity band first (default-aware bounds from
+                // the filter), then classify the call's arguments against the sibling
+                // overload signatures. Conservative bias (Mark's pick (b)): a call
+                // the classifier can't disambiguate stays INCLUDED — false-positive
+                // over false-negative for rename safety. Decl/impl lines never reach
+                // here as calls: countCallArgsFromTokens needs `(` as the next
+                // significant token, and `name PROCEDURE(` has the keyword between.
+                if (overloadFilter && !procedureDeclLines.has(token.line)) {
+                    const argCount = this.countCallArgsFromTokens(tokens, i);
+                    if (argCount >= 0) {
+                        if (argCount < overloadFilter.minArgs || argCount > overloadFilter.maxArgs) continue;
+                        const cands = overloadFilter.candidates;
+                        if (cands && cands.length > 1) {
+                            if (!callSiteCtx) {
+                                const fileVarIndex = this.scopeTypeIndex.buildFileVarTypeIndex(tokens);
+                                callSiteCtx = {
+                                    resolveSymbolType: (name, line) =>
+                                        this.scopeTypeIndex.lookupVarTypeAtLine(fileVarIndex, null, line, name.toLowerCase())
+                                };
+                                callSiteClassifier = new CallSiteArgumentClassifier();
+                            }
+                            const args = callSiteClassifier!.classifyArguments(tokens, i, callSiteCtx);
+                            if (args) {
+                                const result = this.overloadResolver.findOverloadByArgClassifications(
+                                    args, cands.map(c => c.signature));
+                                if (!result.matchedAll && result.matchedIndex >= 0 &&
+                                    cands[result.matchedIndex].declarationLine !== overloadFilter.declarationLine) {
+                                    continue; // call site belongs to a different overload
+                                }
+                            }
+                        }
                     }
                 }
 
