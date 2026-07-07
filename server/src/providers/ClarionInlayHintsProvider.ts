@@ -7,6 +7,10 @@ import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { serverSettings } from '../serverSettings';
 
 /**
+ * ⚠️ DORMANT (2026-07-07): inlay hints are DISABLED — they added too much visual noise for
+ * Clarion. This provider is fully intact but never invoked because the server no longer
+ * advertises the `inlayHintProvider` capability (see server.ts). Kept for easy re-enable.
+ *
  * Inlay hints for Clarion:
  *   - Implicit-variable TYPE hints — `Counter#` → `: LONG`, `Pct$` → `: REAL`, `Name"` → `: STRING`.
  *     Shown once per distinct implicit name within the requested range.

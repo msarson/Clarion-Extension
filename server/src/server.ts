@@ -351,7 +351,12 @@ connection.onInitialize((params) => {
                 referencesProvider: true,
                 renameProvider: { prepareProvider: true },
                 documentHighlightProvider: true,
-                inlayHintProvider: true,
+                // Inlay hints DISABLED (2026-07-07): they added too much visual noise for Clarion.
+                // The provider, handler, and settings are kept intact but dormant — NOT advertising
+                // this capability means VS Code never requests inlay hints, so the handler below is
+                // never called. To re-enable: restore `inlayHintProvider: true` here (and, if desired,
+                // re-add the `clarion.inlayHints.*` settings to package.json).
+                // inlayHintProvider: true,
                 workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
@@ -2317,6 +2322,8 @@ connection.onDocumentHighlight(async (params) => {
 });
 
 // Inlay hints — implicit-variable types + parameter-name hints at call sites.
+// DORMANT (2026-07-07): the `inlayHintProvider` capability is no longer advertised (see the
+// server capabilities block above), so VS Code never calls this handler. Kept for easy re-enable.
 connection.languages.inlayHint.on((params) => {
     if (!serverInitialized) return null;
     const document = documents.get(params.textDocument.uri);

@@ -1289,16 +1289,6 @@
           "default": true,
           "description": "Enabled by default. Shows a '… references' CodeLens above each procedure, method implementation, and CLASS, counting usages across the solution. Each lens runs a Find-All-References, which can make very large classes (e.g. StringTheory) sluggish — set to false to disable. Toggling requires reloading the VS Code window (issue #185)."
         },
-        "clarion.inlayHints.parameterNames.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inline parameter-name hints at call sites (e.g. Save(pName: 'report', pFlags: 3)). Set to false to hide them. Note: VS Code's own 'editor.inlayHints.enabled' toggles all inlay hints. Toggling requires reloading the VS Code window."
-        },
-        "clarion.inlayHints.implicitVariableTypes.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inline type hints for implicit variables (e.g. Counter# : LONG, Pct$ : REAL). Set to false to hide them. Note: VS Code's own 'editor.inlayHints.enabled' toggles all inlay hints. Toggling requires reloading the VS Code window."
-        },
         "clarion.activeVersion": {
           "type": "string",
           "default": "",
