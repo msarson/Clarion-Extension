@@ -26,6 +26,7 @@ import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
 import { RoutineHoverResolver } from './hover/RoutineHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
+import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
 import { CrossFileCache } from './hover/CrossFileCache';
@@ -50,6 +51,7 @@ export class HoverProvider {
     private crossFileCache: CrossFileCache;
     private mapResolver: MapProcedureResolver;
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
+    private fileResolver = new FileDefinitionResolver(); // #265 — shared with F12's #171 path
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
@@ -109,6 +111,21 @@ export class HoverProvider {
     private async _provideHoverInternal(document: TextDocument, position: Position): Promise<Hover | null> {
 
         try {
+            // #265 — INCLUDE/MODULE/MEMBER/LINK filename hover (mirror of F12's
+            // #171 exception). The context builder bails on any cursor inside a
+            // string literal, so this must run BEFORE it: when the cursor is on
+            // the filename argument of a file-ref statement, show the RESOLVED
+            // path (the redirection answer — the filename alone doesn't tell you
+            // which copy wins). The detector scopes to the FIRST string after the
+            // file-ref token, so SECTION args still fall through to the bail.
+            {
+                const preTokens = this.tokenCache.getTokens(document);
+                const fileRefStr = TokenHelper.getFileRefArgStringToken(preTokens, position.line, position.character);
+                if (fileRefStr) {
+                    return this.buildFileRefHover(fileRefStr, preTokens, document);
+                }
+            }
+
             // Build hover context
             const context = await this.contextBuilder.build(document, position);
             if (!context) {
@@ -783,6 +800,37 @@ export class HoverProvider {
      */
     public clearCache(): void {
         this.crossFileCache.clear();
+    }
+
+    /**
+     * #265 — hover card for a file-ref filename (INCLUDE / MODULE / MEMBER /
+     * LINK argument): statement keyword + filename + the redirection-resolved
+     * absolute path, or a not-found note. Shares FileDefinitionResolver with
+     * F12 so both surfaces always agree on which physical file wins.
+     */
+    private async buildFileRefHover(fileRefStr: Token, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+        const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
+        if (!filename) return null;
+
+        // The statement keyword: the file-ref-carrying token on the same line.
+        const refToken = tokens.find(t =>
+            t.line === fileRefStr.line && t.referencedFile !== undefined && t.referencedFile.length > 0);
+        const keyword = refToken ? refToken.value.toUpperCase() : 'INCLUDE';
+
+        const loc = await this.fileResolver.findFileDefinition(filename, document.uri);
+        const lines: string[] = [`**${keyword}** \`${filename}\``];
+        if (loc) {
+            const fsPath = decodeURIComponent(loc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            lines.push(`Resolves to: \`${fsPath}\``);
+        } else {
+            lines.push('⚠️ File not found via project paths or redirection');
+        }
+        return {
+            contents: { kind: 'markdown', value: lines.join('\n\n') },
+            range: Range.create(
+                fileRefStr.line, fileRefStr.start,
+                fileRefStr.line, fileRefStr.start + fileRefStr.value.length)
+        };
     }
 
     /**
