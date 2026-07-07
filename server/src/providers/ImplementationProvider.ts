@@ -299,27 +299,21 @@ export class ImplementationProvider {
 
         logger.info(`Looking for routine: ${routineName}`);
 
-        // Search for routine label at column 0 (supports namespace prefixes)
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-
-        for (let i = 0; i < lines.length; i++) {
-            const routineLine = lines[i];
-
-            // Check if line starts at column 0 (no leading whitespace)
-            if (routineLine.length > 0 && routineLine[0] !== ' ' && routineLine[0] !== '\t') {
-                const match = routineLine.match(ClarionPatterns.ROUTINE_LABEL);
-                if (match && match[1].toUpperCase() === routineName.toUpperCase()) {
-                    logger.info(`✅ Found routine at line ${i}`);
-                    return Location.create(
-                        document.uri,
-                        {
-                            start: { line: i, character: 0 },
-                            end: { line: i, character: match[0].length }
-                        }
-                    );
+        // #264: scope the lookup to the ENCLOSING PROCEDURE (the #211 rule) — routine
+        // labels repeat across procedures, and the previous whole-file first-match text
+        // scan landed on the WRONG procedure's routine. Shares DefinitionProvider's
+        // algorithm via TokenHelper so hover, F12, and Ctrl+F12 always agree.
+        const structure = this.tokenCache.getStructure(document);
+        const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
+        if (routineToken) {
+            logger.info(`✅ Found routine at line ${routineToken.line}`);
+            return Location.create(
+                document.uri,
+                {
+                    start: { line: routineToken.line, character: 0 },
+                    end: { line: routineToken.line, character: routineToken.value.length }
                 }
-            }
+            );
         }
 
         return null;

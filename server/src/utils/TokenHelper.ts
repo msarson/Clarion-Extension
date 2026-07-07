@@ -80,6 +80,37 @@ export class TokenHelper {
     }
 
     /**
+     * #264: resolves a `DO routineName` reference to its ROUTINE token, scoped to the
+     * ENCLOSING PROCEDURE — Clarion ROUTINE labels are procedure-local and legally
+     * repeat across procedures, so a whole-file first-match scan returns the wrong
+     * routine whenever two procedures share a routine name. This is the #211
+     * algorithm extracted from DefinitionProvider so hover (RoutineHoverResolver),
+     * F12 (DefinitionProvider), and Ctrl+F12 (ImplementationProvider) share ONE
+     * implementation and always agree.
+     *
+     * @returns the ROUTINE token inside the cursor's enclosing procedure, or
+     *   undefined when the cursor isn't inside a procedure or the procedure has no
+     *   such routine (callers should return null — falling back to a file-wide
+     *   match would reintroduce the wrong-routine bug).
+     */
+    public static findScopedRoutineToken(
+        structure: DocumentStructure,
+        routineName: string,
+        cursorLine: number
+    ): Token | undefined {
+        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, cursorLine);
+        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
+            return undefined;
+        }
+        const matches = structure.findRoutines(routineName).filter(routineToken => {
+            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+            return parentScope?.line === enclosingProc.line &&
+                   parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
+        });
+        return matches[0];
+    }
+
+    /**
      * Gets the word range at a position
      * Handles Clarion's special notation:
      * - Prefix notation with colons (LOC:Field, Struct:Field)

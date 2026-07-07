@@ -2393,28 +2393,17 @@ export class DefinitionProvider {
      */
     private findRoutineDefinition(routineName: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
         logger.info(`🔍 [#211] Resolving DO routine reference: "${routineName}"`);
-        
+
+        // #264: the #211 procedure-scoped algorithm now lives in
+        // TokenHelper.findScopedRoutineToken, shared with hover (RoutineHoverResolver)
+        // and Ctrl+F12 (ImplementationProvider) so all three always agree.
         const structure = this.tokenCache.getStructure(document);
-        
-        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, position.line);
-        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
-            logger.info(`❌ No enclosing procedure found at line ${position.line}`);
-            return null;
-        }
-        
-        logger.info(`Found enclosing procedure: "${enclosingProc.value}" (lines ${enclosingProc.line}-${enclosingProc.finishesAt})`);
-
-        const routineTokens = structure.findRoutines(routineName).filter(routineToken => {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
-            return parentScope?.line === enclosingProc.line && parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
-        });
-
-        if (routineTokens.length === 0) {
-            logger.info(`❌ No ROUTINE label found for "${routineName}" in procedure "${enclosingProc.value}"`);
+        const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
+        if (!routineToken) {
+            logger.info(`❌ No ROUTINE label found for "${routineName}" in the enclosing procedure`);
             return null;
         }
 
-        const routineToken = routineTokens[0];
         logger.info(`✅ Found ROUTINE "${routineName}" at line ${routineToken.line}`);
         return Location.create(document.uri, Range.create(routineToken.line, 0, routineToken.line, routineToken.value.length));
     }

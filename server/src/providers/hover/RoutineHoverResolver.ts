@@ -2,6 +2,8 @@ import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
+import { TokenHelper } from '../../utils/TokenHelper';
+import { TokenCache } from '../../TokenCache';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("RoutineHoverResolver");
@@ -40,31 +42,24 @@ export class RoutineHoverResolver {
 
         logger.info(`Looking for routine hover: ${routineName}`);
 
-        // Search for routine label at column 0
-        const text = document.getText();
-        const lines = text.split(/\r?\n/);
-
-        for (let i = 0; i < lines.length; i++) {
-            const routineLine = lines[i];
-
-            // Check if line starts at column 0 (no leading whitespace)
-            if (routineLine.length > 0 && routineLine[0] !== ' ' && routineLine[0] !== '\t') {
-                const match = routineLine.match(ClarionPatterns.ROUTINE_LABEL);
-                if (match && match[1].toUpperCase() === routineName.toUpperCase()) {
-                    logger.info(`✅ Found routine at line ${i}`);
-                    
-                    return {
-                        contents: {
-                            kind: 'markdown',
-                            value: [
-                                `**Routine:** \`${routineName}\``,
-                                '',
-                                `📍 Line ${i + 1}`
-                            ].join('\n')
-                        }
-                    };
+        // #264: scope the lookup to the ENCLOSING PROCEDURE (the #211 rule) — routine
+        // labels repeat across procedures, and the previous whole-file first-match text
+        // scan showed the WRONG procedure's routine. Shares DefinitionProvider's
+        // algorithm via TokenHelper so hover, F12, and Ctrl+F12 always agree.
+        const structure = TokenCache.getInstance().getStructure(document);
+        const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
+        if (routineToken) {
+            logger.info(`✅ Found routine at line ${routineToken.line}`);
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: [
+                        `**Routine:** \`${routineName}\``,
+                        '',
+                        `📍 Line ${routineToken.line + 1}`
+                    ].join('\n')
                 }
-            }
+            };
         }
 
         logger.info(`❌ Routine not found: ${routineName}`);
