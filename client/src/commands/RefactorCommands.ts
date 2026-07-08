@@ -1,7 +1,8 @@
 import {
-    commands, window, Range, Selection, EndOfLine, Disposable, ExtensionContext, QuickPickItem
+    commands, languages, window, Range, Selection, EndOfLine, Disposable, ExtensionContext, QuickPickItem
 } from 'vscode';
 import { buildSurround, SURROUND_STRUCTURES } from '../refactor/surroundWith';
+import { SurroundWithCodeActionProvider } from '../refactor/SurroundWithCodeActionProvider';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RefactorCommands");
@@ -10,11 +11,16 @@ logger.setLevel("error");
 interface StructurePick extends QuickPickItem { id: string; }
 
 /**
- * #277 — "Surround With / Embedding": wrap the selected line(s) (or the current line) in a Clarion
- * structure chosen from a quick pick, indenting the content and selecting the condition placeholder.
+ * #277 — "Surround With / Embedding": wrap the selected line(s) in a Clarion structure.
+ *
+ * Exposed two ways, both without a dedicated keybinding (to avoid per-refactor shortcut sprawl —
+ * the generic Ctrl+. / Refactor affordances surface it):
+ *   - a `SurroundWithCodeActionProvider` (refactor code actions, one per structure), and
+ *   - the `clarion.surroundWith` command for the palette, which prompts with a quick pick when no
+ *     structure id is passed. A code action invokes the same command with the chosen id.
  */
 export function registerRefactorCommands(context: ExtensionContext): Disposable[] {
-    const surroundWith = commands.registerCommand('clarion.surroundWith', async () => {
+    const surroundWith = commands.registerCommand('clarion.surroundWith', async (structureId?: string) => {
         const editor = window.activeTextEditor;
         if (!editor) {
             return;
@@ -35,12 +41,17 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
             selectedLines.push(doc.lineAt(l).text);
         }
 
-        const pick = await window.showQuickPick<StructurePick>(
-            SURROUND_STRUCTURES.map(s => ({ label: s.label, id: s.id })),
-            { placeHolder: 'Surround with…', matchOnDescription: true }
-        );
-        if (!pick) {
-            return;
+        // A code action passes the chosen structure id directly; the palette prompts.
+        let id = structureId;
+        if (!id) {
+            const pick = await window.showQuickPick<StructurePick>(
+                SURROUND_STRUCTURES.map(s => ({ label: s.label, id: s.id })),
+                { placeHolder: 'Surround with…', matchOnDescription: true }
+            );
+            if (!pick) {
+                return;
+            }
+            id = pick.id;
         }
 
         const baseIndent = /^\s*/.exec(doc.lineAt(startLine).text)?.[0] ?? '';
@@ -49,7 +60,7 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
 
         let result;
         try {
-            result = buildSurround(selectedLines, pick.id, { baseIndent, indentUnit });
+            result = buildSurround(selectedLines, id, { baseIndent, indentUnit });
         } catch (err) {
             logger.error(`Surround With failed: ${err instanceof Error ? err.message : String(err)}`);
             return;
@@ -75,5 +86,12 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         editor.revealRange(editor.selection);
     });
 
-    return [surroundWith];
+    // Refactor code actions (Ctrl+. / Refactor…) — no keybinding needed.
+    const surroundProvider = languages.registerCodeActionsProvider(
+        { language: 'clarion' },
+        new SurroundWithCodeActionProvider(),
+        { providedCodeActionKinds: SurroundWithCodeActionProvider.providedKinds }
+    );
+
+    return [surroundWith, surroundProvider];
 }

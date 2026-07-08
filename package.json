@@ -221,11 +221,6 @@
         "command": "clarion.addImplementation",
         "key": "ctrl+shift+i",
         "when": "editorTextFocus && editorLangId == clarion"
-      },
-      {
-        "command": "clarion.surroundWith",
-        "key": "ctrl+shift+alt+w",
-        "when": "editorTextFocus && editorLangId == clarion"
       }
     ],
     "viewsContainers": {
@@ -512,13 +507,6 @@
       }
     ],
     "menus": {
-      "editor/context": [
-        {
-          "command": "clarion.surroundWith",
-          "when": "editorLangId == clarion && editorHasSelection",
-          "group": "1_modification@10"
-        }
-      ],
       "view/item/context": [
         {
           "command": "clarion.buildSolutionDirect",
