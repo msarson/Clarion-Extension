@@ -135,16 +135,19 @@ export async function startLanguageServer(
                 return next(document, position, token);
             }
         },
-        // Add error handling options
+        // Add error handling options.
+        // #276 — vscode-languageclient@8 changed the ErrorHandler contract: `error` returns an
+        // `ErrorHandlerResult` and `closed` a `CloseHandlerResult` (a `{ action }` object), not the
+        // bare `ErrorAction`/`CloseAction` enum the @7 API accepted.
         errorHandler: {
             error: (error, message, count) => {
                 logger.error(`Language server error: ${error.message || error}`);
-                return ErrorAction.Continue;
+                return { action: ErrorAction.Continue };
             },
             closed: () => {
                 logger.warn("Language server connection closed");
                 // Always try to restart the server
-                return CloseAction.Restart;
+                return { action: CloseAction.Restart };
             }
         }
     };
