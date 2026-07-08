@@ -5,6 +5,7 @@ import { TokenCache } from '../TokenCache';
 import { HoverProvider } from '../providers/HoverProvider';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
+import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
 import { setServerInitialized } from '../serverState';
 
@@ -111,5 +112,21 @@ suite('Hover — WINDOW-labelled argument overload resolution (#274)', () => {
         assert.ok(resolved, 'Window must resolve to a type');
         assert.strictEqual(resolved!.structureKind, 'WINDOW',
             `Window's own WINDOW declaration must win over the WindowManager decoy; got ${JSON.stringify(resolved)}`);
+    });
+
+    // Go-to-Implementation must pick the SAME overload as hover/F12. The impl path's
+    // tryArgClassifyResolve used to classify args WITHOUT enrichment, so a typed argument never
+    // disambiguated → it fell to the paramCount-only lookup (first-declared impl). SRC's impls:
+    // STRING,STRING at line 16, STRING,WINDOW at line 20 — the WINDOW call must land on line 20.
+    test('Go-to-Implementation on INIMgr.Fetch(\'Main\', Window) lands on the (STRING, WINDOW) impl', async () => {
+        const doc = TextDocument.create('file:///t274-impl.clw', 'clarion', 1, SRC);
+        TokenCache.getInstance().getTokens(doc);
+        const provider = new ImplementationProvider();
+        const pos: Position = { line: 22, character: '  INIMgr.Fetch'.indexOf('Fetch') + 1 };
+        const loc: any = await provider.provideImplementation(doc, pos);
+        const picked = Array.isArray(loc) ? loc[0] : loc;
+        assert.ok(picked, 'implementation must resolve to a location');
+        assert.strictEqual(picked.range.start.line, 20,
+            `Go-to-Implementation must land on the STRING,WINDOW impl (line 20), not the STRING,STRING impl (line 16); got line ${picked.range.start.line}`);
     });
 });

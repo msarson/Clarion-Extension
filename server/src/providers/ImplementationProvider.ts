@@ -338,32 +338,24 @@ export class ImplementationProvider {
         document: TextDocument,
         callInfo: { objectName: string; methodName: string; paramCount: number },
         callLine: number
-    ): Promise<{ type: string; className: string; line: number; file: string } | null> {
+    ): Promise<{ type: string; className: string; line: number; file: string; signature: string } | null> {
         const tokens = this.tokenCache.getTokens(document);
-        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document);
+        // #274 — pass the scope line so a procedure-local / parameter receiver resolves (mirrors
+        // the hover/definition callers, which supply position.line).
+        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document, callLine);
         if (!varTypeInfo?.isClass) return null;
         const className = varTypeInfo.typeName;
 
-        const lowerMethod = callInfo.methodName.toLowerCase();
-        const callNameIdx = tokens.findIndex(t =>
-            t.line === callLine && (
-                t.value.toLowerCase() === lowerMethod ||
-                t.value.toLowerCase().endsWith('.' + lowerMethod)
-            ));
-        if (callNameIdx < 0) return null;
-
-        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
-        if (!args) return null;
-
-        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, callInfo.methodName, document, tokens);
-        if (candidates.length < 2) return null;
-
-        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
-            args, candidates.map(c => c.signature));
-        if (matchedAll || matchedIndex < 0) return null;
-
-        const picked = candidates[matchedIndex];
-        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file };
+        // #274 — delegate to the single enriched choke point. This method previously inlined
+        // classify + findOverload but SKIPPED the ArgumentTypeResolver enrichment, so a typed
+        // argument (e.g. a WINDOW instance passed to INIMgr.Fetch('Main', Window)) never
+        // type-resolved on the implementation path → matchedAll → the caller fell to the
+        // paramCount-only lookup and landed on the wrong overload / the declaration. Definition
+        // and hover already went through resolveOverloadDeclByArgs; this converges impl with them.
+        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
+            className, callInfo.methodName, document, tokens, callLine);
+        if (!picked) return null;
+        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file, signature: picked.signature };
     }
 
     private async findMethodImplementation(
@@ -512,8 +504,13 @@ export class ImplementationProvider {
                     const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
                     if (argClassifyInfo) {
                         if (ProcedureUtils.containsProcedureKeyword(argClassifyInfo.type)) { // #247
-                            const impl = await this.memberResolver.findImplementationCrossFile(
-                                argClassifyInfo.className, callInfo.methodName, argClassifyInfo, document, token
+                            // #274 — signature-aware cross-file impl lookup, mirroring the SELF/PARENT
+                            // paths: the picked overload's signature disambiguates the body, and the
+                            // declaration file (the `.inc`) lets the redirection find the sibling `.clw`
+                            // (e.g. ABUTIL.INC → ABUTIL.CLW) so impl lands on the method body, not the decl.
+                            const impl = await this.findMethodImplementationCrossFile(
+                                argClassifyInfo.className, callInfo.methodName, document, callInfo.paramCount,
+                                null, argClassifyInfo.signature, argClassifyInfo.file, token
                             );
                             if (impl) {
                                 logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
