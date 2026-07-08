@@ -506,8 +506,37 @@ export class ClarionTokenizer {
                 }
 
                 if (!matched) {
-                    position++;
-                    column++;
+                    // #274 — in a CODE/execution section, a reserved structure keyword can appear
+                    // as a VALUE: a WINDOW whose label is literally `Window`, passed by name
+                    // (`INIMgr.Fetch('Main', Window)`), or any structure keyword used as an
+                    // argument (`Foo(WINDOW)`). The Structure pattern is correctly rejected in
+                    // expression context, but no identifier pattern accepts a reserved word at its
+                    // start, so the old single-char advance dropped the leading character
+                    // (`Window`→`indow`) — which then classified as an unresolvable variable and
+                    // broke call-site argument typing / hover-F12 overload resolution. Consume the
+                    // WHOLE identifier as a Variable instead.
+                    //
+                    // Restricted to CODE sections on purpose: in a declaration section the same
+                    // shape is a parameter TYPE (`GET PROCEDURE(FILE,KEY)`) that the outline /
+                    // structure passes still expect absent here (signatures are read from raw line
+                    // text, so overload resolution is unaffected). Keeping the old single-char
+                    // advance there leaves declaration tokenization untouched.
+                    const identMatch = inCodeSection ? /^[A-Za-z_]\w*/.exec(line.slice(position)) : null;
+                    if (identMatch) {
+                        this.tokens.push({
+                            type: TokenType.Variable,
+                            value: identMatch[0],
+                            line: lineNumber,
+                            start: position,
+                            maxLabelLength: 0
+                        });
+                        position += identMatch[0].length;
+                        column += identMatch[0].length;
+                        tokensOnCurrentLine++;
+                    } else {
+                        position++;
+                        column++;
+                    }
                 }
             }
         }

@@ -118,7 +118,15 @@ export class ArgumentTypeResolver {
             typeName = await this.resolveSimpleVarType(text, tokens, document, position.line);
         }
 
-        if (!typeName) return undefined;
+        if (!typeName) {
+            // #274 — a structure INSTANCE declared inline (`Window WINDOW('Main')`, `Q QUEUE`)
+            // has no named user TYPE, so resolveSimpleVarType (which looks for `name TYPE`)
+            // misses it. Its column-0 declaration line carries the structure kind directly, and
+            // that kind is the overload discriminator (matching a `WINDOW`/`QUEUE`/… parameter).
+            const kind = this.resolveInstanceStructureKind(text, tokens);
+            if (kind) return { typeName: kind, structureKind: kind };
+            return undefined;
+        }
         return { typeName, structureKind: this.resolveTypeStructureKind(typeName, tokens) };
     }
 
@@ -182,5 +190,25 @@ export class ArgumentTypeResolver {
     private inlineStructureKind(rawType: string): string | undefined {
         const base = rawType.trim().replace(/^&/, '').split(/[\s,(]/)[0].trim().toUpperCase();
         return ArgumentTypeResolver.STRUCTURE_KIND_TYPES.has(base) ? base : undefined;
+    }
+
+    /**
+     * #274 — the structure KIND of a variable declared as an inline structure INSTANCE
+     * (`Window WINDOW('Main')`, `Q QUEUE,PRE(Q)`, `Rpt REPORT`). Unlike `resolveTypeStructureKind`
+     * — which keys on a TYPE name — this keys on the INSTANCE name: it finds the variable's
+     * column-0 declaration and returns the structure keyword on that line when it is one of the
+     * anonymous structure kinds. Undefined for scalar declarations, named-type instances (handled
+     * by the resolveSimpleVarType path), or names with no column-0 declaration.
+     */
+    private resolveInstanceStructureKind(name: string, tokens: Token[]): string | undefined {
+        const nameU = name.replace(/^&/, '').toUpperCase();
+        const decl = tokens.find(t =>
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toUpperCase() === nameU);
+        if (!decl) return undefined;
+        const structTok = tokens.find(t => t.line === decl.line && t.type === TokenType.Structure);
+        const kind = structTok?.value.toUpperCase();
+        return kind && ArgumentTypeResolver.STRUCTURE_KIND_TYPES.has(kind) ? kind : undefined;
     }
 }
