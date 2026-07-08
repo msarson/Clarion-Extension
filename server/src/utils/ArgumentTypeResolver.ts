@@ -113,20 +113,26 @@ export class ArgumentTypeResolver {
             typeName = ClassMemberResolver.extractClassName(memberInfo.type)
                 ?? this.inlineStructureKind(memberInfo.type);
         } else if (/^&?[\w:]+$/.test(text)) {
+            // #274 — a structure INSTANCE declared inline in THIS file (`Window WINDOW('Caption')`,
+            // `Q QUEUE`) is AUTHORITATIVE: its column-0 declaration unambiguously fixes it to that
+            // structure kind, which is the overload discriminator (matching a `WINDOW`/`QUEUE`/…
+            // parameter). Check it BEFORE the cross-file resolveSimpleVarType, which — once a
+            // solution is loaded — can mis-resolve a name like `Window` to an unrelated class
+            // (e.g. colliding with `ThisWindow CLASS(WindowManager)` via the structure indexer)
+            // and return a wrong-but-truthy type that would otherwise shadow this. Guarded to fire
+            // only for real inline structure declarations: a named-type instance (`q MyQueueType`)
+            // has a Type token (not a Structure) on its line and falls through to resolveSimpleVarType,
+            // and WINDOW-used-as-a-parameter-type is unaffected (this resolves the ARGUMENT, not the
+            // parameter).
+            const instanceKind = this.resolveInstanceStructureKind(text, tokens);
+            if (instanceKind) return { typeName: instanceKind, structureKind: instanceKind };
+
             // Simple identifier (the `:` admits PRE-prefixed fields like `QUE:Fld`):
             // typed / reference / PRE:Field / cross-file variable.
             typeName = await this.resolveSimpleVarType(text, tokens, document, position.line);
         }
 
-        if (!typeName) {
-            // #274 — a structure INSTANCE declared inline (`Window WINDOW('Main')`, `Q QUEUE`)
-            // has no named user TYPE, so resolveSimpleVarType (which looks for `name TYPE`)
-            // misses it. Its column-0 declaration line carries the structure kind directly, and
-            // that kind is the overload discriminator (matching a `WINDOW`/`QUEUE`/… parameter).
-            const kind = this.resolveInstanceStructureKind(text, tokens);
-            if (kind) return { typeName: kind, structureKind: kind };
-            return undefined;
-        }
+        if (!typeName) return undefined;
         return { typeName, structureKind: this.resolveTypeStructureKind(typeName, tokens) };
     }
 

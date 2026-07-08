@@ -4,6 +4,7 @@ import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TokenCache } from '../TokenCache';
 import { HoverProvider } from '../providers/HoverProvider';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
+import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
 import { setServerInitialized } from '../serverState';
 
@@ -85,5 +86,30 @@ suite('Hover — WINDOW-labelled argument overload resolution (#274)', () => {
             `hover must show the (STRING, WINDOW) overload; got:\n${text}`);
         assert.ok(!/STRING SECTION, STRING NAME/.test(text),
             `hover must NOT show the STRING,STRING decoy overload; got:\n${text}`);
+    });
+
+    // The real-file shape (ABC generated): a `Window WINDOW(...)` instance sits alongside
+    // `ThisWindow CLASS(WindowManager)`. When a solution is loaded the cross-file/structure-index
+    // resolver mis-mapped the argument `Window` to `WindowManager` (ThisWindow's parent) — a
+    // wrong-but-truthy type that shadowed the in-file WINDOW structure and broke the WINDOW-vs-STRING
+    // overload pick. The argument's own column-0 `Window WINDOW(...)` declaration must win.
+    const WINDOWMANAGER_DECOY = [
+        "Window        WINDOW('Caption'),AT(,,395,224)",   // 0  the WINDOW instance
+        '                BUTTON(\'OK\'),AT(1,1)',           // 1
+        '              END',                                // 2
+        '',                                                 // 3
+        'ThisWindow    CLASS(WindowManager)',               // 4  decoy: name ends with "window"
+        'Init            PROCEDURE(),BYTE,PROC,DERIVED',    // 5
+        '              END',                                // 6
+    ].join('\n');
+
+    test('resolveArgType(Window) resolves to the WINDOW structure, not the ThisWindow/WindowManager decoy', async () => {
+        const doc = TextDocument.create('file:///t274-wm.clw', 'clarion', 1, WINDOWMANAGER_DECOY);
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const resolved = await new ArgumentTypeResolver()
+            .resolveArgType('Window', tokens, doc, { line: 6, character: 0 });
+        assert.ok(resolved, 'Window must resolve to a type');
+        assert.strictEqual(resolved!.structureKind, 'WINDOW',
+            `Window's own WINDOW declaration must win over the WindowManager decoy; got ${JSON.stringify(resolved)}`);
     });
 });
