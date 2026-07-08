@@ -3,6 +3,8 @@ import {
 } from 'vscode';
 import { buildSurround, SURROUND_STRUCTURES } from '../refactor/surroundWith';
 import { SurroundWithCodeActionProvider } from '../refactor/SurroundWithCodeActionProvider';
+import { extractCondition, negateExpression } from '../refactor/negateCondition';
+import { NegateConditionCodeActionProvider } from '../refactor/NegateConditionCodeActionProvider';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RefactorCommands");
@@ -86,12 +88,33 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         editor.revealRange(editor.selection);
     });
 
+    // #279 — Negate condition: palette command mirroring the code action; operates on the cursor
+    // line when it is an IF / ELSIF / LOOP WHILE / LOOP UNTIL.
+    const negateCondition = commands.registerCommand('clarion.negateCondition', async () => {
+        const editor = window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+        const lineNumber = editor.selection.active.line;
+        const span = extractCondition(editor.document.lineAt(lineNumber).text);
+        if (!span) {
+            return;
+        }
+        const negated = negateExpression(span.condition);
+        await editor.edit(eb => eb.replace(new Range(lineNumber, span.start, lineNumber, span.end), negated));
+    });
+
     // Refactor code actions (Ctrl+. / Refactor…) — no keybinding needed.
     const surroundProvider = languages.registerCodeActionsProvider(
         { language: 'clarion' },
         new SurroundWithCodeActionProvider(),
         { providedCodeActionKinds: SurroundWithCodeActionProvider.providedKinds }
     );
+    const negateProvider = languages.registerCodeActionsProvider(
+        { language: 'clarion' },
+        new NegateConditionCodeActionProvider(),
+        { providedCodeActionKinds: NegateConditionCodeActionProvider.providedKinds }
+    );
 
-    return [surroundWith, surroundProvider];
+    return [surroundWith, negateCondition, surroundProvider, negateProvider];
 }

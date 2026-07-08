@@ -494,6 +494,10 @@
         "title": "Clarion: Surround With…"
       },
       {
+        "command": "clarion.negateCondition",
+        "title": "Clarion: Negate Condition"
+      },
+      {
         "command": "clarion.createClass",
         "title": "Clarion: Create New Class"
       },
