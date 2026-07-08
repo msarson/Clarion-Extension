@@ -104,4 +104,40 @@ suite('Hover — built-in overload resolution from argument types (#272)', () =>
         assert.ok(!text.includes('FILE FILE'),
             `hover must NOT show ADD's FILE overload for a QUEUE arg; got:\n${text}`);
     });
+
+    // The reported repro: members typed as an INLINE structure-kind reference (`&WINDOW`) —
+    // there is no named user TYPE, so the kind itself (WINDOW) is the overload discriminator.
+    // OPEN's two-WINDOW overload is index 4; the other two-arg overloads are FILE+LONG (1) and
+    // APPLICATION+WINDOW (6). Both arguments are dotted members, so the legacy `firstArgType`
+    // narrowing resolves nothing and (pre-fix) hover fell back to listing all three.
+    const OPEN_WINDOW_SRC = [
+        '  PROGRAM',                                 // 0
+        '  MAP',                                     // 1
+        '  END',                                     // 2
+        '',                                          // 3
+        'ThisWindow  CLASS,TYPE',                    // 4
+        'MyWindow      &WINDOW',                     // 5
+        'OwnerWindow   &WINDOW',                     // 6
+        'Init          PROCEDURE()',                 // 7
+        '            END',                           // 8
+        '',                                          // 9
+        '  CODE',                                    // 10
+        '',                                          // 11
+        'ThisWindow.Init  PROCEDURE()',              // 12
+        '  CODE',                                    // 13
+        '  OPEN(SELF.MyWindow, SELF.OwnerWindow)',   // 14  ← hover on OPEN
+    ].join('\n');
+
+    test('OPEN(SELF.MyWindow, SELF.OwnerWindow) with &WINDOW members resolves to the WINDOW+WINDOW overload', async () => {
+        const doc = TextDocument.create('file:///hover-builtin-272-open.clw', 'clarion', 1, OPEN_WINDOW_SRC);
+        TokenCache.getInstance().getTokens(doc);
+        const provider = new HoverProvider();
+        const pos: Position = { line: 14, character: '  OPEN'.indexOf('OPEN') + 1 };
+
+        const text = hoverText(await provider.provideHover(doc, pos)).toUpperCase();
+        assert.ok(text.includes('WINDOW WINDOW') && text.includes('WINDOW OWNER'),
+            `hover must resolve to OPEN(WINDOW window, WINDOW owner); got:\n${text}`);
+        assert.ok(!text.includes('FILE FILE') && !text.includes('APPLICATION APP'),
+            `hover must NOT show the FILE or APPLICATION overloads for &WINDOW args; got:\n${text}`);
+    });
 });

@@ -36,6 +36,15 @@ export class ArgumentTypeResolver {
     private chainedResolver = new ChainedPropertyResolver();
     private scopeTypeIndex = new ScopeTypeIndexService();
 
+    // #272 — the anonymous structure KINDs an argument can have as its declared type
+    // WITHOUT a named user TYPE (e.g. `MyWindow &WINDOW`, `q &QUEUE`). For these the kind
+    // itself is the overload discriminator (matching a built-in parameter typed `WINDOW`/
+    // `QUEUE`/…), so it is surfaced as `structureKind` even though there is no `Name KIND,TYPE`
+    // declaration to look up.
+    private static readonly STRUCTURE_KIND_TYPES = new Set([
+        'WINDOW', 'APPLICATION', 'REPORT', 'VIEW', 'FILE', 'QUEUE', 'GROUP', 'RECORD',
+    ]);
+
     /**
      * Enrich already-classified args in place: for each `variable` / `dotted_var` argument that
      * has no inferred type yet, resolve its declared type name + structure kind.
@@ -98,7 +107,11 @@ export class ArgumentTypeResolver {
             if (!memberInfo?.type) return undefined;
             // extractClassName strips a leading `&` (reference) / LIKE(...) and returns undefined
             // for Clarion primitives — for a queue/group/file TYPE it yields the TYPE name.
-            typeName = ClassMemberResolver.extractClassName(memberInfo.type) ?? undefined;
+            // #272 — but an inline structure-kind reference (`&WINDOW`, `&QUEUE`) has no named
+            // type and extractClassName drops it as a primitive; fall back to the kind itself so
+            // `OPEN(SELF.MyWindow, …)` where `MyWindow &WINDOW` can match the `WINDOW` overload.
+            typeName = ClassMemberResolver.extractClassName(memberInfo.type)
+                ?? this.inlineStructureKind(memberInfo.type);
         } else if (/^&?[\w:]+$/.test(text)) {
             // Simple identifier (the `:` admits PRE-prefixed fields like `QUE:Fld`):
             // typed / reference / PRE:Field / cross-file variable.
@@ -148,6 +161,9 @@ export class ArgumentTypeResolver {
      */
     public resolveTypeStructureKind(typeName: string, tokens: Token[]): string | undefined {
         const nameU = typeName.toUpperCase();
+        // #272 — the type name is itself an anonymous structure kind (`WINDOW`, `QUEUE`, …):
+        // there is no `Name KIND,TYPE` declaration to find; the keyword IS the kind.
+        if (ArgumentTypeResolver.STRUCTURE_KIND_TYPES.has(nameU)) return nameU;
         const decl = tokens.find(t =>
             t.start === 0 &&
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
@@ -155,5 +171,16 @@ export class ArgumentTypeResolver {
         if (!decl) return undefined;
         const structTok = tokens.find(t => t.line === decl.line && t.type === TokenType.Structure);
         return structTok?.value.toUpperCase();
+    }
+
+    /**
+     * #272 — a raw declared-type string (`&WINDOW`, `QUEUE,PRE(Q)`, `&FILE`) whose base is an
+     * anonymous structure kind → that kind (`WINDOW` / `QUEUE` / `FILE` / …). Undefined when the
+     * base is a named user type or a scalar. Used only as a fallback when `extractClassName`
+     * (which treats these kinds as primitives) yields nothing.
+     */
+    private inlineStructureKind(rawType: string): string | undefined {
+        const base = rawType.trim().replace(/^&/, '').split(/[\s,(]/)[0].trim().toUpperCase();
+        return ArgumentTypeResolver.STRUCTURE_KIND_TYPES.has(base) ? base : undefined;
     }
 }
