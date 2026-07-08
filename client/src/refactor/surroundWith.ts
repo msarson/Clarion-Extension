@@ -14,14 +14,21 @@ export interface SurroundStructure {
     label: string;
 }
 
-/** The structures offered by the "Surround With" picker, in menu order. */
+/**
+ * The structures offered by the "Surround With" picker, in menu order.
+ *
+ * Deliberately only the general control structures. `BEGIN` is excluded: it is a compiler directive
+ * that groups statements into one structure, meaningful essentially only inside `EXECUTE` (whose
+ * cases must each be a single statement) — a standalone `BEGIN…END` surround around arbitrary code
+ * would be legal but pointless. `EXECUTE` itself isn't a surround target either (its body is a list
+ * of single statements selected by value, not a wrapped block).
+ */
 export const SURROUND_STRUCTURES: SurroundStructure[] = [
     { id: 'IF',         label: 'IF … END' },
     { id: 'LOOP',       label: 'LOOP … END' },
     { id: 'LOOP_WHILE', label: 'LOOP WHILE … END' },
     { id: 'LOOP_UNTIL', label: 'LOOP UNTIL … END' },
     { id: 'CASE',       label: 'CASE … OF … END' },
-    { id: 'BEGIN',      label: 'BEGIN … END' },
 ];
 
 export interface SurroundResult {
@@ -81,9 +88,6 @@ export function buildSurround(
             break;
         case 'LOOP_UNTIL':
             header('LOOP UNTIL condition', 'condition'); content(1); end();
-            break;
-        case 'BEGIN':
-            header('BEGIN'); content(1); end();
             break;
         case 'CASE':
             // Clarion/ABC convention: OF aligns with CASE, statements one level in from OF.

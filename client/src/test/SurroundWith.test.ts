@@ -49,10 +49,8 @@ suite('#277 buildSurround — Surround With / Embedding', () => {
         assert.deepStrictEqual(r.placeholder, { line: 0, startChar: 7, endChar: 17 });
     });
 
-    test('BEGIN wraps with no placeholder', () => {
-        const r = buildSurround(['  a'], 'BEGIN', opts);
-        assert.deepStrictEqual(r.lines, ['  BEGIN', '    a', '  END']);
-        assert.strictEqual(r.placeholder, undefined);
+    test('an unknown structure id throws (guards the switch)', () => {
+        assert.throws(() => buildSurround(['  a'], 'BEGIN', opts), /Unknown surround structure/);
     });
 
     test('preserves relative indentation of nested lines and leaves blank lines empty', () => {
