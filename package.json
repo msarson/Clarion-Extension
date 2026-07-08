@@ -221,6 +221,11 @@
         "command": "clarion.addImplementation",
         "key": "ctrl+shift+i",
         "when": "editorTextFocus && editorLangId == clarion"
+      },
+      {
+        "command": "clarion.surroundWith",
+        "key": "ctrl+shift+alt+w",
+        "when": "editorTextFocus && editorLangId == clarion"
       }
     ],
     "viewsContainers": {
@@ -490,6 +495,10 @@
         "title": "Clarion: Paste as String"
       },
       {
+        "command": "clarion.surroundWith",
+        "title": "Clarion: Surround With…"
+      },
+      {
         "command": "clarion.createClass",
         "title": "Clarion: Create New Class"
       },
@@ -503,6 +512,13 @@
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "clarion.surroundWith",
+          "when": "editorLangId == clarion && editorHasSelection",
+          "group": "1_modification@10"
+        }
+      ],
       "view/item/context": [
         {
           "command": "clarion.buildSolutionDirect",

@@ -18,6 +18,7 @@ import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
+import { registerRefactorCommands } from './commands/RefactorCommands';
 import { registerClassCreationCommands } from './commands/ClassCreationCommands';
 import { registerImplementationCommands } from './commands/ImplementationCommands';
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
@@ -189,7 +190,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register text editing commands (paste as string)
     context.subscriptions.push(...registerTextEditingCommands(context));
-    
+
+    // Register refactor commands (#277 — Surround With)
+    context.subscriptions.push(...registerRefactorCommands(context));
+
     // Register class creation commands
     context.subscriptions.push(...registerClassCreationCommands(context));
     

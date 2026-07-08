@@ -10,6 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 
 **New Features**
 
+- ✨ **Refactor: Surround With…** (#277): select one or more statement lines and wrap them in a Clarion structure — `IF … END`, `LOOP`/`LOOP WHILE`/`LOOP UNTIL … END`, `CASE … OF … END`, or `BEGIN … END` — via the editor context menu, the command palette, or `Ctrl+Shift+Alt+W`. The content is indented one level (preserving relative indentation), and the condition/expression placeholder is selected so you can type straight over it. First of a series of CodeRush-inspired refactors.
 - ⬆️ **Language client/server upgraded to LSP 8.x**, unlocking LSP 3.17 features natively.
 - ✨ **Hover on an INCLUDE/MODULE/MEMBER/LINK filename shows the resolved path** (#265): hovering the filename argument now shows which physical file the redirection system actually resolves to (or a not-found note) — previously hover bailed on any cursor inside a string. Uses the same resolver as F12's filename navigation, so the two always agree.
 - 🚫 **Inlay hints — implemented but disabled**: inline implicit-variable types (`Counter#` → `: LONG`) and parameter-name hints at call sites were built, but proved too noisy for Clarion, so the capability is left un-advertised. The provider/handler/tests remain in the codebase (dormant) for a possible future opt-in.
