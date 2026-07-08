@@ -976,30 +976,13 @@ export class MethodOverloadResolver {
             return { matchedIndex: -1, matchedAll: true };
         }
 
-        // Step 1: arity filter (default-aware — mirror selectBestOverload:367-372).
-        // Strict equality misses N-arg calls against (N+defaults)-param decls — #120 root cause.
-        const arityCompatible = candidateSignatures
-            .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
-            .filter(c => {
-                const defaults = ClarionPatterns.countDefaultParams(c.sig);
-                return argClassifications.length >= (c.paramTypes.length - defaults)
-                    && argClassifications.length <= c.paramTypes.length;
-            });
-
-        if (arityCompatible.length === 0) {
-            return { matchedIndex: -1, matchedAll: true };
-        }
-
-        // Step 2: per-position type compatibility filter (Mark's locked rule + strict mode).
-        // Iterate over argClassifications (not paramTypes) — trailing default-omitted positions
-        // are unconstrained when defaults take effect.
-        const typeCompatible = arityCompatible.filter(c =>
-            argClassifications.every((argClass, i) =>
-                this.argMatchesParam(argClass, c.paramTypes[i], strict))
-        );
+        // Steps 1–2 (arity + per-position type compatibility) — shared with
+        // `filterOverloadsByArgClassifications` so both the unique-pick and the
+        // family-narrowing consumers apply identical rules.
+        const typeCompatible = this.computeTypeCompatible(argClassifications, candidateSignatures, strict);
 
         if (typeCompatible.length === 0) {
-            // All candidates dropped by type filter → match-all fallback (Mark pick (b)).
+            // Zero compatible after arity+type filtering → match-all fallback (Mark pick (b)).
             return { matchedIndex: -1, matchedAll: true };
         }
         if (typeCompatible.length === 1) {
@@ -1020,6 +1003,62 @@ export class MethodOverloadResolver {
             return { matchedIndex: -1, matchedAll: true };
         }
         return { matchedIndex: scored[0].idx, matchedAll: false };
+    }
+
+    /**
+     * #272 — return the indices of every candidate that is arity- AND type-compatible
+     * with the classified call-site arguments (steps 1–2 of
+     * `findOverloadByArgClassifications`, without the specificity ranking). Where that
+     * method collapses to a single most-specific pick, this exposes the whole
+     * compatible FAMILY — used by built-in hover to narrow the displayed overloads to
+     * the ones the argument types permit (e.g. the QUEUE overloads of `GET`), while
+     * still showing more than one when the arguments can't uniquely disambiguate.
+     *
+     * Returns `[]` when no candidate is compatible (caller keeps its own fallback).
+     * Shares `computeTypeCompatible` with the unique-pick path so both honour the same
+     * locked overload-resolution rule (project_clarion_overload_resolution_rule).
+     */
+    public filterOverloadsByArgClassifications(
+        argClassifications: ArgClassification[],
+        candidateSignatures: string[],
+        options?: { strictRefMatching?: boolean }
+    ): number[] {
+        if (candidateSignatures.length === 0) return [];
+        return this
+            .computeTypeCompatible(argClassifications, candidateSignatures, options?.strictRefMatching ?? false)
+            .map(c => c.idx);
+    }
+
+    /**
+     * Steps 1–2 of overload resolution: filter candidates to those whose arity is
+     * default-aware compatible with the argument count AND whose every parameter is
+     * per-position type-compatible with the classified argument. Returns the surviving
+     * candidates with their extracted parameter types (for downstream specificity
+     * scoring). Shared by `findOverloadByArgClassifications` and
+     * `filterOverloadsByArgClassifications`.
+     */
+    private computeTypeCompatible(
+        argClassifications: ArgClassification[],
+        candidateSignatures: string[],
+        strict: boolean
+    ): { idx: number; paramTypes: string[] }[] {
+        // Arity filter (default-aware — mirror selectBestOverload:367-372). Strict
+        // equality misses N-arg calls against (N+defaults)-param decls — #120 root cause.
+        const arityCompatible = candidateSignatures
+            .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.sig);
+                return argClassifications.length >= (c.paramTypes.length - defaults)
+                    && argClassifications.length <= c.paramTypes.length;
+            });
+
+        // Per-position type compatibility (Mark's locked rule + strict mode). Iterate over
+        // argClassifications (not paramTypes) — trailing default-omitted positions are
+        // unconstrained when defaults take effect.
+        return arityCompatible
+            .filter(c => argClassifications.every((argClass, i) =>
+                this.argMatchesParam(argClass, c.paramTypes[i], strict)))
+            .map(c => ({ idx: c.idx, paramTypes: c.paramTypes }));
     }
 
     /**

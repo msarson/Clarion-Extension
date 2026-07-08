@@ -611,9 +611,22 @@ export class HoverFormatter {
     }
 
     /**
-     * Constructs hover information for built-in Clarion functions
+     * Constructs hover information for built-in Clarion functions.
+     *
+     * `resolvedIndices` (#272) — when the caller has classified the call-site
+     * arguments and resolved which overload(s) actually apply (via the shared
+     * `CallSiteArgumentClassifier` / `MethodOverloadResolver` stack that signature
+     * help uses), it passes the surviving signature indices here. Those are shown
+     * verbatim, bypassing the crude `firstArgType` / `paramCount` narrowing — a
+     * single index means a unique overload was resolved from the argument types.
      */
-    formatBuiltin(functionName: string, signatures: any[], paramCount: number | null, firstArgType?: string): Hover {
+    formatBuiltin(
+        functionName: string,
+        signatures: any[],
+        paramCount: number | null,
+        firstArgType?: string,
+        resolvedIndices?: number[]
+    ): Hover {
         if (signatures.length === 0) {
             return {
                 contents: {
@@ -625,36 +638,50 @@ export class HoverFormatter {
 
         let matchingSignatures = signatures;
 
-        // Narrow by first argument's structureType (e.g. FILE, VIEW, WINDOW, REPORT)
-        if (firstArgType) {
-            const typeNarrowed = signatures.filter(sig =>
-                sig.parameters && sig.parameters.length > 0 &&
-                sig.parameters[0].label.toUpperCase().startsWith(firstArgType)
-            );
-            if (typeNarrowed.length > 0) {
-                matchingSignatures = typeNarrowed;
+        // #272 — argument-type-resolved overload(s) take precedence over the legacy
+        // narrowing. `resolvedIndices` is already arity- and type-filtered against the
+        // call's classified arguments, so it needs no further paramCount narrowing.
+        const argResolved = Array.isArray(resolvedIndices) && resolvedIndices.length > 0;
+        if (argResolved) {
+            matchingSignatures = resolvedIndices!
+                .filter(i => i >= 0 && i < signatures.length)
+                .map(i => signatures[i]);
+        } else {
+            // Narrow by first argument's structureType (e.g. FILE, VIEW, WINDOW, REPORT)
+            if (firstArgType) {
+                const typeNarrowed = signatures.filter(sig =>
+                    sig.parameters && sig.parameters.length > 0 &&
+                    sig.parameters[0].label.toUpperCase().startsWith(firstArgType)
+                );
+                if (typeNarrowed.length > 0) {
+                    matchingSignatures = typeNarrowed;
+                }
+            }
+
+            if (paramCount !== null) {
+                const countNarrowed = matchingSignatures.filter(sig =>
+                    sig.parameters && sig.parameters.length === paramCount
+                );
+
+                if (countNarrowed.length > 0) {
+                    matchingSignatures = countNarrowed;
+                }
             }
         }
 
-        if (paramCount !== null) {
-            const countNarrowed = matchingSignatures.filter(sig => 
-                sig.parameters && sig.parameters.length === paramCount
-            );
-            
-            if (countNarrowed.length > 0) {
-                matchingSignatures = countNarrowed;
-            }
-        }
-
-        const isKeyword = matchingSignatures.every(sig => 
+        const isKeyword = matchingSignatures.every(sig =>
             !sig.parameters || sig.parameters.length === 0
         );
-        
-        let content = isKeyword 
+
+        let content = isKeyword
             ? `**Keyword: ${functionName}**\n\n`
             : `**Built-in Function: ${functionName}**\n\n`;
-        
-        if (paramCount !== null && matchingSignatures.length < signatures.length) {
+
+        if (argResolved && matchingSignatures.length < signatures.length) {
+            content += matchingSignatures.length === 1
+                ? `_Resolved to the overload matching the argument type(s)._\n\n`
+                : `_Showing ${matchingSignatures.length} overload(s) compatible with the argument type(s)._\n\n`;
+        } else if (!argResolved && paramCount !== null && matchingSignatures.length < signatures.length) {
             content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
         }
         
