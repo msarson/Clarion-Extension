@@ -13,7 +13,7 @@ import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { shouldRestoreSolutionFromHistory } from '../utils/SolutionFallbackPolicy';
-import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
+import { refreshActiveEditorScopedStatusBars } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
 import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
@@ -74,7 +74,9 @@ export function registerEventListeners(context: ExtensionContext): void {
     logger.info("🔄 Phase 4: Setting up event listeners...");
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {
-            updateBuildProjectStatusBar();
+            // #273 — re-scope version/config/build visibility to the active editor's language
+            // (this also recomputes the build item for the newly focused file).
+            refreshActiveEditorScopedStatusBars();
         })
     );
     logger.info("✅ Phase 4 complete: Event listeners registered");

@@ -11,6 +11,23 @@ const logger = LoggerManager.getLogger("StatusBarManager");
 logger.setLevel("error");
 
 /**
+ * #273 — the Clarion status surface is scoped to the active editor so it never steps on a
+ * non-Clarion workspace (the same principle the built-in TypeScript version indicator uses —
+ * hidden off .ts/.js). Every Clarion status item is shown only while a Clarion document is the
+ * active editor and hidden otherwise; the solution-load indicator no longer leaves a persistent
+ * "Clarion: Ready" item, and a solution-free / non-Clarion folder shows nothing at all.
+ *
+ * (The idiomatic home for the load indicator would be `languages.createLanguageStatusItem` with a
+ * `busy` spinner in the `{ }` area; that API needs `@types/vscode` ≥ 1.65, but the client is still
+ * pinned to 1.56 — bumping it ripples into vscode-languageclient's typings, so that's a separate
+ * dependency-hygiene change. Until then this achieves the same visibility behaviour in the main bar.)
+ */
+function isClarionActiveEditor(): boolean {
+    const doc = window.activeTextEditor?.document;
+    return !!doc && (doc.languageId === 'clarion' || doc.languageId === 'clarion-template');
+}
+
+/**
  * Status bar items for Clarion extension
  */
 let configStatusBarItem: StatusBarItem;
@@ -21,15 +38,15 @@ let buildProjectStatusBarItem: StatusBarItem;
 let versionStatusBarItem: StatusBarItem;
 let initializationStatusBarItem: StatusBarItem;
 let operationStatusBarItem: StatusBarItem;
-let initializationHideTimer: ReturnType<typeof setTimeout> | undefined;
 let operationHideTimer: ReturnType<typeof setTimeout> | undefined;
 
-function clearInitializationHideTimer(): void {
-    if (initializationHideTimer) {
-        clearTimeout(initializationHideTimer);
-        initializationHideTimer = undefined;
-    }
-}
+// #273 — last-known values so the active-editor visibility refresh can re-show items with the
+// correct content when focus returns to a Clarion document (without re-plumbing their callers).
+let lastConfiguration: string | undefined;
+let lastVersion: { version?: string; propertiesFile?: string; solutionLoaded: boolean } | undefined;
+// #273 — the init indicator's desired content while a solution is loading (or a failure state);
+// undefined means "nothing to show". Actual visibility is gated on isClarionActiveEditor().
+let initializationState: { text: string; tooltip: string } | undefined;
 
 function clearOperationHideTimer(): void {
     if (operationHideTimer) {
@@ -46,48 +63,53 @@ function ensureInitializationStatusBarItem(): StatusBarItem {
     return initializationStatusBarItem;
 }
 
+/** #273 — apply the stored init state, gated on a Clarion document being active. */
+function applyInitializationStatusBar(): void {
+    if (!initializationState) {
+        if (initializationStatusBarItem) initializationStatusBarItem.hide();
+        return;
+    }
+    const item = ensureInitializationStatusBarItem();
+    item.text = initializationState.text;
+    item.tooltip = initializationState.tooltip;
+    if (isClarionActiveEditor()) {
+        item.show();
+    } else {
+        item.hide();
+    }
+}
+
 export function updateInitializationStatusBar(
     phase: InitializationStatusPhase,
     detail?: string
 ): void {
-    clearInitializationHideTimer();
-    const item = ensureInitializationStatusBarItem();
-    item.text = buildInitializationStatusText(phase, detail);
-    item.tooltip = detail
-        ? `Clarion initialization: ${detail}`
-        : 'Clarion initialization in progress';
-    item.show();
+    initializationState = {
+        text: buildInitializationStatusText(phase, detail),
+        tooltip: detail ? `Clarion initialization: ${detail}` : 'Clarion initialization in progress',
+    };
+    applyInitializationStatusBar();
 }
 
-export function completeInitializationStatusBar(detail?: string): void {
-    clearInitializationHideTimer();
-    const item = ensureInitializationStatusBarItem();
-    item.text = detail
-        ? `$(check) Clarion: Ready (${detail})`
-        : '$(check) Clarion: Ready';
-    item.tooltip = detail
-        ? `Clarion initialization completed: ${detail}`
-        : 'Clarion initialization completed';
-    item.show();
-    initializationHideTimer = setTimeout(() => {
-        item.hide();
-        initializationHideTimer = undefined;
-    }, 4000);
+export function completeInitializationStatusBar(_detail?: string): void {
+    // #273 — the indicator is load-progress feedback only; on success it disappears rather than
+    // leaving a persistent "Clarion: Ready" item. Solution state is conveyed by the version /
+    // config / build items.
+    initializationState = undefined;
+    applyInitializationStatusBar();
 }
 
 export function failInitializationStatusBar(message: string): void {
-    clearInitializationHideTimer();
-    const item = ensureInitializationStatusBarItem();
-    item.text = '$(error) Clarion: Initialization failed';
-    item.tooltip = `Clarion initialization failed: ${message}`;
-    item.show();
+    // Keep the failure visible (while a Clarion document is active) so the user notices it.
+    initializationState = {
+        text: '$(error) Clarion: Initialization failed',
+        tooltip: `Clarion initialization failed: ${message}`,
+    };
+    applyInitializationStatusBar();
 }
 
 export function hideInitializationStatusBar(): void {
-    clearInitializationHideTimer();
-    if (initializationStatusBarItem) {
-        initializationStatusBarItem.hide();
-    }
+    initializationState = undefined;
+    applyInitializationStatusBar();
 }
 
 function ensureOperationStatusBarItem(): StatusBarItem {
@@ -162,7 +184,13 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
     const displayConfig = configuration.split('|')[0];
     configStatusBarItem.text = `$(gear) Clarion: ${displayConfig}`;
     configStatusBarItem.tooltip = `Click to change Clarion configuration (Current: ${configuration})`;
-    configStatusBarItem.show();
+    // #273 — remember the value and only surface it while a Clarion document is active.
+    lastConfiguration = configuration;
+    if (isClarionActiveEditor()) {
+        configStatusBarItem.show();
+    } else {
+        configStatusBarItem.hide();
+    }
 
     // ✅ Ensure the setting is updated
     const currentConfig = workspace.getConfiguration().get<string>("clarion.configuration");
@@ -200,6 +228,8 @@ export function updateVersionStatusBar(
         versionStatusBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 101);
         versionStatusBarItem.command = 'clarion.setActiveVersion';
     }
+    // #273 — remember the value so the active-editor refresh can re-show it correctly.
+    lastVersion = { version, propertiesFile, solutionLoaded };
     if (!version || !propertiesFile || !solutionLoaded) {
         versionStatusBarItem.hide();
         return;
@@ -207,7 +237,12 @@ export function updateVersionStatusBar(
     const ideDir = path.basename(path.dirname(propertiesFile));
     versionStatusBarItem.text = `$(symbol-package) Compile: ${version} (from ${ideDir})`;
     versionStatusBarItem.tooltip = `Compile target: ${version}\nFrom: ${propertiesFile}\nClick to change`;
-    versionStatusBarItem.show();
+    // #273 — only surface it while a Clarion document is active (mirrors the TS version indicator).
+    if (isClarionActiveEditor()) {
+        versionStatusBarItem.show();
+    } else {
+        versionStatusBarItem.hide();
+    }
 }
 
 /**
@@ -235,9 +270,10 @@ export async function updateBuildProjectStatusBar(): Promise<void> {
         return;
     }
 
-    // Check if there's an active editor
+    // Check if there's an active editor — and #273, that it is a Clarion document, so the
+    // build action doesn't linger while viewing unrelated files in a Clarion project.
     const activeEditor = window.activeTextEditor;
-    if (!activeEditor) {
+    if (!activeEditor || !isClarionActiveEditor()) {
         if (buildProjectStatusBarItem) {
             buildProjectStatusBarItem.hide();
         }
@@ -296,12 +332,37 @@ export function hideBuildProjectStatusBar(): void {
 }
 
 /**
- * Disposes both status bar items
+ * #273 — re-apply the visibility of the main-bar workspace items (version / config / build) to
+ * match the active editor's language, mirroring the built-in TypeScript version indicator. Wired
+ * to `window.onDidChangeActiveTextEditor`. Only acts when there IS an active text editor, so
+ * moving focus to a panel/view (no active editor) leaves the items as-is rather than flickering.
+ */
+export function refreshActiveEditorScopedStatusBars(): void {
+    if (!window.activeTextEditor) return;
+    const clarion = isClarionActiveEditor();
+
+    applyInitializationStatusBar();
+    if (configStatusBarItem) {
+        (clarion && lastConfiguration) ? configStatusBarItem.show() : configStatusBarItem.hide();
+    }
+    if (versionStatusBarItem) {
+        (clarion && lastVersion?.version && lastVersion.propertiesFile && lastVersion.solutionLoaded)
+            ? versionStatusBarItem.show()
+            : versionStatusBarItem.hide();
+    }
+    // The build item recomputes from the active editor (and self-gates on Clarion + solution).
+    void updateBuildProjectStatusBar();
+}
+
+/**
+ * Disposes all status bar / language status items
  * Call this during extension deactivation
  */
 export function disposeStatusBars(): void {
-    clearInitializationHideTimer();
     clearOperationHideTimer();
+    if (initializationStatusBarItem) {
+        initializationStatusBarItem.dispose();
+    }
     if (configStatusBarItem) {
         configStatusBarItem.dispose();
     }
@@ -310,9 +371,6 @@ export function disposeStatusBars(): void {
     }
     if (versionStatusBarItem) {
         versionStatusBarItem.dispose();
-    }
-    if (initializationStatusBarItem) {
-        initializationStatusBarItem.dispose();
     }
     if (operationStatusBarItem) {
         operationStatusBarItem.dispose();

@@ -32,7 +32,9 @@ import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 import * as SolutionInitializer from './solution/SolutionInitializer';
 import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
-import { completeInitializationStatusBar, updateInitializationStatusBar } from './statusbar/StatusBarManager';
+// #273 — the initialization indicator is now a Clarion-scoped language status item driven by the
+// solution-load lifecycle (SolutionInitializer), not painted unconditionally on activation. So a
+// non-Clarion (or solution-free) folder shows nothing; per-file language features are unaffected.
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
@@ -48,8 +50,6 @@ let documentManager: DocumentManager | undefined;
 // Helper function to escape special characters in file paths for RegExp
 
 export async function activate(context: ExtensionContext): Promise<void> {
-    updateInitializationStatusBar('activating');
-
     const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
@@ -120,8 +120,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     ActivationManager.registerEventListeners(context);
     const xmlFileCount = ActivationManager.checkForOpenXmlFiles();
     
-    // Phase 6: Start language server
-    updateInitializationStatusBar('starting-language-server');
+    // Phase 6: Start language server (starts for per-file language features regardless of whether
+    // a solution is open; #273 — no status ping here, the solution-load path surfaces its own).
     await ActivationManager.startClientServer(context, state, xmlFileCount > 0);
     client = state.client;
     
@@ -164,11 +164,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
         disposables
     );
 
-    // If no solution is being initialized, mark activation ready here.
-    if (!globalSolutionFile) {
-        completeInitializationStatusBar();
-    }
-    
+    // #273 — no solution being initialized → stay silent (no "Clarion: Ready"). The init
+    // indicator is solution-load feedback only, driven by SolutionInitializer.
+
     // Always create views
     await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
     
