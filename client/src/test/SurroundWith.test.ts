@@ -38,12 +38,12 @@ suite('#277 buildSurround — Surround With / Embedding', () => {
         assert.deepStrictEqual(u.lines, ['  LOOP UNTIL condition', '    a', '  END']);
     });
 
-    test('CASE nests content under an OF clause (two levels) with an expression placeholder', () => {
+    test('CASE aligns OF with CASE and indents content one level (Clarion/ABC convention)', () => {
         const r = buildSurround(['  x = 1'], 'CASE', opts);
         assert.deepStrictEqual(r.lines, [
             '  CASE expression',
-            '    OF value',
-            '      x = 1',
+            '  OF value',
+            '    x = 1',
             '  END',
         ]);
         assert.deepStrictEqual(r.placeholder, { line: 0, startChar: 7, endChar: 17 });

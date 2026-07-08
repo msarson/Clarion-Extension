@@ -86,9 +86,10 @@ export function buildSurround(
             header('BEGIN'); content(1); end();
             break;
         case 'CASE':
+            // Clarion/ABC convention: OF aligns with CASE, statements one level in from OF.
             header('CASE expression', 'expression');
-            lines.push(baseIndent + indentUnit + 'OF value');
-            content(2);
+            lines.push(baseIndent + 'OF value');
+            content(1);
             end();
             break;
         default:
