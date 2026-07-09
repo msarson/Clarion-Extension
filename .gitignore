@@ -34,3 +34,7 @@ server/src/generated/
 
 # Per-session diagnostic log sink (truncated each session by LoggerManager)
 .clarion-debug/
+
+# local diagnostic captures
+*.cpuprofile
+*.cpuprofile.txt
