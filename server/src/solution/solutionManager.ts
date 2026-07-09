@@ -10,6 +10,9 @@ import { solutionOperationInProgress } from '../server';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
+// Always-on ("perf" level) timeline for solution loading — emits even in a release VSIX so slow
+// per-project source-file loads are visible in the "Clarion Language Server" output channel.
+const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 
 export class SolutionManager {
     public solution: ClarionSolutionServer;
@@ -196,12 +199,22 @@ export class SolutionManager {
                         // Add to the list of projects to add to the solution
                         projectsToAdd.push(project);
                         
-                        // Create a promise for loading this project's source files
-                        const projectPromise = project.loadSourceFilesFromProjectFile()
-                            .catch(projectError => {
+                        // Create a promise for loading this project's source files (timed per project
+                        // so a slow redirection / source enumeration shows up against its neighbours).
+                        const projectPromise = (async () => {
+                            const projStart = performance.now();
+                            try {
+                                await project.loadSourceFilesFromProjectFile();
+                            } catch (projectError) {
                                 logger.error(`❌ Error loading source files for project ${projectName}: ${projectError instanceof Error ? projectError.message : String(projectError)}`);
                                 // We'll still add the project even if loading source files failed
+                            }
+                            perfLogger.perf("SolutionLoad: project source files loaded", {
+                                ms: Math.round(performance.now() - projStart),
+                                project: projectName,
+                                source_files: project.sourceFiles.length
                             });
+                        })();
                         
                         projectPromises.push(projectPromise);
                     } catch (matchError) {

@@ -103,7 +103,10 @@ logger.setLevel("error");
 // #158 — perfLogger level set to "error" post-investigation. Calls remain
 // in place; flip back to "perf" for future startup-time investigations
 // (toggle is a single-character edit per logger).
-const perfLogger = LoggerManager.getLogger("StartupPerf", "error");
+// "perf" level → these phase markers ALWAYS emit, even in a packaged (release) VSIX where the
+// default log level is "error". Low-volume startup/solution-load timeline so users (and support)
+// can see where solution loading spends its time in the "Clarion Language Server" output channel.
+const perfLogger = LoggerManager.getLogger("StartupPerf", "perf");
 const serverModuleLoadedAt = Date.now();
 perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
 
@@ -1559,6 +1562,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             await initializeSolutionManager(solutionPath);
             const initEndTime = performance.now();
             logger.info(`✅ Solution manager initialized successfully in ${(initEndTime - initStartTime).toFixed(2)}ms`);
+            perfLogger.perf("Phase: SolutionManager init (parse .sln + load project source files)", {
+                ms: Math.round(initEndTime - initStartTime),
+                project_count: SolutionManager.getInstance()?.solution.projects.length ?? 0,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
             
             // Log the solution manager state
             const solutionManager = SolutionManager.getInstance();
@@ -1602,6 +1610,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
             logger.info(`⏱️ [STARTUP] Solution build done: ${globalSolution.projects.length} projects, ${globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0)} source files in ${(buildEndTime - buildStartTime).toFixed(0)}ms`);
+            perfLogger.perf("Phase: buildClarionSolution", {
+                ms: Math.round(buildEndTime - buildStartTime),
+                project_count: globalSolution.projects.length,
+                source_file_count: globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0),
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Always-visible project summary
@@ -1691,12 +1705,22 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 )];
                 const sdiStart = Date.now();
                 logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
-                await Promise.all(projectPaths.map(p =>
-                    indexer.getOrBuildIndex(p).catch(err =>
+                await Promise.all(projectPaths.map(async p => {
+                    const t = Date.now();
+                    await indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
-                    )
-                ));
+                    );
+                    perfLogger.perf("SDI: project structure index built", {
+                        ms: Date.now() - t,
+                        project: path.basename(p)
+                    });
+                }));
                 logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                perfLogger.perf("Phase: SDI structure-index build complete (background)", {
+                    ms: Date.now() - sdiStart,
+                    project_count: projectPaths.length,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -1721,6 +1745,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
                 logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                perfLogger.perf("Phase: FRG file-relationship-graph build complete (background)", {
+                    ms: Date.now() - frgStart,
+                    file_count: allFiles.length,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
                 connection.sendNotification('clarion/graphStatus', {
                     status: 'built',
                     fileCount: graph.fileCount,
