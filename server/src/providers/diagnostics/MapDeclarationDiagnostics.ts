@@ -375,8 +375,22 @@ export async function validateMissingImplementations(
     // budget between modules (effective now that the sdiReady pass runs validators sequentially).
     const timeSliceModules = makeTimeSlicer();
 
+    // #292: a MODULE naming anything other than a Clarion source file is an external-library
+    // reference — per the docs (MODULE, "specify MEMBER source file"): "If the sourcefile is an
+    // external library, this string may contain any unique identifier". Its procedures are
+    // implemented in another binary (typically another project in the solution, prototyped with
+    // the DLL attribute), so "no implementation in 'x.dll'" is a false positive by construction —
+    // and when redirection FOUND the physical .dll, the loader tokenized the binary as text.
+    // Extensionless names are skipped too: they are legal external-library identifiers and
+    // indistinguishable from implicit-.clw source names, and this diagnostic stays conservative.
+    const CLARION_SOURCE_EXTS = new Set(['.clw', '.inc', '.equ', '.eq', '.int']);
+
     for (const moduleToken of moduleTokens) {
         await timeSliceModules();
+        const moduleExt = nodePath.extname(moduleToken.referencedFile!).toLowerCase();
+        if (!CLARION_SOURCE_EXTS.has(moduleExt)) {
+            continue;
+        }
         // MODULE filenames are stored unresolved on the token
         // (DocumentStructure.resolveFileReferences:1915 — "We're storing
         // unresolved filenames"). Resolve to an absolute path before any URI
@@ -436,6 +450,17 @@ export async function validateMissingImplementations(
 
         for (const decl of moduleDecls) {
             const procName = decl.label!;
+
+            // #292: the DLL prototype attribute means "defined externally in a .DLL" (docs) —
+            // no source implementation exists anywhere in this solution's files by contract.
+            // Belt-and-braces alongside the module-extension gate above: catches a DLL-attributed
+            // prototype even inside a source-named MODULE. Note the docs allow the flag to be an
+            // undefined label (still active), so any DLL(...) or bare DLL counts.
+            const declLineText = docLines[decl.line] ?? '';
+            if (/,\s*DLL\b/i.test(declLineText.replace(/!.*$/, ''))) {
+                continue;
+            }
+
             const range: Range = {
                 start: { line: decl.line, character: 0 },
                 end:   { line: decl.line, character: procName.length }
