@@ -225,11 +225,23 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
     const filePaths = collectSolutionSourceFilePaths(solution);
     let scannedFiles = 0;
     let indexedLenses = 0;
+    let missingFiles = 0;
     const startedAt = Date.now();
 
     for (const absPath of filePaths) {
         if (generation !== codeLensPrecomputeGeneration) return; // superseded by a newer build
-        if (!fs.existsSync(absPath)) continue;
+        // #290: count (don't hide) paths that fail the existence probe — Mark's run showed
+        // files=13 of ~3016 solution entries, i.e. the project.path + relativePath join may not
+        // reconstruct the real location for most files. A large `missing` count here means the
+        // precompute is silently covering a fraction of the solution (everything else falls back
+        // to live-FAR per visible lens — exactly the slow path #189 was built to avoid).
+        if (!fs.existsSync(absPath)) {
+            missingFiles++;
+            if (missingFiles <= 3) {
+                logger.info(`⚠️ [CodeLens precompute] path does not exist: ${absPath}`);
+            }
+            continue;
+        }
 
         const uri = pathToCanonicalUri(absPath);
         const openDoc = documents.get(uri);
@@ -279,6 +291,8 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
             ms: Date.now() - startedAt,
             lenses: indexedLenses,
             files: scannedFiles,
+            missing: missingFiles,
+            total_paths: filePaths.length,
             since_module_load_ms: Date.now() - serverModuleLoadedAt
         });
     }
