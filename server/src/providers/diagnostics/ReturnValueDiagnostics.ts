@@ -84,6 +84,9 @@ function isNonProcReturnMethod(typeStr: string): boolean {
     return /\b(LONG|SHORT|BYTE|SIGNED|UNSIGNED|STRING|CSTRING|PSTRING|REAL|DECIMAL|DATE|TIME|SREAL|BLOB|QUEUE|GROUP|CLASS|BOOL|ANY|BFILE|FILE)\b/.test(afterParen);
 }
 
+/** #294 visibility: how many files the last cross-file plain-call scan actually covered. */
+let lastCrossFileFilesScanned = 0;
+
 function validateCrossFilePlainCalls(
     currentTokens: Token[],
     document: TextDocument,
@@ -111,23 +114,16 @@ function validateCrossFilePlainCalls(
         filesToScan.set(uri.toLowerCase(), { uri });
     }
 
-    // #162 V1 — include unopened project files, not just TokenCache entries.
-    const solutionManager = SolutionManager.getInstance();
-    if (solutionManager?.solution?.projects?.length) {
-        for (const project of solutionManager.solution.projects) {
-            for (const sourceFile of project.sourceFiles) {
-                const fullPath = path.isAbsolute(sourceFile.relativePath)
-                    ? sourceFile.relativePath
-                    : path.join(project.path, sourceFile.relativePath);
-                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                if (uri.toLowerCase() === currentUri.toLowerCase()) continue;
-                const key = uri.toLowerCase();
-                if (!filesToScan.has(key)) {
-                    filesToScan.set(key, { uri, fsPath: fullPath });
-                }
-            }
-        }
-    }
+    // #162 V1 included EVERY unopened project source file here. That was only ever affordable
+    // because the #293 resolution bug capped "every project file" at ~41; with resolution fixed
+    // (~3,016 files) this pass cold-loads and tokenizes the entire solution per validated
+    // document, freezing the server for minutes. REVERTED to cached/open files (pre-#162 scope)
+    // per Mark's call — identical to the behavior users actually observed. True solution-wide
+    // coverage returns with the one-pass reference index (#294), which makes it O(total tokens)
+    // once instead of per-document sweeps. NOTE (no silent caps): the
+    // "validateDiscardedReturnValues complete" perf line carries crossfile_files_scanned so the
+    // reduced scope stays visible.
+    lastCrossFileFilesScanned = filesToScan.size;
 
     for (const { uri, fsPath } of filesToScan.values()) {
         let otherTokens = cache.getTokensByUri(uri);
@@ -838,6 +834,7 @@ export async function validateDiscardedReturnValues(
         total_ms: Date.now() - fnStart,
         dotcall_loop_ms: dotCallMs,
         crossfile_ms: crossFileMs,
+        crossfile_files_scanned: lastCrossFileFilesScanned,
         dotcall_sites: dotCallSites,
         cache_hits: cacheHits,
         cache_unique_keys: memberCache.size,

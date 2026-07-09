@@ -1808,7 +1808,14 @@ CallerProc  PROCEDURE()
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
         });
 
-        test('cross-file: unopened project file is scanned via solution sourceFiles', async () => {
+        test('cross-file: scan covers CACHED files only — unopened project files are deliberately out of scope (#294)', async () => {
+            // CONTRACT CHANGE (2026-07-09, Mark's call): #162 V1 swept EVERY solution source file
+            // per validated document. That was only affordable while the #293 resolution bug
+            // capped "every file" at ~41; at a real solution's scale (~3,016 files) the sweep
+            // cold-tokenized the whole solution per document and froze the server for minutes.
+            // Scope is now cached/open files (pre-#162 behavior); full-solution coverage returns
+            // with the one-pass reference index (#294). This test pins BOTH sides of the new
+            // contract: no warning from an unopened file, warning present once the file is cached.
             const fs = require('fs');
             const os = require('os');
             const path = require('path');
@@ -1836,8 +1843,6 @@ CallerProc  PROCEDURE()
 
             const savedSm = (SolutionManager as unknown as { instance: unknown }).instance;
             try {
-                // Do not pre-populate program tokens in TokenCache — this pins V1:
-                // diagnostics must still discover returning MAP procs from unopened files.
                 TokenCache.getInstance().clearAllTokens();
                 const memberDoc = createDoc(`file:///${memberPath.replace(/\\/g, '/')}`, memberCode);
                 const tokens = TokenCache.getInstance().getTokens(memberDoc);
@@ -1852,12 +1857,23 @@ CallerProc  PROCEDURE()
                 (SolutionManager as unknown as { instance: unknown }).instance = fakeSm;
 
                 const locator = new MemberLocatorService();
-                const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
-                const plain = diags.filter((d: { message: string }) =>
+
+                // Side 1: program file NOT cached → out of scope → no warning.
+                const coldDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+                const coldPlain = coldDiags.filter((d: { message: string }) =>
                     /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
                 );
-                assert.strictEqual(plain.length, 1, 'should warn from unopened project file declaration');
-                assert.ok(plain[0].message.includes("'TestProc'"));
+                assert.strictEqual(coldPlain.length, 0, 'unopened files are out of scope by design (#294 restores coverage)');
+
+                // Side 2: cache the program file (as an open/previously-seen doc would be) → warns.
+                const progDoc = createDoc(`file:///${programPath.replace(/\\/g, '/')}`, programCode);
+                TokenCache.getInstance().getTokens(progDoc);
+                const warmDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+                const warmPlain = warmDiags.filter((d: { message: string }) =>
+                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                );
+                assert.strictEqual(warmPlain.length, 1, 'cached program file declaration should warn');
+                assert.ok(warmPlain[0].message.includes("'TestProc'"));
             } finally {
                 (SolutionManager as unknown as { instance: unknown }).instance = savedSm;
                 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
