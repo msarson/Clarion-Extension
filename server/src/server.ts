@@ -136,6 +136,13 @@ let firstValidateFired = false;
 // threshold; loose-file users wait 2s for async diagnostics instead of
 // getting them at t=63ms. Acceptable per Bob's dispatch.
 let solutionPipelineReady = false;
+// #289: the async cross-file validators additionally wait for the SDI structure-index prebuild.
+// Several of them block on the index INTERNALLY (MemberLocatorService/SymbolFinderService await
+// getOrBuildIndex), so running them earlier just parks them behind the 30s+ build — measured:
+// ONE member resolution in discardedReturn = 40.4s while the index built. Deferring until the
+// prebuild completes turns three async passes (open/drain → solutionReady → sdiReady) into ONE
+// fast pass (~1-3s measured post-index). Sync diagnostics still publish immediately throughout.
+let sdiPipelineReady = false;
 const deferredAsyncDocs = new Set<string>();
 
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
@@ -617,11 +624,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         //
         // No-solution timeout fallback (registered at bottom of file) marks
         // pipeline ready after 2s if solutionReady never fires.
-        if (!solutionPipelineReady && caller === 'onDidOpen') {
+        // #289: gate widened — async validators wait for BOTH the solution AND the SDI structure
+        // index (several block on the index internally; see sdiPipelineReady above). Applies to
+        // every caller, so an edit during the index-build window defers instead of stalling 40s.
+        // The sdiReady pass re-validates all open docs once both flags are set.
+        if (!solutionPipelineReady || !sdiPipelineReady) {
             deferredAsyncDocs.add(document.uri);
-            perfLogger.perf("validateTextDocument async deferred (solution pending)", {
+            perfLogger.perf("validateTextDocument async deferred (pipeline pending)", {
                 total_ms: Date.now() - validateStart,
                 sync_ms: syncMs,
+                solution_ready: String(solutionPipelineReady),
+                sdi_ready: String(sdiPipelineReady),
                 token_count: tokens.length,
                 diag_count: diagnostics.length,
                 uri: document.uri,
@@ -1756,10 +1769,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
 
-                // #289: index-dependent diagnostics (missing includes / missing constants) SKIP
-                // while the index is still building instead of stalling the pipeline for its full
-                // duration. Now that it's ready, re-validate open documents so those diagnostics
-                // arrive — everything else is warm at this point, so the pass is cheap.
+                // #289: the async cross-file validators were deferred until this point (several
+                // block on the index internally — running them earlier parked them behind the
+                // build). Index ready → run the single full async pass; everything is warm, so
+                // it completes in a few seconds instead of tens.
+                sdiPipelineReady = true;
+                deferredAsyncDocs.clear();
                 lastValidatedVersions.clear();
                 for (const doc of documents.all()) {
                     validateTextDocument(doc, 'sdiReady');
@@ -2702,6 +2717,7 @@ const drainDeferredIfNoSolution = () => {
         deferred_count: deferredAsyncDocs.size
     });
     solutionPipelineReady = true;
+    sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);
     deferredAsyncDocs.clear();
     for (const uri of queuedUris) {
