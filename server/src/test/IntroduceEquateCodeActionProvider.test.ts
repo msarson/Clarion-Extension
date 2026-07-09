@@ -64,6 +64,25 @@ suite('#281 IntroduceEquateCodeActionProvider', () => {
         assert.strictEqual(scopes[1].insertLine, 3);
     });
 
+    test('Global lands after the MAP, not inside it, when the MAP has prototypes (real-file shape)', () => {
+        const src = [
+            '  PROGRAM',        // 0
+            '  MAP',            // 1
+            'Foo   PROCEDURE',  // 2  (prototype INSIDE the MAP — must not be the anchor)
+            '  END',            // 3
+            'GlobalX  LONG',    // 4  (global data)
+            '  CODE',           // 5  (program CODE — global data ends here)
+            '  Foo',            // 6
+            'Foo PROCEDURE',    // 7  (implementation)
+            '  CODE',           // 8
+            '  Y = 10'          // 9
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq-map.clw', 9, 8));
+        const global = scopes.find(s => s.label === 'Global')!;
+        assert.ok(global, 'a Global scope is offered');
+        assert.strictEqual(global.insertLine, 5, 'inserts before the program CODE (after the MAP), not inside the MAP');
+    });
+
     test('string literal in a MEMBER procedure → file scope labelled "This module"', () => {
         const src = [
             "  MEMBER('prog')", // 0
@@ -158,7 +177,11 @@ suite('#281 cross-file Global from a MEMBER', () => {
     for (const memberArg of ['MyApp', 'MyApp.clw']) {
         test(`MEMBER('${memberArg}') offers a cross-file Global scope targeting the resolved PROGRAM file`, () => {
             // Program file sits next to the member (sibling-directory resolution, no solution needed).
-            fs.writeFileSync(path.join(tmpDir, 'MyApp.clw'), ['  PROGRAM', '  MAP', '  END', '  CODE'].join('\n'));
+            // Its MAP carries a prototype before CODE — the cross-file global must land after the MAP.
+            fs.writeFileSync(
+                path.join(tmpDir, 'MyApp.clw'),
+                ['  PROGRAM', '  MAP', 'Foo   PROCEDURE', '  END', 'GlobalX  LONG', '  CODE'].join('\n')
+            );
             const memberPath = path.join(tmpDir, 'sub.clw');
             const memberUri = 'file:///' + memberPath.replace(/\\/g, '/');
 
@@ -172,7 +195,7 @@ suite('#281 cross-file Global from a MEMBER', () => {
             ]);
             const global = scopes.find(s => s.label.startsWith('Global'))!;
             assert.ok(global.uri && global.uri.toLowerCase().includes('myapp.clw'), 'global scope targets MyApp.clw');
-            assert.strictEqual(global.insertLine, 3, 'global data inserts before the PROGRAM CODE (line 3)');
+            assert.strictEqual(global.insertLine, 5, 'global data inserts before the PROGRAM CODE (after the MAP)');
         });
     }
 });
