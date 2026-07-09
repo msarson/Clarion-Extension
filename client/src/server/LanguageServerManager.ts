@@ -74,7 +74,13 @@ export async function startLanguageServer(
         documentSelector: documentSelectors,
         initializationOptions: {
             settings: workspace.getConfiguration('clarion'),
-            lookupExtensions: lookupExtensions
+            lookupExtensions: lookupExtensions,
+            // #289: announce the configured solution INSIDE the initialize request itself, so the
+            // server knows a solution is coming at t≈0 — the clarion/solutionPending notification
+            // proved racy (it queues behind whatever the busy event loop is processing and lost to
+            // the 2s no-solution fallback timer by 0ms on Mark's VM).
+            configuredSolutionFile: workspace.getConfiguration('clarion').get<string>('currentSolution', '')
+                || workspace.getConfiguration('clarion').get<string>('solutionFile', '')
         },
         synchronize: {
             fileEvents: [

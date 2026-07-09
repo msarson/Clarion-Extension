@@ -20,7 +20,9 @@ logger.setLevel('error');
 // "error" at final commit.
 // #158 — level set to "error" post-investigation. Flip to "perf" for
 // future investigations (single-character toggle).
-const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'error');
+// "perf" → the completion breakdown (sdi wait vs include-check vs constant-check) always emits,
+// even in a release VSIX — one line per validation, needed to diagnose slow-solution reports.
+const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'perf');
 
 const includeVerifier = IncludeVerifier.getInstance();
 

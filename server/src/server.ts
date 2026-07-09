@@ -316,6 +316,26 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+
+        // #289: a configured solution announces itself IN the initialize request (race-free — this
+        // handler runs at t≈4ms, before any validation or timer can compete). The explicit
+        // `configuredSolutionFile` field is the contract; the settings fallback covers older
+        // clients. Sets the flag the 2s no-solution fallback checks, so the expensive async
+        // validation pass stays deferred until clarion/solutionReady instead of draining mid-load
+        // in degraded no-solution mode (which starved the solution load itself on big solutions).
+        const initOpts = params.initializationOptions as
+            { configuredSolutionFile?: string; settings?: { currentSolution?: string; solutionFile?: string } } | undefined;
+        const announcedSolution = initOpts?.configuredSolutionFile
+            || initOpts?.settings?.currentSolution
+            || initOpts?.settings?.solutionFile
+            || '';
+        if (announcedSolution) {
+            solutionAnnounced = true;
+            perfLogger.perf("Phase: solution announced via initializationOptions", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                solution: path.basename(announcedSolution)
+            });
+        }
         
         // Log workspace folders
         if (params.workspaceFolders) {
