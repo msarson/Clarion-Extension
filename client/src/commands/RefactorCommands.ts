@@ -1,5 +1,6 @@
 import {
-    commands, languages, window, Range, Selection, Position, EndOfLine, Disposable, ExtensionContext, QuickPickItem
+    commands, languages, window, workspace, Uri, Range, Selection, Position, EndOfLine, WorkspaceEdit,
+    Disposable, ExtensionContext, QuickPickItem
 } from 'vscode';
 import { buildSurround, SURROUND_STRUCTURES } from '../refactor/surroundWith';
 import { SurroundWithCodeActionProvider } from '../refactor/SurroundWithCodeActionProvider';
@@ -7,6 +8,7 @@ import { extractCondition, negateExpression } from '../refactor/negateCondition'
 import { NegateConditionCodeActionProvider } from '../refactor/NegateConditionCodeActionProvider';
 import { flipIfElse } from '../refactor/flipIfElse';
 import { FlipIfElseCodeActionProvider } from '../refactor/FlipIfElseCodeActionProvider';
+import { formatEquateDeclaration, isValidEquateName } from '../refactor/introduceEquate';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RefactorCommands");
@@ -129,6 +131,60 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         await editor.edit(eb => eb.replace(replaceRange, result.newLines.join(eol)));
     });
 
+    // #281 — Introduce EQUATE: invoked by the server code action. The server passes the literal's
+    // span and the candidate data-section scopes; here the user picks the scope (a quick pick — the
+    // "second choice", mirroring Surround With) then names the constant. We insert the EQUATE in the
+    // chosen section and replace the literal with the name in one edit.
+    interface EquateScope extends QuickPickItem { insertLine: number; }
+    const introduceEquate = commands.registerCommand(
+        'clarion.introduceEquate',
+        async (
+            uriString: string,
+            literal: { line: number; startChar: number; endChar: number },
+            value: string,
+            scopes: Array<{ label: string; insertLine: number }>
+        ) => {
+            if (!scopes || scopes.length === 0) {
+                return;
+            }
+
+            // Second choice: which data section. Skip the pick when there's only one place.
+            let scope: EquateScope = { label: scopes[0].label, insertLine: scopes[0].insertLine };
+            if (scopes.length > 1) {
+                const picked = await window.showQuickPick<EquateScope>(
+                    scopes.map(s => ({ label: s.label, insertLine: s.insertLine })),
+                    { placeHolder: 'Place the EQUATE in…' }
+                );
+                if (!picked) {
+                    return;
+                }
+                scope = picked;
+            }
+
+            const name = await window.showInputBox({
+                prompt: 'Name for the EQUATE',
+                placeHolder: 'e.g. MaxItems',
+                validateInput: v => isValidEquateName(v) ? undefined : 'Enter a valid Clarion label (letter/underscore first).'
+            });
+            if (!name) {
+                return;
+            }
+
+            const uri = Uri.parse(uriString);
+            const doc = await workspace.openTextDocument(uri);
+            const eol = doc.eol === EndOfLine.CRLF ? '\r\n' : '\n';
+
+            const edit = new WorkspaceEdit();
+            edit.insert(uri, new Position(scope.insertLine, 0), formatEquateDeclaration(name, value) + eol);
+            edit.replace(
+                uri,
+                new Range(literal.line, literal.startChar, literal.line, literal.endChar),
+                name.trim()
+            );
+            await workspace.applyEdit(edit);
+        }
+    );
+
     // #280 — post-edit cursor placement for a server code action (e.g. Create routine). The server
     // computes the body position and attaches this command to the code action; VS Code applies the
     // edit first, then runs it. Operates on the active editor (where the lightbulb was invoked).
@@ -162,5 +218,5 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         { providedCodeActionKinds: FlipIfElseCodeActionProvider.providedKinds }
     );
 
-    return [surroundWith, negateCondition, flipIfElseCmd, placeCursor, surroundProvider, negateProvider, flipProvider];
+    return [surroundWith, negateCondition, flipIfElseCmd, introduceEquate, placeCursor, surroundProvider, negateProvider, flipProvider];
 }
