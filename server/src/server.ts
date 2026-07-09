@@ -163,21 +163,9 @@ const codeLensRefCache = new Map<string, { refs: Location[]; shortName: string }
 const codeLensRefIndex = new ReferenceIndex();
 let codeLensPrecomputeGeneration = 0;
 
-function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[] {
-    const dedup = new Set<string>();
-    const files: string[] = [];
-    for (const project of solution.projects) {
-        for (const sourceFile of project.sourceFiles) {
-            if (!sourceFile.relativePath) continue;
-            const abs = path.join(project.path, sourceFile.relativePath);
-            const key = path.normalize(abs).toLowerCase();
-            if (dedup.has(key)) continue;
-            dedup.add(key);
-            files.push(abs);
-        }
-    }
-    return files;
-}
+// (collectSolutionSourceFilePaths removed with the #293 follow-up: the CodeLens precompute
+// now warms open documents only — see precomputeCodeLensReferenceCounts. Recover from git
+// history if the one-pass inverted reference index (#294) wants solution-wide enumeration.)
 
 /**
  * #189 Phase 4 (initial) — declaration-position probe for FAR fast-path.
@@ -222,7 +210,20 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
 
     if (!serverSettings.referencesCodeLensEnabled) return;
 
-    const filePaths = collectSolutionSourceFilePaths(solution);
+    // #293 follow-up: warm OPEN DOCUMENTS only, not the whole solution. The whole-solution
+    // sweep was designed pre-#293, when the resolution bug meant it only ever saw ~13 files
+    // (52-96s measured). At true solution scale the cost is lenses × full-FAR-scan with BOTH
+    // factors ~75× larger — unaffordable as a background job. Open files (where lenses are
+    // visible) get warm counts; everything else resolves lazily per visible lens with
+    // per-symbol caching, exactly as unopened files always effectively did. The proper
+    // long-term fix is a one-pass inverted reference index (tracked on #290/#294).
+    void solution; // retained in the signature for the settings-toggle re-kick path
+    const filePaths = documents.all()
+        .map(d => {
+            try { return decodeURIComponent(d.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'); }
+            catch { return ''; }
+        })
+        .filter(p => p && /\.(clw|inc|equ|int)$/i.test(p));
     let scannedFiles = 0;
     let indexedLenses = 0;
     let missingFiles = 0;
