@@ -9,6 +9,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -182,7 +183,12 @@ export async function validateMissingMapDeclarations(
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
 
+    // #297: measured 1.9s on a generated module during the startup revalidation — yield on a
+    // time budget so interactive requests interleave with the per-procedure resolution.
+    const timeSlice = makeTimeSlicer();
+
     for (const proc of implementations) {
+        await timeSlice();
         const procName = proc.label!;
 
         // Case 1: self-declared via MODULE('thisfile.clw') — compare signatures locally

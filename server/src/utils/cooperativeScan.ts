@@ -28,3 +28,22 @@ export async function cooperativeCheckpoint(
     }
     return token?.isCancellationRequested ?? false;
 }
+
+/**
+ * #297 — time-based variant for loops whose per-iteration cost varies wildly (a dot-call
+ * resolution can be a cache hit or a 200ms cross-file walk, so a count-based checkpoint
+ * can't bound the stall). Returns an awaitable that yields the event loop whenever more
+ * than `budgetMs` has elapsed since the last yield:
+ *
+ *   const timeSlice = makeTimeSlicer();
+ *   for (...) { await timeSlice(); ...heavy work... }
+ */
+export function makeTimeSlicer(budgetMs = 25): () => Promise<void> {
+    let lastYield = Date.now();
+    return async () => {
+        if (Date.now() - lastYield >= budgetMs) {
+            await new Promise<void>(resolve => setImmediate(resolve));
+            lastYield = Date.now();
+        }
+    };
+}

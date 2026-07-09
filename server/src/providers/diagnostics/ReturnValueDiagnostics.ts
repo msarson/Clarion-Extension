@@ -9,6 +9,7 @@ import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
 import { SolutionManager } from '../../solution/solutionManager';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 
@@ -735,7 +736,14 @@ export async function validateDiscardedReturnValues(
     let dotCallSites = 0;
     let cacheHits = 0;
 
+    // #297: this loop measured 3.9s on a 5k-token generated module (dotcall_loop_ms=3876,
+    // essentially one sync stretch) and scales with document size — on the 20k-token gl1.clw
+    // it pinned the LSP loop long enough to starve an in-memory tree request past its 15s
+    // timeout. Yield on a time budget so interactive requests interleave.
+    const timeSlice = makeTimeSlicer();
+
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+        await timeSlice();
         const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
         if (!range) continue;
 

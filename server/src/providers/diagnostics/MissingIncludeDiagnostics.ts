@@ -6,6 +6,7 @@ import { IncludeVerifier } from '../../utils/IncludeVerifier';
 import { ClassConstantParser } from '../../utils/ClassConstantParser';
 import { ProjectConstantsChecker } from '../../utils/ProjectConstantsChecker';
 import { SolutionManager } from '../../solution/solutionManager';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 
@@ -263,7 +264,12 @@ export async function validateMissingConstants(
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();
 
+    // #297: measured 2.5s on a generated module during the startup revalidation — yield on a
+    // time budget so interactive requests interleave with the per-type include/constant checks.
+    const timeSlice = makeTimeSlicer();
+
     for (const { typeToken, typeName, typeNameStart } of collectFileTopLevelTypeTokens(tokens)) {
+        await timeSlice();
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)
