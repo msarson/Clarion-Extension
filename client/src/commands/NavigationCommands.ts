@@ -132,8 +132,17 @@ export function registerNavigationCommands(
                     : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
 
                 if (!fs.existsSync(absolutePath)) {
-                    vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
-                    return;
+                    // #297 fix 13: resolve on demand via redirection. Tree file items now attach
+                    // this command up front with whatever path they know (relative or bare name)
+                    // instead of firing a server findFile per rendered node — the one user click
+                    // that needs the resolution pays for it here.
+                    const resolved = await SolutionCache.getInstance().findFileWithExtension(filePathStr);
+                    if (resolved && resolved !== "" && fs.existsSync(resolved)) {
+                        absolutePath = resolved;
+                    } else {
+                        vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
+                        return;
+                    }
                 }
 
                 const doc = await workspace.openTextDocument(Uri.file(absolutePath));

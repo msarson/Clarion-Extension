@@ -762,13 +762,26 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getTreeItem(element: TreeNode): TreeItem {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
-        
+
         // Set description if available
         if (element.description) {
             treeItem.description = element.description;
         }
-        
+
         const data = element.data;
+
+        // #297 fix 1 (audit H2): stable TreeItem identity so VS Code can match nodes across
+        // whole-tree rebuilds (expansion state + selection survive; no silent child re-resolution
+        // against stale handles). File nodes carry a per-project uniqueId; project nodes their GUID.
+        const fileUniqueId = (data as any)?.uniqueId;
+        const projectGuid = (data as any)?.kind === 'project'
+            ? ((data as any).projectId ?? (data as any).guid)
+            : undefined;
+        if (fileUniqueId) {
+            treeItem.id = `file:${fileUniqueId}`;
+        } else if (projectGuid) {
+            treeItem.id = `project:${projectGuid}`;
+        }
         logger.info(`🏗 Processing item with label: ${label}`);
         // Reduce logging to improve performance
         logger.info(`🏗 Item data type: ${data?.type || (data?.guid ? 'project' : (data?.relativePath ? 'file' : 'other'))}`);
@@ -1046,86 +1059,36 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.iconPath = new ThemeIcon('file-code');
             treeItem.contextValue = 'clarionFile';
 
-            const solutionCache = SolutionCache.getInstance();
-            // Log more details about the file for debugging
-            logger.info(`🔍 Looking for file: ${file.name || 'undefined'}, relativePath: ${file.relativePath || 'undefined'}`);
-            
-            // Get the parent project node to help with debugging
-            let projectNode = element.parent;
-            let projectName = "unknown";
-            let projectPath = "unknown";
-            
-            if (projectNode && projectNode.data && (projectNode.data as any).guid) {
-                const projectData = projectNode.data as ClarionProjectInfo;
-                projectName = projectData.name || "unnamed";
-                projectPath = projectData.path || "unknown";
-                logger.info(`🔍 File belongs to project: ${projectName}, path: ${projectPath}`);
-                
-                // Make sure we have a valid relative path
-                const relativePath = file.relativePath || file.name || "unknown-file";
-                logger.info(`🔍 Full relative path: ${path.join(projectPath, relativePath)}`);
-                
-                // Try direct path first as a quick check
-                // Make sure we have a valid relative path
-                const fileRelativePath = file.relativePath || file.name || "unknown-file";
-                const directPath = path.join(projectPath, fileRelativePath);
-                
+            // #297 fix 13 (audit H1/#296): getTreeItem is now fully SYNCHRONOUS. It previously
+            // fired a fire-and-forget server findFile round-trip per rendered node whose direct
+            // path missed, and attached the command AFTER returning the item — VS Code had
+            // already consumed it, so those requests were pure server load and the clicks were
+            // dead. Now: attach the command up front with the best path we know; the
+            // clarion.openFile handler resolves via redirection on demand (the one click that
+            // needs it pays for it).
+            const fileRelativePath = file.relativePath || file.name || "unknown-file";
+            const projectNode = element.parent;
+            const parentData = projectNode?.data as any;
+            const parentPath: string | undefined = parentData?.projectPath ?? parentData?.path;
+
+            let commandArg = fileRelativePath;
+            let tooltipPath = fileRelativePath;
+            if (parentPath) {
+                const directPath = path.join(parentPath, fileRelativePath);
                 if (fs.existsSync(directPath)) {
-                    logger.info(`✅ File found immediately using direct path: ${directPath}`);
-                    treeItem.command = {
-                        title: 'Open File',
-                        command: 'clarion.openFile',
-                        arguments: [directPath]
-                    };
-                    treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${directPath} (direct)`;
-                    return treeItem;
+                    commandArg = directPath;
+                    tooltipPath = `${directPath} (direct)`;
+                } else {
+                    // Pass the relative path — clarion.openFile resolves via redirection on click.
+                    tooltipPath = `${fileRelativePath} (resolved on open)`;
                 }
             }
-            
-            // If direct path didn't work, try server resolution
-            // Make sure we have a valid path to search for
-            const searchPath = file.relativePath || file.name || "unknown-file";
-            solutionCache.findFileWithExtension(searchPath).then(fullPath => {
-                logger.info(`🔍 Result from findFileWithExtension: ${fullPath}`);
-                
-                if (fullPath && fullPath !== "") {
-                    treeItem.command = {
-                        title: 'Open File',
-                        command: 'clarion.openFile',
-                        arguments: [fullPath]
-                    };
-                    logger.info(`📄 getTreeItem(): File – ${file.name || path.basename(searchPath)} (${fullPath})`);
-                    
-                    // Add tooltip with file path for debugging
-                    treeItem.tooltip = `File: ${file.name || path.basename(searchPath)}\nPath: ${fullPath}`;
-                } else {
-                    // Try with full path as fallback
-                    if (projectNode && projectNode.data && (projectNode.data as any).guid) {
-                        const projectData = projectNode.data as ClarionProjectInfo;
-                        // Make sure we have a valid relative path
-                        const fallbackPath = file.relativePath || file.name || "unknown-file";
-                        const fullFilePath = path.join(projectData.path, fallbackPath);
-                        
-                        if (fs.existsSync(fullFilePath)) {
-                            logger.info(`✅ File found using direct path: ${fullFilePath}`);
-                            treeItem.command = {
-                                title: 'Open File',
-                                command: 'clarion.openFile',
-                                arguments: [fullFilePath]
-                            };
-                            treeItem.tooltip = `File: ${file.name || path.basename(fallbackPath)}\nPath: ${fullFilePath} (direct)`;
-                        } else {
-                            treeItem.tooltip = `⚠️ File not found: ${file.name || fallbackPath}`;
-                            logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || fallbackPath}`);
-                        }
-                    } else {
-                        treeItem.tooltip = `⚠️ File not found: ${file.name || file.relativePath || "unknown-file"}`;
-                        logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || file.relativePath || "unknown-file"}`);
-                    }
-                }
-            }).catch(err => {
-                logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
-            });
+            treeItem.command = {
+                title: 'Open File',
+                command: 'clarion.openFile',
+                arguments: [commandArg]
+            };
+            treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${tooltipPath}`;
             return treeItem;
         }
 
@@ -1371,6 +1334,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 );
             }
             
+            // #297 fix 1 (audit H2): every root rebuild used to create fresh project nodes with
+            // children=[], discarding fetched children — so the guaranteed solutionReady refresh
+            // (and any other refresh) silently re-issued getProjectFiles for every expanded
+            // project during the busiest server window. Carry fetched children across rebuilds,
+            // keyed by project GUID.
+            const previousChildren = new Map<string, TreeNode[]>();
+            if (this._root && this._root[0]?.children) {
+                for (const oldProject of this._root[0].children) {
+                    const guid = (oldProject.data as any)?.projectId ?? (oldProject.data as any)?.guid;
+                    if (guid && oldProject.children && oldProject.children.length > 0) {
+                        previousChildren.set(String(guid), oldProject.children);
+                    }
+                }
+            }
+
             for (const project of sortedProjects) {
                 // Create a project node with no children initially
                 // Add project identity data to allow lazy loading on expand
@@ -1386,6 +1364,15 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     },
                     solutionNode
                 );
+
+                // #297 fix 1: reattach previously fetched children (reparented to the new node)
+                const carried = previousChildren.get(String(project.guid));
+                if (carried) {
+                    for (const child of carried) {
+                        child.parent = projectNode;
+                    }
+                    projectNode.children = carried;
+                }
                 
                 // Add counts to the project node label if available
                 const projectWithCounts = project as any;
