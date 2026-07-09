@@ -5,6 +5,8 @@ import { buildSurround, SURROUND_STRUCTURES } from '../refactor/surroundWith';
 import { SurroundWithCodeActionProvider } from '../refactor/SurroundWithCodeActionProvider';
 import { extractCondition, negateExpression } from '../refactor/negateCondition';
 import { NegateConditionCodeActionProvider } from '../refactor/NegateConditionCodeActionProvider';
+import { flipIfElse } from '../refactor/flipIfElse';
+import { FlipIfElseCodeActionProvider } from '../refactor/FlipIfElseCodeActionProvider';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("RefactorCommands");
@@ -104,6 +106,29 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         await editor.edit(eb => eb.replace(new Range(lineNumber, span.start, lineNumber, span.end), negated));
     });
 
+    // #278 — Flip IF/ELSE: palette command mirroring the code action; negates the condition and
+    // swaps the branches when the cursor sits on a block-form IF … ELSE … END.
+    const flipIfElseCmd = commands.registerCommand('clarion.flipIfElse', async () => {
+        const editor = window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+        const doc = editor.document;
+        const lines: string[] = [];
+        for (let i = 0; i < doc.lineCount; i++) {
+            lines.push(doc.lineAt(i).text);
+        }
+        const result = flipIfElse(lines, editor.selection.active.line);
+        if (!result) {
+            return;
+        }
+        const eol = doc.eol === EndOfLine.CRLF ? '\r\n' : '\n';
+        const replaceRange = new Range(
+            result.startLine, 0, result.endLine, doc.lineAt(result.endLine).text.length
+        );
+        await editor.edit(eb => eb.replace(replaceRange, result.newLines.join(eol)));
+    });
+
     // Refactor code actions (Ctrl+. / Refactor…) — no keybinding needed.
     const surroundProvider = languages.registerCodeActionsProvider(
         { language: 'clarion' },
@@ -115,6 +140,11 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         new NegateConditionCodeActionProvider(),
         { providedCodeActionKinds: NegateConditionCodeActionProvider.providedKinds }
     );
+    const flipProvider = languages.registerCodeActionsProvider(
+        { language: 'clarion' },
+        new FlipIfElseCodeActionProvider(),
+        { providedCodeActionKinds: FlipIfElseCodeActionProvider.providedKinds }
+    );
 
-    return [surroundWith, negateCondition, surroundProvider, negateProvider];
+    return [surroundWith, negateCondition, flipIfElseCmd, surroundProvider, negateProvider, flipProvider];
 }
