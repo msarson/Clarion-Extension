@@ -117,9 +117,22 @@ export async function validateMissingIncludes(
     includeVerifier.clearCache(document.uri);
     const clearCacheMs = Date.now() - clearCacheStart;
 
-    const sdiStart = Date.now();
     const sdi = StructureDeclarationIndexer.getInstance();
-    await sdi.getOrBuildIndex(projectPath);
+    // #289: never BLOCK a validation pass on the structure-index build — on a large installation
+    // the build takes tens of seconds and this await was 97% of the validator's time
+    // (sdi_getOrBuild_ms=28887 of total_ms=29793 measured on a 40-project VM). Kick/join the
+    // background build and skip; server.ts re-validates open documents when the prebuilt index
+    // completes, so the diagnostics still arrive without ever stalling the pipeline.
+    if (!sdi.isIndexed(projectPath)) {
+        void sdi.getOrBuildIndex(projectPath).catch(() => { /* logged by the indexer */ });
+        perfLogger.perf("validateMissingIncludes skipped — structure index still building", {
+            total_ms: Date.now() - fnStart,
+            uri: document.uri
+        });
+        return diagnostics;
+    }
+    const sdiStart = Date.now();
+    await sdi.getOrBuildIndex(projectPath); // index ready — resolves immediately
     const sdiMs = Date.now() - sdiStart;
 
     const constantParser = new ClassConstantParser();
@@ -228,7 +241,13 @@ export async function validateMissingConstants(
     }
 
     const sdi = StructureDeclarationIndexer.getInstance();
-    await sdi.getOrBuildIndex(projectPath);
+    // #289: same non-blocking rule as validateMissingIncludes — never stall a validation pass on
+    // the structure-index build; server.ts re-validates once the prebuilt index is ready.
+    if (!sdi.isIndexed(projectPath)) {
+        void sdi.getOrBuildIndex(projectPath).catch(() => { /* logged by the indexer */ });
+        return diagnostics;
+    }
+    await sdi.getOrBuildIndex(projectPath); // index ready — resolves immediately
 
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();

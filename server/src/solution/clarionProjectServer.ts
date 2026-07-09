@@ -32,7 +32,14 @@ export class ClarionProjectServer {
         logger.info(`📁 Initializing ClarionProjectServer: ${name}`);
     }
 
+    /** #289 diagnostics: phase breakdown of the last loadSourceFilesFromProjectFile call. */
+    public lastLoadReadParseMs = 0;
+    public lastLoadResolveMs = 0;
+
     async loadSourceFilesFromProjectFile(): Promise<void> {
+        const loadStart = performance.now();
+        this.lastLoadReadParseMs = 0;
+        this.lastLoadResolveMs = 0;
         logger.info(`🔄 Loading source files for project: ${this.name} (${this.path})`);
         
         // Reset collections before loading
@@ -67,7 +74,8 @@ export class ClarionProjectServer {
                 });
                 
                 const parsed = await parser.parseStringPromise(xmlContent);
-                
+                this.lastLoadReadParseMs = Math.round(performance.now() - loadStart);
+
                 // Process all ItemGroups
                 if (parsed?.project?.itemgroup) {
                     // Convert to array if it's not already (happens when there's only one itemgroup)
@@ -196,6 +204,7 @@ export class ClarionProjectServer {
                     // Process source files (most expensive operation, do it last)
                     // Create an array of promises for resolving file paths in parallel
                     // We only process Compile items as source files
+                    const resolveStart = performance.now();
                     const filePromises = compileItems.map(async (file, index) => {
                         try {
                             // Log the raw file object to understand its structure
@@ -301,7 +310,8 @@ export class ClarionProjectServer {
                     
                     // Wait for all file resolutions to complete
                     const resolvedFiles = await Promise.all(filePromises);
-                    
+                    this.lastLoadResolveMs = Math.round(performance.now() - resolveStart);
+
                     // No need to filter out null values since we always return a ClarionSourcerFileServer
                     this.sourceFiles = resolvedFiles as ClarionSourcerFileServer[];
                     

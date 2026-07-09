@@ -216,6 +216,8 @@ export class SolutionManager {
                             }
                             perfLogger.perf("SolutionLoad: project source files loaded", {
                                 ms: Math.round(performance.now() - projStart),
+                                read_parse_ms: project.lastLoadReadParseMs,
+                                resolve_ms: project.lastLoadResolveMs,
                                 project: projectName,
                                 source_files: project.sourceFiles.length
                             });

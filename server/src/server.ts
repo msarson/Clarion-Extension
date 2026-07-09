@@ -1755,6 +1755,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     project_count: projectPaths.length,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
+
+                // #289: index-dependent diagnostics (missing includes / missing constants) SKIP
+                // while the index is still building instead of stalling the pipeline for its full
+                // duration. Now that it's ready, re-validate open documents so those diagnostics
+                // arrive — everything else is warm at this point, so the pass is cheap.
+                lastValidatedVersions.clear();
+                for (const doc of documents.all()) {
+                    validateTextDocument(doc, 'sdiReady');
+                }
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -2701,6 +2710,37 @@ const drainDeferredIfNoSolution = () => {
     }
 };
 setTimeout(drainDeferredIfNoSolution, 2000);
+
+// #289 diagnostics: event-loop lag sampler for the first 120s. A 100ms heartbeat drifts by
+// however long the loop was blocked; the max drift per 5s window is reported (only when it
+// exceeds 100ms, to keep the log lean). This directly distinguishes "phase X is genuinely slow"
+// from "phase X's wall-clock ballooned because something else starved the single-threaded loop"
+// — the run-3/run-4 SolutionManager-init variance (0.7s vs 15s, identical work) needs exactly
+// this attribution.
+{
+    const samplerStart = Date.now();
+    let lastTick = Date.now();
+    let windowMaxLag = 0;
+    const heartbeat = setInterval(() => {
+        const now = Date.now();
+        const lag = now - lastTick - 100;
+        lastTick = now;
+        if (lag > windowMaxLag) windowMaxLag = lag;
+    }, 100);
+    const reporter = setInterval(() => {
+        if (windowMaxLag > 100) {
+            perfLogger.perf("EventLoop lag", {
+                max_blocked_ms: windowMaxLag,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
+        }
+        windowMaxLag = 0;
+        if (Date.now() - samplerStart > 120_000) {
+            clearInterval(heartbeat);
+            clearInterval(reporter);
+        }
+    }, 5000);
+}
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD]");
