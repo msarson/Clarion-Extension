@@ -356,6 +356,40 @@ const connection = createConnection(ProposedFeatures.all);
         handler === undefined
             ? origOnNotification(type as never)
             : origOnNotification(type as never, wrapHandler('notification', methodName(type), handler) as never);
+
+    // The built-in feature registrars (onDocumentSymbol, onCodeLens, onHover, didChange sync…)
+    // bypass connection.onRequest, so the first VM run's 6.2s sync block never produced a
+    // slow-handler line. Wrap every dedicated `onXxx(handler)` registrar too — only when the
+    // first argument is a function (onProgress and friends have different signatures and pass
+    // through untouched).
+    const conn = connection as unknown as Record<string, unknown>;
+    for (const key of Object.keys(conn)) {
+        if (key === 'onRequest' || key === 'onNotification') continue;
+        const fn = conn[key];
+        if (typeof fn !== 'function' || !/^on[A-Z]/.test(key)) continue;
+        conn[key] = (...args: unknown[]) => {
+            if (typeof args[0] === 'function') {
+                args[0] = wrapHandler('request', key, args[0] as (...a: unknown[]) => unknown);
+            }
+            return (fn as (...a: unknown[]) => unknown).apply(connection, args);
+        };
+    }
+    // languages.* sub-registrars (semanticTokens.on/onDelta/onRange, inlayHint.on)
+    const languages = (connection as unknown as { languages?: Record<string, unknown> }).languages;
+    for (const feature of ['semanticTokens', 'inlayHint']) {
+        const obj = languages?.[feature] as Record<string, unknown> | undefined;
+        if (!obj) continue;
+        for (const key of Object.keys(obj)) {
+            const fn = obj[key];
+            if (typeof fn !== 'function' || !/^on/.test(key)) continue;
+            obj[key] = (...args: unknown[]) => {
+                if (typeof args[0] === 'function') {
+                    args[0] = wrapHandler('request', `${feature}.${key}`, args[0] as (...a: unknown[]) => unknown);
+                }
+                return (fn as (...a: unknown[]) => unknown).apply(obj, args);
+            };
+        }
+    }
 }
 
 // Add global error handling

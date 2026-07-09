@@ -19,6 +19,16 @@ export function registerSolutionViewCommands(
 ): Disposable[] {
     const disposables: Disposable[] = [];
 
+    // #297 fix 11: clicked from the "couldn't load files" node — a plain refresh re-queries
+    // the failed project (its children were never stored).
+    const retryLoadCommand = commands.registerCommand('clarion.solutionTree.retryProjectLoad', async () => {
+        await solutionTreeDataProvider?.refresh();
+    });
+    if (context) {
+        context.subscriptions.push(retryLoadCommand);
+    }
+    disposables.push(retryLoadCommand);
+
     // Register filter command
     const filterCommand = commands.registerCommand('clarion.solutionView.filter', async () => {
         const filterText = await vscodeWindow.showInputBox({

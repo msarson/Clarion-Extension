@@ -64,6 +64,68 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // Track refresh state
     private refreshInProgress = false;
 
+    // #297 fix 11: one in-flight getProjectFiles per project GUID — a whole-tree fire()
+    // re-queries every expanded project, and without dedup each re-query stacked another
+    // server request behind a busy queue.
+    private _inflightProjectFiles: Map<string, Promise<{ files: any[] } | null>> = new Map();
+    private static readonly PROJECT_FILES_TIMEOUT_MS = 15_000;
+
+    /**
+     * #297 fix 11: fetch a project's file list with an entry breadcrumb (so an expand that
+     * starves server-side still shows up in the log), in-flight dedup per GUID, and a hard
+     * timeout — an unanswerable request previously left the spinner forever with zero output.
+     * Returns null on timeout/error.
+     */
+    private fetchProjectFiles(projectGuid: string, label: string): Promise<{ files: any[] } | null> {
+        const client = getLanguageClient();
+        if (!client) {
+            logger.error("❌ Language client not available");
+            return Promise.resolve(null);
+        }
+        let inflight = this._inflightProjectFiles.get(projectGuid);
+        if (inflight) return inflight;
+
+        treePerf.perf("Tree expand: getProjectFiles requested", { project: label, guid: projectGuid });
+        const reqStart = Date.now();
+        inflight = (async () => {
+            try {
+                const result = await Promise.race([
+                    client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', { projectGuid }),
+                    new Promise<null>(resolve =>
+                        setTimeout(() => resolve(null), SolutionTreeDataProvider.PROJECT_FILES_TIMEOUT_MS))
+                ]);
+                treePerf.perf("Tree expand: getProjectFiles round-trip", {
+                    ms: Date.now() - reqStart,
+                    project: label,
+                    files: result?.files?.length ?? -1,
+                    timed_out: String(result === null)
+                });
+                return result;
+            } catch (error) {
+                logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
+                return null;
+            } finally {
+                this._inflightProjectFiles.delete(projectGuid);
+            }
+        })();
+        this._inflightProjectFiles.set(projectGuid, inflight);
+        return inflight;
+    }
+
+    /**
+     * #297 fix 11: shown instead of an eternal spinner when getProjectFiles times out or
+     * errors. NOT stored in element.children, so the next tree refresh re-fetches naturally.
+     */
+    private makeProjectLoadErrorNode(element: TreeNode): TreeNode {
+        const node = new TreeNode(
+            "⚠ Couldn't load files (server busy) — click to retry",
+            TreeItemCollapsibleState.None,
+            { type: 'retryProjectLoad' },
+            element
+        );
+        return node;
+    }
+
     // Application sort order: 'solution' (as in .sln) or 'build' (dependency order)
     private _applicationSortOrder: 'solution' | 'build' = 'solution';
 
@@ -479,41 +541,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 }
                 // This is a project node that needs to load its details from the server
                 const projectData = element.data as any;
-                
-                // Show loading indicator
-                const loadingNode = new TreeNode(
-                    "Loading...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'loading' }
-                );
-                
-                // Return the loading node while we fetch the details
-                const loadingResult = [loadingNode];
-                
+
                 // Get project information from the data payload
                 const { projectId } = projectData;
-                
-                // Get the language client
-                const client = getLanguageClient();
-                if (!client) {
-                    logger.error("❌ Language client not available");
-                    return loadingResult;
-                }
-                
-                try {
-                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectId}`);
 
-                    // Request project files from the server
-                    const reqStart = Date.now();
-                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                        projectGuid: projectId
-                    });
-                    treePerf.perf("Tree expand: getProjectFiles round-trip", {
-                        ms: Date.now() - reqStart,
-                        project: String(element.label),
-                        files: response?.files?.length ?? 0
-                    });
-                    
+                {
+                    const response = await this.fetchProjectFiles(String(projectId), String(element.label));
+                    if (response === null) {
+                        // Timed out or errored — surface a retry node instead of an eternal spinner
+                        return [this.makeProjectLoadErrorNode(element)];
+                    }
+
                     if (response && response.files) {
                         logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
                         
@@ -573,44 +611,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         
                         return [];
                     }
-                } catch (error) {
-                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
-                    
-                    // Return the loading node to indicate an error
-                    return loadingResult;
                 }
             }
-            
+
             // Check if this is a project node with the old format (for backward compatibility)
             else if (element.data && (element.data as any).guid) {
                 // This is a project node that needs to load its details from the server
                 const projectData = element.data as any;
-                
-                // Show loading indicator
-                const loadingNode = new TreeNode(
-                    "Loading...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'loading' }
-                );
-                
-                // Return the loading node while we fetch the details
-                const loadingResult = [loadingNode];
-                
-                // Get the language client
-                const client = getLanguageClient();
-                if (!client) {
-                    logger.error("❌ Language client not available");
-                    return loadingResult;
-                }
-                
-                try {
-                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectData.guid}`);
-                    
-                    // Request project files from the server
-                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                        projectGuid: projectData.guid
-                    });
-                    
+
+                {
+                    const response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
+                    if (response === null) {
+                        return [this.makeProjectLoadErrorNode(element)];
+                    }
+
                     if (response && response.files) {
                         logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
                         
@@ -670,14 +684,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         
                         return [];
                     }
-                } catch (error) {
-                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
-                    
-                    // Return the loading node to indicate an error
-                    return loadingResult;
                 }
             }
-            
+
             // Check if we have a filter active
             if (this._filterText && this._filterText.trim() !== '') {
                 // Create a cache key based on the element's path
@@ -875,6 +884,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         if ((data as any)?.type === 'warning') {
             treeItem.iconPath = new ThemeIcon('warning');
             treeItem.tooltip = (data as any).tooltip;
+            return treeItem;
+        }
+
+        // #297 fix 11: retry node shown when getProjectFiles timed out — clicking refreshes
+        // the tree; the failed project's children were never stored, so it re-fetches.
+        if ((data as any)?.type === 'retryProjectLoad') {
+            treeItem.iconPath = new ThemeIcon('warning');
+            treeItem.tooltip = "The language server didn't answer in time. Click to retry.";
+            treeItem.collapsibleState = TreeItemCollapsibleState.None;
+            treeItem.command = {
+                title: 'Retry',
+                command: 'clarion.solutionTree.retryProjectLoad',
+                arguments: []
+            };
             return treeItem;
         }
 

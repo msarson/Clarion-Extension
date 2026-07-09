@@ -109,7 +109,10 @@ export class ReferencesProvider {
      * by the reference-count CodeLens resolving per method) would otherwise block
      * interactive requests (hover/F12) until it finishes.
      */
-    private static readonly FILES_PER_YIELD = 25;
+    // #297 (audit S4 partial): 25 files between yields produced multi-second sync stalls on
+    // Mark's VM (lag sampler recorded a single 6.2s block) — large generated modules make
+    // individual file scans expensive, and interactive requests time out behind one stretch.
+    private static readonly FILES_PER_YIELD = 5;
 
     /**
      * #186 — yields the event loop every {@link FILES_PER_YIELD} files so a long
