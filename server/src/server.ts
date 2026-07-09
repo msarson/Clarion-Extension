@@ -67,6 +67,7 @@ import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider
 import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
 import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
 import { UnicodeCodeActionProvider } from './providers/UnicodeCodeActionProvider';
+import { GenerateRoutineCodeActionProvider } from './providers/GenerateRoutineCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
@@ -2433,7 +2434,12 @@ connection.onCodeAction(async (params) => {
         const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
         logger.info(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
 
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
+        const t10 = Date.now();
+        const generateRoutineProvider = new GenerateRoutineCodeActionProvider();
+        const generateRoutineActions = generateRoutineProvider.provideCodeActions(document, params.range);
+        logger.info(`⏱️ [CODE-ACTION] GenerateRoutine done: ${Date.now() - t10}ms → ${generateRoutineActions.length} actions`);
+
+        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions, ...generateRoutineActions];
         logger.info(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {

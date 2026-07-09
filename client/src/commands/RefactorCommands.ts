@@ -1,5 +1,5 @@
 import {
-    commands, languages, window, Range, Selection, EndOfLine, Disposable, ExtensionContext, QuickPickItem
+    commands, languages, window, Range, Selection, Position, EndOfLine, Disposable, ExtensionContext, QuickPickItem
 } from 'vscode';
 import { buildSurround, SURROUND_STRUCTURES } from '../refactor/surroundWith';
 import { SurroundWithCodeActionProvider } from '../refactor/SurroundWithCodeActionProvider';
@@ -129,6 +129,22 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         await editor.edit(eb => eb.replace(replaceRange, result.newLines.join(eol)));
     });
 
+    // #280 — post-edit cursor placement for a server code action (e.g. Create routine). The server
+    // computes the body position and attaches this command to the code action; VS Code applies the
+    // edit first, then runs it. Operates on the active editor (where the lightbulb was invoked).
+    const placeCursor = commands.registerCommand(
+        'clarion.placeCursor',
+        (_uri: string, line: number, character: number) => {
+            const editor = window.activeTextEditor;
+            if (!editor) {
+                return;
+            }
+            const pos = new Position(line, character);
+            editor.selection = new Selection(pos, pos);
+            editor.revealRange(new Range(pos, pos));
+        }
+    );
+
     // Refactor code actions (Ctrl+. / Refactor…) — no keybinding needed.
     const surroundProvider = languages.registerCodeActionsProvider(
         { language: 'clarion' },
@@ -146,5 +162,5 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         { providedCodeActionKinds: FlipIfElseCodeActionProvider.providedKinds }
     );
 
-    return [surroundWith, negateCondition, flipIfElseCmd, surroundProvider, negateProvider, flipProvider];
+    return [surroundWith, negateCondition, flipIfElseCmd, placeCursor, surroundProvider, negateProvider, flipProvider];
 }
