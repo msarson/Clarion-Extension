@@ -143,10 +143,14 @@ export class RedirectionFileParserServer {
     return Math.floor(Math.random() * 10000);
   }
 
+  /** #293 diagnostics: the red file the last parse actually used ('(none)' when not found). */
+  public lastRedFileParsed = '';
+
   public parseRedFile(projectPath: string): RedirectionEntry[] {
     this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
+      this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
@@ -162,9 +166,11 @@ export class RedirectionFileParserServer {
         logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
       } else {
         logger.test("No valid redirection file found.");
+        this.lastRedFileParsed = '(none)';
         this.entries = [];
         return this.entries;
       }
+      this.lastRedFileParsed = redFileToParse;
 
       // Create a cache key using the file path and mtime
       const cacheKey = this.createCacheKey(redFileToParse);
@@ -204,6 +210,7 @@ export class RedirectionFileParserServer {
     this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
+      this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
@@ -223,10 +230,12 @@ export class RedirectionFileParserServer {
           logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
         } catch {
           logger.test("No valid redirection file found.");
+          this.lastRedFileParsed = '(none)';
           this.entries = [];
           return this.entries;
         }
       }
+      this.lastRedFileParsed = redFileToParse;
 
       // Create a cache key using the file path and mtime
       const cacheKey = this.createCacheKey(redFileToParse);

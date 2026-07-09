@@ -11,6 +11,11 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
 logger.setLevel("error");// Production: Only log errors
+// #293 diagnostics: always-on RED-parse outcome (which red file, how many entries, what search
+// paths) — emitted once per unique project directory so a broken redirection setup is visible
+// in a release VSIX instead of silently collapsing resolution to project-root + libsrc.
+const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
+const redOutcomeLogged = new Set<string>();
 
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
@@ -604,6 +609,25 @@ export class ClarionProjectServer {
         logger.info(`🔄 Creating new RedirectionFileParserServer instance for project: ${this.name}`);
         this.redirectionParser = new RedirectionFileParserServer();
         this.redirectionEntries = this.redirectionParser.parseRedFile(this.path);
+
+        // #293: one-shot RED-parse outcome per unique project dir. entries=0 or a tiny search-path
+        // list here IS the resolution-failure smoking gun (only project root + libsrc get probed).
+        const pathKey = this.path.toLowerCase();
+        if (!redOutcomeLogged.has(pathKey)) {
+            redOutcomeLogged.add(pathKey);
+            let clwSearchPaths: string[] = [];
+            try { clwSearchPaths = this.getSearchPaths('.clw'); } catch { /* diagnostic only */ }
+            perfLogger.perf("SolutionLoad: RED parse outcome", {
+                project_dir: this.path,
+                red_file: this.redirectionParser.lastRedFileParsed || '(unknown)',
+                entries: this.redirectionEntries.length,
+                configuration: serverSettings.configuration,
+                macro_count: Object.keys(serverSettings.macros ?? {}).length,
+                redirection_file_setting: serverSettings.redirectionFile || '(empty)',
+                primary_red_path: serverSettings.primaryRedirectionPath || '(empty)',
+                clw_search_paths: clwSearchPaths.slice(0, 12).join(';') || '(none)'
+            });
+        }
         return this.redirectionParser;
     }
 
