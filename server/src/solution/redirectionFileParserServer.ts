@@ -550,10 +550,12 @@ export class RedirectionFileParserServer {
    *      Tier 3: walk `serverSettings.libsrcPaths` sequentially.
    *
    * @param filename The filename to find
-   * @param dirIndex #288 — optional batch existence index for the SOLUTION-LOAD path only.
-   *   When provided, per-candidate existence checks use one cached readdir per directory
-   *   instead of an existsSync each. Runtime callers (hover/F12/`clarion/findFile`) must NOT
-   *   pass it — a cached listing could hide files created after the snapshot.
+   * @param dirIndex #288 — optional batch existence index. The solution-load path passes the
+   *   load-scoped index (no TTL, cleared per load). When omitted, the shared RUNTIME index is
+   *   used (#289): per-candidate existence checks cost one cached readdir per directory per
+   *   TTL window instead of an existsSync each — this is what makes cross-file validators
+   *   (which resolve hundreds of include names through every project's entries) affordable.
+   *   Worst-case staleness for a newly created file is DirectoryFileIndex.RUNTIME_TTL_MS.
    * @returns The resolved file path info if found, null otherwise
    */
   public findFile(filename: string, dirIndex?: DirectoryFileIndex): ResolvedFilePath | null {
@@ -561,8 +563,8 @@ export class RedirectionFileParserServer {
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
-    const candidateExists = (p: string): boolean =>
-      dirIndex ? dirIndex.existsPath(p) : fs.existsSync(p);
+    const idx = dirIndex ?? DirectoryFileIndex.getRuntime();
+    const candidateExists = (p: string): boolean => idx.existsPath(p);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {
@@ -708,15 +710,10 @@ export class RedirectionFileParserServer {
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
 
-    // Helper for async existence check
-    const fileExists = async (filePath: string) => {
-      try {
-        await fs.promises.access(filePath, fs.constants.F_OK);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    // Existence check via the shared runtime directory index (#289) — one cached readdir per
+    // directory per TTL window instead of an fs access per candidate. See findFile's JSDoc.
+    const runtimeIndex = DirectoryFileIndex.getRuntime();
+    const fileExists = async (filePath: string) => runtimeIndex.existsPath(filePath);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {

@@ -12,24 +12,45 @@ import * as path from 'path';
  * lowercase name set (Windows file systems are case-insensitive, as is Clarion), so every
  * subsequent existence check is an in-memory lookup.
  *
- * Scope: LOAD-TIME ONLY, by design. The index is passed explicitly down the solution-load call
- * chain and never consulted by runtime resolution (hover/F12/`clarion/findFile`), where a stale
- * listing could hide files created after the snapshot. `SolutionManager.parseSolution` clears it
- * at the start of each load, so a reload always sees fresh disk state.
+ * Two instances exist (#288, #289):
+ *   - `getInstance()` — the LOAD index. No TTL; passed explicitly down the solution-load call
+ *     chain and cleared by `SolutionManager.parseSolution` at the start of each load, so a
+ *     reload always sees fresh disk state.
+ *   - `getRuntime()` — the RUNTIME index (#289), consulted by `findFile`/`findFileAsync` by
+ *     default. Cross-file validators (missing-includes BFS, discarded-return member resolution,
+ *     MAP declaration checks) resolve hundreds of unique include names, each walking every
+ *     project's redirection entries — measured 10–20s PER FILE on a 40-project solution. The
+ *     runtime index absorbs that with a short TTL (listings re-read after {@link RUNTIME_TTL_MS}),
+ *     so a newly created file is visible within seconds while a validation burst runs entirely
+ *     from memory.
  */
 export class DirectoryFileIndex {
     private static instance: DirectoryFileIndex | null = null;
+    private static runtimeInstance: DirectoryFileIndex | null = null;
+
+    /** How long a runtime listing stays fresh. Diagnostics re-run per edit, so staleness self-heals. */
+    public static readonly RUNTIME_TTL_MS = 10_000;
 
     /** normalized-lowercase dir → lowercase file/dir names in it (empty set = dir missing/unreadable). */
-    private listings = new Map<string, Set<string>>();
+    private listings = new Map<string, { names: Set<string>; readAt: number }>();
     private dirsRead = 0;
     private lookups = 0;
 
+    private constructor(private readonly ttlMs: number | null = null) {}
+
     public static getInstance(): DirectoryFileIndex {
         if (!DirectoryFileIndex.instance) {
-            DirectoryFileIndex.instance = new DirectoryFileIndex();
+            DirectoryFileIndex.instance = new DirectoryFileIndex(null);
         }
         return DirectoryFileIndex.instance;
+    }
+
+    /** The shared TTL'd index used by runtime `findFile` resolution (#289). */
+    public static getRuntime(): DirectoryFileIndex {
+        if (!DirectoryFileIndex.runtimeInstance) {
+            DirectoryFileIndex.runtimeInstance = new DirectoryFileIndex(DirectoryFileIndex.RUNTIME_TTL_MS);
+        }
+        return DirectoryFileIndex.runtimeInstance;
     }
 
     /** Drop all cached listings (call at the start of a solution load). */
@@ -44,20 +65,21 @@ export class DirectoryFileIndex {
         this.lookups++;
         const key = path.normalize(dir).toLowerCase();
         let listing = this.listings.get(key);
-        if (!listing) {
-            listing = new Set<string>();
+        if (!listing || (this.ttlMs !== null && Date.now() - listing.readAt > this.ttlMs)) {
+            const names = new Set<string>();
             try {
                 for (const name of fs.readdirSync(dir)) {
-                    listing.add(name.toLowerCase());
+                    names.add(name.toLowerCase());
                 }
                 this.dirsRead++;
             } catch {
                 // Missing/unreadable directory — cache the empty set so we don't retry it
                 // for every file (one failed readdir instead of N failed stats).
             }
+            listing = { names, readAt: Date.now() };
             this.listings.set(key, listing);
         }
-        return listing.has(fileName.toLowerCase());
+        return listing.names.has(fileName.toLowerCase());
     }
 
     /** `exists` for a full path (splits into dir + basename). */

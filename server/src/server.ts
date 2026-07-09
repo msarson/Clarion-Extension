@@ -2629,21 +2629,40 @@ connection.onExit(() => {
 // real no-solution-mode workspaces produce no solutionReady at all. 2s is
 // well under perceived-startup-blocking; loose-file users wait 2s for
 // async diagnostics instead of getting them at t=63ms. Acceptable trade.
-setTimeout(() => {
-    if (!solutionPipelineReady) {
-        perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+//
+// #289: when a solution IS on its way (path known / manager created / load in
+// flight), RESCHEDULE instead of draining. Draining mid-load ran the full
+// async cross-file pass on every deferred doc in degraded no-solution mode,
+// only for solutionReady to re-validate them all again — double the most
+// expensive work on exactly the biggest solutions. Genuine no-solution
+// workspaces have none of these signals and still drain at 2s as before.
+const drainDeferredIfNoSolution = () => {
+    if (solutionPipelineReady) return;
+    const solutionOnItsWay =
+        (global as any).solutionOperationInProgress === true ||
+        SolutionManager.getInstance() !== null ||
+        !!serverSettings.solutionFilePath;
+    if (solutionOnItsWay) {
+        perfLogger.perf("Phase B addendum — no-solution timeout deferred (solution load under way)", {
             since_module_load_ms: Date.now() - serverModuleLoadedAt,
             deferred_count: deferredAsyncDocs.size
         });
-        solutionPipelineReady = true;
-        const queuedUris = Array.from(deferredAsyncDocs);
-        deferredAsyncDocs.clear();
-        for (const uri of queuedUris) {
-            const doc = documents.get(uri);
-            if (doc) validateTextDocument(doc, 'noSolutionTimeout');
-        }
+        setTimeout(drainDeferredIfNoSolution, 2000);
+        return;
     }
-}, 2000);
+    perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+        since_module_load_ms: Date.now() - serverModuleLoadedAt,
+        deferred_count: deferredAsyncDocs.size
+    });
+    solutionPipelineReady = true;
+    const queuedUris = Array.from(deferredAsyncDocs);
+    deferredAsyncDocs.clear();
+    for (const uri of queuedUris) {
+        const doc = documents.get(uri);
+        if (doc) validateTextDocument(doc, 'noSolutionTimeout');
+    }
+};
+setTimeout(drainDeferredIfNoSolution, 2000);
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD]");

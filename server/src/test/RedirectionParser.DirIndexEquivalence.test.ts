@@ -41,6 +41,7 @@ suite('#288 findFile dirIndex equivalence', () => {
         fs.writeFileSync(path.join(projDir, 'AtRoot.clw'), '! root');
 
         DirectoryFileIndex.getInstance().clear();
+        DirectoryFileIndex.getRuntime().clear();
     });
 
     teardown(() => {
@@ -48,6 +49,7 @@ suite('#288 findFile dirIndex equivalence', () => {
         serverSettings.libsrcPaths = savedLibsrcPaths;
         serverSettings.configuration = savedConfiguration;
         DirectoryFileIndex.getInstance().clear();
+        DirectoryFileIndex.getRuntime().clear();
         try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
     });
 
@@ -78,6 +80,24 @@ suite('#288 findFile dirIndex equivalence', () => {
             );
         }
         assert.ok(idx.stats().lookups > 0, 'the indexed calls actually consulted the index');
+    });
+
+    test('#289: findFile with NO explicit index resolves via the shared runtime index', () => {
+        const parser = freshParser();
+        const runtime = DirectoryFileIndex.getRuntime();
+        runtime.clear();
+
+        const r = parser.findFile('Main.clw');
+        assert.ok(r?.path.toLowerCase().endsWith('main.clw'), 'resolves through the runtime index');
+        assert.ok(runtime.stats().lookups > 0, 'runtime index was consulted by default');
+
+        // Intentional TTL semantics: a file created after the directory listing was cached is
+        // invisible until the TTL lapses (or clear()). Freshness returns after clear().
+        fs.writeFileSync(path.join(projDir, 'src', 'Late.clw'), '!');
+        assert.strictEqual(parser.findFile('Late.clw'), null, 'stale within the TTL window (by design)');
+        runtime.clear();
+        const late = parser.findFile('Late.clw');
+        assert.ok(late?.path.toLowerCase().endsWith('late.clw'), 'fresh after clear');
     });
 
     test('index absorbs repeat lookups: many files resolved with few directory reads', () => {
