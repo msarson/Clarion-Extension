@@ -4,6 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import LoggerManager from '../../logger';
 
@@ -203,9 +204,20 @@ async function augmentDeclaredViaSymbolFinder(
     // #297: each findSymbol is a scope walk that can span files; on big generated modules the
     // candidate set is large and the loop holds the LSP loop — yield on a time budget.
     const timeSlice = makeTimeSlicer();
+    // #298: SymbolFinder's variable-scope chain does not cover INCLUDE-chain / libsrc EQUATEs
+    // (SelectRecord, CtrlShiftP…) — but the structure declaration index does (EQUATE +
+    // ITEMIZE_EQUATE across the redirection search paths and libsrc), and hover answers from
+    // it. This diagnostic is conservative by contract: if ANY of our own resolution paths
+    // knows the name, don't flag it. The SDI lookup is an in-memory map hit, so it runs
+    // FIRST — sparing the (more expensive) findSymbol scope walk for genuine variables.
+    const sdi = StructureDeclarationIndexer.getInstance();
     for (const upperName of candidateNames) {
         await timeSlice();
         try {
+            if (sdi.find(upperName).length > 0) {
+                ctx.declaredNames.add(upperName);
+                continue;
+            }
             const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
             if (resolved) ctx.declaredNames.add(upperName);
         } catch (err) {
