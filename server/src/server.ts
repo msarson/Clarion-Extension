@@ -1447,6 +1447,20 @@ documents.onDidClose(event => {
 });
 
 
+// #289: the client announces a configured solution the moment its language client is ready —
+// long before the heavy init flow sends clarion/updatePaths. This is what lets the 2s
+// no-solution fallback below know a solution is on its way (previously it had NO signal until
+// updatePaths arrived, fired mid-startup, and the degraded async validation pass it drained
+// starved the solution load itself).
+let solutionAnnounced = false;
+connection.onNotification('clarion/solutionPending', (params: { solutionFilePath?: string }) => {
+    solutionAnnounced = true;
+    perfLogger.perf("Phase: clarion/solutionPending received", {
+        since_module_load_ms: Date.now() - serverModuleLoadedAt,
+        solution: params?.solutionFilePath ? path.basename(params.solutionFilePath) : '(unnamed)'
+    });
+});
+
 connection.onNotification('clarion/updatePaths', async (params: {
     redirectionPaths: string[];
     projectPaths: string[];
@@ -2638,13 +2652,17 @@ connection.onExit(() => {
 // workspaces have none of these signals and still drain at 2s as before.
 const drainDeferredIfNoSolution = () => {
     if (solutionPipelineReady) return;
+    const sinceLoad = Date.now() - serverModuleLoadedAt;
     const solutionOnItsWay =
+        solutionAnnounced ||
         (global as any).solutionOperationInProgress === true ||
         SolutionManager.getInstance() !== null ||
         !!serverSettings.solutionFilePath;
-    if (solutionOnItsWay) {
+    // Hard cap: if an announced solution never finishes loading (load failure), don't defer
+    // async diagnostics forever — drain after 60s regardless.
+    if (solutionOnItsWay && sinceLoad < 60_000) {
         perfLogger.perf("Phase B addendum — no-solution timeout deferred (solution load under way)", {
-            since_module_load_ms: Date.now() - serverModuleLoadedAt,
+            since_module_load_ms: sinceLoad,
             deferred_count: deferredAsyncDocs.size
         });
         setTimeout(drainDeferredIfNoSolution, 2000);

@@ -1,6 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
-import { globalSettings } from '../globals';
+import { globalSettings, globalSolutionFile } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
 import { DocumentManager } from '../documentManager';
 import { StructureViewProvider } from '../views/StructureViewProvider';
@@ -169,6 +169,21 @@ export async function startLanguageServer(
         // Wait for the language client to become ready
         await getClientReadyPromise();
         logger.info("✅ Language client started and is ready");
+
+        // #289: announce a configured solution to the server IMMEDIATELY — long before the full
+        // client-side init flow sends clarion/updatePaths. Without this the server's 2s
+        // no-solution fallback fires mid-startup (it has no signal a solution is coming), runs
+        // the expensive async cross-file validation pass on open documents in degraded
+        // no-solution mode, and that work starves the solution load itself. The announcement is
+        // just a flag — the real load still arrives via clarion/updatePaths.
+        const cfg = workspace.getConfiguration('clarion');
+        const configuredSolution = globalSolutionFile
+            || cfg.get<string>('currentSolution', '')
+            || cfg.get<string>('solutionFile', '');
+        if (configuredSolution) {
+            client.sendNotification('clarion/solutionPending', { solutionFilePath: configuredSolution });
+            logger.info(`⏱️ [STARTUP] clarion/solutionPending sent (${configuredSolution})`);
+        }
         
         // Log server capabilities
         const capabilities = client.initializeResult?.capabilities;
