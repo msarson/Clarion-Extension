@@ -5,6 +5,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { serverSettings } from '../serverSettings';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
 import { validateStructureTerminators, validateConditionalBlocks, validateFileStructures, validateCaseStructures, validateExecuteStructures, validateViewProjectFields } from './diagnostics/StructureDiagnostics';
@@ -182,6 +183,17 @@ export class DiagnosticProvider {
         symbolFinder: SymbolFinderService
     ): Promise<Diagnostic[]> {
         if (!serverSettings.undeclaredVariablesEnabled) return [];
+        // #287 — in no-solution mode there is no cross-file symbol index, so `SymbolFinder` can't
+        // resolve globals declared in other files (GlobalRequest, GlobalResponse, module/global data,
+        // etc.). Every such legitimate cross-file global would then be flagged as undeclared. The
+        // diagnostic's value depends on that index, so we suppress it entirely until a solution is
+        // loaded (`SolutionManager.getInstance() === null` is the canonical no-solution signal).
+        // Loading the solution restores full coverage; the off-switch setting remains for those who
+        // want it disabled even with a solution.
+        if (SolutionManager.getInstance() === null) {
+            logger.info('[#287] undeclared-variable diagnostic skipped — no solution loaded (cross-file globals unresolvable)');
+            return [];
+        }
         return this.filterOmitted(await _validateUndeclaredVariablesAsync(tokens, document, symbolFinder), tokens, document);
     }
 }

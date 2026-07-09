@@ -2747,6 +2747,7 @@ LocalVar LONG
             const { TokenCache } = await import('../TokenCache');
             const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
             const { SymbolFinderService } = await import('../services/SymbolFinderService');
+            const { SolutionManager } = await import('../solution/solutionManager');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
@@ -2754,8 +2755,14 @@ LocalVar LONG
             const doc = createDocument(code);
             const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            // #287: the async wrapper now also gates on a loaded solution (no cross-file index in
+            // no-solution mode). Establish a loaded-solution precondition so this test isolates the
+            // ENABLE gate. A bare {} is enough — SymbolFinder resolves TyposVar to nothing regardless.
+            const smSlot = SolutionManager as unknown as { instance: unknown };
+            const savedSm = smSlot.instance;
             try {
                 serverSettings.undeclaredVariablesEnabled = true;
+                smSlot.instance = {};
                 const tokenCache = TokenCache.getInstance();
                 const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
                 const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
@@ -2764,6 +2771,7 @@ LocalVar LONG
                 assert.ok(undecl[0].message.includes("'TyposVar'"));
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
+                smSlot.instance = savedSm;
             }
         });
 
@@ -2771,6 +2779,7 @@ LocalVar LONG
             const { TokenCache } = await import('../TokenCache');
             const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
             const { SymbolFinderService } = await import('../services/SymbolFinderService');
+            const { SolutionManager } = await import('../solution/solutionManager');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
@@ -2778,8 +2787,13 @@ LocalVar LONG
             const doc = createDocument(code);
             const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            // Loaded-solution precondition (#287) so this proves the ENABLE gate silences it, not the
+            // no-solution gate.
+            const smSlot = SolutionManager as unknown as { instance: unknown };
+            const savedSm = smSlot.instance;
             try {
                 serverSettings.undeclaredVariablesEnabled = false;
+                smSlot.instance = {};
                 const tokenCache = TokenCache.getInstance();
                 const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
                 const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
@@ -2787,6 +2801,7 @@ LocalVar LONG
                 assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
+                smSlot.instance = savedSm;
             }
         });
 
