@@ -1740,13 +1740,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info("🔗 Document-link refresh notification sent to client");
 
             // #189 Phase 2 — precompute CodeLens reference counts in the background.
-            // Keeps `onCodeLensResolve` mostly cache-hit/O(1) after startup while still
-            // preserving live FAR fallback when precompute is incomplete.
-            setImmediate(() => {
-                precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
-                    logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
-                );
-            });
+            // #290: moved to run AFTER the sdiReady validation pass (see the SDI prebuild block
+            // below). It performs a cross-file reference scan per lens (measured 4,140 scans /
+            // ~96s on a large solution) — started here it interleaved with the deferred
+            // validators and multiplied their wall time (a 1-3s member resolution stretched to
+            // 33s). Live-FAR fallback covers CodeLens counts until the cache warms, so it is
+            // safe to be last in line.
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
@@ -1783,9 +1782,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 sdiPipelineReady = true;
                 deferredAsyncDocs.clear();
                 lastValidatedVersions.clear();
-                for (const doc of documents.all()) {
-                    validateTextDocument(doc, 'sdiReady');
-                }
+                const revalidations = documents.all().map(doc => validateTextDocument(doc, 'sdiReady'));
+
+                // #290: only AFTER the diagnostics land does the CodeLens precompute start —
+                // it's the heaviest background job (a reference scan per lens) and running it
+                // alongside the validators multiplied their wall time. Last in line; live-FAR
+                // fallback serves CodeLens counts meanwhile.
+                Promise.allSettled(revalidations).then(() => {
+                    if (!globalSolution) return;
+                    precomputeCodeLensReferenceCounts(globalSolution).catch(err =>
+                        logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
+                    );
+                });
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.

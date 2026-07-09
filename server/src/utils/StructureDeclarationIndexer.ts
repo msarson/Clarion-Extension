@@ -298,7 +298,15 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         // its scan already covers the RED search paths + libsrc where such files live. Genuine
         // no-solution mode (no SolutionManager) keeps the #184 last-resort dir-keyed build.
         const sm = SolutionManager.getInstance();
-        if (sm && sm.solution.projects.length > 0) {
+        if (sm) {
+            // Solution still parsing (projects not yet populated): a request in this window would
+            // otherwise launch a dir-keyed scan that races the whole load (measured: a 'src' build
+            // firing the same millisecond parseSolution started, starving project parsing).
+            // Return an empty UNCACHED index — validators are deferred anyway, interactive callers
+            // degrade for a few seconds, and the real per-project prebuild follows solutionReady.
+            if (sm.solution.projects.length === 0) {
+                return { byName: new Map(), lastIndexed: 0, projectPath };
+            }
             const isProjectKey = sm.solution.projects.some(p => this.normalizeKey(p.path) === key);
             if (!isProjectKey) {
                 const existing = this.indexes.values().next();
