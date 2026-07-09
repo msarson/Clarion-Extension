@@ -67,7 +67,16 @@ export function matchesActiveConfiguration(
   configuration: string
 ): boolean {
   const sectionLower = entry.section.toLowerCase();
-  return sectionLower === 'common' || sectionLower === configuration.toLowerCase();
+  if (sectionLower === 'common') return true;
+  const configLower = configuration.toLowerCase();
+  if (sectionLower === configLower) return true;
+  // #293 — a solution build configuration arrives as "Config|Platform" (e.g. "Debug|Win32")
+  // while RED sections are named by the build configuration alone ([Debug]/[Release]/custom).
+  // The strict comparison dropped every configuration section, silently collapsing the search
+  // paths to [Common]-only — on a real 40-project solution that left ~99% of source files
+  // unresolvable at load (generated sources live under [Debug]/[Release] paths).
+  const configSegment = configLower.split('|')[0].trim();
+  return configSegment.length > 0 && sectionLower === configSegment;
 }
 
 export class RedirectionFileParserServer {
