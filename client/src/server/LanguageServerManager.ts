@@ -203,8 +203,19 @@ export async function startLanguageServer(
         }
         
         // 🔄 Listen for symbol refresh notifications from server
+        // #297 fix 6 (audit H3): only refresh the Structure view when the notification is about
+        // the ACTIVE editor. The server emits this per didOpen/didChange for EVERY document —
+        // refreshing on all of them issued extra documentSymbol fetches mid-flight, feeding the
+        // generation race that blanked the view.
         client.onNotification('clarion/symbolsRefreshed', (params: { uri: string }) => {
-            logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
+            const activeUri = vscodeWindow.activeTextEditor?.document.uri.toString();
+            const same = !!activeUri && !!params?.uri &&
+                decodeURIComponent(activeUri).toLowerCase() === decodeURIComponent(params.uri).toLowerCase();
+            if (!same) {
+                logger.info(`🔄 symbolsRefreshed for non-active document ignored: ${params?.uri}`);
+                return;
+            }
+            logger.info(`🔄 Received symbolsRefreshed notification for active document: ${params.uri}`);
             if (structureViewProvider) {
                 structureViewProvider.refresh();
             }
