@@ -183,9 +183,13 @@ export class IntroduceEquateCodeActionProvider {
         }
     }
 
-    /** Resolve `<programName>.clw` via the solution's redirection, then a sibling-directory fallback. */
+    /**
+     * Resolve the program's `.clw` via the solution's redirection, then a sibling-directory fallback.
+     * The MEMBER argument may be a bare program name (`MyApp`) or the full filename
+     * (`MyApp.clw`, as AppGen-generated code emits) — only append `.clw` when it is missing.
+     */
     private resolveProgramFile(programName: string, currentPath: string): string | null {
-        const candidate = `${programName}.clw`;
+        const candidate = /\.clw$/i.test(programName) ? programName : `${programName}.clw`;
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
             for (const proj of sm.solution.projects) {

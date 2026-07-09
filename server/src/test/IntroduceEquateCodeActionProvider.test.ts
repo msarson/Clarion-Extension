@@ -153,22 +153,26 @@ suite('#281 cross-file Global from a MEMBER', () => {
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     });
 
-    test("MEMBER('MyApp') offers a cross-file Global scope targeting the resolved PROGRAM file", () => {
-        // Program file sits next to the member (sibling-directory resolution, no solution needed).
-        fs.writeFileSync(path.join(tmpDir, 'MyApp.clw'), ['  PROGRAM', '  MAP', '  END', '  CODE'].join('\n'));
-        const memberPath = path.join(tmpDir, 'sub.clw');
-        const memberUri = 'file:///' + memberPath.replace(/\\/g, '/');
+    // Both the bare-name form MEMBER('MyApp') and the full-filename form MEMBER('MyApp.clw')
+    // (AppGen-generated code emits the latter) must resolve to MyApp.clw — not MyApp.clw.clw.
+    for (const memberArg of ['MyApp', 'MyApp.clw']) {
+        test(`MEMBER('${memberArg}') offers a cross-file Global scope targeting the resolved PROGRAM file`, () => {
+            // Program file sits next to the member (sibling-directory resolution, no solution needed).
+            fs.writeFileSync(path.join(tmpDir, 'MyApp.clw'), ['  PROGRAM', '  MAP', '  END', '  CODE'].join('\n'));
+            const memberPath = path.join(tmpDir, 'sub.clw');
+            const memberUri = 'file:///' + memberPath.replace(/\\/g, '/');
 
-        const src = ["  MEMBER('MyApp')", 'MyProc PROCEDURE', '  CODE', '  Count = 42'].join('\n');
-        const { scopes } = args(invoke(src, memberUri, 3, 11));
+            const src = [`  MEMBER('${memberArg}')`, 'MyProc PROCEDURE', '  CODE', '  Count = 42'].join('\n');
+            const { scopes } = args(invoke(src, memberUri, 3, 11));
 
-        assert.deepStrictEqual(scopes.map(s => s.label), [
-            'This procedure (local data)',
-            'This module',
-            'Global (in MyApp.clw)'
-        ]);
-        const global = scopes.find(s => s.label.startsWith('Global'))!;
-        assert.ok(global.uri && global.uri.toLowerCase().includes('myapp.clw'), 'global scope targets MyApp.clw');
-        assert.strictEqual(global.insertLine, 3, 'global data inserts before the PROGRAM CODE (line 3)');
-    });
+            assert.deepStrictEqual(scopes.map(s => s.label), [
+                'This procedure (local data)',
+                'This module',
+                'Global (in MyApp.clw)'
+            ]);
+            const global = scopes.find(s => s.label.startsWith('Global'))!;
+            assert.ok(global.uri && global.uri.toLowerCase().includes('myapp.clw'), 'global scope targets MyApp.clw');
+            assert.strictEqual(global.insertLine, 3, 'global data inserts before the PROGRAM CODE (line 3)');
+        });
+    }
 });
