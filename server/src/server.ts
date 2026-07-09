@@ -3,7 +3,7 @@ import {
     TextDocuments,
     ProposedFeatures,
     Diagnostic,
-    CancellationTokenSource
+    CodeLensRefreshRequest
 } from 'vscode-languageserver/node';
 
 // Add global error handlers to prevent crashes
@@ -962,12 +962,29 @@ connection.onCodeLens((params) => {
 // Handle CodeLens resolve — fill in title + command by counting references
 // #297 fix 8 (audit H1 #5): each cold resolve is a cross-file reference scan measured at
 // 0.5-2.8s — VS Code fires one resolve per visible lens, so a screenful of lenses on a big
-// generated module stacked seconds of scans onto the interactive queue. Each scan now runs
-// under a wall-clock budget linked to the client's own cancellation; on expiry the scan's
-// cooperative checkpoints abort it, the (possibly partial) result is shown WITHOUT being
-// cached, and a later resolve retries cold.
+// generated module stacked seconds of scans onto the interactive queue.
+//
+// Follow-up (Mark's VM, GLQuarter): the original budget CANCELLED the scan and returned
+// "0+ references" — which VS Code then cached indefinitely, so hot symbols (whose scans always
+// exceed the budget) never showed a real count. The scan is no longer cancelled: it runs to
+// completion in the background (time-sliced — FILES_PER_YIELD=5 keeps it cooperative), the
+// response beyond the budget is an honest "counting…" placeholder, and when the scan finishes
+// the server asks the client to refresh its lenses (workspace/codeLens/refresh) — the
+// re-resolve then answers instantly from the cache with the REAL count. One in-flight scan per
+// lens, so refresh-triggered re-resolves never duplicate work.
 const CODELENS_RESOLVE_BUDGET_MS = 500;
-connection.onCodeLensResolve(async (lens, clientToken) => {
+const inflightLensScans = new Map<string, Promise<Location[]>>();
+let lensRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleLensRefresh() {
+    if (lensRefreshTimer) return;
+    lensRefreshTimer = setTimeout(() => {
+        lensRefreshTimer = null;
+        connection.sendRequest(CodeLensRefreshRequest.type).catch(() => {
+            // client without refresh support — the count appears on the next natural refresh
+        });
+    }, 250);
+}
+connection.onCodeLensResolve(async (lens) => {
     try {
         const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
         if (!data) return lens;
@@ -982,51 +999,55 @@ connection.onCodeLensResolve(async (lens, clientToken) => {
         if (cached) {
             refs = cached.refs;
         } else {
-            const budget = new CancellationTokenSource();
-            const budgetTimer = setTimeout(() => budget.cancel(), CODELENS_RESOLVE_BUDGET_MS);
-            const cancelLink = clientToken?.onCancellationRequested?.(() => budget.cancel());
-            try {
-                refs = await referencesProvider.provideReferences(
+            let scan = inflightLensScans.get(cacheKey);
+            if (!scan) {
+                scan = referencesProvider.provideReferences(
                     document,
                     { line: data.line, character: data.character },
-                    { includeDeclaration: true },
-                    budget.token
-                );
-            } finally {
-                clearTimeout(budgetTimer);
-                cancelLink?.dispose();
+                    { includeDeclaration: true }
+                ).then(found => {
+                    const resolved = found ?? [];
+                    // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
+                    // name-based invalidation when an edit adds a new reference (#189 Phase 2).
+                    const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+                    codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
+                    // Track which files this symbol's references live in, so a later edit to one
+                    // of those files evicts this count (and only the affected counts).
+                    codeLensRefIndex.removeSymbol(cacheKey);
+                    for (const loc of resolved) {
+                        codeLensRefIndex.add(cacheKey, {
+                            uri: loc.uri,
+                            line: loc.range.start.line,
+                            character: loc.range.start.character,
+                        });
+                    }
+                    return resolved;
+                }).finally(() => {
+                    inflightLensScans.delete(cacheKey);
+                });
+                inflightLensScans.set(cacheKey, scan);
             }
-            if (budget.token.isCancellationRequested) {
-                // Aborted (budget or client) — show the partial count, skip the cache so a
-                // later resolve gets a full retry.
-                const partial = refs ?? [];
-                perfLogger.perf("CodeLens resolve budget hit", {
-                    partial_refs: partial.length,
+
+            const raced = await Promise.race([
+                scan,
+                new Promise<'budget'>(resolve =>
+                    setTimeout(() => resolve('budget'), CODELENS_RESOLVE_BUDGET_MS))
+            ]);
+            if (raced === 'budget') {
+                perfLogger.perf("CodeLens resolve budget hit — continuing in background", {
                     budget_ms: CODELENS_RESOLVE_BUDGET_MS,
                     uri: data.uri
                 });
+                // Real count arrives via the refresh once the background scan lands.
+                scan.then(() => scheduleLensRefresh()).catch(() => { /* logged at source */ });
                 lens.command = {
-                    title: `${partial.length}+ references`,
+                    title: 'counting…',
                     command: 'clarion.showReferences',
-                    arguments: [data.uri, { line: data.line, character: data.character }, partial],
+                    arguments: [data.uri, { line: data.line, character: data.character }, []],
                 };
                 return lens;
             }
-            const resolved = refs ?? [];
-            // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
-            // name-based invalidation when an edit adds a new reference (#189 Phase 2).
-            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
-            codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
-            // Track which files this symbol's references live in, so a later edit to one
-            // of those files evicts this count (and only the affected counts).
-            codeLensRefIndex.removeSymbol(cacheKey);
-            for (const loc of resolved) {
-                codeLensRefIndex.add(cacheKey, {
-                    uri: loc.uri,
-                    line: loc.range.start.line,
-                    character: loc.range.start.character,
-                });
-            }
+            refs = raced;
         }
 
         const count = refs?.length ?? 0;
