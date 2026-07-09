@@ -754,9 +754,38 @@ export class MapProcedureResolver {
             const solutionManager = SolutionManager.getInstance();
             
             let resolvedPath: string | null = null;
-            
+
+            // #299: MODULE('X.DLL') / MODULE('X.LIB') is an external-library identifier (docs:
+            // "may contain any unique identifier"), typically another project in this solution.
+            // The old flow required redirection to resolve the PHYSICAL binary before trying the
+            // source-project fallback — a DLL that isn't built (or whose output dir isn't in the
+            // RED paths) dead-ended F12 even though every needed source file is in the solution.
+            // Go straight from the library basename to its main source (IBSUTILS.DLL →
+            // ibsutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
+            const moduleExt = path.extname(moduleFile).toLowerCase();
+            const isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
+            if (!isSourceModule && solutionManager && solutionManager.solution) {
+                const libBase = path.basename(moduleFile, path.extname(moduleFile)).toLowerCase();
+                for (const proj of solutionManager.solution.projects) {
+                    const mainFile = (proj.sourceFiles || []).find(sf =>
+                        sf?.name && sf.name.toLowerCase() === `${libBase}.clw`);
+                    if (mainFile) {
+                        const fullPath = path.join(proj.path, mainFile.relativePath);
+                        if (fs.existsSync(fullPath)) {
+                            logger.info(`✅ #299: external-library MODULE '${moduleFile}' mapped to main source ${fullPath}`);
+                            resolvedPath = fullPath;
+                            break;
+                        }
+                    }
+                }
+                if (!resolvedPath) {
+                    logger.info(`❌ #299: no project main source found for external-library MODULE '${moduleFile}'`);
+                    return null;
+                }
+            }
+
             // Try solution-wide redirection first
-            if (solutionManager && solutionManager.solution) {
+            if (!resolvedPath && solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(moduleFile);
