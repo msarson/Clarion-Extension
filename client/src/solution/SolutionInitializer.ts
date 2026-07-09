@@ -423,11 +423,13 @@ export async function initializeSolution(
         logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
         updateInitializationStatusBar('indexing-solution', solutionName);
         
-        // Wait a moment for the server to process the notification and initialize
-        // This prevents a race condition where we request the solution tree before it's built
-        logger.info("⏳ Waiting for server to initialize solution...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        logger.info(`⏱️ [STARTUP] 1s delay complete, calling reinitializeEnvironment`);
+        // #297 S1: the 1s sleep that lived here ("wait for the server to process updatePaths")
+        // is gone. The race it papered over is handled properly now: an early getSolutionTree
+        // just returns the empty/cached tree (the client keeps existing info on an empty
+        // response), and the clarion/solutionReady handler refreshes with the real tree. On the
+        // VM run 8, the server had the solution READY in 2.0s — this sleep was pure added
+        // latency on the eager path.
+        logger.info(`⏱️ [STARTUP] calling reinitializeEnvironment (no artificial delay)`);
     } else {
         logger.error("❌ Language client is not available.");
         failInitializationStatusBar('Language client is not available');

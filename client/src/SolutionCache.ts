@@ -391,6 +391,20 @@ export class SolutionCache {
      */
     // Debounce mechanism to prevent multiple simultaneous requests
     private fetchInProgressPromise: Promise<ClarionSolutionInfo | null> | null = null;
+
+    // #297 S1: ONE clarion/getSolutionTree request on the wire at a time. Initialize, refresh,
+    // and the background-refresh path each raced their own copy — during startup that stacked
+    // identical requests on the busiest queue. Callers keep their own timeouts; only the
+    // underlying request is shared.
+    private inflightGetSolutionTree: Promise<ClarionSolutionInfo | null> | null = null;
+    private sendGetSolutionTreeRequest(): Promise<ClarionSolutionInfo | null> {
+        if (!this.inflightGetSolutionTree) {
+            this.inflightGetSolutionTree = this.client!
+                .sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree')
+                .finally(() => { this.inflightGetSolutionTree = null; });
+        }
+        return this.inflightGetSolutionTree;
+    }
     private fetchDebounceTimeoutId: NodeJS.Timeout | null = null;
     private readonly FETCH_DEBOUNCE_DELAY = 300; // ms
     
@@ -435,7 +449,7 @@ export class SolutionCache {
                     
                     // Race between the actual request and the timeout
                     const solution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     
@@ -819,7 +833,7 @@ export class SolutionCache {
                     logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     const requestEndTime = performance.now();
@@ -977,7 +991,7 @@ export class SolutionCache {
                     
                     // Race between the actual request and the timeout
                     const solution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     
@@ -1149,7 +1163,7 @@ export class SolutionCache {
                     const requestStartTime = performance.now();
                     // Race between the actual request and the timeout
                     const serverSolution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     const requestEndTime = performance.now();

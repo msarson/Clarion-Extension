@@ -1244,6 +1244,7 @@ documents.onDidChangeContent(event => {
         
         // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
         symbolCache.delete(uri);
+        symbolCacheVersions.delete(uri);
         foldingCache.delete(uri);
         
         // Invalidate cross-file cache for this document
@@ -1436,6 +1437,10 @@ connection.onDocumentRangeFormatting((params: DocumentRangeFormattingParams): Te
 
 // Cache for document symbols to avoid recomputing during rapid typing
 const symbolCache = new Map<string, DocumentSymbol[]>();
+// #297 S5: version stamp for symbolCache entries — an unchanged document answers
+// onDocumentSymbol straight from cache (VS Code re-requests symbols on every focus change;
+// each recompute was 100-800ms of loop time on generated modules).
+const symbolCacheVersions = new Map<string, number>();
 const foldingCache = new Map<string, FoldingRange[]>();
 
 connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
@@ -1472,6 +1477,11 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
             return [];
         }
 
+        // #297 S5: same document version → same symbols; skip the recompute entirely.
+        if (symbolCacheVersions.get(uri) === document.version && symbolCache.has(uri)) {
+            return symbolCache.get(uri)!;
+        }
+
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
         const tokenStart = performance.now();
@@ -1493,6 +1503,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         
         // Cache the symbols for quick retrieval during typing
         symbolCache.set(uri, symbols);
+        symbolCacheVersions.set(uri, document.version);
         
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
 
@@ -1619,6 +1630,7 @@ documents.onDidClose(event => {
         try {
             tokenCache.clearTokens(uri);
             symbolCache.delete(uri);
+            symbolCacheVersions.delete(uri);
             foldingCache.delete(uri);
             logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
         } catch (cacheError) {
@@ -2438,8 +2450,17 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
     }
 
     logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
+    // #297 S5: open documents answer from the version-keyed cache (disk-loaded fallbacks
+    // above have no live version to key on, so they compute fresh).
+    if (documents.get(params.uri) && symbolCacheVersions.get(params.uri) === document.version && symbolCache.has(params.uri)) {
+        return symbolCache.get(params.uri)!;
+    }
     const tokens = getTokens(document);
     const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri, document);
+    if (documents.get(params.uri)) {
+        symbolCache.set(params.uri, symbols);
+        symbolCacheVersions.set(params.uri, document.version);
+    }
     logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
     return symbols;
 });

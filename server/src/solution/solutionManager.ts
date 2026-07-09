@@ -536,22 +536,12 @@ export class SolutionManager {
 
     public registerHandlers(connection: Connection): void {
         logger.info("🔄 Registering solution manager handlers");
-        
-        connection.onRequest('clarion/getSolutionTree', () => {
-            try {
-                // Set the solution operation flag to true
-                (global as any).solutionOperationInProgress = true;
-                
-                logger.info("📂 Received request for solution tree");
-                const tree = this.getSolutionTree();
-                logger.info(`📂 Returning solution tree with ${tree.projects.length} projects and ${tree.applications?.length || 0} applications`);
-                return tree;
-            } finally {
-                // Reset the solution operation flag when done
-                (global as any).solutionOperationInProgress = false;
-            }
-        });
-        
+
+        // #297 S1: clarion/getSolutionTree is deliberately NOT registered here — server.ts owns
+        // the single registration (it prefers this manager's tree and falls back to the cached
+        // globalSolution). Registering it here too silently REPLACED that handler mid-startup,
+        // losing the fallback path and making "which handler answered?" ambiguous in traces.
+
         // Add a new handler for getting project details on demand
         connection.onRequest('clarion/getProjectDetails', (params: { projectGuid: string }) => {
             try {
