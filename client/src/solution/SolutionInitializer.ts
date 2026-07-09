@@ -298,7 +298,13 @@ export async function initializeSolution(
     }
     // #297 fix 2: shared between the solutionReady handler (registered inside the client block)
     // and the eager path's completion check further down — must be function-scoped.
+    // `started` is flipped at handler ENTRY (the handler's refresh pass can take 15s+ on a busy
+    // server — Mark's VM run showed the 30s fallback firing MID-handler and running a competing
+    // document pass because only the end-of-handler flag existed). The fallback timer handle is
+    // kept so the handler can cancel it outright.
     let startupRefreshDone = false;
+    let startupRefreshStarted = false;
+    let startupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {
@@ -344,6 +350,14 @@ export async function initializeSolution(
             // Dispose immediately so subsequent re-initializations register a fresh handler
             solutionReadyDisposable?.dispose();
             solutionReadyDisposable = null;
+
+            // Claim the startup completion NOW and kill the fallback — this handler's refresh
+            // pass can run long, and the fallback must not start a competing pass mid-flight.
+            startupRefreshStarted = true;
+            if (startupFallbackTimer) {
+                clearTimeout(startupFallbackTimer);
+                startupFallbackTimer = null;
+            }
 
             logger.info(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
             updateInitializationStatusBar('indexing-solution', `${params.projectCount} projects`);
@@ -457,8 +471,8 @@ export async function initializeSolution(
     } else {
         logger.info(`⏱️ [STARTUP] startup completion deferred to the clarion/solutionReady handler (single pipeline)`);
         const dm = documentManager;
-        setTimeout(async () => {
-            if (startupRefreshDone) return;
+        startupFallbackTimer = setTimeout(async () => {
+            if (startupRefreshDone || startupRefreshStarted) return;
             startupRefreshDone = true;
             logger.warn(`⚠️ [STARTUP] clarion/solutionReady not received within 30s — running fallback completion`);
             solutionCache.beginActivationRefresh();

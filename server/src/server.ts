@@ -322,6 +322,42 @@ const documentLinkProvider = new DocumentLinkProvider();
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
 
+// #297 fix 14 (audit): dispatch instrumentation — the decisive experiment. The server is
+// single-threaded, so "the tree spinner" is always SOME handler occupying the loop; the lag
+// sampler proves occupancy but not identity. Wrap every handler registered via
+// connection.onRequest/onNotification and log any that holds the loop or runs long, so a perf
+// log names the culprit instead of leaving us inferring from gaps. Installed BEFORE any
+// registration so all clarion/* handlers (server.ts + SolutionManager) are covered; built-in
+// feature handlers (onDocumentSymbol etc.) register through dedicated methods and keep their
+// own perf lines.
+{
+    const SLOW_HANDLER_MS = 100;
+    const methodName = (type: unknown): string =>
+        typeof type === 'string' ? type : ((type as { method?: string })?.method ?? 'unknown');
+    const wrapHandler = (kind: 'request' | 'notification', method: string, handler: (...args: unknown[]) => unknown) =>
+        async (...args: unknown[]) => {
+            const t0 = Date.now();
+            try {
+                return await handler(...args);
+            } finally {
+                const ms = Date.now() - t0;
+                if (ms >= SLOW_HANDLER_MS) {
+                    perfLogger.perf("LSP slow handler", { kind, method, ms });
+                }
+            }
+        };
+    const origOnRequest = connection.onRequest.bind(connection);
+    (connection as { onRequest: unknown }).onRequest = (type: unknown, handler?: (...args: unknown[]) => unknown) =>
+        handler === undefined
+            ? origOnRequest(type as never) // star-handler overload — pass through untouched
+            : origOnRequest(type as never, wrapHandler('request', methodName(type), handler) as never);
+    const origOnNotification = connection.onNotification.bind(connection);
+    (connection as { onNotification: unknown }).onNotification = (type: unknown, handler?: (...args: unknown[]) => unknown) =>
+        handler === undefined
+            ? origOnNotification(type as never)
+            : origOnNotification(type as never, wrapHandler('notification', methodName(type), handler) as never);
+}
+
 // Add global error handling
 process.on('uncaughtException', (error: Error) => {
     logger.error(`❌ [CRITICAL] Uncaught exception: ${error.message}`, error);
@@ -1806,12 +1842,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // lazily per VISIBLE lens (user-proportional work) with per-symbol caching; the
                 // settings-toggle path can still trigger a manual warm. The real fix — off-thread
                 // or persisted reference indexing — is tracked in #294/#295.
-                void revalidations;
+
+                // #297: the FRG build used to launch in its own setImmediate at solutionReady —
+                // concurrent with THIS block and with the client's interactive burst (tree
+                // fetch, documentSymbols, open-doc refresh). On Mark's VM the tree request sat
+                // 15s+ behind the FRG's ~25s of tokenization and hit the client-side timeout.
+                // Background work is now strictly sequenced: SDI → revalidation pass → settle
+                // delay (lets the client burst drain) → FRG.
+                await Promise.all(revalidations.map(p => p.catch(() => { /* validator errors are logged at source */ })));
+                perfLogger.perf("Phase: sdiReady revalidation pass complete", {
+                    ms: Date.now() - sdiStart,
+                    doc_count: revalidations.length,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+                await new Promise<void>(resolve => setTimeout(resolve, 3000));
+                await buildFileRelationshipGraph();
             });
-            
+
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
             // Enables O(1) reverse lookups for local MAP scope (#91) and include chains (#52).
-            setImmediate(async () => {
+            // #297: invoked from the sequenced background chain above, no longer self-starting.
+            const buildFileRelationshipGraph = async () => {
                 const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
                 const graph = FileRelationshipGraph.getInstance();
                 const solutionManager = SolutionManager.getInstance();
@@ -1842,7 +1893,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     edgeCount: graph.edgeCount,
                     durationMs: graph.buildDurationMs
                 });
-            });
+            };
 
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
