@@ -1,9 +1,14 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Range } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
-import { IntroduceEquateCodeActionProvider, EquateScope } from '../providers/IntroduceEquateCodeActionProvider';
+import {
+    IntroduceEquateCodeActionProvider, EquateScope, extractMemberProgramName
+} from '../providers/IntroduceEquateCodeActionProvider';
 
 /**
  * #281 — Introduce EQUATE: detect the literal under the cursor and compute the candidate data
@@ -100,5 +105,70 @@ suite('#281 IntroduceEquateCodeActionProvider', () => {
         ].join('\n');
         // char 4 is inside the identifier "Count", not the literal.
         assert.strictEqual(invoke(src, 'file:///eq-noop.clw', 3, 4).length, 0);
+    });
+
+    test('a bare / empty MEMBER offers no global scope (only module + local)', () => {
+        for (const member of ['  MEMBER', '  MEMBER()', "  MEMBER('')"]) {
+            const src = [member, 'MyProc PROCEDURE', '  CODE', '  Count = 42'].join('\n');
+            const { scopes } = args(invoke(src, `file:///eq-empty-${member.trim()}.clw`, 3, 11));
+            assert.deepStrictEqual(
+                scopes.map(s => s.label),
+                ['This procedure (local data)', 'This module'],
+                `no Global for "${member.trim()}"`
+            );
+        }
+    });
+
+    test("a named MEMBER whose program file can't be resolved degrades to module + local", () => {
+        const src = ["  MEMBER('NoSuchProgram')", 'MyProc PROCEDURE', '  CODE', '  Count = 42'].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq-missing.clw', 3, 11));
+        assert.deepStrictEqual(scopes.map(s => s.label), ['This procedure (local data)', 'This module']);
+    });
+});
+
+suite('#281 extractMemberProgramName', () => {
+    setup(() => { setServerInitialized(true); TokenCache.getInstance().clearAllTokens(); });
+
+    function nameOf(memberLine: string): string | null {
+        const doc = createDocument(`${memberLine}\nMyProc PROCEDURE\n  CODE`, 'file:///member-name.clw');
+        return extractMemberProgramName(TokenCache.getInstance().getTokens(doc));
+    }
+
+    test("MEMBER('MyApp') → 'MyApp'", () => assert.strictEqual(nameOf("  MEMBER('MyApp')"), 'MyApp'));
+    test('bare MEMBER → null', () => assert.strictEqual(nameOf('  MEMBER'), null));
+    test('MEMBER() → null', () => assert.strictEqual(nameOf('  MEMBER()'), null));
+    test("MEMBER('') → null", () => assert.strictEqual(nameOf("  MEMBER('')"), null));
+});
+
+suite('#281 cross-file Global from a MEMBER', () => {
+    let tmpDir: string;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clarion-eq-'));
+    });
+
+    teardown(() => {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    test("MEMBER('MyApp') offers a cross-file Global scope targeting the resolved PROGRAM file", () => {
+        // Program file sits next to the member (sibling-directory resolution, no solution needed).
+        fs.writeFileSync(path.join(tmpDir, 'MyApp.clw'), ['  PROGRAM', '  MAP', '  END', '  CODE'].join('\n'));
+        const memberPath = path.join(tmpDir, 'sub.clw');
+        const memberUri = 'file:///' + memberPath.replace(/\\/g, '/');
+
+        const src = ["  MEMBER('MyApp')", 'MyProc PROCEDURE', '  CODE', '  Count = 42'].join('\n');
+        const { scopes } = args(invoke(src, memberUri, 3, 11));
+
+        assert.deepStrictEqual(scopes.map(s => s.label), [
+            'This procedure (local data)',
+            'This module',
+            'Global (in MyApp.clw)'
+        ]);
+        const global = scopes.find(s => s.label.startsWith('Global'))!;
+        assert.ok(global.uri && global.uri.toLowerCase().includes('myapp.clw'), 'global scope targets MyApp.clw');
+        assert.strictEqual(global.insertLine, 3, 'global data inserts before the PROGRAM CODE (line 3)');
     });
 });

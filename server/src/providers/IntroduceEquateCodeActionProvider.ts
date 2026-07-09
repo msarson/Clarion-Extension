@@ -1,8 +1,11 @@
 import { TextDocument, Range, CodeAction, CodeActionKind } from 'vscode-languageserver/node';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TokenCache } from '../TokenCache';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
-import { TokenHelper } from '../utils/TokenHelper';
 import { ScopeKind } from '../scope/ScopeTypes';
+import { SolutionManager } from '../solution/solutionManager';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('IntroduceEquateCodeActionProvider');
@@ -12,6 +15,21 @@ logger.setLevel('error');
 export interface EquateScope {
     label: string;
     insertLine: number;
+    /** When set, the EQUATE is inserted into THIS file (cross-file global into the PROGRAM). */
+    uri?: string;
+}
+
+/**
+ * The program named by a `MEMBER('name')` statement, or null for a bare `MEMBER`, `MEMBER()` or
+ * `MEMBER('')` (no named program → no global scope can be offered). Exported for unit testing.
+ */
+export function extractMemberProgramName(tokens: Token[]): string | null {
+    const member = tokens.find(t => t.value.toUpperCase() === 'MEMBER');
+    if (!member) return null;
+    const arg = tokens.find(t => t.line === member.line && t.type === TokenType.String && t.start > member.start);
+    if (!arg) return null;
+    const name = arg.value.replace(/^'/, '').replace(/'$/, '').trim();
+    return name.length > 0 ? name : null;
 }
 
 /** The literal found under the cursor / selection. */
@@ -41,7 +59,7 @@ export class IntroduceEquateCodeActionProvider {
         if (!literal) return [];
 
         const structure = TokenCache.getInstance().getStructure(document);
-        const scopes = this.computeScopes(structure, tokens, literal.line);
+        const scopes = this.computeScopes(document, structure, tokens, literal.line);
         if (scopes.length === 0) return [];
 
         logger.info(`💡 Introduce EQUATE for "${literal.text}" → ${scopes.length} scope(s)`);
@@ -85,7 +103,12 @@ export class IntroduceEquateCodeActionProvider {
     }
 
     /** The data sections the EQUATE could live in, innermost → outermost. */
-    private computeScopes(structure: ReturnType<TokenCache['getStructure']>, tokens: Token[], line: number): EquateScope[] {
+    private computeScopes(
+        document: TextDocument,
+        structure: ReturnType<TokenCache['getStructure']>,
+        tokens: Token[],
+        line: number
+    ): EquateScope[] {
         const scopes: EquateScope[] = [];
         const node = structure.getScopeResolver().resolveScopeAt(line);
 
@@ -101,34 +124,93 @@ export class IntroduceEquateCodeActionProvider {
             scopes.push({ label: 'This procedure (local data)', insertLine: procNode.token.executionMarker.line });
         }
 
-        // File-level: global data in a PROGRAM, module data in a MEMBER.
-        const fileScope = this.fileScope(structure, tokens);
-        if (fileScope) scopes.push(fileScope);
-
+        // File-level: global data in a PROGRAM (same file), module data + (if the MEMBER names a
+        // program) cross-file global into that PROGRAM file.
+        scopes.push(...this.fileScopes(document, structure, tokens));
         return scopes;
     }
 
-    private fileScope(structure: ReturnType<TokenCache['getStructure']>, tokens: Token[]): EquateScope | null {
-        let isProgram = false;
+    private fileScopes(
+        document: TextDocument,
+        structure: ReturnType<TokenCache['getStructure']>,
+        tokens: Token[]
+    ): EquateScope[] {
+        const isProgram = tokens.some(t => t.value.toUpperCase() === 'PROGRAM');
+        if (isProgram) {
+            const insertLine = this.globalInsertLine(tokens, structure);
+            return insertLine === null ? [] : [{ label: 'Global', insertLine }];
+        }
+
+        // MEMBER file: module data (this file), before the first procedure.
+        const out: EquateScope[] = [];
+        const firstProcLine = this.firstProcLine(structure);
+        if (firstProcLine !== null) {
+            out.push({ label: 'This module', insertLine: firstProcLine });
+        }
+
+        // Cross-file global: MEMBER('name') → the program is name.clw; a bare/empty MEMBER names no
+        // program, so no global is offered. Only available when the program file can be resolved.
+        const programName = extractMemberProgramName(tokens);
+        if (programName) {
+            const globalScope = this.crossFileGlobalScope(document, programName);
+            if (globalScope) out.push(globalScope);
+        }
+        return out;
+    }
+
+    /** Resolve the PROGRAM file named by MEMBER and compute its global-data insertion point. */
+    private crossFileGlobalScope(document: TextDocument, programName: string): EquateScope | null {
+        try {
+            const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const programPath = this.resolveProgramFile(programName, currentPath);
+            if (!programPath) return null;
+
+            const content = fs.readFileSync(programPath, 'utf8');
+            const programUri = pathToCanonicalUri(programPath);
+            const programDoc = TextDocument.create(programUri, 'clarion', 1, content);
+            const programTokens = TokenCache.getInstance().getTokens(programDoc);
+            // Sanity: the resolved file must actually be a PROGRAM.
+            if (!programTokens.some(t => t.value.toUpperCase() === 'PROGRAM')) return null;
+
+            const programStructure = TokenCache.getInstance().getStructure(programDoc);
+            const insertLine = this.globalInsertLine(programTokens, programStructure);
+            if (insertLine === null) return null;
+
+            return { label: `Global (in ${path.basename(programPath)})`, insertLine, uri: programUri };
+        } catch (err) {
+            logger.error(`crossFileGlobalScope('${programName}') failed: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+        }
+    }
+
+    /** Resolve `<programName>.clw` via the solution's redirection, then a sibling-directory fallback. */
+    private resolveProgramFile(programName: string, currentPath: string): string | null {
+        const candidate = `${programName}.clw`;
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution) {
+            for (const proj of sm.solution.projects) {
+                const resolved = proj.getRedirectionParser().findFile(candidate);
+                if (resolved?.path && fs.existsSync(resolved.path)) return resolved.path;
+            }
+        }
+        const sibling = path.join(path.dirname(currentPath), candidate);
+        return fs.existsSync(sibling) ? sibling : null;
+    }
+
+    /** The global-data insertion line: before the PROGRAM's own CODE (which precedes any procedure). */
+    private globalInsertLine(tokens: Token[], structure: ReturnType<TokenCache['getStructure']>): number | null {
         let firstCodeLine = Number.MAX_SAFE_INTEGER;
         for (const t of tokens) {
-            const v = t.value.toUpperCase();
-            if (v === 'PROGRAM') isProgram = true;
-            if (v === 'CODE' && t.line < firstCodeLine) firstCodeLine = t.line;
+            if (t.value.toUpperCase() === 'CODE' && t.line < firstCodeLine) firstCodeLine = t.line;
         }
+        const firstProc = this.firstProcLine(structure) ?? Number.MAX_SAFE_INTEGER;
+        const line = firstCodeLine < firstProc ? firstCodeLine : firstProc;
+        return line === Number.MAX_SAFE_INTEGER ? null : line;
+    }
 
-        const procedures = structure.getAllProcedures();
-        let firstProcLine = Number.MAX_SAFE_INTEGER;
-        for (const p of procedures) if (p.line < firstProcLine) firstProcLine = p.line;
-
-        if (isProgram) {
-            // Global data sits before the PROGRAM's own CODE (which precedes any procedure).
-            const insertLine = firstCodeLine < firstProcLine ? firstCodeLine : firstProcLine;
-            if (insertLine === Number.MAX_SAFE_INTEGER) return null;
-            return { label: 'Global', insertLine };
-        }
-        // MEMBER module data sits before the first procedure.
-        if (firstProcLine === Number.MAX_SAFE_INTEGER) return null;
-        return { label: 'This module', insertLine: firstProcLine };
+    private firstProcLine(structure: ReturnType<TokenCache['getStructure']>): number | null {
+        let first = Number.MAX_SAFE_INTEGER;
+        for (const p of structure.getAllProcedures()) if (p.line < first) first = p.line;
+        return first === Number.MAX_SAFE_INTEGER ? null : first;
     }
 }

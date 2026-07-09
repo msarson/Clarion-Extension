@@ -135,24 +135,24 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
     // span and the candidate data-section scopes; here the user picks the scope (a quick pick — the
     // "second choice", mirroring Surround With) then names the constant. We insert the EQUATE in the
     // chosen section and replace the literal with the name in one edit.
-    interface EquateScope extends QuickPickItem { insertLine: number; }
+    interface EquateScope extends QuickPickItem { insertLine: number; uri?: string; }
     const introduceEquate = commands.registerCommand(
         'clarion.introduceEquate',
         async (
             uriString: string,
             literal: { line: number; startChar: number; endChar: number },
             value: string,
-            scopes: Array<{ label: string; insertLine: number }>
+            scopes: Array<{ label: string; insertLine: number; uri?: string }>
         ) => {
             if (!scopes || scopes.length === 0) {
                 return;
             }
 
             // Second choice: which data section. Skip the pick when there's only one place.
-            let scope: EquateScope = { label: scopes[0].label, insertLine: scopes[0].insertLine };
+            let scope: EquateScope = { label: scopes[0].label, insertLine: scopes[0].insertLine, uri: scopes[0].uri };
             if (scopes.length > 1) {
                 const picked = await window.showQuickPick<EquateScope>(
-                    scopes.map(s => ({ label: s.label, insertLine: s.insertLine })),
+                    scopes.map(s => ({ label: s.label, insertLine: s.insertLine, uri: s.uri })),
                     { placeHolder: 'Place the EQUATE in…' }
                 );
                 if (!picked) {
@@ -170,14 +170,17 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
                 return;
             }
 
-            const uri = Uri.parse(uriString);
-            const doc = await workspace.openTextDocument(uri);
-            const eol = doc.eol === EndOfLine.CRLF ? '\r\n' : '\n';
+            const sourceUri = Uri.parse(uriString);
+            // The EQUATE is inserted into the chosen scope's file (the PROGRAM file for a cross-file
+            // global); the literal is always replaced in the current document.
+            const insertUri = scope.uri ? Uri.parse(scope.uri) : sourceUri;
+            const insertDoc = await workspace.openTextDocument(insertUri);
+            const eol = insertDoc.eol === EndOfLine.CRLF ? '\r\n' : '\n';
 
             const edit = new WorkspaceEdit();
-            edit.insert(uri, new Position(scope.insertLine, 0), formatEquateDeclaration(name, value) + eol);
+            edit.insert(insertUri, new Position(scope.insertLine, 0), formatEquateDeclaration(name, value) + eol);
             edit.replace(
-                uri,
+                sourceUri,
                 new Range(literal.line, literal.startChar, literal.line, literal.endChar),
                 name.trim()
             );
