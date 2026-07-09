@@ -4,6 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import LoggerManager from '../../logger';
 
 // Inherit the default log level (debug in dev, error in release per
@@ -199,7 +200,11 @@ async function augmentDeclaredViaSymbolFinder(
     // correctly. Clarion is case-insensitive — passing the upper-cased name
     // resolves identically.
     const probePos = { line: ctx.codeRanges[0].codeStart + 1, character: 0 };
+    // #297: each findSymbol is a scope walk that can span files; on big generated modules the
+    // candidate set is large and the loop holds the LSP loop — yield on a time budget.
+    const timeSlice = makeTimeSlicer();
     for (const upperName of candidateNames) {
+        await timeSlice();
         try {
             const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
             if (resolved) ctx.declaredNames.add(upperName);

@@ -369,7 +369,14 @@ export async function validateMissingImplementations(
         t.finishesAt !== undefined
     );
 
+    // #297: an app-main CLW (gl1.clw) declares one MODULE per generated file (~178) and each
+    // iteration LOADS AND TOKENIZES that file on cache miss — measured 37s+ of near-continuous
+    // loop occupancy at startup on Mark's VM, starving even in-memory requests. Yield on a time
+    // budget between modules (effective now that the sdiReady pass runs validators sequentially).
+    const timeSliceModules = makeTimeSlicer();
+
     for (const moduleToken of moduleTokens) {
+        await timeSliceModules();
         // MODULE filenames are stored unresolved on the token
         // (DocumentStructure.resolveFileReferences:1915 — "We're storing
         // unresolved filenames"). Resolve to an absolute path before any URI

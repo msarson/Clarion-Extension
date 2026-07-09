@@ -3,6 +3,7 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 
 /**
  * Warns when a CLASS declares `IMPLEMENTS(SomeInterface)` but does not provide an
@@ -54,7 +55,12 @@ export async function validateClassInterfaceImplementationAsync(
 
     const inlineAllowed = structure.getDocumentKind() !== undefined;
 
+    // #297: per-class resolution walks include chains / modules cross-file — yield on a time
+    // budget so a class-heavy file doesn't hold the LSP loop through the whole pass.
+    const timeSlice = makeTimeSlicer();
+
     for (const cls of classes) {
+        await timeSlice();
         const implemented = cls.implementedInterfaces;
         if (!implemented || implemented.length === 0) continue;
 

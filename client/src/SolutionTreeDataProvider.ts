@@ -577,10 +577,14 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 const { projectId } = projectData;
 
                 {
-                    let response = await this.fetchProjectFiles(String(projectId), String(element.label));
+                    // #297: LOCAL-FIRST — the cwproj on disk is the same source the server's
+                    // list is derived from (<Compile Include> entries), file nodes only need
+                    // name+relativePath, and clicks resolve real paths lazily (fix 13). Parsing
+                    // it directly makes expansion instant and independent of server load; the
+                    // server request is only a fallback for an unreadable cwproj.
+                    let response = this.parseProjectFilesLocally(projectData, String(element.label));
                     if (response === null) {
-                        // Server busy/timed out — build the list from the cwproj directly
-                        response = this.parseProjectFilesLocally(projectData, String(element.label));
+                        response = await this.fetchProjectFiles(String(projectId), String(element.label));
                     }
                     if (response === null) {
                         // Both paths failed — surface a retry node instead of an eternal spinner
@@ -655,9 +659,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 const projectData = element.data as any;
 
                 {
-                    let response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
+                    // #297: local-first, same rationale as the branch above
+                    let response = this.parseProjectFilesLocally(projectData, String(element.label));
                     if (response === null) {
-                        response = this.parseProjectFilesLocally(projectData, String(element.label));
+                        response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
                     }
                     if (response === null) {
                         return [this.makeProjectLoadErrorNode(element)];
