@@ -88,3 +88,7 @@ release-announcement-*.md
 # - README.md (marketplace description) - root only
 # - CHANGELOG.md (version history) - root only
 # - LICENSE (required) - root only
+
+# local diagnostic captures
+*.cpuprofile
+*.cpuprofile.txt
