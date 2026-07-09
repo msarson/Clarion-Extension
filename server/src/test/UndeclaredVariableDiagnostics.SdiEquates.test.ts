@@ -36,10 +36,16 @@ suite('UndeclaredVariableDiagnostics — SDI-indexed EQUATEs (#298)', () => {
 
     suiteSetup(async () => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue298-'));
-        // Column-0 labels, mirroring KEYCODES.CLW / template-equate shapes
+        // Column-0 labels. SelectRecord mirrors the template-equate shape (.inc — always
+        // scanned); CtrlShiftP mirrors its REAL home: KEYCODES.CLW, one of Clarion's
+        // declaration-only .clw files, which the .inc/.equ-only scan filter used to skip
+        // (the second half of #298 — hover resolved it, the diagnostic still fired).
         fs.writeFileSync(path.join(tmpDir, 'keyequ.inc'), [
-            'CtrlShiftP          EQUATE(2150h)',
             'SelectRecord        EQUATE(4)',
+            '',
+        ].join('\n'), 'utf8');
+        fs.writeFileSync(path.join(tmpDir, 'keycodes.clw'), [
+            'CtrlShiftP          EQUATE(2150h)',
             '',
         ].join('\n'), 'utf8');
         const indexer = StructureDeclarationIndexer.getInstance();
@@ -58,6 +64,7 @@ suite('UndeclaredVariableDiagnostics — SDI-indexed EQUATEs (#298)', () => {
         StructureDeclarationIndexer.getInstance().clearProjectCache(tmpDir);
         try {
             fs.unlinkSync(path.join(tmpDir, 'keyequ.inc'));
+            fs.unlinkSync(path.join(tmpDir, 'keycodes.clw'));
             fs.rmdirSync(tmpDir);
         } catch { /* best-effort cleanup */ }
     });

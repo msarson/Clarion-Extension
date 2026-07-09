@@ -96,6 +96,21 @@ const ITEMIZE_PATTERN =
 /** Blank-label ITEMIZE: indented keyword with no label at col 0, e.g. "          ITEMIZE,PRE(CLType)" */
 const ITEMIZE_BLANK_PATTERN =
     /^\s+ITEMIZE\b/i;
+// #298: Clarion ships a handful of DECLARATION-ONLY .clw files (equates/property/keycode
+// constants — no implementations). The .inc/.equ-only scan filter skipped them, so names like
+// CtrlShiftP (KEYCODES.CLW) were invisible to every SDI consumer — hover resolved them via the
+// include chain while the undeclared-variable diagnostic flagged them. Whitelisted by basename
+// rather than widening to *.clw: scanning thousands of implementation modules would bloat the
+// index with module-local equates that aren't in scope elsewhere.
+const DECLARATION_CLW_FILES = new Set([
+    'equates.clw',
+    'keycodes.clw',
+    'property.clw',
+    'errors.clw',
+    'printer.clw',
+    'tplequ.clw',
+]);
+
 const EQUATE_PATTERN =
     /^([A-Za-z_][\w:]*)\s+EQUATE\b/i;
 const END_PATTERN =
@@ -358,7 +373,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             for (const dir of searchPaths) {
                 if (fs.existsSync(dir)) {
                     const files = fs.readdirSync(dir)
-                        .filter(f => /\.(inc|equ)$/i.test(f))
+                        .filter(f => /\.(inc|equ)$/i.test(f) || DECLARATION_CLW_FILES.has(f.toLowerCase()))
                         .map(f => path.join(dir, f));
                     allFiles.push(...files);
                 }
