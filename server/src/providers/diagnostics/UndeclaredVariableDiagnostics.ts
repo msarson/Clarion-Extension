@@ -181,7 +181,11 @@ async function augmentDeclaredViaSymbolFinder(
 ): Promise<void> {
     const candidateNames = new Set<string>();
     for (const t of ctx.tokens) {
-        if (t.type !== TokenType.Variable) continue;
+        // #300: match detectCheckableName's own acceptance set. Dotted receivers
+        // (`thisStartup.Module`) tokenize as TokenType.StructureField — the Variable-only gate
+        // here meant the COLLECT pass flagged their leading name while this AUGMENT pass never
+        // attempted to resolve it: the diagnostic condemned names it never looked up.
+        if (t.type !== TokenType.Variable && t.type !== TokenType.StructureField) continue;
         if (!ctx.isInsideCode(t.line)) continue;
         const candidate = detectCheckableName(t);
         if (!candidate) continue;

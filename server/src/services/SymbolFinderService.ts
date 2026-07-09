@@ -25,6 +25,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -939,8 +940,8 @@ export class SymbolFinderService {
     private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument): Promise<SymbolInfo | null> {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
-        const resolvedPath = path.resolve(currentFileDir, parentFile);
-        const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+        let resolvedPath = path.resolve(currentFileDir, parentFile);
+        let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
         logger.info(`Searching parent file: ${resolvedPath}`);
 
@@ -960,9 +961,37 @@ export class SymbolFinderService {
         try {
             if (!parentTokens || !parentDoc) {
                 if (!fs.existsSync(resolvedPath)) {
-                    logger.warn(`Parent file not found: ${resolvedPath}`);
-                    return null;
+                    // #300: MEMBER targets aren't necessarily same-dir — generated multi-DLL
+                    // apps put member modules in genfiles\src while the app main lives elsewhere
+                    // (project root per the RED). Cache first, same-dir next, redirection LAST —
+                    // the same shape every other cross-file resolution path uses. Without this
+                    // the whole Tier-6 global walk dead-ended and the undeclared-variable
+                    // diagnostic flagged parent-file globals that hover resolves. The fresh-read
+                    // URI is canonical (#251) — hand-built file:/// shapes keep causing
+                    // cache-identity bugs.
+                    const solutionManager = SolutionManager.getInstance();
+                    const viaRedirection = solutionManager
+                        ? await solutionManager.findFileWithExtension(parentFile)
+                        : null;
+                    if (viaRedirection?.path && fs.existsSync(viaRedirection.path)) {
+                        logger.info(`✅ #300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
+                        resolvedPath = viaRedirection.path;
+                        parentUri = pathToCanonicalUri(resolvedPath);
+                        // The redirected target may itself be cached (open in the editor)
+                        parentTokens = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                        if (parentTokens) {
+                            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                            if (cachedText !== null) {
+                                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                            }
+                        }
+                    } else {
+                        logger.warn(`Parent file not found: ${resolvedPath}`);
+                        return null;
+                    }
                 }
+            }
+            if (!parentTokens || !parentDoc) {
                 const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
                 parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                 parentTokens = this.tokenCache.getTokens(parentDoc);
