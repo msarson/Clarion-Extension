@@ -150,14 +150,21 @@ export class SolutionManager {
     private async parseSolution(): Promise<ClarionSolutionServer> {
         const startTime = performance.now();
         logger.info(`🕒 Starting parseSolution`);
-        
+        // #290: sub-phase marks — an unattributed ~9.6s sync block was observed inside the
+        // SolutionManager-init window BEFORE the (sub-second) project loop; these pin which
+        // sub-phase carries it on the next perf capture.
+        const mark = (phase: string, from: number) =>
+            perfLogger.perf(`SolutionLoad: parseSolution ${phase}`, { ms: Math.round(performance.now() - from) });
+
         try {
             // Try to load from cache first
+            const cacheStart = performance.now();
             if (await this.loadFromCache()) {
                 const endTime = performance.now();
                 logger.info(`🕒 parseSolution completed in ${(endTime - startTime).toFixed(2)}ms (loaded from cache)`);
                 return this.solution;
             }
+            mark('cache-miss check', cacheStart);
             
             // Use async file existence check
             try {
@@ -248,13 +255,17 @@ export class SolutionManager {
 
                 // Parse Clarion .APP files from Solution Items section
                 logger.info(`🔍 Searching for Solution Items with APP files`);
+                const appFilesStart = performance.now();
                 this.parseApplicationFiles(content, solution);
+                mark('parseApplicationFiles', appFilesStart);
 
                 logger.info(`📂 Finished parsing solution file. Found ${solution.projects.length} projects and ${solution.applications.length} applications.`);
-                
+
                 // Save the parsed solution to cache
                 this.solution = solution;
+                const saveCacheStart = performance.now();
                 await this.saveToCache();
+                mark('saveToCache', saveCacheStart);
 
                 const endTime = performance.now();
                 logger.info(`🕒 parseSolution completed in ${(endTime - startTime).toFixed(2)}ms`);

@@ -1,4 +1,6 @@
 import * as fs from 'fs';
+import * as os from 'os';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redirectionFileParserServer';
 import LoggerManager from '../logger';
@@ -6,6 +8,32 @@ import { serverSettings } from '../serverSettings';
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
 logger.setLevel('error');
+// Always-on build timing (#290) — the SDI build is the dominant background cost on large
+// installations; its duration/reuse stats must be visible in a release VSIX.
+const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', 'perf');
+
+/**
+ * #290 — on-disk declaration cache, keyed by file mtime.
+ *
+ * The index scan itself is a light regex pass, but on a large installation it still reads
+ * thousands of libsrc `.inc`/`.equ` files (~27s measured on a VM). Library files essentially
+ * never change, so the scan results are persisted to a per-project JSON in the OS temp dir;
+ * a rebuild stats each file and reuses the cached declarations when the mtime is unchanged —
+ * warm builds then cost one stat per file instead of a read + scan.
+ * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
+ */
+const DISK_CACHE_VERSION = 1;
+
+interface SdiDiskCacheEntry {
+    mtimeMs: number;
+    decls: StructureDeclarationInfo[];
+}
+
+interface SdiDiskCacheFile {
+    version: number;
+    projectPath: string;
+    files: Record<string, SdiDiskCacheEntry>;
+}
 
 /**
  * All declaration types that the indexer recognises.
@@ -272,9 +300,16 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return buildPromise;
     }
 
+    /** Stats of the most recent buildIndex call (exposed for perf lines and tests). */
+    public lastBuildStats: { files: number; scanned: number; reusedFromDisk: number; ms: number } | null = null;
+
     async buildIndex(projectPath: string): Promise<StructureIndex> {
         const startTime = Date.now();
         const byName = new Map<string, StructureDeclarationInfo[]>();
+        let total = 0;
+        let scanned = 0;
+        let reusedFromDisk = 0;
+        let fileCount = 0;
 
         try {
             const redirectionParser = new RedirectionFileParserServer();
@@ -300,14 +335,32 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     allFiles.push(...files);
                 }
             }
+            fileCount = allFiles.length;
 
-            logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches`);
+            // #290: mtime-keyed disk cache — reuse prior scan results for unchanged files.
+            const diskCache = this.loadDiskCache(projectPath);
+            const freshEntries: Record<string, SdiDiskCacheEntry> = {};
+
+            logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
 
             const BATCH_SIZE = 20;
-            let total = 0;
             for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
                 const batch = allFiles.slice(i, i + BATCH_SIZE);
-                const batchResults = await Promise.all(batch.map(f => this.scanFile(f)));
+                const batchResults = await Promise.all(batch.map(async f => {
+                    const stat = await fs.promises.stat(f).catch(() => null);
+                    if (!stat) return [] as StructureDeclarationInfo[];
+                    const key = f.toLowerCase();
+                    const cached = diskCache?.files[key];
+                    if (cached && cached.mtimeMs === stat.mtimeMs) {
+                        reusedFromDisk++;
+                        freshEntries[key] = cached;
+                        return cached.decls;
+                    }
+                    const decls = await this.scanFile(f);
+                    scanned++;
+                    freshEntries[key] = { mtimeMs: stat.mtimeMs, decls };
+                    return decls;
+                }));
                 for (const decls of batchResults) {
                     total += decls.length;
                     for (const d of decls) {
@@ -320,14 +373,57 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 await new Promise<void>(resolve => setImmediate(resolve));
             }
 
+            this.saveDiskCache(projectPath, freshEntries);
+
             const duration = Date.now() - startTime;
             logger.debug(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
+            this.lastBuildStats = { files: fileCount, scanned, reusedFromDisk, ms: duration };
+            perfLogger.perf("SDI buildIndex complete", {
+                ms: duration,
+                files: fileCount,
+                scanned,
+                reused_from_disk: reusedFromDisk,
+                declarations: total,
+                project: path.basename(projectPath) || projectPath
+            });
 
         } catch (err) {
             logger.error(`Error building index: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         return { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
+    }
+
+    /** Location of the per-project disk cache (OS temp dir — never pollutes the user's solution). */
+    private diskCachePath(projectPath: string): string {
+        const hash = crypto.createHash('md5').update(this.normalizeKey(projectPath).toLowerCase()).digest('hex').slice(0, 16);
+        return path.join(os.tmpdir(), 'clarion-extension-sdi', `sdi-${hash}.json`);
+    }
+
+    private loadDiskCache(projectPath: string): SdiDiskCacheFile | null {
+        try {
+            const raw = fs.readFileSync(this.diskCachePath(projectPath), 'utf8');
+            const parsed = JSON.parse(raw) as SdiDiskCacheFile;
+            if (parsed?.version !== DISK_CACHE_VERSION || typeof parsed.files !== 'object') return null;
+            return parsed;
+        } catch {
+            return null; // missing / corrupt / stale-format → full scan
+        }
+    }
+
+    private saveDiskCache(projectPath: string, files: Record<string, SdiDiskCacheEntry>): void {
+        try {
+            const file = this.diskCachePath(projectPath);
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            const payload: SdiDiskCacheFile = {
+                version: DISK_CACHE_VERSION,
+                projectPath: this.normalizeKey(projectPath),
+                files
+            };
+            fs.writeFileSync(file, JSON.stringify(payload));
+        } catch (err) {
+            logger.debug(`[SDI] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     /** Case-insensitive name lookup across all indexed projects (or a specific one) */

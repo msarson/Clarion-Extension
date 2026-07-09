@@ -260,20 +260,27 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
             }
 
             indexedLenses++;
-            if (indexedLenses % 25 === 0) {
-                await new Promise<void>(resolve => setImmediate(resolve));
-            }
+            // #290: yield after EVERY lens — each provideReferences is a cross-file scan; batching
+            // 25 of them between yields produced multi-second event-loop blocks that froze
+            // hover/F12 during startup.
+            await new Promise<void>(resolve => setImmediate(resolve));
         }
 
         scannedFiles++;
-        if (scannedFiles % 10 === 0) {
-            await new Promise<void>(resolve => setImmediate(resolve));
-        }
+        // #290: yield after every file — provideCodeLenses tokenizes the whole (closed) file
+        // synchronously; ten large generated files between yields blocked the loop for seconds.
+        await new Promise<void>(resolve => setImmediate(resolve));
     }
 
     if (generation === codeLensPrecomputeGeneration) {
         codeLensRefIndex.setReady(true);
         logger.info(`⚡ CodeLens reference precompute ready: ${indexedLenses} lenses across ${scannedFiles} files in ${Date.now() - startedAt}ms`);
+        perfLogger.perf("Phase: CodeLens reference precompute complete (background)", {
+            ms: Date.now() - startedAt,
+            lenses: indexedLenses,
+            files: scannedFiles,
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
     }
 }
 
