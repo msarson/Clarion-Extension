@@ -7,6 +7,7 @@ import { Connection } from 'vscode-languageserver';
 import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
+import { DirectoryFileIndex } from './DirectoryFileIndex';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -175,6 +176,10 @@ export class SolutionManager {
                 const projectCount = (content.match(/Project\("/g) || []).length;
                 logger.info(`📂 Found ${projectCount} project entries in solution file`);
                 
+                // #288: fresh directory index per load — projects share search dirs, so each unique
+                // dir is readdir'd once for the whole solution instead of stat-per-file-per-dir.
+                DirectoryFileIndex.getInstance().clear();
+
                 const regex = /Project\("([^\"]+)"\) = "([^\"]+)", "([^\"]+)", "([^\"]+)"/g;
                 let match: RegExpExecArray | null;
                 
@@ -224,6 +229,14 @@ export class SolutionManager {
 
                 // Wait for all projects to load in parallel
                 await Promise.all(projectPromises);
+
+                // #288: how much stat traffic the directory index absorbed this load.
+                const idx = DirectoryFileIndex.getInstance().stats();
+                perfLogger.perf("SolutionLoad: directory index stats", {
+                    dirs_read: idx.dirsRead,
+                    dirs_cached: idx.dirsCached,
+                    existence_lookups: idx.lookups
+                });
                 
                 // Add all projects to the solution
                 for (const project of projectsToAdd) {

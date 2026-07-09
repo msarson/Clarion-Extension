@@ -4,6 +4,7 @@ import * as path from "path";
 import * as fs from "fs";
 import LoggerManager from "../logger";
 import { serverSettings } from "../serverSettings";
+import { DirectoryFileIndex } from "./DirectoryFileIndex";
 
 const logger = LoggerManager.getLogger("RedirectionParserServer");
 logger.setLevel("error");
@@ -549,17 +550,23 @@ export class RedirectionFileParserServer {
    *      Tier 3: walk `serverSettings.libsrcPaths` sequentially.
    *
    * @param filename The filename to find
+   * @param dirIndex #288 — optional batch existence index for the SOLUTION-LOAD path only.
+   *   When provided, per-candidate existence checks use one cached readdir per directory
+   *   instead of an existsSync each. Runtime callers (hover/F12/`clarion/findFile`) must NOT
+   *   pass it — a cached listing could hide files created after the snapshot.
    * @returns The resolved file path info if found, null otherwise
    */
-  public findFile(filename: string): ResolvedFilePath | null {
+  public findFile(filename: string, dirIndex?: DirectoryFileIndex): ResolvedFilePath | null {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
+    const candidateExists = (p: string): boolean =>
+      dirIndex ? dirIndex.existsPath(p) : fs.existsSync(p);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {
-      const result = fs.existsSync(filename)
+      const result = candidateExists(filename)
         ? { path: filename, source: FilePathSource.Project, entry: undefined }
         : null;
       const duration = Date.now() - t0;
@@ -575,7 +582,7 @@ export class RedirectionFileParserServer {
         return null;
       }
       const candidate = path.normalize(path.join(this.projectPath, filename));
-      if (fs.existsSync(candidate)) {
+      if (candidateExists(candidate)) {
         const duration = Date.now() - t0;
         logger.debug(`[RED][resolve:end] name="${filename}" → ${candidate} (pathed) durMs=${duration}`);
         return { path: candidate, source: FilePathSource.Project, entry: undefined };
@@ -630,7 +637,7 @@ export class RedirectionFileParserServer {
 
             checkedPaths.add(normalizedCandidate);
 
-            if (fs.existsSync(normalizedCandidate)) {
+            if (candidateExists(normalizedCandidate)) {
               const result = {
                 path: normalizedCandidate,
                 source: FilePathSource.Redirected,
@@ -654,7 +661,7 @@ export class RedirectionFileParserServer {
       const projectCandidate = path.normalize(path.join(this.projectPath, filename));
       if (!checkedPaths.has(projectCandidate)) {
         checkedPaths.add(projectCandidate);
-        if (fs.existsSync(projectCandidate)) {
+        if (candidateExists(projectCandidate)) {
           const duration = Date.now() - t0;
           logger.debug(`[RED][resolve:end] name="${filename}" → ${projectCandidate} (Tier 2 projRoot) durMs=${duration}`);
           return {
@@ -675,7 +682,7 @@ export class RedirectionFileParserServer {
         const normalized = path.normalize(candidate);
         if (checkedPaths.has(normalized)) continue;
         checkedPaths.add(normalized);
-        if (fs.existsSync(normalized)) {
+        if (candidateExists(normalized)) {
           const result = {
             path: normalized,
             source: FilePathSource.LibSrc,

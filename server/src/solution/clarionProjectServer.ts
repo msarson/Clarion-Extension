@@ -5,6 +5,7 @@ import LoggerManager from '../logger';
 import { RedirectionEntry, RedirectionFileParserServer, matchesActiveConfiguration } from './redirectionFileParserServer';
 import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
+import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 
@@ -250,9 +251,11 @@ export class ClarionProjectServer {
                             }
                             
                             logger.info(`📂 Processing file from project: ${fileName}`);
-                            
-                            // Use the async version of findFileInProjectPaths
-                            const resolvedPath = await this.findFileInProjectPathsAsync(fileName);
+
+                            // Use the async version of findFileInProjectPaths. #288: route existence
+                            // checks through the shared directory index — one readdir per unique
+                            // search dir across ALL projects instead of a stat per file per dir.
+                            const resolvedPath = await this.findFileInProjectPathsAsync(fileName, DirectoryFileIndex.getInstance());
                             if (resolvedPath) {
                                 const relativePath = path.relative(this.path, resolvedPath);
                                 logger.info(`✅ Resolved path for ${fileName}: ${relativePath}`);
@@ -477,10 +480,13 @@ export class ClarionProjectServer {
         return null;
     }
     
-    // Add an asynchronous version for better performance
-    private async findFileInProjectPathsAsync(fileName: string): Promise<string | null> {
+    // Add an asynchronous version for better performance.
+    // #288: `dirIndex` (solution-load path only) batches existence checks — one cached readdir
+    // per directory instead of a stat per candidate. Omitted → behaves exactly as before.
+    private async findFileInProjectPathsAsync(fileName: string, dirIndex?: DirectoryFileIndex): Promise<string | null> {
         // Helper for async existence check
         const fileExists = async (filePath: string) => {
+            if (dirIndex) return dirIndex.existsPath(filePath);
             try {
                 await fs.promises.access(filePath, fs.constants.F_OK);
                 return true;
@@ -488,10 +494,10 @@ export class ClarionProjectServer {
                 return false;
             }
         };
-        
+
         // First try using the redirection parser directly
         const redParser = this.getRedirectionParser();
-        const redResult = redParser.findFile(fileName);
+        const redResult = redParser.findFile(fileName, dirIndex);
         if (redResult && redResult.path) {
             // Verify the file exists
             if (await fileExists(redResult.path)) {
@@ -499,7 +505,7 @@ export class ClarionProjectServer {
                 return redResult.path;
             }
         }
-        
+
         // Fallback to search paths
         const ext = path.extname(fileName).toLowerCase();
         const searchPaths = this.getSearchPaths(ext);
@@ -512,7 +518,7 @@ export class ClarionProjectServer {
             }
             return null;
         });
-        
+
         // Wait for all path checks to complete
         const results = await Promise.all(pathPromises);
         const foundPath = results.find(p => p !== null);
@@ -525,16 +531,16 @@ export class ClarionProjectServer {
             // Create an array of promises for each extension
             const extPromises = serverSettings.defaultLookupExtensions.map(async (defaultExt) => {
                 const fileNameWithExt = `${fileName}${defaultExt}`;
-                
+
                 // Try with redirection parser first
-                const redResultWithExt = redParser.findFile(fileNameWithExt);
+                const redResultWithExt = redParser.findFile(fileNameWithExt, dirIndex);
                 if (redResultWithExt && redResultWithExt.path) {
                     if (await fileExists(redResultWithExt.path)) {
                         logger.info(`✅ Found file with added extension through redirection: ${redResultWithExt.path} (source: ${redResultWithExt.source})`);
                         return redResultWithExt.path;
                     }
                 }
-                
+
                 // Create promises for each search path with this extension
                 const extPathPromises = searchPaths.map(async (spath) => {
                     const full = path.normalize(path.join(spath, fileNameWithExt));
@@ -544,12 +550,12 @@ export class ClarionProjectServer {
                     }
                     return null;
                 });
-                
+
                 // Wait for all path checks for this extension to complete
                 const extResults = await Promise.all(extPathPromises);
                 return extResults.find(p => p !== null) || null;
             });
-            
+
             // Wait for all extension checks to complete
             const extResults = await Promise.all(extPromises);
             const foundExtPath = extResults.find(p => p !== null);
