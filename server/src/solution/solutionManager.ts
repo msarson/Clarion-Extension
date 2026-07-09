@@ -427,127 +427,100 @@ export class SolutionManager {
         return this.equatesPath;
     }
 
+    // #297 fix 7 (audit H1): the old implementation fanned out EVERY candidate across all 40
+    // projects with Promise.all (no early exit), had no negative cache (every miss re-ran the
+    // whole fan-out), and no in-flight coalescing (the client fires bursts of identical names).
+    // The audit's own evidence: "113 parallel clarion/findFile requests block the server 5+
+    // seconds". Now: positive cache → negative cache (TTL) → coalesced sequential search with
+    // first-hit early exit, existence answered by the runtime directory index (memory).
+    private inflightFinds: Map<string, Promise<{ path: string, source: string }>> = new Map();
+    private negativeFindCache: Map<string, number> = new Map();
+    private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
+
     public async findFileWithExtension(filename: string): Promise<{ path: string, source: string }> {
+        if (!filename) {
+            logger.warn(`⚠️ Filename is undefined or null`);
+            return { path: '', source: "" };
+        }
+        const key = filename.toLowerCase();
+
+        // Positive cache (existence revalidated via the runtime index — cheap)
+        if (this.fileCache.has(filename)) {
+            const cachedPath = this.fileCache.get(filename)!;
+            if (DirectoryFileIndex.getRuntime().existsPath(cachedPath)) {
+                return { path: cachedPath, source: "cache" };
+            }
+            this.fileCache.delete(filename);
+        }
+
+        // Negative cache — a name that just missed will miss again; don't re-run the search
+        const negAt = this.negativeFindCache.get(key);
+        if (negAt !== undefined && Date.now() - negAt < SolutionManager.NEGATIVE_FIND_TTL_MS) {
+            return { path: '', source: "" };
+        }
+
+        // In-flight coalescing — concurrent requests for the same name share one search
+        const inflight = this.inflightFinds.get(key);
+        if (inflight) {
+            return inflight;
+        }
+        const search = this.findFileWithExtensionInner(filename, key);
+        this.inflightFinds.set(key, search);
         try {
-            // Helper for async existence check
-            const fileExists = async (filePath: string) => {
-                try {
-                    await fs.promises.access(filePath, fs.constants.F_OK);
-                    return true;
-                } catch {
-                    return false;
-                }
-            };
-    
-            // Check cache first
-            if (this.fileCache.has(filename)) {
-                const cachedPath = this.fileCache.get(filename)!;
-                if (await fileExists(cachedPath)) {
-                    logger.info(`✅ Found file in cache: ${cachedPath}`);
-                    return { path: cachedPath, source: "cache" };
-                } else {
-                    // Remove invalid cache entry
-                    this.fileCache.delete(filename);
-                }
-            }
-    
-            logger.info(`🔍 Searching for file: ${filename}`);
-            
-            // Handle potential undefined or null filename
-            if (!filename) {
-                logger.warn(`⚠️ Filename is undefined or null`);
-                return { path: '', source: "" };
-            }
-            
-            const ext = path.extname(filename).toLowerCase();
-    
-            // Create an array of promises to check all possible locations in parallel
-            const checkPromises: Promise<{ path: string, source: string } | null>[] = [];
-    
-            // Check project source files
-            for (const project of this.solution.projects) {
-                // Skip if project has no source files
-                if (!project.sourceFiles || project.sourceFiles.length === 0) {
-                    continue;
-                }
-                
-                const sourceFile = project.sourceFiles.find(sf => {
-                    // Handle potential undefined name
-                    if (!sf || !sf.name) {
-                        return false;
-                    }
-                    return sf.name.toLowerCase() === path.basename(filename).toLowerCase();
-                });
-
-            if (sourceFile) {
-                // Handle potential undefined relativePath
-                if (sourceFile.relativePath) {
-                    const fullPath = path.join(project.path, sourceFile.relativePath);
-                    checkPromises.push(
-                        fileExists(fullPath).then(exists => {
-                            if (exists) {
-                                logger.info(`✅ Found file in project source files: ${fullPath}`);
-                                this.fileCache.set(filename, fullPath);
-                                return { path: fullPath, source: "project" };
-                            }
-                            return null;
-                        })
-                    );
-                } else {
-                    logger.warn(`⚠️ Source file ${sourceFile.name || 'unknown'} has no relativePath`);
-                }
-            }
+            return await search;
+        } finally {
+            this.inflightFinds.delete(key);
         }
-
-        // Check redirection entries and search paths
-        for (const project of this.solution.projects) {
-            // Try using the redirection parser directly
-            const redParser = project.getRedirectionParser();
-            const redResult = redParser.findFile(filename);
-            if (redResult && redResult.path) {
-                checkPromises.push(
-                    fileExists(redResult.path).then(exists => {
-                        if (exists) {
-                            logger.info(`✅ Found file through redirection: ${redResult.path}`);
-                            this.fileCache.set(filename, redResult.path);
-                            return { path: redResult.path, source: "redirected" };
-                        }
-                        return null;
-                    })
-                );
-            }
-
-            // Check search paths
-            const searchPaths = project.getSearchPaths(ext);
-            for (const searchPath of searchPaths) {
-                const fullPath = path.join(searchPath, filename);
-                checkPromises.push(
-                    fileExists(fullPath).then(exists => {
-                        if (exists) {
-                            logger.info(`✅ Found file in search path: ${fullPath}`);
-                            this.fileCache.set(filename, fullPath);
-                            return { path: fullPath, source: "project-search-path" };
-                        }
-                        return null;
-                    })
-                );
-            }
-        }
-
-        // Wait for all checks to complete and find the first successful result
-        const results = await Promise.all(checkPromises);
-        const firstMatch = results.find(result => result !== null);
-
-        if (firstMatch) {
-            return firstMatch;
-        }
-
-        logger.warn(`❌ File '${filename}' not found in any project paths.`);
-        return { path: '', source: "" };
-    } catch (error) {
-        logger.error(`❌ Error searching for file: ${error instanceof Error ? error.message : String(error)}`);
-        return { path: '', source: "" };
     }
+
+    private async findFileWithExtensionInner(filename: string, key: string): Promise<{ path: string, source: string }> {
+        try {
+            logger.info(`🔍 Searching for file: ${filename}`);
+            const ext = path.extname(filename).toLowerCase();
+            const runtimeIndex = DirectoryFileIndex.getRuntime();
+            const baseNameLower = path.basename(filename).toLowerCase();
+
+            // 1. Project source-file lists (authoritative post-#293) — first hit wins.
+            for (const project of this.solution.projects) {
+                if (!project.sourceFiles || project.sourceFiles.length === 0) continue;
+                const sourceFile = project.sourceFiles.find(sf => sf?.name && sf.name.toLowerCase() === baseNameLower);
+                if (sourceFile?.relativePath) {
+                    const fullPath = path.join(project.path, sourceFile.relativePath);
+                    if (runtimeIndex.existsPath(fullPath)) {
+                        this.fileCache.set(filename, fullPath);
+                        return { path: fullPath, source: "project" };
+                    }
+                }
+            }
+
+            // 2. Redirection resolution per project — findFile already answers existence from the
+            //    runtime index, so this is a memory walk; first hit wins.
+            for (const project of this.solution.projects) {
+                const redResult = project.getRedirectionParser().findFile(filename);
+                if (redResult?.path && runtimeIndex.existsPath(redResult.path)) {
+                    this.fileCache.set(filename, redResult.path);
+                    return { path: redResult.path, source: "redirected" };
+                }
+            }
+
+            // 3. Raw search-path joins as the last tier — memory lookups via the index.
+            for (const project of this.solution.projects) {
+                for (const searchPath of project.getSearchPaths(ext)) {
+                    const fullPath = path.join(searchPath, filename);
+                    if (runtimeIndex.existsPath(fullPath)) {
+                        this.fileCache.set(filename, fullPath);
+                        return { path: fullPath, source: "project-search-path" };
+                    }
+                }
+            }
+
+            logger.warn(`❌ File '${filename}' not found in any project paths.`);
+            this.negativeFindCache.set(key, Date.now());
+            return { path: '', source: "" };
+        } catch (error) {
+            logger.error(`❌ Error searching for file: ${error instanceof Error ? error.message : String(error)}`);
+            return { path: '', source: "" };
+        }
     }
 
     public registerHandlers(connection: Connection): void {
