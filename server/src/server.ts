@@ -74,6 +74,7 @@ import { IntroduceEquateCodeActionProvider } from './providers/IntroduceEquateCo
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
+import { initializingHoverFallback } from './utils/InitializingHover';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
@@ -2667,18 +2668,28 @@ connection.onWorkspaceSymbol(async (params, token) => {
 
 connection.onHover(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
-    
+
+    // #301: while startup pipelines run, an unresolved hover shows a "still indexing" note
+    // instead of null — a null makes VS Code's "Loading…" placeholder vanish silently, which
+    // reads as "this symbol has no hover" when the truth is "not ready yet".
+    const hoverReadiness = () => ({
+        serverInitialized,
+        solutionAnnounced,
+        solutionPipelineReady,
+        sdiPipelineReady
+    });
+
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying hover request`);
-        return null;
+        return initializingHoverFallback(null, hoverReadiness());
     }
-    
+
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
         return null;
     }
-    
+
     try {
         const hover = await hoverProvider.provideHover(document, params.position);
         if (hover) {
@@ -2686,7 +2697,7 @@ connection.onHover(async (params) => {
         } else {
             logger.info(`⚠️ No hover info found for ${params.textDocument.uri}`);
         }
-        return hover;
+        return initializingHoverFallback(hover, hoverReadiness());
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
         return null;
