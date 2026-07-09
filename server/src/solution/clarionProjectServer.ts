@@ -35,11 +35,17 @@ export class ClarionProjectServer {
     /** #289 diagnostics: phase breakdown of the last loadSourceFilesFromProjectFile call. */
     public lastLoadReadParseMs = 0;
     public lastLoadResolveMs = 0;
+    /** #293 diagnostics: how many Compile items failed path resolution (kept with bare names). */
+    public lastLoadUnresolved = 0;
+    /** #293 diagnostics: first few unresolved names, for the perf line. */
+    public lastLoadUnresolvedSample: string[] = [];
 
     async loadSourceFilesFromProjectFile(): Promise<void> {
         const loadStart = performance.now();
         this.lastLoadReadParseMs = 0;
         this.lastLoadResolveMs = 0;
+        this.lastLoadUnresolved = 0;
+        this.lastLoadUnresolvedSample = [];
         logger.info(`🔄 Loading source files for project: ${this.name} (${this.path})`);
         
         // Reset collections before loading
@@ -272,7 +278,13 @@ export class ClarionProjectServer {
                             } else {
                                 logger.warn(`❌ Could not resolve file: ${fileName}, but will still include it in the project`);
                                 // Still include the file even if we can't resolve its path
-                                // Use the fileName as both the name and relativePath
+                                // Use the fileName as both the name and relativePath.
+                                // #293: count it — silent bare-name inclusion left FRG/CodeLens
+                                // consumers running on ~1% of a real solution with no signal.
+                                this.lastLoadUnresolved++;
+                                if (this.lastLoadUnresolvedSample.length < 3) {
+                                    this.lastLoadUnresolvedSample.push(fileName);
+                                }
                                 logger.info(`📂 Including file with original name: ${fileName}`);
                                 return new ClarionSourcerFileServer(fileName, fileName, this);
                             }

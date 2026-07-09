@@ -226,7 +226,11 @@ export class SolutionManager {
                                 read_parse_ms: project.lastLoadReadParseMs,
                                 resolve_ms: project.lastLoadResolveMs,
                                 project: projectName,
-                                source_files: project.sourceFiles.length
+                                source_files: project.sourceFiles.length,
+                                // #293: unresolved Compile items are kept with bare names and
+                                // silently break every consumer that reconstructs absolute paths.
+                                unresolved: project.lastLoadUnresolved,
+                                unresolved_sample: project.lastLoadUnresolvedSample.join(';') || '(none)'
                             });
                         })();
                         
