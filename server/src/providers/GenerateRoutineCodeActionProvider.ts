@@ -2,7 +2,8 @@ import {
     TextDocument, Range, Position, CodeAction, CodeActionKind, TextEdit, WorkspaceEdit
 } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
-import { TokenType } from '../tokenizer/TokenTypes';
+import { Token } from '../tokenizer/TokenTypes';
+import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 
@@ -26,14 +27,21 @@ export function buildRoutineSkeleton(name: string, bodyIndent: string, eol: stri
 
 /**
  * #280 — offers a "Create routine 'X'" quick fix when the cursor is on a `DO X` whose target does
- * not resolve to a ROUTINE in the enclosing procedure. A ROUTINE is procedure-local (DO can only
- * call a routine in the same CODE section — see the DO docs), and routine labels legally repeat
- * across procedures (#211/#264), so resolution is scoped to the enclosing procedure and the new
- * routine is placed at the end of that procedure's span (keeping it procedure-local).
+ * not resolve to a ROUTINE in scope. A ROUTINE is procedure-local (DO can only call a routine in the
+ * same CODE section — see the DO docs), and routine labels legally repeat across procedures
+ * (#211/#264), so resolution is scoped to the enclosing procedure.
  *
- * Lightweight sibling of #271: a routine has no parameters and no return type, so there is nothing
- * to infer — just scaffold a labelled skeleton. The action carries the insertion edit plus a
- * command that drops the cursor into the new body.
+ * The subtlety this handles (the ABC/NetTalk shape): a **local derived method** — one whose CLASS is
+ * declared in a procedure's local data — shares that procedure's scope (Rule 4), so a routine at the
+ * enclosing procedure's level is visible to ALL of the class's methods. Therefore, for a `DO` inside
+ * such a method we:
+ *   - treat the target as already defined if the routine exists in the method OR in the declaring
+ *     procedure (otherwise we'd offer to create one that already exists and works); and
+ *   - offer TWO placements — one local to the method, one at the procedure level shared by every
+ *     method. For a plain procedure (or a module/global-class method) there is only one scope.
+ *
+ * A routine has no parameters and no return type, so — unlike #271 — there is nothing to infer; just
+ * scaffold a labelled skeleton, dropping the cursor into the new body.
  */
 export class GenerateRoutineCodeActionProvider {
 
@@ -50,33 +58,73 @@ export class GenerateRoutineCodeActionProvider {
 
         const structure = TokenCache.getInstance().getStructure(document);
 
-        // Resolve the enclosing PROCEDURE. A DO inside a routine body resolves the innermost scope
-        // to that ROUTINE — step up to its parent procedure so a valid sibling routine still counts
-        // as resolved (otherwise we'd offer to create one that already exists).
-        const scope = TokenHelper.getInnermostScopeAtLine(structure, cursorLine);
-        if (!scope) return []; // program/module scope — program-level routines are deferred
-        const proc = scope.subType === TokenType.Routine
-            ? TokenHelper.getParentScopeOfRoutine(structure, scope)
-            : scope;
-        if (!proc || !TokenHelper.isProcedureOrFunction(proc)) return [];
+        // Collect the routine-holding scopes visible from the DO, innermost first. For a local
+        // derived method this is [method, declaringProcedure]; for a plain procedure it is [proc];
+        // a DO inside a routine climbs to that routine's owning procedure/method chain.
+        const candidates = this.candidateScopes(structure.getScopeResolver().resolveScopeAt(cursorLine));
+        if (candidates.length === 0) return []; // program/module scope — deferred
 
-        // Already defined in THIS procedure? Then nothing to create.
-        const resolved = structure.findRoutines(name).some(rt => {
-            const parent = TokenHelper.getParentScopeOfRoutine(structure, rt);
-            return parent?.line === proc.line &&
-                   parent?.value.toUpperCase() === proc.value.toUpperCase();
-        });
-        if (resolved) return [];
-
-        // Insertion point: after the last non-blank line of the procedure's span (finishesAt runs to
-        // the end of the procedure, past its existing routines). Trimming trailing blanks keeps the
-        // new routine snug against the previous content rather than after a run of empty lines.
-        const procEnd = proc.finishesAt ?? (lines.length - 1);
-        let anchor = Math.min(procEnd, lines.length - 1);
-        while (anchor > proc.line && lines[anchor].trim() === '') anchor--;
+        // Already defined in ANY visible scope? Then nothing to create — this is what stops a false
+        // offer for a procedure-level routine `DO`ed from one of the class's methods.
+        const defined = candidates.some(scope => this.routineDefinedIn(structure, name, scope));
+        if (defined) return [];
 
         const eol = text.includes('\r\n') ? '\r\n' : '\n';
         const bodyIndent = doIndent.includes('\t') ? '\t' : '  ';
+        const build = (scope: Token, title: string): CodeAction =>
+            this.buildAction(document, lines, name, scope, eol, bodyIndent, title);
+
+        // One scope → the plain action. Two (local derived method) → let the user choose the scope.
+        if (candidates.length === 1) {
+            return [build(candidates[0], `Create routine '${name}'`)];
+        }
+        const [method, proc] = candidates;
+        return [
+            build(method, `Create routine '${name}' (local to this method)`),
+            build(proc, `Create routine '${name}' (procedure-level — shared by all methods)`),
+        ];
+    }
+
+    /**
+     * The chain of Procedure/Method scopes that can host a routine, innermost first. A Routine node
+     * cannot itself host a routine (routines don't nest), so we start from its owning scope. A Method
+     * node's parent chain climbs through its declaring procedure (Rule 4), yielding both scopes.
+     */
+    private candidateScopes(node: ScopeNode): Token[] {
+        const scopes: Token[] = [];
+        let n: ScopeNode | null = node.kind === ScopeKind.Routine ? node.parent : node;
+        while (n && (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method)) {
+            if (n.token) scopes.push(n.token);
+            n = n.parent;
+        }
+        return scopes;
+    }
+
+    /** True when a ROUTINE named `name` is declared directly inside the given procedure/method scope. */
+    private routineDefinedIn(structure: ReturnType<TokenCache['getStructure']>, name: string, scope: Token): boolean {
+        return structure.findRoutines(name).some(rt => {
+            const parent = TokenHelper.getParentScopeOfRoutine(structure, rt);
+            return parent?.line === scope.line &&
+                   parent?.value.toUpperCase() === scope.value.toUpperCase();
+        });
+    }
+
+    private buildAction(
+        document: TextDocument,
+        lines: string[],
+        name: string,
+        scope: Token,
+        eol: string,
+        bodyIndent: string,
+        title: string
+    ): CodeAction {
+        // Insert after the last non-blank line of the scope's span (finishesAt runs to the end of the
+        // procedure/method, past its existing routines). Trimming trailing blanks keeps the new
+        // routine snug against the previous content rather than after a run of empty lines.
+        const scopeEnd = scope.finishesAt ?? (lines.length - 1);
+        let anchor = Math.min(scopeEnd, lines.length - 1);
+        while (anchor > scope.line && lines[anchor].trim() === '') anchor--;
+
         const skeleton = buildRoutineSkeleton(name, bodyIndent, eol);
         const insertText = `${eol}${eol}${skeleton}`;
 
@@ -88,15 +136,15 @@ export class GenerateRoutineCodeActionProvider {
             }
         };
 
-        // After the edit, the body line is anchor + 3 (blank, ROUTINE header, body). Drop the cursor
+        // After the edit the body line is anchor + 3 (blank, ROUTINE header, body). Drop the cursor
         // at the end of the `! TODO` line so the user can start typing the routine.
         const bodyLine = anchor + 3;
         const bodyChar = bodyIndent.length + '! TODO'.length;
 
-        logger.info(`💡 Offering create-routine '${name}' in ${proc.value} → insert after line ${anchor}`);
+        logger.info(`💡 Offering "${title}" → insert after line ${anchor} (scope ${scope.value})`);
 
-        return [{
-            title: `Create routine '${name}'`,
+        return {
+            title,
             kind: CodeActionKind.QuickFix,
             isPreferred: true,
             edit,
@@ -105,6 +153,6 @@ export class GenerateRoutineCodeActionProvider {
                 command: 'clarion.placeCursor',
                 arguments: [document.uri, bodyLine, bodyChar]
             }
-        }];
+        };
     }
 }

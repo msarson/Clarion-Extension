@@ -144,3 +144,67 @@ suite('#280 GenerateRoutineCodeActionProvider', () => {
         assert.strictEqual(actionsFor(namespaced, 'file:///t280-ns.clw', 2).actions.length, 0);
     });
 });
+
+/**
+ * Local derived methods (ABC/NetTalk shape): `ThisWindow` is declared in Main's local data, so its
+ * methods share Main's scope (Rule 4) — a routine at Main's level is visible to every method. This
+ * is the case Mark flagged: a DO inside a method must be able to place the new routine either local
+ * to the method or at the procedure level, and must NOT offer to create one that already exists at
+ * the procedure level.
+ */
+suite('#280 GenerateRoutineCodeActionProvider — local derived methods', () => {
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+    });
+
+    // Main declares ThisWindow locally; TestEnrollment is a Main-level routine; TakeEvent is a
+    // local derived method whose body DOes both TestEnrollment (exists) and NewOne (missing).
+    const FIXTURE = [
+        'Main PROCEDURE',                            // 0
+        'ThisWindow CLASS(WindowManager)',           // 1
+        'TakeEvent   PROCEDURE(),BYTE,PROC,DERIVED', // 2
+        '            END',                            // 3
+        '  CODE',                                     // 4
+        '  GlobalResponse = ThisWindow.Run()',        // 5
+        'TestEnrollment ROUTINE',                     // 6
+        '  ! existing',                               // 7
+        'ThisWindow.TakeEvent PROCEDURE',             // 8
+        '  CODE',                                     // 9
+        '  DO TestEnrollment',                        // 10
+        '  DO NewOne'                                 // 11
+    ].join('\n');
+
+    test('offers TWO placements for a missing routine DOed inside a local derived method', () => {
+        const { actions } = actionsFor(FIXTURE, 'file:///t280-ld-2.clw', 11);
+        assert.strictEqual(actions.length, 2);
+        assert.deepStrictEqual(actions.map(a => a.title), [
+            "Create routine 'NewOne' (local to this method)",
+            "Create routine 'NewOne' (procedure-level — shared by all methods)"
+        ]);
+    });
+
+    test('procedure-level placement lands inside Main (before the method); method-level lands in the method', () => {
+        const { doc, actions } = actionsFor(FIXTURE, 'file:///t280-ld-place.clw', 11);
+        const methodResult = applyInsert(FIXTURE, actions[0].edit!.changes![doc.uri][0]);
+        const procResult = applyInsert(FIXTURE, actions[1].edit!.changes![doc.uri][0]);
+
+        // Procedure-level: new routine sits within Main, before the method implementation.
+        assert.ok(
+            procResult.indexOf('NewOne ROUTINE') < procResult.indexOf('ThisWindow.TakeEvent PROCEDURE'),
+            `procedure-level routine must precede the method impl; got:\n${procResult}`
+        );
+        // Method-level: new routine sits after the method body (after the DO NewOne line).
+        assert.ok(
+            methodResult.indexOf('NewOne ROUTINE') > methodResult.indexOf('DO NewOne'),
+            `method-level routine must follow the method body; got:\n${methodResult}`
+        );
+    });
+
+    test('does NOT offer to create a routine that already exists at the procedure level (resolution fix)', () => {
+        // DO TestEnrollment (line 10) inside TakeEvent — TestEnrollment is a Main-level routine,
+        // visible to the method. Previously this wrongly offered "create".
+        const { actions } = actionsFor(FIXTURE, 'file:///t280-ld-exists.clw', 10);
+        assert.strictEqual(actions.length, 0);
+    });
+});
