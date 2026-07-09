@@ -68,7 +68,38 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // re-queries every expanded project, and without dedup each re-query stacked another
     // server request behind a busy queue.
     private _inflightProjectFiles: Map<string, Promise<{ files: any[] } | null>> = new Map();
-    private static readonly PROJECT_FILES_TIMEOUT_MS = 15_000;
+    // 5s, not more: when the server doesn't answer (single-threaded LSP busy with the startup
+    // validator pass — see #295), the local cwproj fallback below takes over, so a long wait
+    // buys nothing.
+    private static readonly PROJECT_FILES_TIMEOUT_MS = 5_000;
+
+    /**
+     * #297: last-resort expansion path that makes the tree independent of server load — parse
+     * the project's own .cwproj (the same <Compile Include> entries the server reads) and build
+     * the file list locally. File nodes only need name+relativePath; clicking resolves the full
+     * path lazily (fix 13), so no redirection logic is needed here.
+     */
+    private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
+        try {
+            const projectPath = projectData?.path ?? projectData?.projectPath;
+            const filename = projectData?.filename;
+            if (!projectPath || !filename) return null;
+            const cwprojPath = path.join(String(projectPath), String(filename));
+            if (!fs.existsSync(cwprojPath)) return null;
+            const content = fs.readFileSync(cwprojPath, 'utf-8');
+            const files: { name: string; relativePath: string }[] = [];
+            const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
+            let m: RegExpExecArray | null;
+            while ((m = compileRe.exec(content)) !== null) {
+                files.push({ name: path.basename(m[1]), relativePath: m[1] });
+            }
+            treePerf.perf("Tree expand: local cwproj fallback", { project: label, files: files.length });
+            return files.length > 0 ? { files } : null;
+        } catch (error) {
+            logger.error(`❌ Local cwproj parse failed for ${label}: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }
 
     /**
      * #297 fix 11: fetch a project's file list with an entry breadcrumb (so an expand that
@@ -546,9 +577,13 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 const { projectId } = projectData;
 
                 {
-                    const response = await this.fetchProjectFiles(String(projectId), String(element.label));
+                    let response = await this.fetchProjectFiles(String(projectId), String(element.label));
                     if (response === null) {
-                        // Timed out or errored — surface a retry node instead of an eternal spinner
+                        // Server busy/timed out — build the list from the cwproj directly
+                        response = this.parseProjectFilesLocally(projectData, String(element.label));
+                    }
+                    if (response === null) {
+                        // Both paths failed — surface a retry node instead of an eternal spinner
                         return [this.makeProjectLoadErrorNode(element)];
                     }
 
@@ -620,7 +655,10 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 const projectData = element.data as any;
 
                 {
-                    const response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
+                    let response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
+                    if (response === null) {
+                        response = this.parseProjectFilesLocally(projectData, String(element.label));
+                    }
                     if (response === null) {
                         return [this.makeProjectLoadErrorNode(element)];
                     }

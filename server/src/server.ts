@@ -1,7 +1,8 @@
 import {
     createConnection,
     TextDocuments,
-    ProposedFeatures
+    ProposedFeatures,
+    Diagnostic
 } from 'vscode-languageserver/node';
 
 // Add global error handlers to prevent crashes
@@ -753,15 +754,35 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             });
             return result;
         };
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
-            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)),
-            timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
-            timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
-            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),
-            timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
-            timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
-            timeIt('ifaceImpl', DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)),
-        ]);
+        // #297: thunks, not eagerly-started promises — the batch startup pass must be able to
+        // run these one at a time. Seven concurrent validator chains awaiting mostly-cached
+        // (already-resolved) promises advance on the MICROTASK queue, so the event loop never
+        // reaches its poll phase to read incoming LSP messages while any chain has work — a
+        // cooperative yield inside one validator doesn't help while the other six keep the
+        // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
+        // even with time-sliced loops. Sequential execution restores the yields' effect; total
+        // work is unchanged (single thread — the concurrency never bought parallelism).
+        const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
+            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
+            ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
+            ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
+            ['missingMapDecl', () => DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)],
+            ['missingImpl', () => DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)],
+            ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
+            ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
+        ];
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
+            caller === 'sdiReady'
+                ? await (async () => {
+                    const results: Diagnostic[][] = [];
+                    for (const [name, thunk] of validatorThunks) {
+                        results.push(await timeIt(name, thunk()));
+                        // Real macrotask yield between validators — lets queued requests in
+                        await new Promise<void>(resolve => setImmediate(resolve));
+                    }
+                    return results;
+                })()
+                : await Promise.all(validatorThunks.map(([name, thunk]) => timeIt(name, thunk())));
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
