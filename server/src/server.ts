@@ -1862,12 +1862,10 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
                 // #289: the async cross-file validators were deferred until this point (several
                 // block on the index internally — running them earlier parked them behind the
-                // build). Index ready → run the single full async pass; everything is warm, so
-                // it completes in a few seconds instead of tens.
+                // build). Index ready → user edits validate normally from here on.
                 sdiPipelineReady = true;
                 deferredAsyncDocs.clear();
                 lastValidatedVersions.clear();
-                const revalidations = documents.all().map(doc => validateTextDocument(doc, 'sdiReady'));
 
                 // #290/#294: the automatic CodeLens precompute is GONE. Even scoped to open
                 // documents, it ran a project-wide reference scan PER LENS (a large generated
@@ -1877,20 +1875,28 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // settings-toggle path can still trigger a manual warm. The real fix — off-thread
                 // or persisted reference indexing — is tracked in #294/#295.
 
-                // #297: the FRG build used to launch in its own setImmediate at solutionReady —
-                // concurrent with THIS block and with the client's interactive burst (tree
-                // fetch, documentSymbols, open-doc refresh). On Mark's VM the tree request sat
-                // 15s+ behind the FRG's ~25s of tokenization and hit the client-side timeout.
-                // Background work is now strictly sequenced: SDI → revalidation pass → settle
-                // delay (lets the client burst drain) → FRG.
-                await Promise.all(revalidations.map(p => p.catch(() => { /* validator errors are logged at source */ })));
+                // #297: background work is strictly sequenced, and the ORDER matters. VM run 3
+                // put the batch revalidation first (all docs Promise.all'd) and it pinned the
+                // loop for 35s+ — cross-file validators fall back to directory scans while the
+                // FRG doesn't exist yet, and a tree expand at +44s starved to its 15s timeout on
+                // an in-memory getProjectFiles. So: short settle (client's post-ready burst
+                // drains) → FRG build (yields every 10 files — interactive requests interleave)
+                // → revalidation ONE DOC AT A TIME, each pass benefiting from the built graph.
+                await new Promise<void>(resolve => setTimeout(resolve, 2000));
+                await buildFileRelationshipGraph();
+                const revalStart = Date.now();
+                let revalCount = 0;
+                for (const doc of documents.all()) {
+                    try {
+                        await validateTextDocument(doc, 'sdiReady');
+                    } catch { /* validator errors are logged at source */ }
+                    revalCount++;
+                }
                 perfLogger.perf("Phase: sdiReady revalidation pass complete", {
-                    ms: Date.now() - sdiStart,
-                    doc_count: revalidations.length,
+                    ms: Date.now() - revalStart,
+                    doc_count: revalCount,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
-                await new Promise<void>(resolve => setTimeout(resolve, 3000));
-                await buildFileRelationshipGraph();
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
