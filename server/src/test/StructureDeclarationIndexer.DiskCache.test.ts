@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { SolutionManager } from '../solution/solutionManager';
 import { serverSettings } from '../serverSettings';
 
 /**
@@ -66,6 +67,31 @@ suite('#290 SDI disk cache', () => {
         assert.strictEqual(indexer.lastBuildStats!.scanned, 1, 'changed file rescanned');
         assert.ok(rebuilt.byName.has('otherclass'), 'new declaration picked up');
         assert.ok(rebuilt.byName.has('myclass'), 'existing declaration retained');
+    });
+
+    test('#290: with a solution loaded, a non-project (dirname) key redirects to the existing index — no rogue scan', async () => {
+        const smSlot = SolutionManager as unknown as { instance: unknown };
+        const savedSm = smSlot.instance;
+        const savedRedFile = serverSettings.redirectionFile;
+        try {
+            serverSettings.redirectionFile = 'Clarion110.red';
+            smSlot.instance = { solution: { projects: [{ path: tmpDir }] } };
+
+            // Build the (sole) project index, then request an arbitrary directory key —
+            // must return the existing index instead of scanning that directory.
+            const projectIndex = await indexer.getOrBuildIndex(tmpDir);
+            indexer.lastBuildStats = null;
+            const otherDir = path.join(tmpDir, 'no-such-subdir');
+            const redirected = await indexer.getOrBuildIndex(otherDir);
+            assert.strictEqual(redirected, projectIndex, 'redirected to the existing project index');
+            assert.strictEqual(indexer.lastBuildStats, null, 'no new scan was launched');
+
+            // find() with the unknown key falls through to the cross-index search.
+            assert.ok(indexer.find('MyClass', otherDir).length > 0, 'find falls back across indexes');
+        } finally {
+            smSlot.instance = savedSm;
+            serverSettings.redirectionFile = savedRedFile;
+        }
     });
 
     test('a corrupt disk cache degrades to a full scan (no crash)', async () => {

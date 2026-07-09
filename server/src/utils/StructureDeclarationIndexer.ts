@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redirectionFileParserServer';
+import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
 
@@ -288,6 +289,25 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         if (this.pendingBuilds.has(key)) {
             return this.pendingBuilds.get(key)!;
         }
+
+        // #290: with a solution loaded, never spawn a NEW scan keyed on an arbitrary directory.
+        // Several callers fall back to `path.dirname(file)` for files that aren't project members
+        // (shared .inc directories, generated-source subdirs); those requests were launching full
+        // directory scans (17–60s measured) that raced the real per-project build and starved
+        // concurrent validators. Redirect them to an existing / in-flight / first-project index —
+        // its scan already covers the RED search paths + libsrc where such files live. Genuine
+        // no-solution mode (no SolutionManager) keeps the #184 last-resort dir-keyed build.
+        const sm = SolutionManager.getInstance();
+        if (sm && sm.solution.projects.length > 0) {
+            const isProjectKey = sm.solution.projects.some(p => this.normalizeKey(p.path) === key);
+            if (!isProjectKey) {
+                const existing = this.indexes.values().next();
+                if (!existing.done) return existing.value;
+                const pending = this.pendingBuilds.values().next();
+                if (!pending.done) return pending.value;
+                return this.getOrBuildIndex(sm.solution.projects[0].path);
+            }
+        }
         const buildPromise = this.buildIndex(key).then(index => {
             this.indexes.set(key, index);
             this.pendingBuilds.delete(key);
@@ -373,7 +393,14 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 await new Promise<void>(resolve => setImmediate(resolve));
             }
 
-            this.saveDiskCache(projectPath, freshEntries);
+            // Only rewrite the disk cache when something actually changed — a fully-warm build
+            // (everything reused) would otherwise re-stringify ~70k declarations for nothing.
+            const cacheDirty = scanned > 0
+                || !diskCache
+                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
+            if (cacheDirty) {
+                await this.saveDiskCache(projectPath, freshEntries);
+            }
 
             const duration = Date.now() - startTime;
             logger.debug(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
@@ -411,7 +438,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         }
     }
 
-    private saveDiskCache(projectPath: string, files: Record<string, SdiDiskCacheEntry>): void {
+    private async saveDiskCache(projectPath: string, files: Record<string, SdiDiskCacheEntry>): Promise<void> {
         try {
             const file = this.diskCachePath(projectPath);
             fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -420,7 +447,10 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 projectPath: this.normalizeKey(projectPath),
                 files
             };
-            fs.writeFileSync(file, JSON.stringify(payload));
+            // Async write — the payload can be tens of MB on a big installation; a sync write
+            // on top of the (already sync) stringify would block the loop. A failed save just
+            // means the next start scans cold.
+            await fs.promises.writeFile(file, JSON.stringify(payload));
         } catch (err) {
             logger.debug(`[SDI] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -430,7 +460,14 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[] {
         const key = name.toLowerCase();
         if (projectPath) {
-            return this.indexes.get(this.normalizeKey(projectPath))?.byName.get(key) ?? [];
+            const idx = this.indexes.get(this.normalizeKey(projectPath));
+            if (idx) {
+                return idx.byName.get(key) ?? [];
+            }
+            // #290: no index under this key (typically a caller's `path.dirname(file)` fallback
+            // for a non-member file — getOrBuildIndex no longer builds dir-keyed indexes when a
+            // solution is loaded). Fall through to the cross-index search instead of silently
+            // returning nothing.
         }
         for (const idx of this.indexes.values()) {
             const hit = idx.byName.get(key);

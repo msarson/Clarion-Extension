@@ -36,7 +36,18 @@ function resolveProjectPaths(document: TextDocument): {
 } {
     const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
     const sm = SolutionManager.getInstance();
-    const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+    // #290: a file that isn't a project member (e.g. a shared .inc under sharedcode/) must NOT key
+    // the structure index by its own DIRECTORY — getProjectPathForFile's dirname fallback made the
+    // skip-kick below launch a full scan of that directory (17-60s measured) racing the real
+    // per-project build and starving concurrent validators. With a solution loaded, anchor on the
+    // first project's prebuilt index instead (sdi.find(name, path) already falls back to a
+    // cross-index find when the per-project lookup misses, and the project index scan covers the
+    // RED search paths + libsrc where such shared files live). The dirname key remains only for
+    // genuine no-solution mode (#184's last resort).
+    const owningProject = sm?.findProjectForFile(fromPath);
+    const projectPath = owningProject?.path
+        ?? sm?.solution.projects[0]?.path
+        ?? path.dirname(fromPath);
     const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
     return { fromPath, projectPath, cwprojPath };
 }
