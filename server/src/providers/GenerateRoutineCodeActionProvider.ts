@@ -3,7 +3,6 @@ import {
 } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
 import { Token } from '../tokenizer/TokenTypes';
-import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import { TokenHelper } from '../utils/TokenHelper';
 import LoggerManager from '../logger';
 
@@ -58,10 +57,11 @@ export class GenerateRoutineCodeActionProvider {
 
         const structure = TokenCache.getInstance().getStructure(document);
 
-        // Collect the routine-holding scopes visible from the DO, innermost first. For a local
-        // derived method this is [method, declaringProcedure]; for a plain procedure it is [proc];
-        // a DO inside a routine climbs to that routine's owning procedure/method chain.
-        const candidates = this.candidateScopes(structure.getScopeResolver().resolveScopeAt(cursorLine));
+        // The routine-holding scopes visible from the DO, innermost first. For a local derived method
+        // this is [method, declaringProcedure]; for a plain procedure it is [proc]; a DO inside a
+        // routine climbs to that routine's owning procedure/method chain. Shared with the routine
+        // navigation resolver (#285) so generation and F12 agree on scope.
+        const candidates = TokenHelper.getRoutineHostingScopes(structure, cursorLine);
         if (candidates.length === 0) return []; // program/module scope — deferred
 
         // Already defined in ANY visible scope? Then nothing to create — this is what stops a false
@@ -83,21 +83,6 @@ export class GenerateRoutineCodeActionProvider {
             build(method, `Create routine '${name}' (local to this method)`),
             build(proc, `Create routine '${name}' (procedure-level — shared by all methods)`),
         ];
-    }
-
-    /**
-     * The chain of Procedure/Method scopes that can host a routine, innermost first. A Routine node
-     * cannot itself host a routine (routines don't nest), so we start from its owning scope. A Method
-     * node's parent chain climbs through its declaring procedure (Rule 4), yielding both scopes.
-     */
-    private candidateScopes(node: ScopeNode): Token[] {
-        const scopes: Token[] = [];
-        let n: ScopeNode | null = node.kind === ScopeKind.Routine ? node.parent : node;
-        while (n && (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method)) {
-            if (n.token) scopes.push(n.token);
-            n = n.parent;
-        }
-        return scopes;
     }
 
     /** True when a ROUTINE named `name` is declared directly inside the given procedure/method scope. */

@@ -3,6 +3,7 @@ import { Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { ScopeResolver } from '../scope/ScopeResolver';
+import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 
 /**
  * Shared utility for token and scope navigation
@@ -98,16 +99,41 @@ export class TokenHelper {
         routineName: string,
         cursorLine: number
     ): Token | undefined {
-        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, cursorLine);
-        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
-            return undefined;
+        // #285: search the routine-hosting scopes visible from the cursor, innermost first. A
+        // method-local routine shadows a procedure-level one; a LOCAL DERIVED method also sees the
+        // routines of its class's declaring procedure (Rule 4), so `DO ProcLevelRoutine` inside such
+        // a method resolves — previously only the immediate method scope was searched, so F12/Ctrl+F12
+        // returned nothing while hover fell through to a broader (unscoped) resolver and did resolve.
+        const scopes = TokenHelper.getRoutineHostingScopes(structure, cursorLine);
+        for (const scope of scopes) {
+            const match = structure.findRoutines(routineName).find(routineToken => {
+                const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+                return parentScope?.line === scope.line &&
+                       parentScope?.value.toUpperCase() === scope.value.toUpperCase();
+            });
+            if (match) return match;
         }
-        const matches = structure.findRoutines(routineName).filter(routineToken => {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
-            return parentScope?.line === enclosingProc.line &&
-                   parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
-        });
-        return matches[0];
+        return undefined;
+    }
+
+    /**
+     * The chain of PROCEDURE / METHOD scopes that can host a ROUTINE visible from `line`, innermost
+     * first. A ROUTINE cannot itself host a routine (routines don't nest), so a routine-body line
+     * starts from its owning scope. A local derived METHOD's visible chain climbs through its
+     * declaring procedure (Rule 4), so both the method and that procedure appear — which is what
+     * lets a procedure-level routine resolve from inside one of its class's methods. Empty at
+     * global/module scope. Shared by findScopedRoutineToken (#285) and the Create-routine quick
+     * fix (#280) so navigation and generation agree on which scopes hold a routine.
+     */
+    public static getRoutineHostingScopes(structure: DocumentStructure, line: number): Token[] {
+        const node = structure.getScopeResolver().resolveScopeAt(line);
+        const scopes: Token[] = [];
+        let n: ScopeNode | null = node.kind === ScopeKind.Routine ? node.parent : node;
+        while (n && (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method)) {
+            if (n.token) scopes.push(n.token);
+            n = n.parent;
+        }
+        return scopes;
     }
 
     /**
