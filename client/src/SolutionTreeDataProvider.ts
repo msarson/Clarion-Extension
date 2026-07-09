@@ -16,6 +16,9 @@ import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
+// #295 diagnosis: always-on timing for tree expansion — Mark reports node clicks "just spin";
+// this tells us whether the time goes in the server round-trip or client-side node building.
+const treePerf = LoggerManager.getLogger("SolutionTreePerf", "perf");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
@@ -476,10 +479,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 
                 try {
                     logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectId}`);
-                    
+
                     // Request project files from the server
+                    const reqStart = Date.now();
                     const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
                         projectGuid: projectId
+                    });
+                    treePerf.perf("Tree expand: getProjectFiles round-trip", {
+                        ms: Date.now() - reqStart,
+                        project: String(element.label),
+                        files: response?.files?.length ?? 0
                     });
                     
                     if (response && response.files) {

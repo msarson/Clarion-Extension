@@ -69,6 +69,37 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const logBaseDir = wsRoot ?? context.logUri.fsPath;
     LoggerManager.initFileSink(path.join(logBaseDir, '.clarion-debug', 'client.log'));
 
+    // #295 diagnosis: EXTENSION-HOST event-loop lag sampler (mirror of the server's). The tree
+    // view, structure view, and every provider run on the extension host — if THIS thread blocks,
+    // the UI spins no matter how healthy the language server is. A 100ms heartbeat's drift is the
+    // block length; max per 5s window, reported when >100ms, for the first 5 minutes.
+    {
+        const clientPerf = LoggerManager.getLogger("ClientPerf", "perf");
+        const samplerStart = Date.now();
+        let lastTick = Date.now();
+        let windowMaxLag = 0;
+        const heartbeat = setInterval(() => {
+            const now = Date.now();
+            const lag = now - lastTick - 100;
+            lastTick = now;
+            if (lag > windowMaxLag) windowMaxLag = lag;
+        }, 100);
+        const reporter = setInterval(() => {
+            if (windowMaxLag > 100) {
+                clientPerf.perf("ExtensionHost EventLoop lag", {
+                    max_blocked_ms: windowMaxLag,
+                    since_activation_ms: Date.now() - activationStartTime
+                });
+            }
+            windowMaxLag = 0;
+            if (Date.now() - samplerStart > 300_000) {
+                clearInterval(heartbeat);
+                clearInterval(reporter);
+            }
+        }, 5000);
+        context.subscriptions.push({ dispose: () => { clearInterval(heartbeat); clearInterval(reporter); } });
+    }
+
     // #148 — register the Actions-pane webview provider EARLY, before any
     // awaits in the activation flow. The view's `visibility: "visible"`
     // contribution in package.json triggers VS Code to start setting up the

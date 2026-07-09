@@ -26,7 +26,7 @@ logger.setLevel("error"); // Enable debug logging to troubleshoot follow cursor
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
-perfLogger.setLevel("error"); // Reduce perf logging noise
+perfLogger.setLevel("info"); // #295 diagnosis: structure-view timings visible in release
 
 // No thresholds needed - solution view priority is handled on the server side
 

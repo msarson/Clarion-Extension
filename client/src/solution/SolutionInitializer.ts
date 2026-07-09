@@ -24,7 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionInitializer");
-logger.setLevel("error");
+logger.setLevel("info"); // #295 diagnosis: startup sequence timings visible in release
 
 /**
  * Handles workspace trust and initial solution setup
