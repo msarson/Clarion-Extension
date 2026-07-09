@@ -165,18 +165,24 @@ export class SolutionManager {
                 return this.solution;
             }
             mark('cache-miss check', cacheStart);
-            
+
             // Use async file existence check
+            const accessStart = performance.now();
             try {
                 await fs.promises.access(this.solutionFilePath, fs.constants.F_OK);
             } catch {
                 logger.error(`❌ Solution file not found: ${this.solutionFilePath}`);
                 return new ClarionSolutionServer();
             }
+            // #297: ~5s of unattributed sync occupancy sits between the cache-miss mark and the
+            // first RED-parse outcome on Mark's VM — these marks bisect that window.
+            mark('sln access', accessStart);
 
             try {
                 // Use async file reading
+                const readStart = performance.now();
                 const content = await fs.promises.readFile(this.solutionFilePath, 'utf-8');
+                mark('sln read', readStart);
                 logger.info(`📂 Solution file content length: ${content.length} bytes`);
                 
                 // Count the number of project entries in the solution file
@@ -199,6 +205,7 @@ export class SolutionManager {
                 const projectPromises: Promise<void>[] = [];
                 const projectsToAdd: ClarionProjectServer[] = [];
 
+                const loopStart = performance.now();
                 while ((match = regex.exec(content)) !== null) {
                     try {
                         const [, projectType, projectName, projectPath, projectGuid] = match;
@@ -240,8 +247,12 @@ export class SolutionManager {
                     }
                 }
 
+                mark('project scan loop (constructors + promise starts)', loopStart);
+
                 // Wait for all projects to load in parallel
+                const loadAllStart = performance.now();
                 await Promise.all(projectPromises);
+                mark('all project loads', loadAllStart);
 
                 // #288: how much stat traffic the directory index absorbed this load.
                 const idx = DirectoryFileIndex.getInstance().stats();

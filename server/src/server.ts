@@ -2,7 +2,8 @@ import {
     createConnection,
     TextDocuments,
     ProposedFeatures,
-    Diagnostic
+    Diagnostic,
+    CancellationTokenSource
 } from 'vscode-languageserver/node';
 
 // Add global error handlers to prevent crashes
@@ -959,7 +960,14 @@ connection.onCodeLens((params) => {
 });
 
 // Handle CodeLens resolve — fill in title + command by counting references
-connection.onCodeLensResolve(async (lens) => {
+// #297 fix 8 (audit H1 #5): each cold resolve is a cross-file reference scan measured at
+// 0.5-2.8s — VS Code fires one resolve per visible lens, so a screenful of lenses on a big
+// generated module stacked seconds of scans onto the interactive queue. Each scan now runs
+// under a wall-clock budget linked to the client's own cancellation; on expiry the scan's
+// cooperative checkpoints abort it, the (possibly partial) result is shown WITHOUT being
+// cached, and a later resolve retries cold.
+const CODELENS_RESOLVE_BUDGET_MS = 500;
+connection.onCodeLensResolve(async (lens, clientToken) => {
     try {
         const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
         if (!data) return lens;
@@ -974,11 +982,36 @@ connection.onCodeLensResolve(async (lens) => {
         if (cached) {
             refs = cached.refs;
         } else {
-            refs = await referencesProvider.provideReferences(
-                document,
-                { line: data.line, character: data.character },
-                { includeDeclaration: true }
-            );
+            const budget = new CancellationTokenSource();
+            const budgetTimer = setTimeout(() => budget.cancel(), CODELENS_RESOLVE_BUDGET_MS);
+            const cancelLink = clientToken?.onCancellationRequested?.(() => budget.cancel());
+            try {
+                refs = await referencesProvider.provideReferences(
+                    document,
+                    { line: data.line, character: data.character },
+                    { includeDeclaration: true },
+                    budget.token
+                );
+            } finally {
+                clearTimeout(budgetTimer);
+                cancelLink?.dispose();
+            }
+            if (budget.token.isCancellationRequested) {
+                // Aborted (budget or client) — show the partial count, skip the cache so a
+                // later resolve gets a full retry.
+                const partial = refs ?? [];
+                perfLogger.perf("CodeLens resolve budget hit", {
+                    partial_refs: partial.length,
+                    budget_ms: CODELENS_RESOLVE_BUDGET_MS,
+                    uri: data.uri
+                });
+                lens.command = {
+                    title: `${partial.length}+ references`,
+                    command: 'clarion.showReferences',
+                    arguments: [data.uri, { line: data.line, character: data.character }, partial],
+                };
+                return lens;
+            }
             const resolved = refs ?? [];
             // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
             // name-based invalidation when an edit adds a new reference (#189 Phase 2).
@@ -1408,6 +1441,11 @@ const foldingCache = new Map<string, FoldingRange[]>();
 connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
+    // #297: while an announced solution is still loading, the FRG's no-solution guard falls
+    // through and builds a THROWAWAY degraded-mode graph for this document (measured 3.2s on
+    // the queue during the busiest window). Skip — the server sends
+    // clarion/refreshDocumentLinks at solutionReady, so links populate then.
+    if (solutionAnnounced && !SolutionManager.getInstance()?.solution) return [];
     return documentLinkProvider.provideDocumentLinks(document);
 });
 

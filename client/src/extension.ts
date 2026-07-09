@@ -293,7 +293,12 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    return await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
+    // #297 fix 12: assign the fresh manager back to the module variable — previously only
+    // returned, so every wrapper capturing `documentManager` (initializeSolution,
+    // closeClarionSolution, workspaceHasBeenTrusted) kept injecting the OLD, disposed instance
+    // after a solution reload, and the stale manager could never be collected.
+    documentManager = await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
+    return documentManager;
 }
 
 
