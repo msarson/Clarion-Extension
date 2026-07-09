@@ -448,12 +448,35 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+        // #296: time EVERY getChildren so tree busy/spin episodes are attributable — the
+        // provider's void-only fire() refreshes the whole tree, so VS Code re-queries every
+        // expanded node on every fire.
+        const gcStart = Date.now();
+        try {
+            return await this.getChildrenInner(element);
+        } finally {
+            const ms = Date.now() - gcStart;
+            if (ms > 50) {
+                treePerf.perf("Tree getChildren", { ms, element: String(element?.label ?? '(root)') });
+            }
+        }
+    }
+
+    private async getChildrenInner(element?: TreeNode): Promise<TreeNode[]> {
         // If we have a filter and this is a request for children of a specific element
         if (element) {
             logger.info(`🔍 Getting children for element: ${element.label}`);
-            
+
             // Check if this is a project node that needs to load its details
             if (element.data && (element.data as any).kind === 'project') {
+                // #296: return cached children — this branch previously re-fetched from the
+                // server on EVERY query, and since fire() is whole-tree, every refresh re-ran
+                // getProjectFiles for every expanded project and rebuilt all its nodes.
+                // Solution reloads rebuild the root with fresh TreeNode objects (empty
+                // children), so invalidation comes free via node replacement.
+                if (element.children && element.children.length > 0) {
+                    return element.children;
+                }
                 // This is a project node that needs to load its details from the server
                 const projectData = element.data as any;
                 
