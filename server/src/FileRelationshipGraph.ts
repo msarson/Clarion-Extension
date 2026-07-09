@@ -22,6 +22,9 @@ import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
+// #294/#295 diagnostics: always-on build progress — at real solution scale (3,016 files) the
+// build's true cost was invisible because it never completed within any captured window.
+const perfLogger = LoggerManager.getLogger("FileRelationshipGraph.Perf", "perf");
 logger.setLevel("error");
 
 /**
@@ -103,8 +106,13 @@ export class FileRelationshipGraph {
         const buildStart = Date.now();
         const visited = new Set<string>();
         const queue: string[] = projectFiles.map(f => this.normalizePath(f));
+        const totalSeeds = queue.length;
+        let processed = 0;
+        let nextProgressAt = 500;
 
-        const PARALLEL_BATCH = 20;
+        // #295: smaller batches — 20 concurrently-completing regex scans between yields produced
+        // multi-second event-loop blocks on large generated modules; 10 halves the worst chunk.
+        const PARALLEL_BATCH = 10;
 
         while (queue.length > 0) {
             // Dequeue up to PARALLEL_BATCH unvisited files
@@ -126,6 +134,15 @@ export class FileRelationshipGraph {
             // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
             // reverse-include lookups work for files directly referenced by project files.
             await Promise.all(batch.map(f => this.processFile(f)));
+            processed += batch.length;
+            if (processed >= nextProgressAt) {
+                nextProgressAt += 500;
+                perfLogger.perf("FRG build progress", {
+                    files_done: processed,
+                    total_seeds: totalSeeds,
+                    elapsed_ms: Date.now() - buildStart
+                });
+            }
 
             // Yield back to the event loop between batches
             await new Promise<void>(resolve => setImmediate(resolve));

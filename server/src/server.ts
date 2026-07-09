@@ -1799,16 +1799,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 lastValidatedVersions.clear();
                 const revalidations = documents.all().map(doc => validateTextDocument(doc, 'sdiReady'));
 
-                // #290: only AFTER the diagnostics land does the CodeLens precompute start —
-                // it's the heaviest background job (a reference scan per lens) and running it
-                // alongside the validators multiplied their wall time. Last in line; live-FAR
-                // fallback serves CodeLens counts meanwhile.
-                Promise.allSettled(revalidations).then(() => {
-                    if (!globalSolution) return;
-                    precomputeCodeLensReferenceCounts(globalSolution).catch(err =>
-                        logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
-                    );
-                });
+                // #290/#294: the automatic CodeLens precompute is GONE. Even scoped to open
+                // documents, it ran a project-wide reference scan PER LENS (a large generated
+                // module ≈ 178 lenses × ~178 files) — minutes of main-thread churn that made the
+                // IDE unresponsive right after load, for a pure optimization. Counts now resolve
+                // lazily per VISIBLE lens (user-proportional work) with per-symbol caching; the
+                // settings-toggle path can still trigger a manual warm. The real fix — off-thread
+                // or persisted reference indexing — is tracked in #294/#295.
+                void revalidations;
             });
             
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
