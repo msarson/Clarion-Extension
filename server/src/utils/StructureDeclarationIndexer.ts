@@ -355,6 +355,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         let fileCount = 0;
 
         try {
+            const redStart = Date.now();
             const redirectionParser = new RedirectionFileParserServer();
             const entries = await redirectionParser.parseRedFileAsync(projectPath);
             const searchPaths = this.extractSearchPaths(entries);
@@ -366,9 +367,11 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     }
                 }
             }
+            const redMs = Date.now() - redStart;
 
             logger.debug(`⏱️ [SDI] Starting scan of ${searchPaths.length} search paths for ${projectPath}`);
 
+            const dirScanStart = Date.now();
             const allFiles: string[] = [];
             for (const dir of searchPaths) {
                 if (fs.existsSync(dir)) {
@@ -379,14 +382,19 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
             }
             fileCount = allFiles.length;
+            const dirScanMs = Date.now() - dirScanStart;
 
             // #290: mtime-keyed disk cache — reuse prior scan results for unchanged files.
-            const diskCache = this.loadDiskCache(projectPath);
+            // #311: async load + per-phase attribution — the one aggregate number couldn't
+            // distinguish cache read (I/O), cache parse (CPU block), the stat/scan loop
+            // (yielding — its wall-clock absorbs interleaved interactive work), and save.
+            const { cache: diskCache, readMs: cacheReadMs, parseMs: cacheParseMs } = await this.loadDiskCache(projectPath);
             const freshEntries: Record<string, SdiDiskCacheEntry> = {};
 
             logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
 
             const BATCH_SIZE = 20;
+            const statLoopStart = Date.now();
             for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
                 const batch = allFiles.slice(i, i + BATCH_SIZE);
                 const batchResults = await Promise.all(batch.map(async f => {
@@ -416,20 +424,33 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 await new Promise<void>(resolve => setImmediate(resolve));
             }
 
+            const statLoopMs = Date.now() - statLoopStart;
+
             // Only rewrite the disk cache when something actually changed — a fully-warm build
             // (everything reused) would otherwise re-stringify ~70k declarations for nothing.
+            const saveStart = Date.now();
             const cacheDirty = scanned > 0
                 || !diskCache
                 || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
             if (cacheDirty) {
                 await this.saveDiskCache(projectPath, freshEntries);
             }
+            const saveMs = Date.now() - saveStart;
 
             const duration = Date.now() - startTime;
             logger.debug(`⏱️ [SDI] Built in ${duration}ms: ${total} declarations, ${byName.size} unique names`);
             this.lastBuildStats = { files: fileCount, scanned, reusedFromDisk, ms: duration };
+            // #311: phase attribution. stat_loop_ms yields between batches, so its
+            // wall-clock absorbs interleaved interactive work (contention, not cost);
+            // cache_parse_ms is the only unavoidable single block.
             perfLogger.perf("SDI buildIndex complete", {
                 ms: duration,
+                red_ms: redMs,
+                dir_scan_ms: dirScanMs,
+                cache_read_ms: cacheReadMs,
+                cache_parse_ms: cacheParseMs,
+                stat_loop_ms: statLoopMs,
+                save_ms: saveMs,
                 files: fileCount,
                 scanned,
                 reused_from_disk: reusedFromDisk,
@@ -450,14 +471,24 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return path.join(os.tmpdir(), 'clarion-extension-sdi', `sdi-${hash}.json`);
     }
 
-    private loadDiskCache(projectPath: string): SdiDiskCacheFile | null {
+    // #311: async read — the cache is tens of MB for a large installation and a SYNC
+    // read on a cold disk blocked the loop for seconds (the 354ms→6.5s buildIndex
+    // variance). The JSON.parse block remains (real CPU, reported separately).
+    private async loadDiskCache(projectPath: string): Promise<{ cache: SdiDiskCacheFile | null; readMs: number; parseMs: number }> {
+        const readStart = Date.now();
         try {
-            const raw = fs.readFileSync(this.diskCachePath(projectPath), 'utf8');
+            const raw = await fs.promises.readFile(this.diskCachePath(projectPath), 'utf8');
+            const parseStart = Date.now();
             const parsed = JSON.parse(raw) as SdiDiskCacheFile;
-            if (parsed?.version !== DISK_CACHE_VERSION || typeof parsed.files !== 'object') return null;
-            return parsed;
+            const parseMs = Date.now() - parseStart;
+            const readMs = parseStart - readStart;
+            if (parsed?.version !== DISK_CACHE_VERSION || typeof parsed.files !== 'object') {
+                return { cache: null, readMs, parseMs };
+            }
+            return { cache: parsed, readMs, parseMs };
         } catch {
-            return null; // missing / corrupt / stale-format → full scan
+            // missing / corrupt / stale-format → full scan
+            return { cache: null, readMs: Date.now() - readStart, parseMs: 0 };
         }
     }
 
