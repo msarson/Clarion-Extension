@@ -1316,11 +1316,22 @@ export class ReferencesProvider {
         const graph = FileRelationshipGraph.getInstance();
         if (graph.isBuilt) {
             // (1) MEMBER siblings: files sharing the same PROGRAM('main') parent.
+            // Include the PROGRAM file itself — its global CODE can hold callers.
             const programFile = graph.getProgramFile(docFsPath);
             if (programFile) {
+                files.add('file:///' + programFile);
                 for (const memberFsPath of graph.getMemberFiles(programFile)) {
                     files.add('file:///' + memberFsPath);
                 }
+            }
+            // (1b) #315: the cursor document may BE the program file (class
+            // declared global in the app CLW — the GPF Reporter shape). Its
+            // MEMBER files are the family; without this the widening came up
+            // empty and the fallback below scanned EVERY project in the
+            // solution (3,016 files on Mark's VM — "finding references" that
+            // never finished).
+            for (const memberFsPath of graph.getMemberFiles(docFsPath)) {
+                files.add('file:///' + memberFsPath);
             }
             // (2) Reverse-includes: anyone explicitly INCLUDEing the cursor's file.
             const visited = new Set<string>();
@@ -1602,63 +1613,77 @@ export class ReferencesProvider {
     }
 
     /**
-     * by scanning all provided file URIs for CLASS declarations with parent class attributes.
+     * Given a declaring class name, return the full set of classes that should be
+     * accepted when filtering SELF.Member references: the declaring class itself
+     * plus every class that directly or indirectly inherits from it
+     * (`ClassB CLASS(ClassA)` — `(` delimiter then a Variable naming the parent).
      *
-     * In Clarion: `ClassB CLASS(ClassA)` — the token after the CLASS structure token
-     * is a `(` delimiter, followed by a Variable token naming the parent class.
+     * #294 follow-up (110s block, symbol=ThisGPF._EncodeEmail): the original
+     * inheritance walk cold-tokenized EVERY candidate file with no awaits.
+     * #315 follow-up: even yielding, tokenizing thousands of candidates per lens
+     * click ran for minutes on Mark's VM. A subclass declaration must textually
+     * contain its parent's name, so the walk now expands a frontier: each round
+     * tokenizes only not-yet-scanned files that mention (per the reference
+     * index's word counts) at least one CURRENT family member, then closes over
+     * the collected child→parent pairs. Transitive chains land in later rounds
+     * (SubB CLASS(SubA) is picked up once SubA joins the family). When the index
+     * isn't built, mayContain answers true and every file scans — the pre-#315
+     * behavior. Yields between files and honors cancellation (returning the
+     * partial family — the caller's own checkpointed loop bails right after).
      */
-    // #294 follow-up (110s block, symbol=ThisGPF._EncodeEmail): this walk cold-tokenizes
-    // every candidate file with NO awaits — when the FRG isn't built yet the local-class
-    // fallback hands it ALL project files, and the 15s cancellation ceiling couldn't land
-    // for 110 seconds. Now async: yields between files and honors cancellation (returning
-    // the partial map — the caller's own checkpointed loop bails right after).
-    private async buildInheritanceMap(fileUris: string[], token?: CancellationToken): Promise<Map<string, string>> {
-        const map = new Map<string, string>();
+    private async buildClassFamily(declaringClass: string, fileUris: string[], token?: CancellationToken): Promise<Set<string>> {
+        const refIdx = ReferenceCountIndex.getInstance();
+        const family = new Set<string>([declaringClass.toLowerCase()]);
+        const pairs = new Map<string, string>(); // childLower → parentLower, accumulated
+        const scanned = new Set<string>();
         let yc = 0;
-        for (const uri of fileUris) {
-            if (await this.yieldIfNeeded(yc++, token)) return map;
-            const tokens = this.getTokensForUri(uri);
-            if (!tokens) continue;
-            for (let i = 0; i < tokens.length; i++) {
-                const t = tokens[i];
-                if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
-                    // Look for ( Variable ) immediately after CLASS on the same line
-                    const next = tokens[i + 1];
-                    const parent = tokens[i + 2];
-                    if (next && next.type === TokenType.Delimiter && next.value === '(' &&
-                        next.line === t.line &&
-                        parent && parent.type === TokenType.Variable &&
-                        parent.line === t.line) {
-                        map.set(t.label.toLowerCase(), parent.value.toLowerCase());
+
+        for (;;) {
+            let scannedThisRound = false;
+            for (const uri of fileUris) {
+                if (scanned.has(uri)) continue;
+                let mentionsFamily = false;
+                for (const name of family) {
+                    if (refIdx.mayContain(uri, name)) { mentionsFamily = true; break; }
+                }
+                if (!mentionsFamily) continue;
+                scanned.add(uri);
+                scannedThisRound = true;
+                if (await this.yieldIfNeeded(yc++, token)) return family;
+                const tokens = this.getTokensForUri(uri);
+                if (!tokens) continue;
+                for (let i = 0; i < tokens.length; i++) {
+                    const t = tokens[i];
+                    if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
+                        // Look for ( Variable ) immediately after CLASS on the same line
+                        const next = tokens[i + 1];
+                        const parent = tokens[i + 2];
+                        if (next && next.type === TokenType.Delimiter && next.value === '(' &&
+                            next.line === t.line &&
+                            parent && parent.type === TokenType.Variable &&
+                            parent.line === t.line) {
+                            pairs.set(t.label.toLowerCase(), parent.value.toLowerCase());
+                        }
                     }
                 }
             }
-        }
-        return map;
-    }
 
-    /**
-     * Given a declaring class name and an inheritance map, return the full set of classes
-     * that should be accepted when filtering SELF.Member references: the declaring class
-     * itself plus every class that directly or indirectly inherits from it.
-     */
-    private async buildClassFamily(declaringClass: string, fileUris: string[], token?: CancellationToken): Promise<Set<string>> {
-        const inheritanceMap = await this.buildInheritanceMap(fileUris, token);
-        const declaringLower = declaringClass.toLowerCase();
-
-        // family starts with the declaring class
-        const family = new Set<string>([declaringLower]);
-
-        // Collect all children/descendants (BFS)
-        let changed = true;
-        while (changed) {
-            changed = false;
-            for (const [child, parentLower] of inheritanceMap) {
-                if (family.has(parentLower) && !family.has(child)) {
-                    family.add(child);
-                    changed = true;
+            // Close over everything collected so far.
+            const sizeBefore = family.size;
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (const [child, parentLower] of pairs) {
+                    if (family.has(parentLower) && !family.has(child)) {
+                        family.add(child);
+                        changed = true;
+                    }
                 }
             }
+
+            // Done when nothing new was scanned, or scanning added no new names
+            // (no new names → next round's mayContain answers can't change).
+            if (!scannedThisRound || family.size === sizeBefore) break;
         }
 
         if (family.size > 1) {

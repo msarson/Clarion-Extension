@@ -305,6 +305,169 @@ suite('ReferencesProvider #315 — inline class-instance receivers (ThisGPF shap
     });
 });
 
+suite('ReferencesProvider #315 — program-file cursor must not scan the whole solution', () => {
+
+    // Mark's VM: clicking the lens "just shows finding all references and never
+    // stops". getLocalClassSearchFiles only widened MEMBER→PROGRAM: when the
+    // cursor document IS the program file (ThisGPF global in the app CLW),
+    // getProgramFile returns nothing, so it fell through to "scan every project
+    // in the solution" — 3,016 files cold-tokenized through the class-family
+    // walk. The program's own MEMBER files ARE its family.
+
+    const N = 25;
+    let dir: string;
+    let fixture: MultiFileFixture;
+    let scannedFiles: string[];
+    let origScan: (...args: unknown[]) => unknown;
+
+    setup(() => {
+        setServerInitialized(true);
+        const filesMap: { [rel: string]: string } = {
+            'ap1.clw': [
+                '  PROGRAM',
+                '  MAP',
+                '  END',
+                'ThisGPF              Class(GPFReporterClass)',
+                'Initialize             PROCEDURE () ,VIRTUAL',
+                '                     End',
+                '  CODE',
+                '  ThisGPF.Initialize()',
+                'ThisGPF.Initialize PROCEDURE()',           // line 8 — lens
+                '  CODE',
+                '  RETURN',
+            ].join('\n'),
+            'memb1.clw': [
+                "  MEMBER('ap1.clw')",
+                'SomeProc PROCEDURE',
+                '  CODE',
+                '  ThisGPF.Initialize()',
+            ].join('\n'),
+        };
+        // Unrelated files (another app's modules in the same solution). They
+        // mention Initialize — the word-prune alone won't skip them; only
+        // correct family scoping keeps them out of the search set.
+        for (let i = 0; i < N; i++) {
+            filesMap[`other${i}.clw`] = [
+                "  MEMBER('apX.clw')",
+                `OtherProc${i} PROCEDURE`,
+                '  CODE',
+                '  SomeObj.Initialize()',
+            ].join('\n');
+        }
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'refidx315prog_'));
+        for (const [rel, content] of Object.entries(filesMap)) {
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        fixture = buildMultiFileFixture({
+            files: filesMap,
+            projectRoot: dir,
+            frg: { programFile: 'ap1.clw', memberFiles: ['memb1.clw'] }
+        });
+
+        scannedFiles = [];
+        const proto = ReferencesProvider.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+        origScan = proto['findMemberReferencesInFile'];
+        proto['findMemberReferencesInFile'] = function (this: unknown, ...args: unknown[]) {
+            scannedFiles.push(String(args[0]));
+            return origScan.apply(this, args);
+        };
+    });
+
+    teardown(() => {
+        const proto = ReferencesProvider.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+        proto['findMemberReferencesInFile'] = origScan;
+        teardownMultiFileFixture();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('lens click on the PROGRAM file searches the app family, not other apps', async () => {
+        const provider = new ReferencesProvider();
+        const doc = fixture.documents['ap1.clw'];
+        const refs = await provider.provideReferences(doc, { line: 8, character: 8 }, { includeDeclaration: true });
+
+        assert.ok(refs && refs.length > 0, 'FAR must return references');
+        assert.ok(refs!.some(r => r.uri.toLowerCase().endsWith('memb1.clw')),
+            'member-module call site found (family widening works)');
+
+        const otherScans = scannedFiles.filter(u => /other\d+\.clw$/i.test(u));
+        assert.strictEqual(otherScans.length, 0,
+            `unrelated apps' files must not be searched (scanned ${otherScans.length}/${N})`);
+    });
+});
+
+suite('ReferencesProvider #315 — class-family walk stays transitive under the word-prune', () => {
+
+    // Guard for the frontier-pruned family walk: SubB inherits SubA inherits
+    // ThisGPF, and SubB's file never mentions "ThisGPF" — a naive one-round
+    // prune by the root name would miss it. The walk must expand by rounds
+    // (files mentioning ANY current family member).
+
+    let dir: string;
+    let fixture: MultiFileFixture;
+
+    setup(async () => {
+        setServerInitialized(true);
+        const filesMap: { [rel: string]: string } = {
+            'a.clw': [
+                '  PROGRAM',
+                '  MAP',
+                '  END',
+                'ThisGPF              Class(GPFReporterClass)',
+                'Initialize             PROCEDURE () ,VIRTUAL',
+                '                     End',
+                '  CODE',
+                'ThisGPF.Initialize PROCEDURE()',            // line 7 — lens
+                '  CODE',
+                '  RETURN',
+            ].join('\n'),
+            'b.clw': [
+                "  MEMBER('a.clw')",
+                'SubA                 Class(ThisGPF)',
+                '                     End',
+            ].join('\n'),
+            'c.clw': [
+                "  MEMBER('a.clw')",
+                'SubB                 Class(SubA)',          // mentions SubA, never ThisGPF
+                'Extra                  PROCEDURE ()',
+                '                     End',
+                'SubB.Extra PROCEDURE()',
+                '  CODE',
+                '  SELF.Initialize()',                       // line 6 — family reference
+            ].join('\n'),
+        };
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'refidx315fam_'));
+        for (const [rel, content] of Object.entries(filesMap)) {
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        fixture = buildMultiFileFixture({
+            files: filesMap,
+            projectRoot: dir,
+            frg: { programFile: 'a.clw', memberFiles: ['b.clw', 'c.clw'] }
+        });
+        // Index BUILT — the prune is live; transitivity must survive it.
+        const idx = ReferenceCountIndex.getInstance();
+        idx.reset();
+        await idx.buildInBackground(Object.keys(filesMap).map(r => path.join(dir, r)));
+    });
+
+    teardown(() => {
+        ReferenceCountIndex.getInstance().reset();
+        teardownMultiFileFixture();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('SELF.Initialize inside a grandchild subclass method is still found', async () => {
+        const provider = new ReferencesProvider();
+        const doc = fixture.documents['a.clw'];
+        const refs = await provider.provideReferences(doc, { line: 7, character: 8 }, { includeDeclaration: true });
+
+        assert.ok(refs, 'FAR must return references');
+        const inC = refs!.filter(r => r.uri.toLowerCase().endsWith('c.clw')).map(r => r.range.start.line);
+        assert.ok(inC.includes(6),
+            `grandchild's SELF.Initialize (c.clw line 6) must be found; got c.clw lines=[${inC.join(',')}]`);
+    });
+});
+
 suite('ReferencesProvider #315 — member FAR prunes indexed no-hit files', () => {
 
     const N = 40;
