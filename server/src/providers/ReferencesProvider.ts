@@ -30,6 +30,11 @@ import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
+// #315 — FAR pipeline trace. Every provideReferences invocation emits ONE
+// "FAR trace" perf line (route taken, scope decisions, FRG answers, candidate
+// counts, prune stats, per-phase ms) so slow/wrong-scope reports from real
+// solutions are diagnosable from the user's log instead of fixture guesswork.
+const perfLogger = LoggerManager.getLogger("ReferencesProvider.Perf", "perf");
 
 /**
  * Canonical dedup key for a reference location (#196 follow-up).
@@ -155,10 +160,39 @@ export class ReferencesProvider {
         token?: CancellationToken,
         opts?: { includeOmitted?: boolean }
     ): Promise<Location[] | null> {
-        const locations = await this.provideReferencesUnfiltered(document, position, context, token);
-        if (!locations || opts?.includeOmitted) return locations;
-        const filtered = this.filterOmittedLocations(locations, document);
-        return filtered.length > 0 ? filtered : null;
+        const traceStart = Date.now();
+        this.farTrace = {
+            uri: path.basename(decodeURIComponent(document.uri)),
+            line: position.line,
+            character: position.character,
+        };
+        let resultCount = -1; // -1 = null result
+        try {
+            const locations = await this.provideReferencesUnfiltered(document, position, context, token);
+            if (!locations || opts?.includeOmitted) {
+                resultCount = locations?.length ?? -1;
+                return locations;
+            }
+            const filtered = this.filterOmittedLocations(locations, document);
+            const result = filtered.length > 0 ? filtered : null;
+            resultCount = result?.length ?? -1;
+            return result;
+        } finally {
+            perfLogger.perf("FAR trace", {
+                ...this.farTrace,
+                total_ms: Date.now() - traceStart,
+                results: resultCount,
+                cancelled: String(token?.isCancellationRequested ?? false),
+            });
+            this.farTrace = null;
+        }
+    }
+
+    /** #315 — per-invocation FAR trace fields, merged by pipeline stages. */
+    private farTrace: Record<string, unknown> | null = null;
+
+    private trace(fields: Record<string, unknown>): void {
+        if (this.farTrace) Object.assign(this.farTrace, fields);
     }
 
     /**
@@ -305,6 +339,7 @@ export class ReferencesProvider {
 
         // Route to member-access path when word contains a dot
         if (word.includes('.')) {
+            this.trace({ route: 'member', word });
             return this.provideMemberReferences(word, document, position, context, undefined, undefined, token);
         }
 
@@ -327,6 +362,7 @@ export class ReferencesProvider {
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
             logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
+            this.trace({ route: 'class-body-member', word });
             return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token);
         }
 
@@ -354,6 +390,7 @@ export class ReferencesProvider {
                 }) : '';
                 if (!/MODULE\s*\(\s*['"]/i.test(classLine)) {
                     logger.test(`🏛️ [FAR] Route: MethodImpl of local class "${implClassName}" → restricting to current file`);
+                    this.trace({ route: 'method-impl-local', word });
                     return this.provideMemberReferences(`SELF.${word}`, document, position, context, undefined, implClassName, token);
                 }
             }
@@ -392,17 +429,22 @@ export class ReferencesProvider {
         // ── Route D: CLASS TYPE name — always global, never scope-limited ──
         // Must run before findSymbol to prevent parameter/local scope limiting.
         const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration, token);
-        if (classTypeRef !== null) return classTypeRef;
+        if (classTypeRef !== null) {
+            this.trace({ route: 'class-type', word });
+            return classTypeRef;
+        }
 
         // Plain symbol path
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
+            this.trace({ route: 'procedure-hunt', word });
             return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token);
         }
 
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document);
+        this.trace({ route: 'plain-symbol', word, scope: symbolInfo.scope.type, files: filesToSearch.length });
 
         // Build OverloadFilter for procedure / method declarations to distinguish
         // overloads (fe254d6f). When the cursor is on an overloaded procedure decl,
@@ -911,6 +953,15 @@ export class ReferencesProvider {
             ? this.getLocalClassSearchFiles(document)
             : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
 
+        this.trace({
+            member: memberName,
+            before_dot: beforeDot,
+            class_name: className ?? '',
+            decl_file: declarationFile ? path.basename(decodeURIComponent(declarationFile)) : '',
+            module_attr: effectiveModuleFile ?? '',
+            is_local_class: String(isLocalClass),
+            files: filesToSearch.length,
+        });
         logger.info(`🔍 Searching ${filesToSearch.length} file(s) for ${className ?? '?'}.${memberName}`);
 
         // Build overload filter: capture both arity range AND cursor decl signature.
@@ -1038,9 +1089,11 @@ export class ReferencesProvider {
 
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
+        const familyStart = Date.now();
         const classFamily = className
             ? await this.buildClassFamily(className, filesToSearch, token)
             : undefined;
+        this.trace({ family_size: classFamily?.size ?? 0, family_ms: Date.now() - familyStart });
 
         // Phase B+ Tier 6 — load global scope from PROGRAM file via FRG so the
         // matching loop can resolve receivers declared at PROGRAM level. Loaded
@@ -1082,13 +1135,18 @@ export class ReferencesProvider {
         // with zero occurrences of the member's name cannot contain a reference,
         // so skip it before any disk read / tokenize (unknown files never prune).
         const refIdx = ReferenceCountIndex.getInstance();
+        const scanStart = Date.now();
+        let scanCount = 0;
+        let prunedCount = 0;
         let ycMember = 0;
         for (const fileUri of filesToSearchDeduped) {
             if (await this.yieldIfNeeded(ycMember++, token)) return null;
-            if (!refIdx.mayContain(fileUri, memberName)) continue;
+            if (!refIdx.mayContain(fileUri, memberName)) { prunedCount++; continue; }
+            scanCount++;
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
+        this.trace({ scan_files: scanCount, scan_pruned: prunedCount, scan_ms: Date.now() - scanStart, index_built: String(refIdx.isBuilt) });
 
         // Optionally strip the declaration itself
         if (!context.includeDeclaration && declarationFile && declarationLine >= 0) {
@@ -1314,6 +1372,11 @@ export class ReferencesProvider {
         const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
 
         const graph = FileRelationshipGraph.getInstance();
+        this.trace({
+            frg_built: String(graph.isBuilt),
+            frg_program_of_doc: graph.isBuilt ? path.basename(graph.getProgramFile(docFsPath) ?? '') : '',
+            frg_member_edges_of_doc: graph.isBuilt ? graph.getMemberFiles(docFsPath).length : -1,
+        });
         if (graph.isBuilt) {
             // (1) MEMBER siblings: files sharing the same PROGRAM('main') parent.
             // Include the PROGRAM file itself — its global CODE can hold callers.
@@ -1348,6 +1411,7 @@ export class ReferencesProvider {
             }
             if (files.size > 1) {
                 logger.info(`[FRG] getLocalClassSearchFiles: widened to ${files.size} file(s) via MEMBER siblings + reverse includes`);
+                this.trace({ files_source: 'frg-family' });
                 return Array.from(files);
             }
             // FRG built but yielded nothing useful — fall through to project scan.
@@ -1368,6 +1432,7 @@ export class ReferencesProvider {
         }
 
         const result = Array.from(files);
+        this.trace({ files_source: 'project-fallback' });
         logger.info(`📂 [local-class] search files: ${result.length}`);
         return result;
     }
@@ -1686,6 +1751,7 @@ export class ReferencesProvider {
             if (!scannedThisRound || family.size === sizeBefore) break;
         }
 
+        this.trace({ family_files_scanned: scanned.size, family_files_pruned: fileUris.length - scanned.size });
         if (family.size > 1) {
             logger.info(`🧬 Class family for "${declaringClass}": [${Array.from(family).join(', ')}]`);
         }
