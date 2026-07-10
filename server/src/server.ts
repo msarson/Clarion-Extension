@@ -2068,6 +2068,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 perfLogger.perf("Phase: FRG file-relationship-graph build complete (background)", {
                     ms: Date.now() - frgStart,
                     file_count: allFiles.length,
+                    scanned: graph.lastBuildStats?.scanned ?? -1,
+                    reused_from_disk: graph.lastBuildStats?.reusedFromDisk ?? -1,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
                 connection.sendNotification('clarion/graphStatus', {

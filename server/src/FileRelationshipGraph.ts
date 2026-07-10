@@ -13,6 +13,8 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as crypto from 'crypto';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
@@ -46,6 +48,22 @@ export interface FileEdge {
     containingClass?: string;       // for CLASS_MODULE edges: the class label declaring this implementation
 }
 
+// #307 — mtime-keyed disk persistence (mirrors the SDI's cache, #290). Bump when
+// FileEdge or the scanner semantics change.
+const DISK_CACHE_VERSION = 1;
+
+interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
+
+interface FrgDiskCacheFile {
+    version: number;
+    /** Resolution environment — cached edges embed redirection-RESOLVED paths, so a
+     *  changed .red / libsrc setup invalidates the whole cache, not per-file mtimes. */
+    signature: string;
+    files: Record<string, FrgDiskCacheEntry>;
+}
+
+export interface FrgBuildStats { files: number; scanned: number; reusedFromDisk: number; ms: number; }
+
 export class FileRelationshipGraph {
     private static instance: FileRelationshipGraph;
 
@@ -72,7 +90,10 @@ export class FileRelationshipGraph {
         return FileRelationshipGraph.instance;
     }
 
+    private _lastBuildStats: FrgBuildStats | undefined;
+
     public get isBuilt(): boolean { return this._built; }
+    public get lastBuildStats(): FrgBuildStats | undefined { return this._lastBuildStats; }
     public get isBuilding(): boolean { return this._building; }
     public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
     public get buildStartTime(): Date | undefined { return this._buildStartTime; }
@@ -110,6 +131,15 @@ export class FileRelationshipGraph {
         let processed = 0;
         let nextProgressAt = 500;
 
+        // #307 — mtime-keyed disk cache: unchanged files replay their stored edges
+        // (one stat each) instead of a read + regex scan. Measured 1.9-8.3s rebuilds
+        // per start on the same 3,016 unchanged files.
+        const signature = this.buildCacheSignature();
+        const diskCache = this.loadDiskCache(projectFiles, signature);
+        const freshEntries: Record<string, FrgDiskCacheEntry> = {};
+        let scanned = 0;
+        let reusedFromDisk = 0;
+
         // #295: smaller batches — 20 concurrently-completing regex scans between yields produced
         // multi-second event-loop blocks on large generated modules; 10 halves the worst chunk.
         const PARALLEL_BATCH = 10;
@@ -133,7 +163,10 @@ export class FileRelationshipGraph {
             // thousands of files and make startup unresponsive on large solutions.
             // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
             // reverse-include lookups work for files directly referenced by project files.
-            await Promise.all(batch.map(f => this.processFile(f)));
+            await Promise.all(batch.map(async f => {
+                const reused = await this.processFileWithCache(f, diskCache, freshEntries);
+                if (reused) reusedFromDisk++; else scanned++;
+            }));
             processed += batch.length;
             if (processed >= nextProgressAt) {
                 nextProgressAt += 500;
@@ -152,8 +185,105 @@ export class FileRelationshipGraph {
         this._buildEndTime = new Date();
         this._built = true;
         this._building = false;
+        this._lastBuildStats = { files: processed, scanned, reusedFromDisk, ms: this._buildDurationMs };
+        // Awaited but async I/O — doesn't block the loop; a failed save just means
+        // the next start scans cold.
+        await this.saveDiskCache(projectFiles, signature, freshEntries);
         const edgeCount = this.getAllEdges().length;
         logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
+    }
+
+    /**
+     * #307 — process one file via the disk cache when possible.
+     * Returns true when the file's edges were replayed from the cache.
+     * Open documents (live tokens) always take the scan path — their buffer may
+     * differ from disk, and their edges are NOT persisted (next start re-scans).
+     */
+    private async processFileWithCache(
+        filePath: string,
+        diskCache: FrgDiskCacheFile | null,
+        freshEntries: Record<string, FrgDiskCacheEntry>
+    ): Promise<boolean> {
+        const tokenCache = TokenCache.getInstance();
+        const hasLiveTokens = !!(
+            tokenCache.getTokensByUri(this.pathToUri(filePath))
+            ?? tokenCache.getTokensByUri('file:///' + filePath.replace(/\\/g, '/'))
+        );
+
+        let mtimeMs: number | undefined;
+        if (!hasLiveTokens) {
+            try { mtimeMs = (await fs.promises.stat(filePath)).mtimeMs; } catch { mtimeMs = undefined; }
+            const entry = diskCache?.files[filePath];
+            if (entry && mtimeMs !== undefined && entry.mtimeMs === mtimeMs) {
+                for (const edge of entry.edges) this.addEdge(edge);
+                freshEntries[filePath] = entry;
+                return true;
+            }
+        }
+
+        await this.processFile(filePath);
+        if (!hasLiveTokens && mtimeMs !== undefined) {
+            freshEntries[filePath] = { mtimeMs, edges: this.forwardEdges.get(filePath) ?? [] };
+        }
+        return false;
+    }
+
+    /**
+     * Resolution-environment signature. Cached edges embed redirection-RESOLVED
+     * paths, so anything that changes how filenames resolve invalidates the cache:
+     * the redirection file setting, its per-project mtimes, and the libsrc paths.
+     */
+    private buildCacheSignature(): string {
+        const parts: string[] = [String(DISK_CACHE_VERSION), serverSettings.redirectionFile ?? ''];
+        for (const p of [...(serverSettings.libsrcPaths ?? [])].map(x => this.normalizePath(x)).sort()) {
+            parts.push(p);
+        }
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution && serverSettings.redirectionFile) {
+            const redMtimes = new Set<string>();
+            for (const project of sm.solution.projects) {
+                try {
+                    const redPath = path.join(project.path, serverSettings.redirectionFile);
+                    redMtimes.add(`${this.normalizePath(redPath)}:${fs.statSync(redPath).mtimeMs}`);
+                } catch { /* project without a local red file — covered by the setting itself */ }
+            }
+            parts.push(...[...redMtimes].sort());
+        }
+        return parts.join('|');
+    }
+
+    /** Per-project-set cache location (OS temp dir — never pollutes the user's solution). */
+    private diskCachePath(projectFiles: string[]): string {
+        const key = projectFiles.map(f => this.normalizePath(f)).sort().join(';');
+        const hash = crypto.createHash('md5').update(key).digest('hex').slice(0, 16);
+        return path.join(os.tmpdir(), 'clarion-extension-frg', `frg-${hash}.json`);
+    }
+
+    private loadDiskCache(projectFiles: string[], signature: string): FrgDiskCacheFile | null {
+        try {
+            const raw = fs.readFileSync(this.diskCachePath(projectFiles), 'utf8');
+            const parsed = JSON.parse(raw) as FrgDiskCacheFile;
+            if (parsed?.version !== DISK_CACHE_VERSION || typeof parsed.files !== 'object') return null;
+            if (parsed.signature !== signature) return null; // resolution environment changed
+            return parsed;
+        } catch {
+            return null; // missing / corrupt / stale-format → full scan
+        }
+    }
+
+    private async saveDiskCache(
+        projectFiles: string[],
+        signature: string,
+        files: Record<string, FrgDiskCacheEntry>
+    ): Promise<void> {
+        try {
+            const file = this.diskCachePath(projectFiles);
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            const payload: FrgDiskCacheFile = { version: DISK_CACHE_VERSION, signature, files };
+            await fs.promises.writeFile(file, JSON.stringify(payload));
+        } catch (err) {
+            logger.debug(`[FRG] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     /**
