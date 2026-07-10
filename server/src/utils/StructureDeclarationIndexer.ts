@@ -393,7 +393,12 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
 
             logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
 
-            const BATCH_SIZE = 20;
+            // #311: 20 → 64. The attributed trace put the warm path's cost in the stat
+            // loop (4,104 stats / 205 batches / a setImmediate round-trip each ≈ 4.2s
+            // wall). Stats are tiny I/O ops — 64-wide keeps chunks small while cutting
+            // the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
+            // 64 concurrent reads is well within Node's comfort.
+            const BATCH_SIZE = 64;
             const statLoopStart = Date.now();
             for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
                 const batch = allFiles.slice(i, i + BATCH_SIZE);

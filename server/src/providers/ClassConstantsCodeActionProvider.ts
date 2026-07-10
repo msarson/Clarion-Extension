@@ -220,24 +220,43 @@ export class ClassConstantsCodeActionProvider {
     /**
      * Gets Code Actions for an INCLUDE statement
      */
+    /**
+     * #312 — memo for INCLUDE-line actions. VS Code fires a code-action request on
+     * every cursor move; resting on an INCLUDE line re-parsed the class file and
+     * re-checked the cwproj constants each time (~150-270ms measured). Same
+     * (uri, version, includeFile) → same actions. Static because server.ts
+     * constructs a fresh provider per request. Bounded LRU-ish.
+     */
+    private static includeActionsMemo = new Map<string, CodeAction[]>();
+
     private async getActionsForInclude(includeFile: string, document: TextDocument): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
-        
+
+        const memoKey = `${document.uri}|${document.version}|${includeFile.toLowerCase()}`;
+        const memoized = ClassConstantsCodeActionProvider.includeActionsMemo.get(memoKey);
+        if (memoized) return memoized;
+
         try {
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const sm = SolutionManager.getInstance();
             const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
             const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
-            
-            // Build or get index for this project
-            await this.sdi.getOrBuildIndex(projectPath);
-            
+
+            // #312: same guard as the word-at-cursor path below — awaiting getOrBuildIndex
+            // here COALESCED every cursor-rest on an INCLUDE line onto the in-flight startup
+            // build (seven stacked requests at 2.9-5.7s each on Mark's trace). While the
+            // index is still building, offer no INCLUDE actions; VS Code re-requests on the
+            // next cursor move and they appear once the index is ready.
+            if (!this.sdi.isIndexed(projectPath)) {
+                return actions;
+            }
+
             // Find all classes in this include file
             const allClasses = this.sdi.findInFile(includeFile, projectPath);
             
             if (allClasses.length === 0) {
                 logger.info(`No classes found in ${includeFile}`);
-                return actions;
+                return this.memoizeIncludeActions(memoKey, actions);
             }
             
             logger.info(`Found ${allClasses.length} classes in ${includeFile}`);
@@ -268,7 +287,7 @@ export class ClassConstantsCodeActionProvider {
             
             if (allMissingConstants.length === 0) {
                 logger.info(`No missing constants for classes in ${includeFile}`);
-                return actions;
+                return this.memoizeIncludeActions(memoKey, actions);
             }
             
             logger.info(`Found ${allMissingConstants.length} missing constants for ${includeFile}`);
@@ -296,11 +315,23 @@ export class ClassConstantsCodeActionProvider {
 
             actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for INCLUDE ${includeFile}`);
-            
+
         } catch (error) {
             logger.error(`Error getting actions for INCLUDE: ${error instanceof Error ? error.message : String(error)}`);
+            return actions; // errors are not memoized — retry on the next request
         }
-        
+
+        return this.memoizeIncludeActions(memoKey, actions);
+    }
+
+    /** #312 — bounded insert into the static INCLUDE-actions memo. */
+    private memoizeIncludeActions(key: string, actions: CodeAction[]): CodeAction[] {
+        const memo = ClassConstantsCodeActionProvider.includeActionsMemo;
+        if (memo.size >= 100) {
+            const oldest = memo.keys().next().value;
+            if (oldest !== undefined) memo.delete(oldest);
+        }
+        memo.set(key, actions);
         return actions;
     }
 
