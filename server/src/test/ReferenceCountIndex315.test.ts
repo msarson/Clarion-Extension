@@ -150,6 +150,26 @@ suite('ReferenceCountIndex #315 — qualifier-scoped counts + FAR pruning', () =
         const asUri = `file:///${files[0].replace(/\\/g, '/')}`;
         assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', asUri), 3);
     });
+
+    test('getCountInFiles: program-family sums for classes global in a PROGRAM CLW', async () => {
+        // Mark's actual shape: ThisGPF is declared at GLOBAL scope in the app's
+        // PROGRAM CLW — visible app-wide, so the estimate must cover the program
+        // file plus its MEMBER modules (file-only would miss member callers),
+        // while still excluding other applications.
+        const idx = ReferenceCountIndex.getInstance();
+        assert.strictEqual(idx.getCountInFiles('ThisGPF.Initialize', files), undefined, 'unbuilt → undefined');
+
+        await idx.buildInBackground(files);
+        assert.strictEqual(idx.getCountInFiles('ThisGPF.Initialize', [files[0], files[1]]), 5,
+            'program + member sum, other apps excluded');
+        assert.strictEqual(idx.getCountInFiles('ThisGPF.Initialize', [files[0], files[0], files[0]]), 3,
+            'duplicate paths count once');
+        const asUri = `file:///${files[1].replace(/\\/g, '/')}`;
+        assert.strictEqual(idx.getCountInFiles('ThisGPF.Initialize', [files[0], asUri]), 5,
+            'mixed path/URI forms normalize to the same keys');
+        assert.strictEqual(idx.getCountInFiles('ThisGPF.Initialize', [path.join(tmpDir, 'nope.clw')]), undefined,
+            'no known file in the list → undefined (caller falls back)');
+    });
 });
 
 suite('ClarionCodeLensProvider #315 — locally-declared classes emit file-scoped lenses', () => {

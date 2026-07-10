@@ -127,6 +127,33 @@ export class ReferenceCountIndex {
     }
 
     /**
+     * #315 follow-up — occurrence count of a symbol's last segment across a
+     * SET of files, deduplicated. Used for lenses on classes declared at
+     * global scope in a PROGRAM CLW: visible app-wide, so the estimate covers
+     * the program file + its MEMBER modules (per the file-relationship graph)
+     * while still excluding other applications. Returns undefined when
+     * unbuilt or when NONE of the listed files is indexed.
+     */
+    public getCountInFiles(symbolName: string, fsPathsOrUris: string[]): number | undefined {
+        if (!this._built) return undefined;
+        const short = symbolName.split('.').pop()?.toLowerCase() ?? '';
+        if (!short) return undefined;
+        let sum = 0;
+        let anyKnown = false;
+        const seen = new Set<string>();
+        for (const f of fsPathsOrUris) {
+            const p = this.toIndexPath(f);
+            if (seen.has(p)) continue;
+            seen.add(p);
+            const counts = this.perFile.get(p);
+            if (!counts) continue;
+            anyKnown = true;
+            sum += counts.get(short) ?? 0;
+        }
+        return anyKnown ? sum : undefined;
+    }
+
+    /**
      * #315 — safe-prune probe for FAR candidate files: false ONLY when the file
      * is indexed and provably contains zero occurrences of `name`. Unknown
      * files, stoplist names (never counted), and the unbuilt state answer true.

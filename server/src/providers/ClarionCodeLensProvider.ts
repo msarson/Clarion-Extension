@@ -21,9 +21,10 @@ export interface CodeLensData {
     character: number;
     symbolName: string;
     /**
-     * #315 — true when the lens symbol's class is declared in this same CLW
-     * (module/procedure-local class): references can only exist in this file,
-     * so the approximate count must be file-scoped, not solution-scoped.
+     * #315 — true when the lens symbol's class is declared in this same CLW.
+     * The class is then invisible to other applications, so resolve scopes the
+     * approximate count to this file — widened to the program's MEMBER family
+     * when this CLW is a PROGRAM file (global-scope classes are app-visible).
      */
     fileScoped?: boolean;
 }
@@ -55,11 +56,12 @@ export function formatApproximateReferenceCount(count: number): string {
 export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
     const lenses: CodeLens[] = [];
 
-    // #315 — classes DECLARED in this file. In a CLW that's a module/procedure-
-    // local class (invisible outside the file), so lenses on it and its method
-    // implementations get file-scoped approximate counts. INC-declared classes
-    // are shared through INCLUDE — their usages live in the includers, so INC
-    // lenses keep the solution-scoped estimate.
+    // #315 — classes DECLARED in this file. In a CLW the class belongs to this
+    // application only (module/procedure scope → this file; global scope in a
+    // PROGRAM file → this app's family, widened at resolve time), so lenses on
+    // it and its method implementations get scoped approximate counts.
+    // INC-declared classes are shared through INCLUDE — their usages live in
+    // the includers, so INC lenses keep the solution-scoped estimate.
     const isClw = /\.clw$/i.test(uri);
     const localClasses = new Set<string>();
     if (isClw) {

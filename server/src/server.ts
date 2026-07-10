@@ -1041,14 +1041,23 @@ connection.onCodeLensResolve(async (lens) => {
         if (!cached) {
             const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
             const refIndex = ReferenceCountIndex.getInstance();
-            // #315 follow-up: a lens on a class DECLARED in this CLW (module/
-            // procedure-local — e.g. CapeSoft GPF Reporter generates an identical
-            // ThisGPF into every app) counts in this file only; the class is
-            // invisible to other files, so any wider count aggregates unrelated
-            // same-named classes across applications.
+            // #315 follow-up: a lens on a class DECLARED in this CLW (e.g.
+            // CapeSoft GPF Reporter generates an identical ThisGPF into every
+            // app) never counts across applications. Scope by where the CLW
+            // sits: a PROGRAM file's global classes are visible app-wide, so
+            // count across the program + its MEMBER modules (the file graph
+            // knows the family); a MEMBER module's class is file-local.
             let idxCount: number | undefined;
             if (data.fileScoped) {
-                idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                const graph = FileRelationshipGraph.getInstance();
+                const fsPath = decodeURIComponent(data.uri.replace(/^file:\/\/\/?/i, ''));
+                const memberFiles = graph.isBuilt ? graph.getMemberFiles(fsPath) : [];
+                if (memberFiles.length) {
+                    idxCount = refIndex.getCountInFiles(data.symbolName ?? '', [fsPath, ...memberFiles]);
+                } else {
+                    idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                }
                 if (idxCount === undefined && refIndex.isBuilt) {
                     // File not indexed (e.g. outside the project list) — sync the
                     // live buffer we already have in hand, then answer from it.
