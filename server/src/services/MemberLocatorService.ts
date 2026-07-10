@@ -168,6 +168,20 @@ export class MemberLocatorService {
             if (visited.has(key)) break;
             visited.add(key);
 
+            // #310: LIKE aliases are variable-style labels, not structure declarations.
+            // When the type name has no LOCAL declaration and the SDI knows it as a
+            // concrete structure, it cannot be a reachable alias — skip the cross-file
+            // dereference walk. Measured 4.2s COLD for `udpt`'s class name: the walk
+            // loaded the generated MEMBER parent plus its entire include chain just to
+            // conclude "not an alias". A local declaration still takes the full check,
+            // so same-file aliases keep exact semantics.
+            const hasLocalDecl = tokens.some(t =>
+                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, key));
+            if (!hasLocalDecl) {
+                await this.ensureIndexBuilt();
+                if (this.sdi.find(current.typeName).length > 0) break;
+            }
+
             const aliasDecl = await this.findVariableTokenCrossFile(current.typeName, tokens, document, scopeLine);
             if (!aliasDecl) break;
 

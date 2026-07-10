@@ -149,6 +149,69 @@ suite('MemberLocatorService #310 — SDI-first class location for member enumera
             'the SDI-first tier must not blindly pick the first of several candidates');
     });
 
+    // ── #310 part 2: resolveTypeAlias's LIKE-dereference walk ────────────────
+    // resolveVariableType found `udpt UltimateDebugX` locally in ms, then spent
+    // 4.2s COLD walking the generated MEMBER parent + its whole include chain
+    // just to conclude the TYPE NAME is not a LIKE alias. If the SDI knows the
+    // name as a concrete structure (and no local declaration shadows it), the
+    // walk is pointless.
+    test('type-alias check: SDI-known class type skips the cross-file dereference walk', async () => {
+        // Parent with a deep include chain the OLD alias check would walk.
+        writeFixture('parent310.clw', [
+            '  PROGRAM',
+            "  INCLUDE('chain0.inc'),ONCE",
+            '  MAP',
+            '  END',
+        ]);
+        StructureDeclarationIndexer.prototype.find = ((name: string) =>
+            name.toLowerCase() === 'windowmgrx' ? [sdiEntry('WindowMgrX', basePath, 0)] : []
+        ) as typeof origSdiFind;
+
+        const doc = makeDoc('main310d.clw', [
+            "  MEMBER('parent310.clw')",
+            'Caller PROCEDURE',
+            'wm  WindowMgrX',
+            '  CODE',
+            '  wm.OpenIt()',
+        ]);
+        const svc = new MemberLocatorService();
+        const loads = spyLoads(svc);
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const result = await svc.resolveVariableType('wm', tokens, doc);
+
+        assert.ok(result, 'type must resolve');
+        assert.strictEqual(result!.typeName, 'WindowMgrX');
+        assert.strictEqual(result!.isClass, true);
+        assert.strictEqual(loads.count(), 0,
+            `SDI knows WindowMgrX is a structure — the alias check must not walk the MEMBER parent chain (loaded ${loads.count()} files)`);
+    });
+
+    test('type-alias check: cross-file LIKE alias still dereferences when SDI misses', async () => {
+        writeFixture('parentalias310.clw', [
+            '  PROGRAM',
+            '  MAP',
+            '  END',
+            'BaseQ  QUEUE,TYPE',
+            'Name     STRING(20)',
+            '       END',
+            'AliasQ LIKE(BaseQ)',
+        ]);
+        StructureDeclarationIndexer.prototype.find = (() => []) as typeof origSdiFind;
+
+        const doc = makeDoc('main310e.clw', [
+            "  MEMBER('parentalias310.clw')",
+            'Caller PROCEDURE',
+            'rq  &AliasQ',
+            '  CODE',
+        ]);
+        const svc = new MemberLocatorService();
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const result = await svc.resolveVariableType('rq', tokens, doc);
+
+        assert.ok(result, 'reference type must resolve');
+        assert.strictEqual(result!.typeName, 'BaseQ', 'cross-file LIKE alias must still dereference to the base type');
+    });
+
     test('SDI miss: include-chain fallback still resolves', async () => {
         StructureDeclarationIndexer.prototype.find = (() => []) as typeof origSdiFind;
 
