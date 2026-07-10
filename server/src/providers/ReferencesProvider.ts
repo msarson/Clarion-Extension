@@ -493,6 +493,7 @@ export class ReferencesProvider {
             );
         // #315: index pre-filter — skip files that provably lack the word.
         const refIdxPlain = ReferenceCountIndex.getInstance();
+        await refIdxPlain.verifyFilesFresh(filesToSearch);
         let ycPlain = 0;
         for (const fileUri of filesToSearch) {
             if (await this.yieldIfNeeded(ycPlain++, token)) return null;
@@ -1087,6 +1088,13 @@ export class ReferencesProvider {
             }
         }
 
+        // #315: one batched ASYNC freshness pass over all candidates up front —
+        // the family walk + scan loop then prune via TTL-verified counts with no
+        // per-file sync stat (measured 9.8s of serial statSync in one call).
+        const verifyStart = Date.now();
+        await ReferenceCountIndex.getInstance().verifyFilesFresh(filesToSearch);
+        this.trace({ verify_ms: Date.now() - verifyStart });
+
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const familyStart = Date.now();
@@ -1433,23 +1441,28 @@ export class ReferencesProvider {
             // FRG built but yielded nothing useful — fall through to project scan.
         }
 
-        // Graph not ready or returned no widening — fall back to scanning all project files.
-        // This is the path test 2's MultiFileFARFixture exercises (FRG not seeded).
+        // Graph not ready or returned no widening — fall back to project files.
+        // #315 (review finding): a LOCAL class is invisible outside its own
+        // program unit, so even the fallback must scope to the document's OWN
+        // project (the pattern getMemberSearchFiles already uses). The old
+        // all-projects union is what let template-generated same-named classes
+        // (ThisGPF in 40 apps) cross-match. All-projects remains only as the
+        // last resort when the owning project can't be determined.
         const solutionManager = SolutionManager.getInstance();
-        if (solutionManager?.solution?.projects?.length) {
-            for (const project of solutionManager.solution.projects) {
-                for (const sourceFile of project.sourceFiles) {
-                    const fullPath = path.isAbsolute(sourceFile.relativePath)
-                        ? sourceFile.relativePath
-                        : path.join(project.path, sourceFile.relativePath);
-                    files.add(`file:///${fullPath.replace(/\\/g, '/')}`);
-                }
+        const ownProject = solutionManager?.findProjectForFile?.(path.basename(docFsPath));
+        const projects = ownProject ? [ownProject] : (solutionManager?.solution?.projects ?? []);
+        for (const project of projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const fullPath = path.isAbsolute(sourceFile.relativePath)
+                    ? sourceFile.relativePath
+                    : path.join(project.path, sourceFile.relativePath);
+                files.add(`file:///${fullPath.replace(/\\/g, '/')}`);
             }
         }
 
         const result = Array.from(files);
-        this.trace({ files_source: 'project-fallback' });
-        logger.info(`📂 [local-class] search files: ${result.length}`);
+        this.trace({ files_source: ownProject ? 'own-project-fallback' : 'project-fallback' });
+        logger.info(`📂 [local-class] search files: ${result.length}${ownProject ? ` (project ${ownProject.name})` : ''}`);
         return result;
     }
 
@@ -1723,6 +1736,11 @@ export class ReferencesProvider {
             let scannedThisRound = false;
             for (const uri of fileUris) {
                 if (scanned.has(uri)) continue;
+                // #315 (review finding): yield BEFORE the mayContain probe — the
+                // prune branch previously never yielded, so the sweep over 2,963
+                // pruned candidates ran as ONE synchronous block (~10s, the
+                // max_blocked_ms=4796 family in Mark's log).
+                if (await this.yieldIfNeeded(yc++, token)) return family;
                 let mentionsFamily = false;
                 for (const name of family) {
                     if (refIdx.mayContain(uri, name)) { mentionsFamily = true; break; }
@@ -1730,7 +1748,6 @@ export class ReferencesProvider {
                 if (!mentionsFamily) continue;
                 scanned.add(uri);
                 scannedThisRound = true;
-                if (await this.yieldIfNeeded(yc++, token)) return family;
                 const tokens = this.getTokensForUri(uri);
                 if (!tokens) continue;
                 for (let i = 0; i < tokens.length; i++) {
@@ -3194,6 +3211,7 @@ export class ReferencesProvider {
         const locations: Location[] = [];
         // #315: index pre-filter — skip files that provably lack the word.
         const refIdx = ReferenceCountIndex.getInstance();
+        await refIdx.verifyFilesFresh(filesToSearch);
         let ycProc = 0;
         for (const fileUri of filesToSearch) {
             if (await this.yieldIfNeeded(ycProc++, token)) return null;

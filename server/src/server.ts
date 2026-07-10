@@ -2189,6 +2189,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     file_count: allFiles.length,
                     scanned: graph.lastBuildStats?.scanned ?? -1,
                     reused_from_disk: graph.lastBuildStats?.reusedFromDisk ?? -1,
+                    // #315: memberEdges=0 on a real solution = degraded resolution
+                    // environment — the direct signal for the poisoned-cache family
+                    // of failures (frg_member_edges_of_doc=0 in FAR traces).
+                    member_edges: graph.lastBuildStats?.memberEdges ?? -1,
+                    include_edges: graph.lastBuildStats?.includeEdges ?? -1,
+                    module_edges: graph.lastBuildStats?.moduleEdges ?? -1,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
                 connection.sendNotification('clarion/graphStatus', {

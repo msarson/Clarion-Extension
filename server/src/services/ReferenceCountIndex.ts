@@ -64,6 +64,16 @@ export class ReferenceCountIndex {
     private totals = new Map<string, number>();
     /** on-disk mtime each file's counts were scanned at — #315 stale-prune guard */
     private fileMtimes = new Map<string, number>();
+    /**
+     * when each file's mtime was last confirmed by the BATCHED pass
+     * (verifyFilesFresh) or a live-buffer update. The TTL only needs to span
+     * one FAR pass (verify runs at each search's start) — kept short so a
+     * regen right after a search is re-detected almost immediately. The sync
+     * stat path deliberately never writes here: memoizing it would let a
+     * regen inside the window be silently pruned (the #315 regen pins).
+     */
+    private verifiedAt = new Map<string, number>();
+    private static readonly VERIFY_TTL_MS = 5_000;
 
     private _built = false;
     private _building = false;
@@ -174,15 +184,56 @@ export class ReferenceCountIndex {
         // stale entry must not silently drop references from FAR results.
         const recorded = this.fileMtimes.get(filePath);
         if (recorded === undefined) return true;
+        // #315: a recent verification (verifyFilesFresh batch at FAR start, or a
+        // prior stat here) means no re-stat — the per-file SYNC stat cost 9.8s
+        // over 2,963 cold pruned files in ONE call on Mark's VM (~3.3ms/stat).
+        const verified = this.verifiedAt.get(filePath);
+        if (verified !== undefined && Date.now() - verified < ReferenceCountIndex.VERIFY_TTL_MS) return false;
         try {
             const mtimeMs = fs.statSync(filePath).mtimeMs;
             if (mtimeMs === recorded) return false;
             // Regenerated since the scan — self-heal the entry, answer fresh.
             this.setFileCounts(filePath, ReferenceCountIndex.scanContent(fs.readFileSync(filePath, 'utf8')));
             this.fileMtimes.set(filePath, mtimeMs);
+            this.verifiedAt.set(filePath, Date.now());
             return (this.perFile.get(filePath)?.get(nameLower) ?? 0) > 0;
         } catch {
             return true; // can't verify — never prune blind
+        }
+    }
+
+    /**
+     * #315 — batched ASYNC freshness pass over candidate files, called once at
+     * the start of a FAR search. Stats run 32-wide in parallel (~hundreds of ms
+     * cold for thousands of files vs ~10s of serial sync stats inside
+     * mayContain); regenerated files are re-scanned so subsequent mayContain
+     * answers are both fast (TTL-verified, no stat) and fresh.
+     */
+    public async verifyFilesFresh(fsPathsOrUris: string[]): Promise<void> {
+        if (!this._built) return;
+        const now = Date.now();
+        const paths = fsPathsOrUris
+            .map(f => this.toIndexPath(f))
+            .filter(p => this.perFile.has(p))
+            .filter(p => {
+                const v = this.verifiedAt.get(p);
+                return v === undefined || now - v >= ReferenceCountIndex.VERIFY_TTL_MS;
+            });
+        const BATCH = 32;
+        for (let i = 0; i < paths.length; i += BATCH) {
+            await Promise.all(paths.slice(i, i + BATCH).map(async p => {
+                try {
+                    const mtimeMs = (await fs.promises.stat(p)).mtimeMs;
+                    if (this.fileMtimes.get(p) !== mtimeMs) {
+                        const content = await fs.promises.readFile(p, 'utf8');
+                        this.setFileCounts(p, ReferenceCountIndex.scanContent(content));
+                        this.fileMtimes.set(p, mtimeMs);
+                    }
+                    this.verifiedAt.set(p, Date.now());
+                } catch {
+                    this.verifiedAt.delete(p); // unreadable — mayContain answers true
+                }
+            }));
         }
     }
 
@@ -252,7 +303,9 @@ export class ReferenceCountIndex {
     /** Re-scan one file's content (live buffer) and adjust totals incrementally. */
     public updateFile(fsPathOrUri: string, content: string): void {
         if (!this._built && !this._building) return; // nothing to keep in sync yet
-        this.setFileCounts(this.toIndexPath(fsPathOrUri), ReferenceCountIndex.scanContent(content));
+        const p = this.toIndexPath(fsPathOrUri);
+        this.setFileCounts(p, ReferenceCountIndex.scanContent(content));
+        this.verifiedAt.set(p, Date.now()); // live buffer is the authoritative content
     }
 
     /** Accepts a file:/// URI (incl. %3A drive-colon encodings) or an fs path. */
@@ -268,6 +321,7 @@ export class ReferenceCountIndex {
         this.perFile.clear();
         this.totals.clear();
         this.fileMtimes.clear();
+        this.verifiedAt.clear();
         this._built = false;
         this._building = false;
         this._lastBuildStats = undefined;

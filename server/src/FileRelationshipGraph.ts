@@ -50,7 +50,11 @@ export interface FileEdge {
 
 // #307 — mtime-keyed disk persistence (mirrors the SDI's cache, #290). Bump when
 // FileEdge or the scanner semantics change.
-const DISK_CACHE_VERSION = 1;
+// v2 (#315): purge caches written by pre-#297 self-starting builds — those ran
+// before the solution's redirection parsers were primed, so every MEMBER('x.clw')
+// resolution failed and the persisted edge lists were missing their MEMBER edges
+// (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
+const DISK_CACHE_VERSION = 2;
 
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
 
@@ -62,7 +66,11 @@ interface FrgDiskCacheFile {
     files: Record<string, FrgDiskCacheEntry>;
 }
 
-export interface FrgBuildStats { files: number; scanned: number; reusedFromDisk: number; ms: number; }
+export interface FrgBuildStats {
+    files: number; scanned: number; reusedFromDisk: number; ms: number;
+    /** #315 diagnostics — edge counts by type; a solution build with memberEdges=0 signals degraded resolution. */
+    memberEdges?: number; includeEdges?: number; moduleEdges?: number;
+}
 
 export class FileRelationshipGraph {
     private static instance: FileRelationshipGraph;
@@ -185,10 +193,36 @@ export class FileRelationshipGraph {
         this._buildEndTime = new Date();
         this._built = true;
         this._building = false;
-        this._lastBuildStats = { files: processed, scanned, reusedFromDisk, ms: this._buildDurationMs };
-        // Awaited but async I/O — doesn't block the loop; a failed save just means
-        // the next start scans cold.
-        await this.saveDiskCache(projectFiles, signature, freshEntries);
+
+        let memberEdges = 0;
+        let includeEdges = 0;
+        let moduleEdges = 0;
+        for (const edges of this.forwardEdges.values()) {
+            for (const e of edges) {
+                if (e.type === 'MEMBER') memberEdges++;
+                else if (e.type === 'INCLUDE') includeEdges++;
+                else if (e.type === 'MODULE' || e.type === 'CLASS_MODULE') moduleEdges++;
+            }
+        }
+        this._lastBuildStats = {
+            files: processed, scanned, reusedFromDisk, ms: this._buildDurationMs,
+            memberEdges, includeEdges, moduleEdges
+        };
+
+        // #315: a sizeable solution build that produced ZERO MEMBER edges means the
+        // resolution environment was degraded (redirection parsers not primed) —
+        // every MEMBER('x.clw') target failed to resolve. Persisting that would
+        // poison every warm start until the source files' mtimes change (the exact
+        // failure replayed on Mark's VM). Skip the save: next start re-scans (~2s).
+        const smAtSave = SolutionManager.getInstance();
+        const degraded = memberEdges === 0 && processed >= 50 && !!smAtSave?.solution?.projects?.length;
+        if (degraded) {
+            logger.warn(`[FRG] build produced 0 MEMBER edges across ${processed} files — NOT persisting (degraded resolution environment?)`);
+        } else {
+            // Awaited but async I/O — doesn't block the loop; a failed save just means
+            // the next start scans cold.
+            await this.saveDiskCache(projectFiles, signature, freshEntries);
+        }
         const edgeCount = this.getAllEdges().length;
         logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
     }
@@ -239,6 +273,11 @@ export class FileRelationshipGraph {
             parts.push(p);
         }
         const sm = SolutionManager.getInstance();
+        // #315: edge resolution quality depends on the solution's project set —
+        // a build with fewer/no projects loaded resolves MEMBER/INCLUDE targets
+        // differently (or not at all). Bake the shape in so a build under a
+        // degraded environment can never satisfy a healthy environment's load.
+        parts.push(`projects:${sm?.solution?.projects?.length ?? 0}`);
         if (sm?.solution && serverSettings.redirectionFile) {
             const redMtimes = new Set<string>();
             for (const project of sm.solution.projects) {
@@ -659,6 +698,13 @@ export class FileRelationshipGraph {
 
         let isProgramFile = false;
         let mapDepth = 0;
+        // #315: MEMBER must be the file's FIRST STATEMENT, but Clarion allows any
+        // number of comment/blank lines before it — template-generated modules
+        // put a banner there. A fixed "line 0 or 1" window silently dropped the
+        // MEMBER edge of every banner-prefixed generated module (Mark's VM: zero
+        // MEMBER edges for ap1.clw across 162 generated members). The window now
+        // stays open until the first non-blank, non-comment line.
+        let memberWindowOpen = true;
 
         for (let lineNum = 0; lineNum < lines.length; lineNum++) {
             const line = lines[lineNum];
@@ -670,8 +716,8 @@ export class FileRelationshipGraph {
             if (mapOpenRe.test(stripped)) mapDepth++;
             if (mapCloseRe.test(stripped) && mapDepth > 0) mapDepth--;
 
-            // MEMBER('file') — only valid on line 0 or 1
-            if (lineNum <= 1) {
+            if (memberWindowOpen && stripped.trim() !== '') {
+                memberWindowOpen = false; // first real statement — MEMBER or not
                 const m = memberRe.exec(stripped);
                 if (m) {
                     const resolved = this.resolveFile(m[1], filePath);
@@ -903,6 +949,17 @@ export class FileRelationshipGraph {
 
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
+            // #315 (review finding): try the FROM file's own project first — the
+            // solution-order walk below can resolve an ambiguous basename (each
+            // app has generated modules with common names) through the WRONG
+            // project's redirection, mis-targeting the edge.
+            const owner = solutionManager.findProjectForFile?.(path.basename(_fromFile));
+            if (owner) {
+                const ownResolved = owner.getRedirectionParser().findFile(filename);
+                if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
+                    return ownResolved.path;
+                }
+            }
             for (const project of solutionManager.solution.projects) {
                 const resolved = project.getRedirectionParser().findFile(filename);
                 if (resolved?.path && fs.existsSync(resolved.path)) {
