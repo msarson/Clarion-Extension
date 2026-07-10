@@ -1643,18 +1643,29 @@ export class MemberLocatorService {
         const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
         if (distinctFiles.size === 1) {
             const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);
-            if (fromSdi.length > 0) return fromSdi;
+            if (fromSdi.length > 0) {
+                this.trace(`findAllMembersInClass "${className}" via SDI tier: ${infos[0].filePath}`);
+                return fromSdi;
+            }
+        } else if (distinctFiles.size > 1) {
+            // #310 follow-up: the ambiguity guard punts to the (expensive) chain walk —
+            // make that decision visible so real traces show WHICH classes bounce.
+            this.trace(`findAllMembersInClass "${className}" SDI ambiguous (${distinctFiles.size} files: ${[...distinctFiles].join('; ')}) — falling to chain walk`);
         }
 
         // 3. INCLUDE chain (scoped resolution — also the ambiguity tie-breaker)
         const fromInclude = await this.findAllMembersInIncludeChain(
             className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
         );
-        if (fromInclude.length > 0) return fromInclude;
+        if (fromInclude.length > 0) {
+            this.trace(`findAllMembersInClass "${className}" via include-chain walk: ${fromInclude[0].file}`);
+            return fromInclude;
+        }
 
         // 4. SDI last-resort: ambiguous entries where the chain walk found nothing —
         // pre-#310 behavior (first non-TYPE entry wins).
         if (infos.length > 0) {
+            this.trace(`findAllMembersInClass "${className}" via SDI last-resort (ambiguous, chain missed)`);
             return this.enumerateMembersFromSdiInfo(infos, className);
         }
 

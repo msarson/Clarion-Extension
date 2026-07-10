@@ -775,7 +775,14 @@ export async function validateDiscardedReturnValues(
         if (!promise) {
             promise = (async () => {
                 try {
+                    const enumStart = Date.now();
                     const items = await memberLocator.enumerateMembersInClass(className, document, className);
+                    const enumMs = Date.now() - enumStart;
+                    if (enumMs >= 250) {
+                        perfLogger.perf("RVD slow class enumeration", {
+                            class: className, ms: enumMs, members: items?.length ?? 0
+                        });
+                    }
                     if (!items || items.length === 0) return null;
                     const byName = new Map<string, OverloadCandidate[]>();
                     for (const item of items) {
@@ -867,7 +874,17 @@ export async function validateDiscardedReturnValues(
         } else {
             let typePromise = typeMemo.get(objUpper);
             if (!typePromise) {
+                // #310 follow-up: name slow receiver-type resolutions — the 8.5s→6.6s
+                // shortfall means the cost split (type resolution vs enumeration vs
+                // guard-skipped SDI) is not what the aggregate line suggests.
+                const typeStart = Date.now();
                 typePromise = memberLocator.resolveVariableType(objectName, tokens, document);
+                typePromise.then(() => {
+                    const typeMs = Date.now() - typeStart;
+                    if (typeMs >= 250) {
+                        perfLogger.perf("RVD slow receiver-type resolution", { object: objectName, ms: typeMs });
+                    }
+                }).catch(() => { /* logged at source */ });
                 typeMemo.set(objUpper, typePromise);
             }
             const typeInfo = await typePromise;
