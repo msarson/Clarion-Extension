@@ -18,6 +18,7 @@ import { CancellationToken } from 'vscode-languageserver';
 import { ClassConstantsCodeActionProvider } from '../providers/ClassConstantsCodeActionProvider';
 import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { ClassConstantParser } from '../utils/ClassConstantParser';
+import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { setServerInitialized } from '../serverState';
 
 const token = {
@@ -91,6 +92,46 @@ suite('ClassConstantsCodeActionProvider #312 — INCLUDE-line hot path', () => {
         assert.deepStrictEqual(actions, [], 'no actions while the index is building');
         assert.strictEqual(getOrBuildCalls, 0,
             `cursor-rest on an INCLUDE line must NOT coalesce onto the in-flight index build (getOrBuildIndex called ${getOrBuildCalls}x)`);
+    });
+
+    // #312 part 2 — the word-at-cursor path (non-INCLUDE lines) ran its include-chain
+    // walk (isClassIncluded) per cursor move; pin that it memoizes too.
+    test('word path: repeated requests on the same word verify includes once', async () => {
+        StructureDeclarationIndexer.prototype.isIndexed = (() => true) as typeof origIsIndexed;
+        const origFind = StructureDeclarationIndexer.prototype.find;
+        const origIsClassIncluded = IncludeVerifier.prototype.isClassIncluded;
+        let isIncludedCalls = 0;
+        StructureDeclarationIndexer.prototype.find = ((name: string) =>
+            name.toLowerCase() === 'widgetusage'
+                ? [{ name: 'WidgetUsage', filePath: 'c:\\proj\\WidgetUsage.inc', line: 0, structureType: 'CLASS', isType: false, lineContent: 'WidgetUsage CLASS' } as StructureDeclarationInfo]
+                : []
+        ) as typeof origFind;
+        IncludeVerifier.prototype.isClassIncluded = (async () => {
+            isIncludedCalls++;
+            return true;
+        }) as typeof origIsClassIncluded;
+
+        try {
+            // Cursor on "WidgetUsage" in a CODE line (line 4 col 3) — not an INCLUDE line.
+            const doc = TextDocument.create('file:///c:/proj/word312.clw', 'clarion', 1, [
+                '  PROGRAM',
+                '  MAP',
+                '  END',
+                '  CODE',
+                '  WidgetUsage',
+            ].join('\n'));
+            const wordRange = { start: { line: 4, character: 4 }, end: { line: 4, character: 4 } };
+
+            for (let i = 0; i < 5; i++) {
+                const p = new ClassConstantsCodeActionProvider();
+                await p.provideCodeActions(doc, wordRange as never, { diagnostics: [] } as never, token);
+            }
+            assert.strictEqual(isIncludedCalls, 1,
+                `word path must memoize per (uri, version, word) — isClassIncluded ran ${isIncludedCalls}x for 5 identical requests`);
+        } finally {
+            StructureDeclarationIndexer.prototype.find = origFind;
+            IncludeVerifier.prototype.isClassIncluded = origIsClassIncluded;
+        }
     });
 
     test('memo: same document version parses constants once across repeated requests', async () => {

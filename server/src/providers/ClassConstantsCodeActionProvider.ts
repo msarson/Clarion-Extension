@@ -126,19 +126,26 @@ export class ClassConstantsCodeActionProvider {
 
             logger.info(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
 
+            // #312 part 2: the word path was the OTHER per-cursor-move cost (100-400ms
+            // measured) — its include-chain walk (isClassIncluded) and constant checks
+            // re-ran on every request. Same memo discipline as the INCLUDE path.
+            const wordMemoKey = `w|${document.uri}|${document.version}|${word.toLowerCase()}`;
+            const memoizedWord = ClassConstantsCodeActionProvider.includeActionsMemo.get(wordMemoKey);
+            if (memoizedWord) return memoizedWord;
+
             // Check if this is a class type with missing constants
             logger.info(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
-            
-            // Build or get index for this project
+
+            // Build or get index for this project (guarded above — already built here)
             const index = await this.sdi.getOrBuildIndex(projectPath);
             logger.info(`[CodeAction] SDI index has ${index.byName.size} entries`);
-            
+
             // Look up the class
             const definitions = this.sdi.find(word, projectPath);
             logger.info(`[CodeAction] found ${definitions.length} definitions for "${word}"`);
             
             if (definitions.length === 0) {
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             const def = definitions[0];
@@ -152,7 +159,7 @@ export class ClassConstantsCodeActionProvider {
                 // Offer Code Action to add the missing INCLUDE
                 const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath);
                 actions.push(...addIncludeActions);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             logger.info(`[CodeAction] checking constants for ${word}`);
@@ -164,7 +171,7 @@ export class ClassConstantsCodeActionProvider {
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
                 logger.info(`[CodeAction] no Link/DLL constants found in ${fileName} for class "${def.name}"`);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             // Check which constants are missing — use specific cwproj path to avoid wrong-project matches
@@ -181,7 +188,7 @@ export class ClassConstantsCodeActionProvider {
 
             if (missingConstants.length === 0) {
                 logger.info(`[CodeAction] all constants already defined — no action needed`);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             logger.info(`[CodeAction] offering action for ${missingConstants.length} missing constants`);
@@ -209,12 +216,13 @@ export class ClassConstantsCodeActionProvider {
 
             actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for ${word}`);
+            return this.memoizeIncludeActions(wordMemoKey, actions);
 
         } catch (error) {
             logger.error(`Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
         }
 
-        return actions;
+        return actions; // error path — not memoized, retried on the next request
     }
 
     /**
