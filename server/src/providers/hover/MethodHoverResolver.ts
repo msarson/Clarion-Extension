@@ -19,6 +19,17 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("MethodHoverResolver");
 logger.setLevel("error");
 
+// #314 follow-up: the hover trace lumps this resolver under 'router' — attribute the
+// PARENT/SELF method-call phases so a slow hover names WHICH half (member resolution
+// vs implementation hunt). Visible with clarion.log.performance.enabled.
+const perfLogger = LoggerManager.getLogger("MethodHoverResolver.Perf", "perf");
+
+// #314: the all-solution implementation sweep is synchronous and unbounded, and for
+// libsrc-implemented classes it is FUTILE by construction (their CLWs aren't project
+// files). The implementation location only ENRICHES the hover — the declaration
+// renders without it — so cap the sweep hard.
+const IMPL_SWEEP_BUDGET_MS = 500;
+
 /**
  * Resolves hover information for class methods (declarations, implementations, and calls)
  */
@@ -334,8 +345,27 @@ export class MethodHoverResolver {
         line: string,
         paramCount?: number
     ): Promise<Hover | null> {
+        const phaseStart = Date.now();
+        let resolveMs = 0;
+        let overlayMs = 0;
+        const emitPhases = (implMs: number) => {
+            const total = Date.now() - phaseStart;
+            if (total >= 250) {
+                perfLogger.perf("PARENT method hover slow", {
+                    total_ms: total,
+                    resolve_member_ms: resolveMs,
+                    overlay_ms: overlayMs,
+                    impl_hunt_ms: implMs,
+                    member: fieldName,
+                    uri: document.uri
+                });
+            }
+        };
+
         const tokens = this.tokenCache.getTokens(document);
+        const t0 = Date.now();
         let memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+        resolveMs = Date.now() - t0;
         let matchedSignature: string | undefined;
 
         if (!memberInfo) {
@@ -343,6 +373,7 @@ export class MethodHoverResolver {
             // overloads (and in-memory / cross-file cases). Fall back to resolving the
             // parent class directly and arg-classifying — symmetric with Goto
             // Definition's PARENT branch, whose overlay is the actual working path.
+            const tf = Date.now();
             const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
             if (parentInfo?.parentClassName && paramCount !== undefined) {
                 const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
@@ -352,13 +383,17 @@ export class MethodHoverResolver {
                     matchedSignature = picked.signature;
                 }
             }
+            resolveMs += Date.now() - tf;
             if (!memberInfo) {
                 logger.info(`❌ PARENT resolution returned null for ${fieldName}`);
+                emitPhases(0);
                 return null;
             }
         } else {
             // #182 — arg-classification overlay (symmetric with Goto Definition's PARENT branch).
+            const tOv = Date.now();
             matchedSignature = await this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
+            overlayMs = Date.now() - tOv;
         }
 
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
@@ -366,6 +401,7 @@ export class MethodHoverResolver {
         if (isMethod) {
             const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
 
+            const tImpl = Date.now();
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
@@ -374,9 +410,12 @@ export class MethodHoverResolver {
                 implModuleFile,
                 matchedSignature
             );
+            emitPhases(Date.now() - tImpl);
             if (implLocation) {
                 return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
             }
+        } else {
+            emitPhases(0);
         }
 
         return this.formatter.formatClassMember(fieldName, memberInfo);
@@ -567,27 +606,62 @@ export class MethodHoverResolver {
             return null;
         }
         
+        // #314: FRG CLASS_MODULE index — O(1) class → implementation file, covers libsrc
+        // classes the project sweep below can NEVER find (their CLWs aren't project files).
+        try {
+            const { FileRelationshipGraph } = await import('../../FileRelationshipGraph');
+            const graph = FileRelationshipGraph.getInstance();
+            if (graph.isBuilt) {
+                for (const edge of graph.getEdgesForClass(className)) {
+                    const candidatePath = edge.toFile.replace(/\//g, path.sep);
+                    const implLine = this.searchFileForImplementation(candidatePath, className, methodName, paramCount, declarationSignature);
+                    if (implLine !== null) {
+                        const fileUri = `file:///${candidatePath.replace(/\\/g, '/')}`;
+                        logger.info(`✅ [FRG] Found ${className}.${methodName} via class-module index → ${candidatePath}`);
+                        return `${fileUri}:${implLine}`;
+                    }
+                }
+            }
+        } catch { /* graph unavailable — fall through */ }
+
         logger.info(`Searching ${solutionManager.solution.projects.length} projects`);
-        
-        // Get all source files from all projects
+
+        // Get all source files from all projects.
+        // #314: hard budget + yields — this sweep is a last resort for an ENRICHMENT
+        // (the hover renders the declaration without the implementation link), and it
+        // was an unbounded synchronous crawl.
+        const sweepStart = Date.now();
+        let sweepCount = 0;
         for (const project of solutionManager.solution.projects) {
             for (const sourceFile of project.sourceFiles) {
+                if (Date.now() - sweepStart > IMPL_SWEEP_BUDGET_MS) {
+                    perfLogger.perf("Impl sweep budget exhausted", {
+                        ms: Date.now() - sweepStart,
+                        files_scanned: sweepCount,
+                        symbol: `${className}.${methodName}`,
+                        uri: currentDocument.uri
+                    });
+                    return null;
+                }
+                if (++sweepCount % 20 === 0) {
+                    await new Promise<void>(resolve => setImmediate(resolve));
+                }
                 const fullPath = path.join(project.path, sourceFile.relativePath);
-                
+
                 // Skip current file - already searched
                 if (path.resolve(fullPath) === path.resolve(currentPath)) {
                     continue;
                 }
-                
+
                 // Only search .clw files
                 if (!fullPath.toLowerCase().endsWith('.clw')) {
                     continue;
                 }
-                
+
                 if (!fs.existsSync(fullPath)) {
                     continue;
                 }
-                
+
                 const implLine = this.searchFileForImplementation(fullPath, className, methodName, paramCount, declarationSignature);
                 if (implLine !== null) {
                     const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
@@ -595,7 +669,7 @@ export class MethodHoverResolver {
                 }
             }
         }
-        
+
         logger.info(`❌ No implementation found for ${className}.${methodName}`);
         return null;
     }
