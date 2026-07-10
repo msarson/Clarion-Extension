@@ -24,7 +24,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionInitializer");
-logger.setLevel("info"); // #295 diagnosis: startup sequence timings visible in release
+// #297 (revised): the ⏱️ [STARTUP] timeline follows the same opt-in as the perf
+// channels — info only when clarion.log.performance.enabled, errors otherwise.
+// (Was pinned to "info" for the #295 diagnosis campaign.)
+logger.setLevel(
+    workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false)
+        ? 'info' : 'error'
+);
 
 /**
  * Handles workspace trust and initial solution setup
