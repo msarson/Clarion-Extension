@@ -60,6 +60,19 @@ test-declaration-patterns.js
 .gitattributes
 .github/**
 
+# #297: dev/agent tooling that must NEVER ship — .mcp.json carries private
+# MCP server configuration and .claude/ carries local agent settings.
+.mcp.json
+.mcp.json.bak
+.claude/**
+.husky/**
+.clarion-debug/**
+esbuild.mjs
+.mocharc-client.json
+scripts/**
+client/package-lock.json
+server/package-lock.json
+
 # VS Code workspace files
 .vscode/**
 .vscode-test/**

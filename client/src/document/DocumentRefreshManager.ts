@@ -4,7 +4,7 @@ import { getAllOpenDocuments } from '../utils/ExtensionHelpers';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("DocumentRefreshManager");
-logger.setLevel("info"); // #295 diagnosis: per-document refresh timings visible in release
+logger.setLevel("error"); // #297 release decision: per-document refresh chatter off (was info for #295 diagnosis)
 
 /**
  * Refreshes all open documents by updating their document info in the document manager
