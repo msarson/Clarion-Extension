@@ -17,7 +17,10 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
+import { cooperativeCheckpoint } from './cooperativeScan';
 import LoggerManager from '../logger';
+import * as fsSync from 'fs';
+import * as pathUtil from 'path';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
@@ -31,6 +34,117 @@ export class MapProcedureResolver {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(tokenCache, solutionManager);
         this.crossFileCache = crossFileCache;
+    }
+
+    /**
+     * #313 — locate a procedure's declaration inside a MODULE block of an INC that
+     * is included in a MAP (the WinEvent pattern: include('winevent.inc') in the
+     * PROGRAM's global MAP, module('winevent.clw') blocks inside the INC). Walks
+     * INCLUDE targets from the given document AND its MEMBER parent. Shared by the
+     * goto-implementation and hover call-site routes — both then run the proven
+     * declaration-side resolution from the returned document/position.
+     */
+    public async findDeclarationInMapIncludes(
+        procName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const startPaths: string[] = [currentPath];
+
+        const memberToken = tokens.find(t =>
+            t.line < 5 && t.value.toUpperCase() === 'MEMBER' && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, pathUtil.dirname(currentPath));
+            if (parentPath) startPaths.push(parentPath);
+        }
+
+        const visited = new Set<string>();
+        for (const start of startPaths) {
+            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename. */
+    private resolveIncludeTarget(fileName: string, fromDir: string): string | null {
+        const sameDir = pathUtil.join(fromDir, fileName);
+        if (fsSync.existsSync(sameDir)) return sameDir;
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution) {
+            for (const project of sm.solution.projects) {
+                const resolved = project.getRedirectionParser().findFile(fileName);
+                if (resolved?.path && fsSync.existsSync(resolved.path)) return resolved.path;
+            }
+        }
+        return null;
+    }
+
+    /** Load a file's document + tokens, via CrossFileCache when available. */
+    private async loadDocForWalk(filePath: string): Promise<{ document: TextDocument; tokens: Token[] } | null> {
+        if (this.crossFileCache) {
+            const cached = await this.crossFileCache.getOrLoadDocument(filePath);
+            if (cached) return { document: cached.document, tokens: cached.tokens };
+        }
+        try {
+            const content = fsSync.readFileSync(filePath, 'utf8');
+            const doc = TextDocument.create(pathToCanonicalUri(filePath), 'clarion', 1, content);
+            return { document: doc, tokens: TokenCache.getInstance().getTokens(doc) };
+        } catch {
+            return null;
+        }
+    }
+
+    /** #313 — recursive INCLUDE walk for a declaration inside a MODULE block. Bounded + cooperative. */
+    private async findModuleDeclarationInIncludesOf(
+        fromPath: string,
+        procName: string,
+        visited: Set<string>,
+        depth = 0
+    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+        if (depth > 4) return null;
+        const key = fromPath.toLowerCase();
+        if (visited.has(key)) return null;
+        visited.add(key);
+        if (await cooperativeCheckpoint(visited.size, undefined, 5)) return null;
+
+        const from = await this.loadDocForWalk(fromPath);
+        if (!from) return null;
+
+        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
+        const content = from.document.getText();
+        const nameLower = procName.toLowerCase();
+        let match: RegExpExecArray | null;
+
+        while ((match = includePattern.exec(content)) !== null) {
+            const incPath = this.resolveIncludeTarget(match[1], pathUtil.dirname(fromPath));
+            if (!incPath || visited.has(incPath.toLowerCase())) continue;
+
+            const inc = await this.loadDocForWalk(incPath);
+            if (!inc) continue;
+
+            // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
+            const moduleRanges = inc.tokens
+                .filter(t => t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+                .map(t => ({ start: t.line, end: t.finishesAt! }));
+            if (moduleRanges.length > 0) {
+                const decl = inc.tokens.find(t =>
+                    (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                    (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+                    moduleRanges.some(r => t.line > r.start && t.line < r.end)
+                );
+                if (decl) {
+                    logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${decl.line}`);
+                    return { doc: inc.document, tokens: inc.tokens, declLine: decl.line };
+                }
+            }
+
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
+            if (nested) return nested;
+        }
+        return null;
     }
 
     /**
@@ -762,8 +876,36 @@ export class MapProcedureResolver {
             // RED paths) dead-ended F12 even though every needed source file is in the solution.
             // Go straight from the library basename to its main source (IBSUTILS.DLL →
             // ibsutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
+            // #313 (docs: MODULE — "specify MEMBER source file"): the sourcefile string
+            // routinely OMITS the extension — the Language Reference's own example is
+            // MODULE('Loadit') for loadit.clw, and shipped headers do the same
+            // (MODULE('cwHH') in cwhh.inc). An extensionless name that resolves as
+            // '<name>.clw' is a source module; only names that DON'T are treated as
+            // external-library identifiers ("may contain any unique identifier" — the
+            // #292/#299 case). Previously extname('cwHH')==='' routed straight into the
+            // external-library branch and hard-returned null.
+            let effectiveModuleFile = moduleFile;
             const moduleExt = path.extname(moduleFile).toLowerCase();
-            const isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
+            let isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
+            if (moduleExt === '') {
+                const clwCandidate = `${moduleFile}.clw`;
+                let clwResolved = false;
+                if (solutionManager?.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        const resolved = project.getRedirectionParser().findFile(clwCandidate);
+                        if (resolved?.path && fs.existsSync(resolved.path)) { clwResolved = true; break; }
+                    }
+                }
+                if (!clwResolved) {
+                    const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+                    clwResolved = fs.existsSync(path.join(currentDir, clwCandidate));
+                }
+                if (clwResolved) {
+                    logger.info(`✅ #313: extensionless MODULE('${moduleFile}') resolves as source module ${clwCandidate}`);
+                    effectiveModuleFile = clwCandidate;
+                    isSourceModule = true;
+                }
+            }
             if (!isSourceModule && solutionManager && solutionManager.solution) {
                 const libBase = path.basename(moduleFile, path.extname(moduleFile)).toLowerCase();
                 for (const proj of solutionManager.solution.projects) {
@@ -788,8 +930,8 @@ export class MapProcedureResolver {
             if (!resolvedPath && solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile);
-                    logger.info(`RedirectionParser.findFile('${moduleFile}') returned:`, resolved);
+                    const resolved = redirectionParser.findFile(effectiveModuleFile);
+                    logger.info(`RedirectionParser.findFile('${effectiveModuleFile}') returned:`, resolved);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         resolvedPath = resolved.path;
                         logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
@@ -847,15 +989,15 @@ export class MapProcedureResolver {
             // Fallback to relative path from current document
             if (!resolvedPath) {
                 const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
-                const relativePath = path.join(currentDir, moduleFile);
+                const relativePath = path.join(currentDir, effectiveModuleFile);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = path.resolve(relativePath);
                     logger.info(`✅ Resolved MODULE file via relative path: ${resolvedPath}`);
                 }
             }
-            
+
             if (!resolvedPath) {
-                logger.info(`❌ Could not resolve MODULE file: ${moduleFile}`);
+                logger.info(`❌ Could not resolve MODULE file: ${effectiveModuleFile}`);
                 return null;
             }
             

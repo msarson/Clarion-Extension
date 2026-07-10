@@ -169,7 +169,7 @@ export class ImplementationProvider {
                 
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
-                    
+
                     const localScope = getLocalMapScope(document.uri);
                     // Use CrossFileResolver to find MAP declaration in parent file
                     const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
@@ -179,18 +179,18 @@ export class ImplementationProvider {
                         line,
                         localScope?.containingProcedure
                     );
-                    
+
                     if (memberResult) {
                         logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
-                        
+
                         // Now find implementation from the parent MAP declaration using cache
                         try {
                             const parentPath = memberResult.file;
                             const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
-                            
+
                             if (cached) {
                                 const { document: parentDoc, tokens: parentTokens } = cached;
-                                
+
                                 const mapPosition: Position = { line: memberResult.line, character: 0 };
                                 const implLocation = await this.mapResolver.findProcedureImplementation(
                                     word,
@@ -199,7 +199,7 @@ export class ImplementationProvider {
                                     mapPosition,
                                     line
                                 );
-                                
+
                                 if (implLocation) {
                                     logger.info(`✅ Found implementation via parent MAP: ${word}`);
                                     return implLocation;
@@ -209,6 +209,22 @@ export class ImplementationProvider {
                             logger.info(`Error loading parent file: ${error}`);
                         }
                     }
+                }
+
+                // #313: the declaration may live in an INC included INSIDE a MAP (the
+                // WinEvent pattern — include('winevent.inc') in the current file's or the
+                // MEMBER parent's MAP, with module('winevent.clw') blocks in the INC).
+                // findMapDeclaration scans current-document tokens only, and
+                // findMapDeclarationInMemberFile searches the parent's MAP only for
+                // MODULE('<current file>') blocks — neither reaches those declarations,
+                // while go-to-DEFINITION does (its own walk follows the includes). Locate
+                // the declaration by walking MAP includes from both start files, then hand
+                // its own document+position to findProcedureImplementation — the exact path
+                // that already works when the cursor is physically on the declaration.
+                const viaMapInclude = await this.findImplementationViaMapIncludes(word, document, tokens);
+                if (viaMapInclude) {
+                    logger.info(`✅ Found implementation via MAP-include MODULE declaration: ${word}`);
+                    return viaMapInclude;
                 }
             }
         }
@@ -265,6 +281,33 @@ export class ImplementationProvider {
 
         logger.info(`No implementation found at this position`);
         return null;
+    }
+
+    /**
+     * #313 — find the implementation of a procedure whose MAP declaration lives in
+     * an INC included inside a MAP: walk INCLUDE targets of the current file AND
+     * its MEMBER parent, find the declaration inside a MODULE block, then run the
+     * proven declaration-side resolution from the INC's own document/position.
+     */
+    private async findImplementationViaMapIncludes(
+        procName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): Promise<Location | null> {
+        const hit = await this.mapResolver.findDeclarationInMapIncludes(procName, document, tokens);
+        if (!hit) return null;
+        const declLineText = hit.doc.getText({
+            start: { line: hit.declLine, character: 0 },
+            end: { line: hit.declLine, character: Number.MAX_SAFE_INTEGER }
+        });
+        return this.mapResolver.findProcedureImplementation(
+            procName,
+            hit.tokens,
+            hit.doc,
+            { line: hit.declLine, character: 0 },
+            declLineText,
+            this.tokenCache.getStructure(hit.doc)
+        );
     }
 
     /**
