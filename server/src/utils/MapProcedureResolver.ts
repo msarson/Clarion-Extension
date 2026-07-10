@@ -49,6 +49,12 @@ export class MapProcedureResolver {
         document: TextDocument,
         tokens: Token[]
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+        // #313 follow-up: MAP procedure names never contain dots — a dotted word is
+        // member access, and running this walk for it cost 12s per hover on
+        // PARENT._FindFirstBreak in a PROGRAM file (the walk exhaustively cold-loaded
+        // every reachable INC before concluding "not a MAP procedure").
+        if (procName.includes('.')) return null;
+
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
@@ -61,7 +67,7 @@ export class MapProcedureResolver {
 
         const visited = new Set<string>();
         for (const start of startPaths) {
-            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited);
+            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
             if (hit) return hit;
         }
         return null;
@@ -101,7 +107,8 @@ export class MapProcedureResolver {
         fromPath: string,
         procName: string,
         visited: Set<string>,
-        depth = 0
+        depth = 0,
+        mapScopedRoot = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         if (depth > 4) return null;
         const key = fromPath.toLowerCase();
@@ -112,12 +119,47 @@ export class MapProcedureResolver {
         const from = await this.loadDocForWalk(fromPath);
         if (!from) return null;
 
+        // #313 follow-up: at the ROOT files, only INCLUDEs that sit INSIDE a MAP block
+        // can carry MODULE prototype blocks — walking every include of a PROGRAM file
+        // (equates, class headers, …) multiplied the walk by an order of magnitude for
+        // guaranteed misses. Files reached FROM a MAP include are MAP content
+        // throughout, so the restriction only applies at depth 0.
+        let mapRanges: Array<{ start: number; end: number }> | null = null;
+        if (mapScopedRoot && depth === 0) {
+            mapRanges = from.tokens
+                .filter(t => t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MAP' && t.finishesAt !== undefined)
+                .map(t => ({ start: t.line, end: t.finishesAt! }));
+            if (mapRanges.length === 0) return null; // no MAP → no MAP includes
+        }
+
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
         const content = from.document.getText();
         const nameLower = procName.toLowerCase();
         let match: RegExpExecArray | null;
 
+        // Offset→line lookup for the MAP-range filter (built once, binary-searched).
+        let lineStarts: number[] | null = null;
+        if (mapRanges) {
+            lineStarts = [0];
+            for (let i = content.indexOf('\n'); i !== -1; i = content.indexOf('\n', i + 1)) {
+                lineStarts.push(i + 1);
+            }
+        }
+        const offsetToLine = (offset: number): number => {
+            let lo = 0, hi = lineStarts!.length - 1;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (lineStarts![mid] <= offset) lo = mid; else hi = mid - 1;
+            }
+            return lo;
+        };
+
         while ((match = includePattern.exec(content)) !== null) {
+            if (mapRanges) {
+                const matchLine = offsetToLine(match.index);
+                if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
+            }
             const incPath = this.resolveIncludeTarget(match[1], pathUtil.dirname(fromPath));
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
 

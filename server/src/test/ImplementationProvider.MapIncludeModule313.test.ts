@@ -141,6 +141,45 @@ suite('ImplementationProvider #313 — MAP-include MODULE procedures', () => {
         assert.ok(text.includes('WinThing'), `hover must describe WinThing, got: ${text.slice(0, 200)}`);
     });
 
+    // #313 follow-up guards: the walk cost 12s per hover when it ran for words it
+    // could never match (dotted member access) and scanned includes OUTSIDE MAP blocks.
+    test('walk guard: dotted words never trigger the MAP-include walk', async () => {
+        const usage = openDoc('usage313.clw');
+        const { MapProcedureResolver } = await import('../utils/MapProcedureResolver');
+        const resolver = new MapProcedureResolver();
+        const tokens = TokenCache.getInstance().getTokens(usage);
+
+        const t0 = Date.now();
+        const hit = await resolver.findDeclarationInMapIncludes('PARENT._FindFirstBreak', usage, tokens);
+        const ms = Date.now() - t0;
+
+        assert.strictEqual(hit, null, 'dotted names are member access, never MAP procedures');
+        assert.ok(ms < 50, `dotted-word guard must return immediately (took ${ms}ms)`);
+    });
+
+    test('walk guard: root-level includes outside MAP blocks are not walked', async () => {
+        // main with an include OUTSIDE the MAP that would satisfy the search if walked.
+        writeFixture('decoy313.inc', [
+            "  module('wevent313.clw')",
+            "    DecoyProc(),long,name('DecoyProc')",
+            '  end',
+        ]);
+        writeFixture('mainguard313.clw', [
+            '  PROGRAM',
+            "  include('decoy313.inc')",   // OUTSIDE the MAP — not a prototype context
+            '  MAP',
+            '  END',
+            '  CODE',
+        ]);
+        const doc = openDoc('mainguard313.clw');
+        const { MapProcedureResolver } = await import('../utils/MapProcedureResolver');
+        const resolver = new MapProcedureResolver();
+        const tokens = TokenCache.getInstance().getTokens(doc);
+
+        const hit = await resolver.findDeclarationInMapIncludes('DecoyProc', doc, tokens);
+        assert.strictEqual(hit, null, 'includes outside MAP blocks must not be treated as prototype sources');
+    });
+
     test('declaration side: extensionless module resolves too', async () => {
         const inc = openDoc('wevent313b.inc');
         const provider = new ImplementationProvider();
