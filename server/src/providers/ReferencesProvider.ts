@@ -25,6 +25,7 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
+import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -434,9 +435,12 @@ export class ReferencesProvider {
                 t.type === TokenType.Structure &&
                 t.subType === TokenType.Class
             );
+        // #315: index pre-filter — skip files that provably lack the word.
+        const refIdxPlain = ReferenceCountIndex.getInstance();
         let ycPlain = 0;
         for (const fileUri of filesToSearch) {
             if (await this.yieldIfNeeded(ycPlain++, token)) return null;
+            if (!refIdxPlain.mayContain(fileUri, searchWord)) continue;
             const fileLocations = this.findReferencesInFile(fileUri, searchWord, symbolInfo, context.includeDeclaration, fieldPrefixes, isClassLabelDecl, overloadFilter, document);
             locations.push(...fileLocations);
         }
@@ -1060,9 +1064,14 @@ export class ReferencesProvider {
             seenLowerUris.add(lower);
             filesToSearchDeduped.push(f);
         }
+        // #315: the index's per-file word counts are a safe pre-filter — a file
+        // with zero occurrences of the member's name cannot contain a reference,
+        // so skip it before any disk read / tokenize (unknown files never prune).
+        const refIdx = ReferenceCountIndex.getInstance();
         let ycMember = 0;
         for (const fileUri of filesToSearchDeduped) {
             if (await this.yieldIfNeeded(ycMember++, token)) return null;
+            if (!refIdx.mayContain(fileUri, memberName)) continue;
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
             locations.push(...hits);
         }
@@ -3058,9 +3067,12 @@ export class ReferencesProvider {
         const overloadFilter = this.buildPlainSymbolOverloadFilter(syntheticInfo, document);
 
         const locations: Location[] = [];
+        // #315: index pre-filter — skip files that provably lack the word.
+        const refIdx = ReferenceCountIndex.getInstance();
         let ycProc = 0;
         for (const fileUri of filesToSearch) {
             if (await this.yieldIfNeeded(ycProc++, token)) return null;
+            if (!refIdx.mayContain(fileUri, word)) continue;
             locations.push(...this.findReferencesInFile(fileUri, word, syntheticInfo, includeDeclaration, undefined, undefined, overloadFilter, document));
         }
 

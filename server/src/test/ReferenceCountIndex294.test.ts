@@ -108,10 +108,14 @@ suite('ReferenceCountIndex #294', () => {
         assert.strictEqual(idx.getCount('OtherThing'), 1, 'new name counted');
     });
 
-    test('dotted lens symbols query their last segment', async () => {
+    test('dotted lens symbols scope to files that mention the qualifier (#315)', async () => {
+        // Pin flexed by #315: dotted symbols originally queried their bare last
+        // segment solution-wide, which produced "3372 references" for ubiquitous
+        // member names. They now count only in files where the qualifier co-occurs.
         const idx = ReferenceCountIndex.getInstance();
         await idx.buildInBackground(files);
-        assert.strictEqual(idx.getCount('SomeClass.MyProc'), idx.getCount('MyProc'));
+        assert.strictEqual(idx.getCount('SomeClass.MyProc'), 0, 'qualifier mentioned nowhere → 0');
+        assert.strictEqual(idx.getCount('Caller.MyProc'), 2, 'qualifier only in b.clw → b.clw occurrences only');
         assert.strictEqual(idx.getCount('NeverMentioned'), 0, 'built index answers 0 for unknown names');
     });
 });

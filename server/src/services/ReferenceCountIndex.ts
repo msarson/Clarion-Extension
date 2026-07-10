@@ -62,6 +62,8 @@ export class ReferenceCountIndex {
     /** normalized path (lowercase, forward slashes) → nameLower → occurrence count */
     private perFile = new Map<string, Map<string, number>>();
     private totals = new Map<string, number>();
+    /** on-disk mtime each file's counts were scanned at — #315 stale-prune guard */
+    private fileMtimes = new Map<string, number>();
 
     private _built = false;
     private _building = false;
@@ -81,16 +83,62 @@ export class ReferenceCountIndex {
     public get lastBuildStats(): RefIndexBuildStats | undefined { return this._lastBuildStats; }
 
     /**
-     * O(1) approximate occurrence count for a symbol name. Dotted lens symbols
-     * (`StringTheory.AddLine`) query their LAST segment — the same shortName the
-     * exact-cache invalidation already keys on. Returns undefined when the index
-     * isn't built (callers fall back to the scan path).
+     * O(1)-ish approximate occurrence count for a symbol name. Returns
+     * undefined when the index isn't built (callers fall back to the scan path).
+     *
+     * Plain names count solution-wide. Dotted lens symbols (`ThisGPF.Initialize`)
+     * count their LAST segment only in files where the QUALIFIER also occurs —
+     * #315: the solution-wide bare-name total answered "3372 references" for a
+     * ubiquitous member name like `initialize`; qualifier co-occurrence keeps
+     * the estimate anchored to files that actually deal with that class.
      */
     public getCount(symbolName: string): number | undefined {
         if (!this._built) return undefined;
-        const short = symbolName.split('.').pop()?.toLowerCase() ?? '';
+        const parts = symbolName.toLowerCase().split('.').filter(Boolean);
+        const short = parts.pop();
         if (!short) return undefined;
-        return this.totals.get(short) ?? 0;
+        const qualifier = parts.pop();
+        if (!qualifier) return this.totals.get(short) ?? 0;
+
+        let sum = 0;
+        for (const counts of this.perFile.values()) {
+            if ((counts.get(qualifier) ?? 0) === 0) continue;
+            sum += counts.get(short) ?? 0;
+        }
+        return sum;
+    }
+
+    /**
+     * #315 — safe-prune probe for FAR candidate files: false ONLY when the file
+     * is indexed and provably contains zero occurrences of `name`. Unknown
+     * files, stoplist names (never counted), and the unbuilt state answer true.
+     * The word scan is a superset of tokenized identifiers (both strip strings
+     * and ! comments), so a zero here means no reference can match in the file.
+     */
+    public mayContain(fsPathOrUri: string, name: string): boolean {
+        if (!this._built) return true;
+        const nameLower = name.toLowerCase();
+        if (STOPLIST.has(nameLower)) return true;
+        const filePath = this.toIndexPath(fsPathOrUri);
+        const counts = this.perFile.get(filePath);
+        if (!counts) return true;
+        if ((counts.get(nameLower) ?? 0) > 0) return true;
+
+        // Zero count → prune ONLY if the on-disk file still matches the scan.
+        // Clarion app generation rewrites CLW files with no editor event; a
+        // stale entry must not silently drop references from FAR results.
+        const recorded = this.fileMtimes.get(filePath);
+        if (recorded === undefined) return true;
+        try {
+            const mtimeMs = fs.statSync(filePath).mtimeMs;
+            if (mtimeMs === recorded) return false;
+            // Regenerated since the scan — self-heal the entry, answer fresh.
+            this.setFileCounts(filePath, ReferenceCountIndex.scanContent(fs.readFileSync(filePath, 'utf8')));
+            this.fileMtimes.set(filePath, mtimeMs);
+            return (this.perFile.get(filePath)?.get(nameLower) ?? 0) > 0;
+        } catch {
+            return true; // can't verify — never prune blind
+        }
     }
 
     /** Build (or rebuild) over the given project files. Batched + yielding. */
@@ -100,6 +148,7 @@ export class ReferenceCountIndex {
         const buildStart = Date.now();
         this.perFile.clear();
         this.totals.clear();
+        this.fileMtimes.clear();
 
         const diskCache = this.loadDiskCache(projectFiles);
         const freshEntries: Record<string, RefIndexDiskEntry> = {};
@@ -119,6 +168,7 @@ export class ReferenceCountIndex {
                     reusedFromDisk++;
                     freshEntries[filePath] = cached;
                     this.setFileCounts(filePath, new Map(Object.entries(cached.counts)));
+                    this.fileMtimes.set(filePath, mtimeMs);
                     return;
                 }
 
@@ -128,6 +178,7 @@ export class ReferenceCountIndex {
                     scanned++;
                     freshEntries[filePath] = { mtimeMs, counts: Object.fromEntries(counts) };
                     this.setFileCounts(filePath, counts);
+                    this.fileMtimes.set(filePath, mtimeMs);
                 } catch { /* unreadable — skip */ }
             }));
             // Yield between batches so this never competes with interactive work.
@@ -156,17 +207,22 @@ export class ReferenceCountIndex {
     /** Re-scan one file's content (live buffer) and adjust totals incrementally. */
     public updateFile(fsPathOrUri: string, content: string): void {
         if (!this._built && !this._building) return; // nothing to keep in sync yet
-        const filePath = this.normalizePath(
+        this.setFileCounts(this.toIndexPath(fsPathOrUri), ReferenceCountIndex.scanContent(content));
+    }
+
+    /** Accepts a file:/// URI (incl. %3A drive-colon encodings) or an fs path. */
+    private toIndexPath(fsPathOrUri: string): string {
+        return this.normalizePath(
             fsPathOrUri.startsWith('file:')
                 ? decodeURIComponent(fsPathOrUri.replace(/^file:\/\/\/?/i, ''))
                 : fsPathOrUri
         );
-        this.setFileCounts(filePath, ReferenceCountIndex.scanContent(content));
     }
 
     public reset(): void {
         this.perFile.clear();
         this.totals.clear();
+        this.fileMtimes.clear();
         this._built = false;
         this._building = false;
         this._lastBuildStats = undefined;

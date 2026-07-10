@@ -74,7 +74,7 @@ import { UnicodeCodeActionProvider } from './providers/UnicodeCodeActionProvider
 import { GenerateRoutineCodeActionProvider } from './providers/GenerateRoutineCodeActionProvider';
 import { IntroduceEquateCodeActionProvider } from './providers/IntroduceEquateCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
-import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
+import { ClarionCodeLensProvider, formatReferenceCount, formatApproximateReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
 import { initializingHoverFallback, buildIndexingHover } from './utils/InitializingHover';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
@@ -1022,6 +1022,10 @@ connection.onCodeLensResolve(async (lens) => {
         const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
         if (!data) return lens;
 
+        // #315 belt-and-braces on the #303 gate: a lens emitted for a libsrc doc
+        // before libsrcPaths arrived must never trigger counting on resolve.
+        if (isUnderLibsrcPath(data.uri)) return lens;
+
         const document = documents.get(data.uri);
         if (!document) return lens;
 
@@ -1039,7 +1043,9 @@ connection.onCodeLensResolve(async (lens) => {
             const idxCount = ReferenceCountIndex.getInstance().getCount(data.symbolName ?? '');
             if (idxCount !== undefined) {
                 lens.command = {
-                    title: formatReferenceCount(idxCount),
+                    // #315: the '~' marks the count as an estimate — the exact
+                    // count replaces it (via the cache + refresh) after a click.
+                    title: formatApproximateReferenceCount(idxCount),
                     command: 'clarion.showReferences',
                     arguments: [data.uri, { line: data.line, character: data.character }, []],
                 };
@@ -1805,6 +1811,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+
+        // #315: lenses requested BEFORE libsrcPaths arrived bypassed the #303
+        // libsrc gate (empty list matches nothing) and stick in the editor.
+        // Re-request them now that the gate can answer correctly.
+        if (serverSettings.libsrcPaths.length) scheduleLensRefresh();
 
         // Clear the SDI cache so any stale empty index (built before redirectionFile was known)
         // is discarded — it will be rebuilt with correct paths by the setImmediate below.
@@ -2714,10 +2725,41 @@ connection.onReferences(async (params: ReferenceParams, token) => {
             }
         }
 
-        const references = await Promise.race([
-            referencesProvider.provideReferences(document, params.position, params.context, token),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
-        ]);
+        // #315: this used to race the scan against a 15s timeout that resolved
+        // null — the peek showed NOTHING while the scan burned on in the
+        // background (Mark's log: 7× onReferences at ~15.0-15.5s, empty peek
+        // each time, re-click, repeat). A slow right answer beats a fast empty
+        // one; the client's cancellation token still aborts abandoned requests.
+        const farStart = Date.now();
+        const references = await referencesProvider.provideReferences(document, params.position, params.context, token);
+        const farMs = Date.now() - farStart;
+        if (farMs >= 1_000) {
+            perfLogger.perf("FAR slow", {
+                ms: farMs,
+                count: references?.length ?? 0,
+                cancelled: String(token.isCancellationRequested),
+                line: params.position.line,
+                uri: params.textDocument.uri
+            });
+        }
+
+        // A completed FAR at a lens declaration IS the exact count — persist it
+        // so the lens title upgrades from the ~estimate and repeat clicks are O(1).
+        if (lensData && references && params.context.includeDeclaration && !token.isCancellationRequested) {
+            const cacheKey = `${lensData.uri}:${lensData.line}:${lensData.character}`;
+            const shortName = (lensData.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs: references, shortName });
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of references) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
+            scheduleLensRefresh();
+        }
+
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
         return references;
     } catch (error) {

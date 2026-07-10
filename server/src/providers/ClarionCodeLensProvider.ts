@@ -31,6 +31,15 @@ export function formatReferenceCount(count: number): string {
 }
 
 /**
+ * #315 — label for counts derived from the approximate ReferenceCountIndex
+ * (word-occurrence scan, no scope resolution). The `~` tells the user this is
+ * an estimate; clicking the lens runs the exact Find-All-References.
+ */
+export function formatApproximateReferenceCount(count: number): string {
+    return `~${formatReferenceCount(count)}`;
+}
+
+/**
  * Scans `tokens` and returns one unresolved `CodeLens` (no command yet) for
  * each GlobalProcedure, MethodImplementation, or CLASS declaration.
  *
