@@ -231,6 +231,80 @@ suite('ClarionCodeLensProvider #315 — locally-declared classes emit file-scope
     });
 });
 
+suite('ReferencesProvider #315 — inline class-instance receivers (ThisGPF shape)', () => {
+
+    // Mark's lens click showed no call sites: `ThisGPF Class(GPFReporterClass)`
+    // declares an inline class INSTANCE — its resolved "type" is `Class(...)`,
+    // whose base extracted as 'class' matched neither the class family nor the
+    // label, so `ThisGPF.Initialize()` call sites in the declaring file (the
+    // app's global CODE — where GPF Reporter's calls live) were dropped. The
+    // label of an inline class IS the class name (impls are Label.Method).
+
+    let dir: string;
+    let fixture: MultiFileFixture;
+
+    const filesMap: { [rel: string]: string } = {
+        'ap1.clw': [
+            '  PROGRAM',                                        // 0
+            '  MAP',                                            // 1
+            '  END',                                            // 2
+            'ThisGPF              Class(GPFReporterClass)',     // 3
+            'Initialize             PROCEDURE () ,VIRTUAL',     // 4
+            '                     End',                         // 5
+            '  CODE',                                           // 6
+            '  ThisGPF.Initialize()',                           // 7 — global-CODE call site
+            'ThisGPF.Initialize PROCEDURE()',                   // 8 — impl (lens sits here)
+            '  CODE',                                           // 9
+            '  RETURN',                                         // 10
+        ].join('\n'),
+        'memb1.clw': [
+            "  MEMBER('ap1.clw')",
+            'SomeProc PROCEDURE',
+            '  CODE',
+            '  ThisGPF.Initialize()',                           // 3 — member-module call site
+        ].join('\n'),
+    };
+
+    setup(() => {
+        setServerInitialized(true);
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'refidx315gpf_'));
+        for (const [rel, content] of Object.entries(filesMap)) {
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        fixture = buildMultiFileFixture({ files: filesMap, projectRoot: dir });
+    });
+
+    teardown(() => {
+        teardownMultiFileFixture();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('lens click (impl-label cursor) finds the global-CODE call site', async () => {
+        const provider = new ReferencesProvider();
+        const doc = fixture.documents['ap1.clw'];
+        // The lens passes {line: impl line, character: after the dot}.
+        const refs = await provider.provideReferences(doc, { line: 8, character: 8 }, { includeDeclaration: true });
+
+        assert.ok(refs, 'FAR must return references');
+        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('ap1.clw')).map(r => r.range.start.line);
+        assert.ok(inAp1.includes(7),
+            `global-CODE call site (line 7) must be found; got ap1 lines=[${inAp1.join(',')}]`);
+        assert.ok(refs!.some(r => r.uri.toLowerCase().endsWith('memb1.clw')),
+            'member-module call site still found');
+    });
+
+    test('decl cursor (class block) finds the global-CODE call site too', async () => {
+        const provider = new ReferencesProvider();
+        const doc = fixture.documents['ap1.clw'];
+        const refs = await provider.provideReferences(doc, { line: 4, character: 0 }, { includeDeclaration: true });
+
+        assert.ok(refs, 'FAR must return references');
+        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('ap1.clw')).map(r => r.range.start.line);
+        assert.ok(inAp1.includes(7),
+            `global-CODE call site (line 7) must be found; got ap1 lines=[${inAp1.join(',')}]`);
+    });
+});
+
 suite('ReferencesProvider #315 — member FAR prunes indexed no-hit files', () => {
 
     const N = 40;

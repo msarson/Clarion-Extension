@@ -1,4 +1,4 @@
-import { commands, Uri, Position, Location, Range, window as vscodeWindow, workspace, TreeView, Disposable } from 'vscode';
+import { commands, Uri, Position, Location, ProgressLocation, Range, window as vscodeWindow, workspace, TreeView, Disposable } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SolutionCache } from '../SolutionCache';
@@ -108,10 +108,19 @@ export function registerNavigationCommands(
                 );
                 // #294: index-counted lenses (and the "counting..." placeholder) pass no
                 // precomputed locations - run the real scoped Find-All-References on click.
+                // #315: surface progress while the scan runs (a silent await read as a dead
+                // click) and say so explicitly when nothing comes back.
                 if (locations.length === 0) {
-                    locations = (await commands.executeCommand<Location[]>(
-                        'vscode.executeReferenceProvider', uri, pos
-                    )) ?? [];
+                    locations = await vscodeWindow.withProgress(
+                        { location: ProgressLocation.Window, title: 'Finding Clarion references…' },
+                        async () => (await commands.executeCommand<Location[]>(
+                            'vscode.executeReferenceProvider', uri, pos
+                        )) ?? []
+                    );
+                }
+                if (locations.length === 0) {
+                    vscodeWindow.setStatusBarMessage('Clarion: no references found', 5000);
+                    return;
                 }
                 await commands.executeCommand('editor.action.showReferences', uri, pos, locations);
             }

@@ -61,6 +61,20 @@ function fsPathToUri(filePath: string): string {
     return `file:///${filePath.replace(/\\/g, '/')}`;
 }
 
+/**
+ * #315 — lowercased base type of a receiver/field declaration, with inline
+ * class instances resolved to their own label. `ThisGPF Class(GPFReporterClass)`
+ * (the CapeSoft GPF Reporter shape) declares an anonymous class whose name IS
+ * the label — methods are implemented as `Label.Method` — so matching the raw
+ * base 'class' against a class family silently dropped every call site whose
+ * receiver's declaration was resolvable.
+ */
+function inlineInstanceAwareTypeBase(rawType: string | undefined, receiverNameLower: string): string | undefined {
+    if (rawType === undefined) return undefined;
+    const base = rawType.toLowerCase().split('(')[0].trim();
+    return base === 'class' ? receiverNameLower : base;
+}
+
 type OverloadFilter = {
     minArgs: number;
     maxArgs: number;
@@ -1930,7 +1944,11 @@ export class ReferencesProvider {
                             const varNameLower = parts[0].toLowerCase();
                             const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
                                 fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
-                            const varTypeBase = varType?.toLowerCase().split('(')[0].trim();
+                            // #315: an inline instance (`ThisGPF Class(Parent)`) declares an
+                            // anonymous class whose name IS the label — its methods are
+                            // implemented as Label.Method, so the receiver's own name is the
+                            // class name, not the raw type base 'class'.
+                            const varTypeBase = inlineInstanceAwareTypeBase(varType, varNameLower);
                             const matchesFamily = varTypeBase !== undefined &&
                                 (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
                             // Conservative fallback: an UNRESOLVABLE receiver that matches the
@@ -1966,7 +1984,7 @@ export class ReferencesProvider {
                             const fieldType = this.scopeTypeIndex.lookupVarTypeAtLine(
                                 fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
                             if (fieldType) {
-                                const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                                const fieldTypeBase = inlineInstanceAwareTypeBase(fieldType, parts[1].toLowerCase())!;
                                 const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
                                 if (matchesFamily) {
                                     if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
@@ -2006,7 +2024,7 @@ export class ReferencesProvider {
                         const fieldType = this.scopeTypeIndex.lookupVarTypeAtLine(
                             fileVarIndex, effectiveGlobalScope, token.line, fieldKey);
                         if (fieldType) {
-                            const fieldTypeBase = fieldType.toLowerCase().split('(')[0].trim();
+                            const fieldTypeBase = inlineInstanceAwareTypeBase(fieldType, prevParts[1].toLowerCase())!;
                             const matchesFamily = classFamily ? classFamily.has(fieldTypeBase) : fieldTypeBase === classLower;
                             if (matchesFamily) {
                                 if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
