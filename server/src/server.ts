@@ -19,6 +19,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 import {
+    CodeAction,
     DocumentFormattingParams,
     DocumentRangeFormattingParams,
     DocumentSymbolParams,
@@ -2812,49 +2813,47 @@ connection.onCodeAction(async (params) => {
     try {
         const caStart = Date.now();
 
-        const t0 = Date.now();
-        logger.info(`⏱️ [CODE-ACTION] ClassConstants starting`);
-        const codeActionProvider = new ClassConstantsCodeActionProvider();
-        const actions = await codeActionProvider.provideCodeActions(
-            document,
-            params.range,
-            params.context,
-            params as any
-        );
-        logger.info(`⏱️ [CODE-ACTION] ClassConstants done: ${Date.now() - t0}ms → ${actions.length} actions`);
+        // #312: VS Code fires code-action requests on every cursor move — on large
+        // generated modules the chain measured 100-300ms per invocation. Run the
+        // providers through a timed table so a slow request NAMES its provider in
+        // the release perf log (the per-provider info lines are suppressed there).
+        const providerRuns: Array<[string, () => CodeAction[] | Promise<CodeAction[]>]> = [
+            ['classConstants', () => new ClassConstantsCodeActionProvider().provideCodeActions(document, params.range, params.context, params as any)],
+            ['flatten', () => new FlattenCodeActionProvider().provideCodeActions(document, params.range)],
+            ['mapModule', () => new MapModuleCodeActionProvider().provideCodeActions(document, params.range)],
+            ['mapDecl', () => new MapDeclarationCodeActionProvider().provideCodeActions(document, params.range, params.context)],
+            ['unicode', () => new UnicodeCodeActionProvider().provideCodeActions(document, params.range, params.context)],
+            ['generateRoutine', () => new GenerateRoutineCodeActionProvider().provideCodeActions(document, params.range)],
+            ['introduceEquate', () => new IntroduceEquateCodeActionProvider().provideCodeActions(document, params.range)],
+        ];
 
-        const t2 = Date.now();
-        const flattenProvider = new FlattenCodeActionProvider();
-        const flattenActions = flattenProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] Flatten done: ${Date.now() - t2}ms → ${flattenActions.length} actions`);
+        const allActions: CodeAction[] = [];
+        const timings: Array<[string, number]> = [];
+        for (const [name, run] of providerRuns) {
+            const t0 = Date.now();
+            const produced = await run();
+            const ms = Date.now() - t0;
+            timings.push([name, ms]);
+            logger.info(`⏱️ [CODE-ACTION] ${name} done: ${ms}ms → ${produced.length} actions`);
+            allActions.push(...produced);
+        }
 
-        const t4 = Date.now();
-        const mapModuleProvider = new MapModuleCodeActionProvider();
-        const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] MapModule done: ${Date.now() - t4}ms → ${mapModuleActions.length} actions`);
-
-        const t6 = Date.now();
-        const mapDeclProvider = new MapDeclarationCodeActionProvider();
-        const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
-        logger.info(`⏱️ [CODE-ACTION] MapDecl done: ${Date.now() - t6}ms → ${mapDeclActions.length} actions`);
-
-        const t8 = Date.now();
-        const unicodeProvider = new UnicodeCodeActionProvider();
-        const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
-        logger.info(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
-
-        const t10 = Date.now();
-        const generateRoutineProvider = new GenerateRoutineCodeActionProvider();
-        const generateRoutineActions = generateRoutineProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] GenerateRoutine done: ${Date.now() - t10}ms → ${generateRoutineActions.length} actions`);
-
-        const t12 = Date.now();
-        const introduceEquateProvider = new IntroduceEquateCodeActionProvider();
-        const introduceEquateActions = introduceEquateProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] IntroduceEquate done: ${Date.now() - t12}ms → ${introduceEquateActions.length} actions`);
-
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions, ...generateRoutineActions, ...introduceEquateActions];
-        logger.info(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
+        const totalMs = Date.now() - caStart;
+        if (totalMs >= 100) {
+            const top = timings
+                .filter(([, ms]) => ms >= 10)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([name, ms]) => `${name}=${ms}`)
+                .join(', ');
+            perfLogger.perf("CodeAction chain slow", {
+                total_ms: totalMs,
+                top: top || '(spread below 10ms each)',
+                line: params.range.start.line,
+                uri: params.textDocument.uri
+            });
+        }
+        logger.info(`⏱️ [CODE-ACTION] ■ total ${totalMs}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
