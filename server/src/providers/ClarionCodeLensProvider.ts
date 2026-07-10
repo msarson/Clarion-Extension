@@ -20,6 +20,12 @@ export interface CodeLensData {
     line: number;
     character: number;
     symbolName: string;
+    /**
+     * #315 — true when the lens symbol's class is declared in this same CLW
+     * (module/procedure-local class): references can only exist in this file,
+     * so the approximate count must be file-scoped, not solution-scoped.
+     */
+    fileScoped?: boolean;
 }
 
 /**
@@ -49,6 +55,21 @@ export function formatApproximateReferenceCount(count: number): string {
 export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
     const lenses: CodeLens[] = [];
 
+    // #315 — classes DECLARED in this file. In a CLW that's a module/procedure-
+    // local class (invisible outside the file), so lenses on it and its method
+    // implementations get file-scoped approximate counts. INC-declared classes
+    // are shared through INCLUDE — their usages live in the includers, so INC
+    // lenses keep the solution-scoped estimate.
+    const isClw = /\.clw$/i.test(uri);
+    const localClasses = new Set<string>();
+    if (isClw) {
+        for (const token of tokens) {
+            if (token.subType === TokenType.Class && token.label) {
+                localClasses.add(token.label.toLowerCase());
+            }
+        }
+    }
+
     for (const token of tokens) {
         if (!LENS_SUBTYPES.has(token.subType as TokenType)) continue;
 
@@ -64,6 +85,14 @@ export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
         const character = dotIndex >= 0 ? dotIndex + 1 : 0;
 
         const data: CodeLensData = { uri, line, character, symbolName };
+
+        // Class lens: the declaration is HERE by definition. Method impl lens:
+        // scope by the dotted qualifier. Procedure lenses are never file-scoped.
+        if (token.subType === TokenType.Class) {
+            if (isClw) data.fileScoped = true;
+        } else if (dotIndex >= 0 && localClasses.has(symbolName.slice(0, dotIndex).toLowerCase())) {
+            data.fileScoped = true;
+        }
 
         lenses.push({
             range: Range.create(line, 0, line, 0),

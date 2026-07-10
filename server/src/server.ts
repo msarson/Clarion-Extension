@@ -1019,7 +1019,7 @@ function scheduleLensRefresh() {
 }
 connection.onCodeLensResolve(async (lens) => {
     try {
-        const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+        const data = lens.data as { uri: string; line: number; character: number; symbolName: string; fileScoped?: boolean } | undefined;
         if (!data) return lens;
 
         // #315 belt-and-braces on the #303 gate: a lens emitted for a libsrc doc
@@ -1040,7 +1040,24 @@ connection.onCodeLensResolve(async (lens) => {
         // still wins above.
         if (!cached) {
             const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
-            const idxCount = ReferenceCountIndex.getInstance().getCount(data.symbolName ?? '');
+            const refIndex = ReferenceCountIndex.getInstance();
+            // #315 follow-up: a lens on a class DECLARED in this CLW (module/
+            // procedure-local — e.g. CapeSoft GPF Reporter generates an identical
+            // ThisGPF into every app) counts in this file only; the class is
+            // invisible to other files, so any wider count aggregates unrelated
+            // same-named classes across applications.
+            let idxCount: number | undefined;
+            if (data.fileScoped) {
+                idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                if (idxCount === undefined && refIndex.isBuilt) {
+                    // File not indexed (e.g. outside the project list) — sync the
+                    // live buffer we already have in hand, then answer from it.
+                    refIndex.updateFile(data.uri, document.getText());
+                    idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                }
+            } else {
+                idxCount = refIndex.getCount(data.symbolName ?? '');
+            }
             if (idxCount !== undefined) {
                 lens.command = {
                     // #315: the '~' marks the count as an estimate — the exact

@@ -21,9 +21,11 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TextDocument } from 'vscode-languageserver-textdocument';
+import { TokenCache } from '../TokenCache';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
-import { formatApproximateReferenceCount } from '../providers/ClarionCodeLensProvider';
+import { formatApproximateReferenceCount, buildCodeLenses } from '../providers/ClarionCodeLensProvider';
 import { buildMultiFileFixture, teardownMultiFileFixture, MultiFileFixture } from './helpers/MultiFileFARFixture';
 import { setServerInitialized } from '../serverState';
 
@@ -127,6 +129,85 @@ suite('ReferenceCountIndex #315 — qualifier-scoped counts + FAR pruning', () =
     test('formatApproximateReferenceCount marks the count as an estimate', () => {
         assert.strictEqual(formatApproximateReferenceCount(5), '~5 references');
         assert.strictEqual(formatApproximateReferenceCount(1), '~1 reference');
+    });
+
+    test('getCountInFile: single-file counts for locally-declared class members', async () => {
+        // CapeSoft GPF Reporter generates an IDENTICAL local ThisGPF class into
+        // every app — qualifier co-occurrence still aggregated across all 40
+        // apps. A class declared in the lens's own CLW is file-scoped by
+        // Clarion's scope model, so its estimate must count in that file only.
+        const idx = ReferenceCountIndex.getInstance();
+        assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', files[0]), undefined, 'unbuilt → undefined');
+
+        await idx.buildInBackground(files);
+        assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', files[0]), 3, 'gpf1.clw only');
+        assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', files[1]), 2, 'gpf2.clw only');
+        assert.strictEqual(idx.getCountInFile('Absent', files[0]), 0, 'known file, absent name → 0');
+        assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', path.join(tmpDir, 'unknown.clw')), undefined,
+            'unknown file → undefined (caller syncs the live buffer and retries)');
+
+        // URI form works like every other entry point.
+        const asUri = `file:///${files[0].replace(/\\/g, '/')}`;
+        assert.strictEqual(idx.getCountInFile('ThisGPF.Initialize', asUri), 3);
+    });
+});
+
+suite('ClarionCodeLensProvider #315 — locally-declared classes emit file-scoped lenses', () => {
+
+    function lensesFor(uri: string, content: string) {
+        const doc = TextDocument.create(uri, 'clarion', 1, content);
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        return buildCodeLenses(uri, tokens);
+    }
+
+    teardown(() => TokenCache.getInstance().clearAllTokens());
+
+    const LOCAL_CLASS_SOURCE = [
+        "  MEMBER('main')",
+        'ThisGPF              Class(GPFReporterClass)',
+        'Initialize             PROCEDURE () ,VIRTUAL',
+        '                     End',
+        'ThisGPF.Initialize PROCEDURE()',
+        '  CODE',
+        '  RETURN',
+    ].join('\n');
+
+    test('method impl of a class declared in the same CLW → fileScoped', () => {
+        const lenses = lensesFor('file:///c:/apps/ap1.clw', LOCAL_CLASS_SOURCE);
+        const impl = lenses.map(l => l.data as { symbolName: string; fileScoped?: boolean })
+            .find(d => d.symbolName === 'ThisGPF.Initialize');
+        assert.ok(impl, 'method implementation lens exists');
+        assert.strictEqual(impl!.fileScoped, true, 'local class member counts are file-scoped');
+
+        const classLens = lenses.map(l => l.data as { symbolName: string; fileScoped?: boolean })
+            .find(d => d.symbolName === 'ThisGPF');
+        assert.ok(classLens, 'class lens exists');
+        assert.strictEqual(classLens!.fileScoped, true, 'the local class itself is file-scoped too');
+    });
+
+    test('method impl of a class declared elsewhere (INC-shared) stays solution-scoped', () => {
+        const lenses = lensesFor('file:///c:/libsrcish/stringtheory.clw', [
+            "  MEMBER('')",
+            'StringTheory.AddLine PROCEDURE(STRING s)',
+            '  CODE',
+            '  RETURN',
+        ].join('\n'));
+        const impl = lenses.map(l => l.data as { symbolName: string; fileScoped?: boolean })
+            .find(d => d.symbolName === 'StringTheory.AddLine');
+        assert.ok(impl, 'method implementation lens exists');
+        assert.ok(!impl!.fileScoped, 'class not declared in this file → keep the wider estimate');
+    });
+
+    test('class declared in an INC is not file-scoped (usages live in includers)', () => {
+        const lenses = lensesFor('file:///c:/apps/myclass.inc', [
+            'MyShared             Class,Type',
+            'DoIt                   PROCEDURE ()',
+            '                     End',
+        ].join('\n'));
+        const classLens = lenses.map(l => l.data as { symbolName: string; fileScoped?: boolean })
+            .find(d => d.symbolName === 'MyShared');
+        assert.ok(classLens, 'class lens exists');
+        assert.ok(!classLens!.fileScoped, 'INC-declared classes are shared — file-scoping would undercount');
     });
 });
 

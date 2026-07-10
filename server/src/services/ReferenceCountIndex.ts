@@ -109,6 +109,24 @@ export class ReferenceCountIndex {
     }
 
     /**
+     * #315 follow-up — occurrence count of a symbol's last segment within ONE
+     * file. Used for lenses on locally-declared classes (module/procedure
+     * scope): the class is invisible outside its declaring file, so counting
+     * anywhere else (CapeSoft GPF Reporter generates an identical ThisGPF into
+     * every app) inflates the estimate across applications. Returns undefined
+     * when unbuilt or the file isn't indexed (caller may sync the live buffer
+     * via updateFile and retry).
+     */
+    public getCountInFile(symbolName: string, fsPathOrUri: string): number | undefined {
+        if (!this._built) return undefined;
+        const short = symbolName.split('.').pop()?.toLowerCase() ?? '';
+        if (!short) return undefined;
+        const counts = this.perFile.get(this.toIndexPath(fsPathOrUri));
+        if (!counts) return undefined;
+        return counts.get(short) ?? 0;
+    }
+
+    /**
      * #315 — safe-prune probe for FAR candidate files: false ONLY when the file
      * is indexed and provably contains zero occurrences of `name`. Unknown
      * files, stoplist names (never counted), and the unbuilt state answer true.
