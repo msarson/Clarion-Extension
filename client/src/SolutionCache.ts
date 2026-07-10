@@ -1,4 +1,4 @@
-import { Uri, workspace, window, Progress, ProgressLocation } from 'vscode';
+import { Uri, workspace, window } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { LanguageClient } from 'vscode-languageclient/node';
@@ -813,14 +813,11 @@ export class SolutionCache {
                     return false;
                 }
 
-                // Show progress notification
-                await window.withProgress({
-                    location: ProgressLocation.Notification,
-                    title: 'Loading solution...',
-                    cancellable: false
-                }, async (progress: Progress<{ message?: string; increment?: number }>) => {
-                    progress.report({ message: 'Fetching solution structure...' });
-                    
+                // #291: no progress toast — the editor is fully usable during this fetch
+                // (heavy work is deferred/background by design post-#288/#289/#290) and the
+                // notification read as "wait". The status-bar initialization item is the
+                // single progress surface; only the TIMEOUT path surfaces a warning.
+                {
                     // Set a timeout to prevent hanging if the server doesn't respond
                     const timeoutPromise = new Promise<null>((resolve) => {
                         setTimeout(() => {
@@ -836,6 +833,9 @@ export class SolutionCache {
                         this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
+                    if (this.solutionInfo === null) {
+                        window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
+                    }
                     const requestEndTime = performance.now();
                     logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
@@ -864,16 +864,14 @@ export class SolutionCache {
                             logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
                             logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
                         }
-                        
-                        progress.report({ message: 'Solution loaded successfully', increment: 100 });
                     } else {
                         logger.warn("⚠️ Server returned null solution tree");
-                        
+
                         // Try local parsing as a fallback
                         if (this.isLocalSlnFallbackEnabled()) {
                             logger.info("🔄 Attempting local .sln parsing as fallback...");
                             const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
-                            
+
                             if (localTree) {
                                 this.solutionInfo = localTree;
                                 logger.info("✅ Using locally parsed solution tree as fallback");
@@ -895,7 +893,7 @@ export class SolutionCache {
                             };
                         }
                     }
-                });
+                }
                 
                 const endTime = performance.now();
                 logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
@@ -1144,14 +1142,9 @@ export class SolutionCache {
             logger.info("🔄 Fetching solution tree from server (bypassing cache)...");
             
             try {
-                // Show progress notification
-                await window.withProgress({
-                    location: ProgressLocation.Notification,
-                    title: 'Loading solution...',
-                    cancellable: false
-                }, async (progress: Progress<{ message?: string; increment?: number }>) => {
-                    progress.report({ message: 'Fetching solution structure...' });
-                    
+                // #291: no progress toast (see the fetch site above) — status bar carries
+                // the state; only the timeout path warns.
+                {
                     // Set a timeout to prevent hanging if the server doesn't respond
                     const timeoutPromise = new Promise<null>((resolve) => {
                         setTimeout(() => {
@@ -1159,13 +1152,16 @@ export class SolutionCache {
                             resolve(null);
                         }, 15000); // 15 second timeout
                     });
-                    
+
                     const requestStartTime = performance.now();
                     // Race between the actual request and the timeout
                     const serverSolution = await Promise.race([
                         this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
+                    if (serverSolution === null) {
+                        window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
+                    }
                     const requestEndTime = performance.now();
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
                     
@@ -1193,11 +1189,9 @@ export class SolutionCache {
                             logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
                             logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
                         }
-                        
-                        progress.report({ message: 'Solution loaded successfully', increment: 100 });
                     } else {
                         logger.warn("⚠️ Server returned null or empty solution tree");
-                        
+
                         // Don't overwrite existing solution info if it has projects
                         if (!this.solutionInfo || !this.solutionInfo.projects || this.solutionInfo.projects.length === 0) {
                             logger.info("ℹ️ No existing solution info with projects, creating minimal placeholder");
@@ -1211,7 +1205,7 @@ export class SolutionCache {
                             logger.info(`ℹ️ Keeping existing solution info with ${this.solutionInfo.projects.length} projects`);
                         }
                     }
-                });
+                }
                 
                 const endTime = performance.now();
                 logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
