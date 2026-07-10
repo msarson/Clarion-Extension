@@ -1033,12 +1033,24 @@ connection.onCodeLensResolve(async (lens) => {
                 // removes the known pathological emitter.)
                 const ceiling = new CancellationTokenSource();
                 const ceilingTimer = setTimeout(() => ceiling.cancel(), 15_000);
+                const scanStart = Date.now();
                 scan = referencesProvider.provideReferences(
                     document,
                     { line: data.line, character: data.character },
                     { includeDeclaration: true },
                     ceiling.token
                 ).then(found => {
+                    // #309: name the symbol on slow scans — "a lens was slow" is
+                    // undiagnosable from user logs without knowing WHICH lens.
+                    const scanMs = Date.now() - scanStart;
+                    if (scanMs >= 1_000) {
+                        perfLogger.perf("CodeLens reference scan slow", {
+                            ms: scanMs,
+                            symbol: data.symbolName,
+                            cancelled: String(ceiling.token.isCancellationRequested),
+                            uri: data.uri
+                        });
+                    }
                     const resolved = found ?? [];
                     // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
                     // name-based invalidation when an edit adds a new reference (#189 Phase 2).
@@ -1070,6 +1082,7 @@ connection.onCodeLensResolve(async (lens) => {
             if (raced === 'budget') {
                 perfLogger.perf("CodeLens resolve budget hit — continuing in background", {
                     budget_ms: CODELENS_RESOLVE_BUDGET_MS,
+                    symbol: data.symbolName, // #309: identify the slow lens
                     uri: data.uri
                 });
                 // Real count arrives via the refresh once the background scan lands.

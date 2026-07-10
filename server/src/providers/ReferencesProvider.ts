@@ -2875,18 +2875,28 @@ export class ReferencesProvider {
         // Check if the word is a known CLASS type via the class definition indexer
         const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+        let knownDecl: { uri: string; line: number };
         try {
             const sdi = StructureDeclarationIndexer.getInstance();
             await sdi.getOrBuildIndex(projectPath);
             const definitions = sdi.find(word, projectPath);
             if (definitions.length === 0) return null;
+            // #309: the SDI hit IS the declaration — pass it through. Without this,
+            // findProcedureReferences hunted a PROCEDURE named like the class across
+            // every project file (cold: readFileSync + tokenize each), a futile
+            // full-solution walk measured at 114s in one sync block on a CLASS lens.
+            const def = definitions.find(d => !d.isType) ?? definitions[0];
+            knownDecl = {
+                uri: `file:///${def.filePath.replace(/\\/g, '/')}`,
+                line: def.line
+            };
         } catch {
             return null;
         }
 
         // It IS a class type — do a global search using the procedure-reference machinery
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
-        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token);
+        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token, knownDecl);
     }
 
     private async findProcedureReferences(
@@ -2894,7 +2904,8 @@ export class ReferencesProvider {
         document: TextDocument,
         currentTokens: Token[],
         includeDeclaration: boolean,
-        token?: CancellationToken
+        token?: CancellationToken,
+        knownDecl?: { uri: string; line: number }
     ): Promise<Location[] | null> {
         // If the current file is a local-MAP implementation target, restrict search
         // to only files reachable via that same procedure-local MAP scope.
@@ -2910,68 +2921,87 @@ export class ReferencesProvider {
             TokenType.MethodDeclaration,
             TokenType.MethodImplementation
         ]);
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
 
-        // 1. Check current-file tokens
-        const localDeclLine = this.findProcedureLabelLine(wordLower, currentTokens, procedureSubTypes);
-        let declarationUri: string | null = localDeclLine !== null ? document.uri : null;
-        let declarationLine: number = localDeclLine ?? 0;
+        // #309: when the caller already resolved the declaration (class lens via SDI),
+        // the whole hunt below is dead weight — skip straight to the search phase.
+        let declarationUri: string | null = knownDecl?.uri ?? null;
+        let declarationLine: number = knownDecl?.line ?? 0;
+        let incDecl: { uri: string; line: number } | null = null;
+
+        // #309: the hunt walks (potentially) every project source file, cold-tokenizing
+        // closed ones — with no checkpoint it ran 114s as ONE sync block on a lens
+        // resolve, starving the loop so the resolve budget/ceiling never fired. One
+        // shared counter across both walk phases: yield every FILES_PER_YIELD files
+        // and honor cancellation between files.
+        let ycHunt = 0;
 
         if (!declarationUri) {
-            // 2. Check all cached project files
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution?.projects?.length) {
-                outerLoop: for (const project of solutionManager.solution.projects) {
-                    for (const sourceFile of project.sourceFiles) {
-                        const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
-                        const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                        const fileTokens = this.getTokensForUri(uri);
-                        const declLine = this.findProcedureLabelLine(wordLower, fileTokens, procedureSubTypes);
-                        if (declLine !== null) {
-                            declarationUri = uri;
-                            declarationLine = declLine;
-                            break outerLoop;
+            // 1. Check current-file tokens
+            const localDeclLine = this.findProcedureLabelLine(wordLower, currentTokens, procedureSubTypes);
+            if (localDeclLine !== null) {
+                declarationUri = document.uri;
+                declarationLine = localDeclLine;
+            }
+
+            if (!declarationUri) {
+                // 2. Check all cached project files
+                const solutionManager = SolutionManager.getInstance();
+                if (solutionManager?.solution?.projects?.length) {
+                    outerLoop: for (const project of solutionManager.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            if (await this.yieldIfNeeded(++ycHunt, token)) return null;
+                            const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
+                            const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                            const fileTokens = this.getTokensForUri(uri);
+                            const declLine = this.findProcedureLabelLine(wordLower, fileTokens, procedureSubTypes);
+                            if (declLine !== null) {
+                                declarationUri = uri;
+                                declarationLine = declLine;
+                                break outerLoop;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 3. Walk MAP INCLUDE files from current CLW — always, so we can include the INC
-        //    declaration site in results even when a project-file implementation was found first.
-        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const incDecl = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes, new Set(), token);
+            // 3. Walk MAP INCLUDE files from current CLW — always, so we can include the INC
+            //    declaration site in results even when a project-file implementation was found first.
+            incDecl = await this.findProcedureInMapIncludes(wordLower, currentPath, procedureSubTypes, new Set(), token);
 
-        if (!declarationUri && incDecl) {
-            declarationUri = incDecl.uri;
-            declarationLine = incDecl.line;
-        }
+            if (!declarationUri && incDecl) {
+                declarationUri = incDecl.uri;
+                declarationLine = incDecl.line;
+            }
 
-        if (!declarationUri) {
-            // 4. Last resort: find any col-0 Label declaration across project + INCLUDE files
-            //    This handles type names (ZipQueueType, MyClass, etc.) that are structure
-            //    definitions rather than procedures.
-            const labelLine = this.findLabelDeclarationLine(wordLower, currentTokens);
-            if (labelLine !== null) {
-                declarationUri = document.uri;
-                declarationLine = labelLine;
-            } else {
-                // Search project files
-                const solutionManager = SolutionManager.getInstance();
-                if (solutionManager?.solution?.projects?.length) {
-                    outerLoop2: for (const project of solutionManager.solution.projects) {
-                        for (const sourceFile of project.sourceFiles) {
-                            const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
-                            const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                            const fileTokens = this.getTokensForUri(uri);
-                            const ll = this.findLabelDeclarationLine(wordLower, fileTokens);
-                            if (ll !== null) { declarationUri = uri; declarationLine = ll; break outerLoop2; }
+            if (!declarationUri) {
+                // 4. Last resort: find any col-0 Label declaration across project + INCLUDE files
+                //    This handles type names (ZipQueueType, MyClass, etc.) that are structure
+                //    definitions rather than procedures.
+                const labelLine = this.findLabelDeclarationLine(wordLower, currentTokens);
+                if (labelLine !== null) {
+                    declarationUri = document.uri;
+                    declarationLine = labelLine;
+                } else {
+                    // Search project files
+                    const solutionManager = SolutionManager.getInstance();
+                    if (solutionManager?.solution?.projects?.length) {
+                        outerLoop2: for (const project of solutionManager.solution.projects) {
+                            for (const sourceFile of project.sourceFiles) {
+                                if (await this.yieldIfNeeded(++ycHunt, token)) return null;
+                                const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
+                                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                                const fileTokens = this.getTokensForUri(uri);
+                                const ll = this.findLabelDeclarationLine(wordLower, fileTokens);
+                                if (ll !== null) { declarationUri = uri; declarationLine = ll; break outerLoop2; }
+                            }
                         }
                     }
-                }
-                // Also walk INCLUDE files
-                if (!declarationUri) {
-                    const incDecl2 = await this.findLabelInIncludes(wordLower, currentPath, new Set(), token);
-                    if (incDecl2) { declarationUri = incDecl2.uri; declarationLine = incDecl2.line; }
+                    // Also walk INCLUDE files
+                    if (!declarationUri) {
+                        const incDecl2 = await this.findLabelInIncludes(wordLower, currentPath, new Set(), token);
+                        if (incDecl2) { declarationUri = incDecl2.uri; declarationLine = incDecl2.line; }
+                    }
                 }
             }
         }
@@ -3007,6 +3037,12 @@ export class ReferencesProvider {
         const filesToSearch = this.getFilesToSearch(syntheticInfo, document);
         if (incDecl && !filesToSearch.includes(incDecl.uri)) {
             filesToSearch.push(incDecl.uri);
+        }
+        // #309: a caller-supplied declaration can live outside the project file list
+        // (e.g. a class declared in a redirection-reachable INC) — make sure its own
+        // file is searched so the declaration site appears in the results.
+        if (knownDecl && !filesToSearch.includes(knownDecl.uri)) {
+            filesToSearch.push(knownDecl.uri);
         }
         logger.info(`📁 Searching ${filesToSearch.length} file(s) for procedure "${word}"`);
 
