@@ -89,6 +89,7 @@ import { CompletionProvider } from './providers/CompletionProvider';
 import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
 import { CrossFileCache } from './providers/hover/CrossFileCache';
+import { LoggingConfig } from '../../common/LoggingConfig';
 import { SymbolFinderService } from './services/SymbolFinderService';
 import { ReferenceIndex } from './services/ReferenceIndex';
 import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
@@ -424,6 +425,13 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+
+        // #297 (revised): perf channels are opt-in via clarion.log.performance.enabled.
+        // Read it here — onInitialize is the server's first breath, so when enabled the
+        // whole startup timeline (bar the two module-load lines) is captured.
+        const logOpts = (params.initializationOptions as
+            { settings?: { log?: { performance?: { enabled?: boolean } } } } | undefined)?.settings?.log?.performance;
+        LoggingConfig.PERF_CHANNELS_ENABLED = logOpts?.enabled === true;
 
         // #289: a configured solution announces itself IN the initialize request (race-free — this
         // handler runs at t≈4ms, before any validation or timer can compete). The explicit

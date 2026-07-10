@@ -20,6 +20,18 @@ export class LoggingConfig {
      * Enable this for performance testing - logs perf metrics while minimizing other noise
      */
     static readonly PERF_TEST_MODE: boolean = false;
+
+    /**
+     * #297 release decision (revised): the always-on "perf"-channel loggers (StartupPerf,
+     * SDI/FRG/RVD timings, slow-handler lines, …) are gated behind the
+     * `clarion.log.performance.enabled` setting — OFF by default for the marketplace.
+     * The instrumentation itself keeps running (its cost is a few Date.now() calls);
+     * only the OUTPUT is gated, so a user with a problem flips one setting, reloads,
+     * and sends the exact logs used to diagnose the 2026-07-10 perf campaign.
+     * Mutable: the client sets it at activation; the server sets it in onInitialize
+     * from initializationOptions.settings.
+     */
+    static PERF_CHANNELS_ENABLED: boolean = false;
     /**
      * Detects if we're running in release mode (packaged extension).
      * 

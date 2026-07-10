@@ -1301,6 +1301,11 @@
           "default": true,
           "description": "Enabled by default. Shows a '… references' CodeLens above each procedure, method implementation, and CLASS, counting usages across the solution. Each lens runs a Find-All-References, which can make very large classes (e.g. StringTheory) sluggish — set to false to disable. Toggling requires reloading the VS Code window (issue #185)."
         },
+        "clarion.log.performance.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disabled by default. Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the 'Clarion Language Server' output channel. Enable when reporting a performance problem — these lines identify exactly which operation is slow — then attach the channel contents to your issue. Negligible overhead either way; the timers always run, only the output is gated. Toggling requires reloading the VS Code window (issue #297)."
+        },
         "clarion.activeVersion": {
           "type": "string",
           "default": "",

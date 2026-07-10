@@ -8,6 +8,7 @@ import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { LoggingConfig } from '../../common/LoggingConfig';
 import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
@@ -61,6 +62,11 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
+
+    // #297 (revised): perf channels are opt-in — clarion.log.performance.enabled gates
+    // their OUTPUT on both sides (server reads it from initializationOptions.settings).
+    LoggingConfig.PERF_CHANNELS_ENABLED =
+        workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false);
 
     // Per-session log file — truncates on activate so each session is fresh.
     // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log

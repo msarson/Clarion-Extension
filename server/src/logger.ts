@@ -87,7 +87,10 @@ class Logger {
      * deliberate perf instrumentation; flip to "error" when not measuring.
      */
     perf(message: string, metrics?: Record<string, number | string>) {
-        if (this.level !== "perf" && !LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
+        // "perf"-level channels additionally require the clarion.log.performance.enabled
+        // setting (LoggingConfig.PERF_CHANNELS_ENABLED) — off by default in release.
+        const perfChannelOn = this.level === "perf" && LoggingConfig.PERF_CHANNELS_ENABLED;
+        if (!perfChannelOn && !LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
 
         const timestamp = this.getTimestamp();
         if (metrics) {
