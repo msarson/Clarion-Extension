@@ -1942,13 +1942,24 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const deferredCount = deferredAsyncDocs.size;
             deferredAsyncDocs.clear();
 
-            for (const doc of openDocs) {
-                validateTextDocument(doc, 'solutionReady');
+            // #306: while the SDI is still pending, this pass was pure waste — its sync
+            // validators are same-file (already ran at onDidOpen, same content) and its
+            // async validators defer anyway; the sdiReady pass re-validates everything
+            // with full context. Running it blocked the loop ~1s per open doc inside the
+            // clarion/updatePaths handler. Queue the docs for the sdiReady pass instead;
+            // if the SDI is somehow already ready (tiny solutions), validate now.
+            if (!sdiPipelineReady) {
+                for (const doc of openDocs) deferredAsyncDocs.add(doc.uri);
+            } else {
+                for (const doc of openDocs) {
+                    validateTextDocument(doc, 'solutionReady');
+                }
             }
             perfLogger.perf("Phase: Post-solution re-validation dispatched", {
                 dispatch_ms: Date.now() - revalDispatchStart,
                 doc_count: openDocs.length,
                 deferred_drained: deferredCount,
+                deferred_to_sdi_pass: String(!sdiPipelineReady),
                 since_module_load_ms: Date.now() - serverModuleLoadedAt
             });
             // NOTE: dispatch_ms only measures the synchronous loop. Each

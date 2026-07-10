@@ -27,6 +27,13 @@ import { OmitCompileDetector } from '../utils/OmitCompileDetector';
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
 
+// #306 — the sync pass costs ~1s on a 1,640-token generated module and blocks the
+// loop at exactly the moment the user starts interacting; the aggregate number can't
+// say which of the 16 validators is fat. Always-on perf channel, emits only when the
+// pass is slow.
+const perfLogger = LoggerManager.getLogger("DiagnosticProvider.Perf", "perf");
+const SYNC_PASS_REPORT_THRESHOLD_MS = 300;
+
 /**
  * Diagnostic Provider for Clarion Language.
  * Thin facade — all validation logic lives in the diagnostics/ sub-modules.
@@ -54,32 +61,53 @@ export class DiagnosticProvider {
             structure = TokenCache.getInstance().getStructure(document);
         }
 
-        const diagnostics: Diagnostic[] = [
-            ...validateStructureTerminators(tokens, document),
-            ...validateConditionalBlocks(tokens, document),
-            ...validateFileStructures(tokens, document),
-            ...validateCaseStructures(tokens, document),
-            ...validateExecuteStructures(tokens, document),
-            ...validateViewProjectFields(tokens, document, getOpenDocumentContent),
-            // #181: class-interface-implementation moved to the async pass — it
-            // resolves cross-file interfaces via the INCLUDE chain (MemberLocator).
-            // See DiagnosticProvider.validateClassInterfaceImplementation + the
-            // server.ts await site.
-            ...validateReturnStatements(tokens, document, structure),
-            ...validateClassProperties(tokens, document),
-            ...validateDiscardedReturnValuesForPlainCalls(tokens, document),
-            ...validateCycleBreakOutsideLoop(tokens, document),
-            // 6b40d7da Phase B (#115): undeclared-variable validator moved to the
-            // async pass — needs SymbolFinderService for cross-file scope resolution
-            // (Tier 5b/6/7). See `DiagnosticProvider.validateUndeclaredVariables`
-            // and the await at server.ts:340+ next to `validateDiscardedReturnValues`.
-            ...validateReservedKeywordLabels(tokens, document),
-            ...validateUnicodeCharacters(document),
-            ...validateAttributeApplicability(tokens, document, structure),
-            ...validateItemizeBlocks(tokens, document),
-            ...validateIndistinguishablePrototypes(tokens, document),
-            ...validateByRefArguments(tokens, document),
+        // #181: class-interface-implementation and (6b40d7da/#115) undeclared-variable
+        // validators live in the ASYNC pass — they resolve cross-file via
+        // MemberLocator / SymbolFinderService. See the server.ts await sites.
+        const syncValidators: Array<[string, () => Diagnostic[]]> = [
+            ['structureTerminators', () => validateStructureTerminators(tokens!, document)],
+            ['conditionalBlocks', () => validateConditionalBlocks(tokens!, document)],
+            ['fileStructures', () => validateFileStructures(tokens!, document)],
+            ['caseStructures', () => validateCaseStructures(tokens!, document)],
+            ['executeStructures', () => validateExecuteStructures(tokens!, document)],
+            ['viewProjectFields', () => validateViewProjectFields(tokens!, document, getOpenDocumentContent)],
+            ['returnStatements', () => validateReturnStatements(tokens!, document, structure)],
+            ['classProperties', () => validateClassProperties(tokens!, document)],
+            ['discardedReturnPlainCalls', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
+            ['cycleBreakOutsideLoop', () => validateCycleBreakOutsideLoop(tokens!, document)],
+            ['reservedKeywordLabels', () => validateReservedKeywordLabels(tokens!, document)],
+            ['unicodeCharacters', () => validateUnicodeCharacters(document)],
+            ['attributeApplicability', () => validateAttributeApplicability(tokens!, document, structure)],
+            ['itemizeBlocks', () => validateItemizeBlocks(tokens!, document)],
+            ['indistinguishablePrototypes', () => validateIndistinguishablePrototypes(tokens!, document)],
+            ['byRefArguments', () => validateByRefArguments(tokens!, document)],
         ];
+
+        const diagnostics: Diagnostic[] = [];
+        const timings: Array<[string, number]> = [];
+        for (const [name, run] of syncValidators) {
+            const t0 = performance.now();
+            diagnostics.push(...run());
+            timings.push([name, performance.now() - t0]);
+        }
+
+        // #306 — name the fat validators when the sync pass is slow.
+        const totalMs = performance.now() - perfStart;
+        if (totalMs >= SYNC_PASS_REPORT_THRESHOLD_MS) {
+            const top = timings
+                .filter(([, ms]) => ms >= 25)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(([name, ms]) => `${name}=${Math.round(ms)}`)
+                .join(', ');
+            perfLogger.perf("Sync validation pass slow", {
+                total_ms: Math.round(totalMs),
+                top: top || '(no single validator ≥25ms — cost is spread/tokenize)',
+                token_count: tokens.length,
+                caller: caller ?? 'unknown',
+                uri: document.uri
+            });
+        }
 
         logger.perf(`🚀 Validation complete${caller ? ` (caller: ${caller})` : ''}`, {
             'time_ms': (performance.now() - perfStart).toFixed(2),
