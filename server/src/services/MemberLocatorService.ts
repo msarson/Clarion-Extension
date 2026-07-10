@@ -264,14 +264,42 @@ export class MemberLocatorService {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
-        // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback)
+        // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
+        // #314: use the tokens already in hand — scanBodyForMember re-loaded the CURRENT
+        // document from disk three times (once per structure kind), and its disk content
+        // can be STALE against the live buffer anyway.
         const fromCurrentDoc =
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS') ??
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'GROUP') ??
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'QUEUE');
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS') ??
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'GROUP') ??
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'QUEUE');
         if (fromCurrentDoc) {
             this.trace(`findMemberInClass hit current document file="${fromCurrentDoc.file}" line=${fromCurrentDoc.line}`);
             return fromCurrentDoc;
+        }
+
+        // 0.5 (#314, mirrors #310): when the SDI UNAMBIGUOUSLY names the declaring file,
+        // scan that body directly — and if the member isn't there (inherited), ascend the
+        // parent chain immediately. The include-chain / MEMBER-parent walks below are
+        // guaranteed full-chain COLD misses in that case (the class lives nowhere else):
+        // hover on PARENT._FindFirstBreak measured 12.1s walking them before the ascent.
+        await this.ensureIndexBuilt();
+        const sdiInfos = this.sdi.find(className);
+        const sdiDeclFiles = new Set(sdiInfos.map(d => d.filePath.toLowerCase()));
+        if (sdiDeclFiles.size === 1) {
+            const info = sdiInfos.find(d => !d.isType) || sdiInfos[0];
+            const kind = (['CLASS', 'GROUP', 'QUEUE', 'INTERFACE'].includes(info.structureType)
+                ? info.structureType : 'CLASS') as 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
+            const fromSdi = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, kind);
+            if (fromSdi) {
+                this.trace(`findMemberInClass hit SDI-located body file="${fromSdi.file}" line=${fromSdi.line}`);
+                return fromSdi;
+            }
+            const fromAscent = await this.walkParentChain(className, memberName, paramCount, new Set(), document);
+            if (fromAscent) {
+                this.trace(`findMemberInClass hit parent chain (SDI-first) file="${fromAscent.file}" line=${fromAscent.line}`);
+                return fromAscent;
+            }
+            // Ascent failed too — fall through to the legacy walks as a last resort.
         }
 
         // 1. Walk INCLUDE chain reachable from this document
@@ -977,6 +1005,19 @@ export class MemberLocatorService {
             return currentInfo;
         }
 
+        // #314 (mirrors #310): the SDI answers class location in one lookup — walking the
+        // include chain first cold-loaded every reachable INC per ANCESTOR during
+        // walkParentChain ascents (12.1s hover on PARENT._FindFirstBreak). Unambiguous
+        // SDI hit wins; ambiguous names keep the scoped chain walk as tie-breaker.
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(className);
+        const distinctDeclFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
+        if (distinctDeclFiles.size === 1) {
+            const fromIndex = infos.find(d => !d.isType) || infos[0];
+            this.trace(`resolveClassDeclarationInfo "${className}" from SDI (unambiguous) "${fromIndex.filePath}" line=${fromIndex.line}`);
+            return fromIndex;
+        }
+
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
         const fromInclude = await this.findClassDeclarationInfoInIncludeChain(
             className,
@@ -989,14 +1030,12 @@ export class MemberLocatorService {
             return fromInclude;
         }
 
-        await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
         if (infos.length === 0) {
             this.trace(`resolveClassDeclarationInfo "${className}" not found in SDI`);
             return null;
         }
         const fromIndex = infos.find(d => !d.isType) || infos[0];
-        this.trace(`resolveClassDeclarationInfo "${className}" from SDI "${fromIndex.filePath}" line=${fromIndex.line}`);
+        this.trace(`resolveClassDeclarationInfo "${className}" from SDI (ambiguous fallback) "${fromIndex.filePath}" line=${fromIndex.line}`);
         return fromIndex;
     }
 

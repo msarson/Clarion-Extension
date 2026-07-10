@@ -212,6 +212,62 @@ suite('MemberLocatorService #310 — SDI-first class location for member enumera
         assert.strictEqual(result!.typeName, 'BaseQ', 'cross-file LIKE alias must still dereference to the base type');
     });
 
+    // ── #314: findMemberInClass + resolveClassDeclarationInfo go SDI-first too ──
+    // Hover on PARENT._FindFirstBreak measured 12.1s: the single-member lookup
+    // walked the full include chain (cold) before the parent-chain ascent, even
+    // though the SDI knew the class's declaring file all along.
+    test('#314: SDI-unambiguous member lookup loads only the declaring file', async () => {
+        StructureDeclarationIndexer.prototype.find = ((name: string) =>
+            name.toLowerCase() === 'windowmgrx' ? [sdiEntry('WindowMgrX', basePath, 0)] : []
+        ) as typeof origSdiFind;
+
+        const doc = makeDoc('main314a.clw', [
+            "  MEMBER('prog.clw')",
+            "  INCLUDE('chain0.inc'),ONCE",
+            'Caller PROCEDURE',
+            '  CODE',
+        ]);
+        const svc = new MemberLocatorService();
+        const loads = spyLoads(svc);
+        const member = await svc.findMemberInClass('WindowMgrX', 'OpenIt', doc, 0);
+
+        assert.ok(member, 'member must resolve');
+        assert.ok(member!.file.toLowerCase().includes('wmbase.inc'), `expected wmbase.inc, got ${member!.file}`);
+        assert.ok(loads.count() <= 2,
+            `SDI names the declaring file — expected <=2 loads, got ${loads.count()} (chain walk ran)`);
+    });
+
+    test('#314: inherited member ascends via SDI without chain walks', async () => {
+        const childPath = writeFixture('childx314.inc', [
+            'ChildX  CLASS(WindowMgrX),TYPE',
+            'OwnThing  PROCEDURE()',
+            '        END',
+        ]);
+        StructureDeclarationIndexer.prototype.find = ((name: string) => {
+            const lower = name.toLowerCase();
+            if (lower === 'childx') {
+                return [{ ...sdiEntry('ChildX', childPath, 0), parentName: 'WindowMgrX' }];
+            }
+            if (lower === 'windowmgrx') return [sdiEntry('WindowMgrX', basePath, 0)];
+            return [];
+        }) as typeof origSdiFind;
+
+        const doc = makeDoc('main314b.clw', [
+            "  MEMBER('prog.clw')",
+            "  INCLUDE('chain0.inc'),ONCE",
+            'Caller PROCEDURE',
+            '  CODE',
+        ]);
+        const svc = new MemberLocatorService();
+        const loads = spyLoads(svc);
+        const member = await svc.findMemberInClass('ChildX', 'OpenIt', doc, 0);
+
+        assert.ok(member, 'inherited member must resolve via the ascent');
+        assert.ok(member!.file.toLowerCase().includes('wmbase.inc'), `expected wmbase.inc, got ${member!.file}`);
+        assert.ok(loads.count() <= 4,
+            `ascent must be indexed loads, not chain walks — got ${loads.count()} loads`);
+    });
+
     test('SDI miss: include-chain fallback still resolves', async () => {
         StructureDeclarationIndexer.prototype.find = (() => []) as typeof origSdiFind;
 
