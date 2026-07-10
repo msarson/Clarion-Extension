@@ -1631,26 +1631,48 @@ export class MemberLocatorService {
                 : diskMembersQueue;
         if (diskMembers.length > 0) return diskMembers;
 
-        // 2. INCLUDE chain
+        // 2. SDI, when it UNAMBIGUOUSLY names the declaring file (#310). The include-chain
+        // walk below loads + tokenizes every reachable INC until the class turns up —
+        // ~1.2s per cold ancestor on a real solution (8.5s for one generated module's 7
+        // receiver hierarchies), while the mtime-persisted index answers in one lookup.
+        // Ambiguous names (several declaring files — e.g. generated `ThisWindow` in every
+        // module, though those are normally caught by the current-document tier above)
+        // keep the scoped chain walk so the closest declaration wins.
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(className);
+        const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
+        if (distinctFiles.size === 1) {
+            const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);
+            if (fromSdi.length > 0) return fromSdi;
+        }
+
+        // 3. INCLUDE chain (scoped resolution — also the ambiguity tie-breaker)
         const fromInclude = await this.findAllMembersInIncludeChain(
             className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
         );
         if (fromInclude.length > 0) return fromInclude;
 
-        // 3. StructureDeclarationIndexer
-        await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
+        // 4. SDI last-resort: ambiguous entries where the chain walk found nothing —
+        // pre-#310 behavior (first non-TYPE entry wins).
         if (infos.length > 0) {
-            const info = infos.find(d => !d.isType) || infos[0];
-            const indexedData = await this.loadDocument(info.filePath);
-            if (indexedData) {
-                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-                if (indexedMembers.length > 0) return indexedMembers;
-            }
-            return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            return this.enumerateMembersFromSdiInfo(infos, className);
         }
 
         return [];
+    }
+
+    /** Enumerates members from an SDI hit's declaring file (token-based, disk fallback). */
+    private async enumerateMembersFromSdiInfo(
+        infos: StructureDeclarationInfo[],
+        className: string
+    ): Promise<MemberEnumItem[]> {
+        const info = infos.find(d => !d.isType) || infos[0];
+        const indexedData = await this.loadDocument(info.filePath);
+        if (indexedData) {
+            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            if (indexedMembers.length > 0) return indexedMembers;
+        }
+        return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
     }
 
     /** Walks the INCLUDE chain searching for className and enumerating its members. */
