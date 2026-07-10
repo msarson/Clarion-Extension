@@ -1045,6 +1045,22 @@ connection.onCodeLensResolve(async (lens) => {
                 };
                 return lens;
             }
+
+            // #294 follow-up: while the index is still building (solution mode), do NOT
+            // fall back to the scan path — that path is exactly the 106s/114s/110s block
+            // family (a lens resolve at +6s cold-tokenized the whole solution inside
+            // buildInheritanceMap before any checkpoint could land). Show the honest
+            // placeholder; the index-built refresh repaints every visible lens with real
+            // counts moments later. No-solution mode (index never builds) keeps the scan
+            // path — its search space is a single file + directory.
+            if (solutionAnnounced || SolutionManager.getInstance()?.solution) {
+                lens.command = {
+                    title: 'counting…',
+                    command: 'clarion.showReferences',
+                    arguments: [data.uri, { line: data.line, character: data.character }, []],
+                };
+                return lens;
+            }
         }
 
         let refs: Location[] | null;

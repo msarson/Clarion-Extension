@@ -1021,7 +1021,7 @@ export class ReferencesProvider {
         // Build class family (declaring class + all subclasses) so that SELF.Member
         // references in subclass method implementations are included.
         const classFamily = className
-            ? this.buildClassFamily(className, filesToSearch)
+            ? await this.buildClassFamily(className, filesToSearch, token)
             : undefined;
 
         // Phase B+ Tier 6 — load global scope from PROGRAM file via FRG so the
@@ -1584,9 +1584,16 @@ export class ReferencesProvider {
      * In Clarion: `ClassB CLASS(ClassA)` — the token after the CLASS structure token
      * is a `(` delimiter, followed by a Variable token naming the parent class.
      */
-    private buildInheritanceMap(fileUris: string[]): Map<string, string> {
+    // #294 follow-up (110s block, symbol=ThisGPF._EncodeEmail): this walk cold-tokenizes
+    // every candidate file with NO awaits — when the FRG isn't built yet the local-class
+    // fallback hands it ALL project files, and the 15s cancellation ceiling couldn't land
+    // for 110 seconds. Now async: yields between files and honors cancellation (returning
+    // the partial map — the caller's own checkpointed loop bails right after).
+    private async buildInheritanceMap(fileUris: string[], token?: CancellationToken): Promise<Map<string, string>> {
         const map = new Map<string, string>();
+        let yc = 0;
         for (const uri of fileUris) {
+            if (await this.yieldIfNeeded(yc++, token)) return map;
             const tokens = this.getTokensForUri(uri);
             if (!tokens) continue;
             for (let i = 0; i < tokens.length; i++) {
@@ -1612,8 +1619,8 @@ export class ReferencesProvider {
      * that should be accepted when filtering SELF.Member references: the declaring class
      * itself plus every class that directly or indirectly inherits from it.
      */
-    private buildClassFamily(declaringClass: string, fileUris: string[]): Set<string> {
-        const inheritanceMap = this.buildInheritanceMap(fileUris);
+    private async buildClassFamily(declaringClass: string, fileUris: string[], token?: CancellationToken): Promise<Set<string>> {
+        const inheritanceMap = await this.buildInheritanceMap(fileUris, token);
         const declaringLower = declaringClass.toLowerCase();
 
         // family starts with the declaring class
