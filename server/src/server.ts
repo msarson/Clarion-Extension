@@ -1028,6 +1028,25 @@ connection.onCodeLensResolve(async (lens) => {
         const cacheKey = `${data.uri}:${data.line}:${data.character}`;
         const cached = codeLensRefCache.get(cacheKey);
 
+        // #294: once the reference-count index is built, answer the count in O(1)
+        // instead of scheduling a scan. The count is APPROXIMATE (comment/string-
+        // stripped identifier occurrences by name); clicking the lens runs the real
+        // scoped Find-All-References (empty args → client falls back to the live
+        // reference provider). An exact cached result (from an earlier real scan)
+        // still wins above.
+        if (!cached) {
+            const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
+            const idxCount = ReferenceCountIndex.getInstance().getCount(data.symbolName ?? '');
+            if (idxCount !== undefined) {
+                lens.command = {
+                    title: formatReferenceCount(idxCount),
+                    command: 'clarion.showReferences',
+                    arguments: [data.uri, { line: data.line, character: data.character }, []],
+                };
+                return lens;
+            }
+        }
+
         let refs: Location[] | null;
         if (cached) {
             refs = cached.refs;
@@ -1300,6 +1319,12 @@ documents.onDidChangeContent(event => {
         // #189 Phase 2: invalidate only the CodeLens counts this edit can affect,
         // instead of every cached count. Counts for other files stay warm.
         invalidateCodeLensForFile(document);
+
+        // #294: keep the approximate reference-count index in sync with the live
+        // buffer — a single regex re-scan of THIS file, totals adjusted by delta.
+        void import('./services/ReferenceCountIndex').then(({ ReferenceCountIndex }) =>
+            ReferenceCountIndex.getInstance().updateFile(uri, document.getText())
+        ).catch(() => { /* non-fatal — counts self-heal on next build */ });
 
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
@@ -2060,6 +2085,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
+
+                // #294: LAST and lowest priority — the reference-count index (one regex
+                // pass over the solution, per-file mtime-persisted). Deliberately after
+                // the flag drop so it never extends the "still indexing" hover window;
+                // lens resolves fall back to the scan path until it lands.
+                const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
+                const refIdxFiles: string[] = [];
+                const smForIdx = SolutionManager.getInstance();
+                if (smForIdx?.solution) {
+                    for (const project of smForIdx.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const absPath = sourceFile.getAbsolutePath();
+                            if (absPath) refIdxFiles.push(absPath);
+                        }
+                    }
+                }
+                await ReferenceCountIndex.getInstance().buildInBackground(refIdxFiles).catch(err =>
+                    logger.error(`❌ [RefIndex] Background build failed: ${err}`)
+                );
+                // Counts are now O(1) — repaint visible lenses with real numbers.
+                scheduleLensRefresh();
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.

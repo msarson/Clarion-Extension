@@ -97,7 +97,7 @@ export function registerNavigationCommands(
             async (uriStr: string, position: { line: number; character: number }, lspLocations: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }[]) => {
                 const uri = Uri.parse(uriStr);
                 const pos = new Position(position.line, position.character);
-                const locations = (lspLocations ?? []).map(loc =>
+                let locations = (lspLocations ?? []).map(loc =>
                     new Location(
                         Uri.parse(loc.uri),
                         new Range(
@@ -106,6 +106,13 @@ export function registerNavigationCommands(
                         )
                     )
                 );
+                // #294: index-counted lenses (and the "counting..." placeholder) pass no
+                // precomputed locations - run the real scoped Find-All-References on click.
+                if (locations.length === 0) {
+                    locations = (await commands.executeCommand<Location[]>(
+                        'vscode.executeReferenceProvider', uri, pos
+                    )) ?? [];
+                }
                 await commands.executeCommand('editor.action.showReferences', uri, pos, locations);
             }
         ),
