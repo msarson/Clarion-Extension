@@ -3,7 +3,8 @@ import {
     TextDocuments,
     ProposedFeatures,
     Diagnostic,
-    CodeLensRefreshRequest
+    CodeLensRefreshRequest,
+    CancellationTokenSource
 } from 'vscode-languageserver/node';
 
 // Add global error handlers to prevent crashes
@@ -950,10 +951,24 @@ connection.onSelectionRanges((params) => {
 });
 
 // Handle CodeLens requests — return unresolved lenses (ranges + data only)
+// #303: a document under libsrcPaths gets NO reference-count lenses. Opening a library class
+// INC (e.g. via F12 from a hover) emitted a lens per method, and one resolve's cross-file scan
+// held the loop for 106 SECONDS as a single sync block on Mark's VM — every request behind it
+// died. Counting solution-wide references for library headers costs a full scan per method for
+// near-zero informational value.
+function isUnderLibsrcPath(uri: string): boolean {
+    if (!serverSettings.libsrcPaths?.length) return false;
+    const fsPath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\').toLowerCase();
+    return serverSettings.libsrcPaths.some(p => {
+        const dir = p.replace(/\//g, '\\').toLowerCase().replace(/\\+$/, '') + '\\';
+        return fsPath.startsWith(dir);
+    });
+}
 connection.onCodeLens((params) => {
     // #185 — reference-count CodeLens is opt-out; when disabled, emit no lenses
     // so no reference searches run (resolveCodeLens is never called).
     if (!serverSettings.referencesCodeLensEnabled) return [];
+    if (isUnderLibsrcPath(params.textDocument.uri)) return [];
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
     try {
@@ -1006,10 +1021,19 @@ connection.onCodeLensResolve(async (lens) => {
         } else {
             let scan = inflightLensScans.get(cacheKey);
             if (!scan) {
+                // #303: hard ceiling on the background scan. The refresh design wants scans to
+                // complete, but unbounded they can run away (a libsrc-INC scan held the loop
+                // 106s). 15s is far above any healthy scan; the cancellation lands at the
+                // scan's cooperative checkpoints. (A scan path with NO checkpoints can still
+                // block — that yield audit is tracked on #294/#295; the libsrc lens gate above
+                // removes the known pathological emitter.)
+                const ceiling = new CancellationTokenSource();
+                const ceilingTimer = setTimeout(() => ceiling.cancel(), 15_000);
                 scan = referencesProvider.provideReferences(
                     document,
                     { line: data.line, character: data.character },
-                    { includeDeclaration: true }
+                    { includeDeclaration: true },
+                    ceiling.token
                 ).then(found => {
                     const resolved = found ?? [];
                     // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
@@ -1028,6 +1052,7 @@ connection.onCodeLensResolve(async (lens) => {
                     }
                     return resolved;
                 }).finally(() => {
+                    clearTimeout(ceilingTimer);
                     inflightLensScans.delete(cacheKey);
                 });
                 inflightLensScans.set(cacheKey, scan);
