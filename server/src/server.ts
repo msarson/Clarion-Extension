@@ -87,6 +87,7 @@ import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
 import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
+import { CrossFileCache } from './providers/hover/CrossFileCache';
 import { SymbolFinderService } from './services/SymbolFinderService';
 import { ReferenceIndex } from './services/ReferenceIndex';
 import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
@@ -744,7 +745,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         // Async pass: detect discarded return values via cross-file type resolution
-        const memberLocator = new MemberLocatorService();
+        // #305: per-pass CrossFileCache — the locator's loadDocument otherwise re-reads
+        // the same INC files from disk for every resolution in this pass. Per-pass (not
+        // shared) so edits between passes are never served stale.
+        const memberLocator = new MemberLocatorService(new CrossFileCache(tokenCache));
         // 6b40d7da Phase B (#115): undeclared-variable validator runs in this async
         // pass for cross-file scope resolution via SymbolFinderService.
         const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);

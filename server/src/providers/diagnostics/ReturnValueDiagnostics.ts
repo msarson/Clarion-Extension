@@ -4,6 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { selectBestMemberOverload, OverloadCandidate } from '../../utils/ClassMemberResolver';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -736,6 +737,68 @@ export async function validateDiscardedReturnValues(
     let dotCallSites = 0;
     let cacheHits = 0;
 
+    // #305 — the #158 tuple memo only collapses REPEATS of the same method; distinct
+    // methods on the same receiver each still paid a full multi-tier cross-file walk
+    // (16s for 22 sites / 14 unique tuples on a generated report module — inherited
+    // members miss every include-chain tier before the parent-chain tier hits).
+    // Receivers repeat far more than (receiver, method) tuples, so:
+    //   1. resolve each receiver's TYPE once (typeMemo), and
+    //   2. enumerate each unique receiver CLASS's members (incl. ancestors) once
+    //      (classMembersMemo, one inheritance-chain walk), answering every method
+    //      lookup from the enumeration.
+    // `callerClass=className` disables the access filter — parity with
+    // findMemberInClass, which never filtered. A class that can't be enumerated
+    // (interface receivers, GROUP/QUEUE types, unresolvable) falls back to the
+    // #158 per-site path so decisions never regress.
+    const typeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
+    const classMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+    let enumResolvedSites = 0;
+    let fallbackSites = 0;
+
+    const countParamsInSignature = (line: string): number => {
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
+        if (!match) return 0;
+        const paramList = match[1].trim();
+        if (!paramList) return 0;
+        let depth = 0, count = 0;
+        for (const char of paramList) {
+            if (char === '(') depth++;
+            else if (char === ')') depth--;
+            else if (char === ',' && depth === 0) count++;
+        }
+        return count + 1;
+    };
+
+    const getClassMembers = (className: string): Promise<Map<string, OverloadCandidate[]> | null> => {
+        const classKey = className.toLowerCase();
+        let promise = classMembersMemo.get(classKey);
+        if (!promise) {
+            promise = (async () => {
+                try {
+                    const items = await memberLocator.enumerateMembersInClass(className, document, className);
+                    if (!items || items.length === 0) return null;
+                    const byName = new Map<string, OverloadCandidate[]>();
+                    for (const item of items) {
+                        const nameKey = item.name.toLowerCase();
+                        let list = byName.get(nameKey);
+                        if (!list) { list = []; byName.set(nameKey, list); }
+                        list.push({
+                            type: item.type,
+                            line: item.line,
+                            paramCount: countParamsInSignature(item.signature),
+                            signature: item.signature
+                        });
+                    }
+                    return byName;
+                } catch {
+                    return null; // enumeration failure → per-site fallback, never a dead validator
+                }
+            })();
+            classMembersMemo.set(classKey, promise);
+        }
+        return promise;
+    };
+
     // #297: this loop measured 3.9s on a 5k-token generated module (dotcall_loop_ms=3876,
     // essentially one sync stretch) and scales with document size — on the 20k-token gl1.clw
     // it pinned the LSP loop long enough to starve an in-memory tree request past its 15s
@@ -796,28 +859,64 @@ export async function validateDiscardedReturnValues(
         const isSelfOrParent = objUpper === 'SELF' || objUpper === 'PARENT';
         if (isSelfOrParent && !range.selfClassName) continue;
 
-        const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
-        const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
-
-        let memberInfoPromise = memberCache.get(cacheKey);
-        if (!memberInfoPromise) {
-            if (isSelfOrParent) {
-                memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
-            } else {
-                memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
-            }
-            memberCache.set(cacheKey, memberInfoPromise);
+        // #305: receiver class — from the code range for SELF/PARENT, else one
+        // memoized type resolution per receiver name.
+        let className: string | null;
+        if (isSelfOrParent) {
+            className = range.selfClassName!;
         } else {
-            cacheHits++;
+            let typePromise = typeMemo.get(objUpper);
+            if (!typePromise) {
+                typePromise = memberLocator.resolveVariableType(objectName, tokens, document);
+                typeMemo.set(objUpper, typePromise);
+            }
+            const typeInfo = await typePromise;
+            if (!typeInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: receiver type unresolved for ${objectName}.${methodName}`);
+                continue; // parity: resolveDotAccess skipped on a type miss
+            }
+            className = typeInfo.typeName;
         }
-        const memberInfo = await memberInfoPromise;
 
-        if (!memberInfo) {
-            logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
-            continue;
+        let typeStr: string | null = null;
+        const members = await getClassMembers(className);
+        if (members) {
+            enumResolvedSites++;
+            const candidates = members.get(methodName.toLowerCase());
+            // Class known, member absent → the tiered path also resolved null here.
+            if (!candidates || candidates.length === 0) continue;
+            const best = selectBestMemberOverload(candidates, paramCount);
+            if (!best) continue;
+            typeStr = best.type;
+        } else {
+            // Class not enumerable — #158 per-site tiered path (interface receivers,
+            // GROUP/QUEUE types), memoized per (obj|method|paramCount|selfContext).
+            fallbackSites++;
+            const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
+            const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
+
+            let memberInfoPromise = memberCache.get(cacheKey);
+            if (!memberInfoPromise) {
+                if (isSelfOrParent) {
+                    memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
+                } else {
+                    memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+                }
+                memberCache.set(cacheKey, memberInfoPromise);
+            } else {
+                cacheHits++;
+            }
+            const memberInfo = await memberInfoPromise;
+
+            if (!memberInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
+                continue;
+            }
+            typeStr = memberInfo.type ?? '';
         }
-        logger.debug(`🔍 Line ${lineIdx + 1}: ${objectName}.${methodName} → type="${memberInfo.type}" isNonProc=${isNonProcReturnMethod(memberInfo.type ?? '')}`);
-        if (!isNonProcReturnMethod(memberInfo.type ?? '')) continue;
+
+        logger.debug(`🔍 Line ${lineIdx + 1}: ${objectName}.${methodName} → type="${typeStr}" isNonProc=${isNonProcReturnMethod(typeStr ?? '')}`);
+        if (!isNonProcReturnMethod(typeStr ?? '')) continue;
 
         const colStart = rawLine.search(/\S/);
         diagnostics.push({
@@ -844,6 +943,9 @@ export async function validateDiscardedReturnValues(
         crossfile_ms: crossFileMs,
         crossfile_files_scanned: lastCrossFileFilesScanned,
         dotcall_sites: dotCallSites,
+        enum_classes: classMembersMemo.size,
+        enum_resolved_sites: enumResolvedSites,
+        fallback_sites: fallbackSites,
         cache_hits: cacheHits,
         cache_unique_keys: memberCache.size,
         diag_count: diagnostics.length,
