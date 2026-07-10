@@ -211,6 +211,89 @@ suite('MemberLocatorService', () => {
             assert.strictEqual(result!.isClass, false);
         });
 
+        // #304 — the sibling-procedure exclusion (#217) must not exclude the ROUTINE's
+        // own parent procedure: a ROUTINE sees its parent procedure's data.
+        test('#304: procedure-local ref var resolves from a ROUTINE call site', async () => {
+            const doc = makeDoc('rv_routine304.clw', [
+                "   MEMBER('main.clw')",
+                '',
+                'DoStuff PROCEDURE()',
+                '',
+                'oHH           &tagHTMLHelp',
+                '',
+                '   CODE',
+                '   DO InitHelp',
+                '',
+                'InitHelp ROUTINE',
+                "   oHH.Init('help.chm')",
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const callLine = 10; // oHH.Init inside the ROUTINE
+            const result = await service.resolveVariableType('oHH', tokens, doc, callLine);
+
+            assert.ok(result, 'ROUTINE call site must see the parent procedure\'s local declaration');
+            assert.strictEqual(result!.typeName, 'tagHTMLHelp');
+            assert.strictEqual(result!.isReference, true);
+        });
+
+        // #304 — Mark's real repro shape: ABC-generated code implements methods of a class
+        // DECLARED IN a procedure's data section (ThisWindow CLASS(WindowManager)). Those
+        // implementations sit outside the host procedure's line range but can see its locals.
+        test('#304: method impl of a procedure-local class sees host-procedure locals', async () => {
+            const doc = makeDoc('rv_methodimpl304.clw', [
+                "   MEMBER('main.clw')",
+                '',
+                '   MAP',
+                '   END',
+                '',
+                'AccessFrequencyAnalysisReport PROCEDURE',
+                '',
+                'oHH           &tagHTMLHelp',
+                'ThisWindow           CLASS(WindowManager)',
+                'Init                   PROCEDURE(),BYTE,PROC,DERIVED',
+                '                     END',
+                '',
+                '  CODE',
+                '  GlobalResponse = ThisWindow.Run()',
+                '',
+                'ThisWindow.Init PROCEDURE',
+                '',
+                'ReturnValue          BYTE,AUTO',
+                '',
+                '  CODE',
+                '  oHH &= NEW tagHTMLHelp',
+                "  oHH.Init('help.chm')",
+                '  RETURN ReturnValue',
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const callLine = 21; // oHH.Init inside ThisWindow.Init implementation
+            const result = await service.resolveVariableType('oHH', tokens, doc, callLine);
+
+            assert.ok(result, 'method impl of procedure-local class must see host procedure locals');
+            assert.strictEqual(result!.typeName, 'tagHTMLHelp');
+            assert.strictEqual(result!.isReference, true);
+        });
+
+        test('#304 pin: same-named local in a sibling procedure is still excluded', async () => {
+            const doc = makeDoc('rv_sibling304.clw', [
+                "   MEMBER('main.clw')",
+                '',
+                'ProcA PROCEDURE()',
+                'oHH           &WrongClass',
+                '   CODE',
+                '   RETURN',
+                '',
+                'ProcB PROCEDURE()',
+                '   CODE',
+                "   oHH.Init('x')",
+            ].join('\n'));
+            const tokens = tokenCache.getTokens(doc);
+            const callLine = 9; // oHH.Init inside ProcB, where oHH is NOT declared
+            const result = await service.resolveVariableType('oHH', tokens, doc, callLine);
+
+            assert.strictEqual(result, null, 'sibling-procedure local must stay excluded (#217)');
+        });
+
         test('bare QUEUE declaration resolves to its own structure label', async () => {
             const doc = makeDoc('rv11.clw', [
                 'problems QUEUE',

@@ -438,16 +438,34 @@ export class MemberLocatorService {
         // When scopeLine is known, build a set of "other procedure" line ranges to skip.
         // This prevents picking up a same-named local variable from a sibling procedure
         // (e.g. `Info` at line 932 inside INIClass.Update when we're inside INIClass.UpdateWindowInfo).
+        // #304: two scope shapes must stay searchable that innermost-scope line equality broke:
+        //   - ROUTINE bodies see their parent procedure's data → keep any procedure range that
+        //     CONTAINS scopeLine (containment, not header-line equality).
+        //   - Method implementations of a class DECLARED IN a procedure's data section
+        //     (ABC's `ThisWindow CLASS(WindowManager)` pattern) see that host procedure's
+        //     locals → when the current scope's label is dotted (Class.Method), the procedure
+        //     range containing the owner class's declaration also stays searchable.
         let excludedRanges: Array<{ start: number; end: number }> = [];
         if (scopeLine !== undefined) {
             const structure = this.tokenCache.getStructure(document);
             const currentScope = TokenHelper.getInnermostScopeAtLine(structure, scopeLine);
-            const currentScopeLine = currentScope?.line;
+            const visibleLines = [scopeLine];
+            const scopeLabel = currentScope?.label;
+            if (scopeLabel?.includes('.')) {
+                const ownerClass = scopeLabel.split('.')[0].toLowerCase();
+                for (const t of tokens) {
+                    if (t.type === TokenType.Structure &&
+                        t.value.toUpperCase() === 'CLASS' &&
+                        t.label?.toLowerCase() === ownerClass) {
+                        visibleLines.push(t.line);
+                    }
+                }
+            }
             excludedRanges = tokens
                 .filter(t =>
                     TokenHelper.isProcedureOrFunction(t) &&
                     t.finishesAt !== undefined &&
-                    t.line !== currentScopeLine
+                    !visibleLines.some(line => line >= t.line && line <= t.finishesAt!)
                 )
                 .map(t => ({ start: t.line, end: t.finishesAt! }));
         }
