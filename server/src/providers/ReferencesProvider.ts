@@ -1414,6 +1414,22 @@ export class ReferencesProvider {
                 this.trace({ files_source: 'frg-family' });
                 return Array.from(files);
             }
+            // (3) #315: exact-path lookups found nothing — the MEMBER edges may
+            // have resolved to a DIFFERENT copy of this program file (FRG's
+            // resolveFile answers in solution-project order, and redirection can
+            // place another copy ahead of the one the editor opened). Same
+            // basename = same logical app: use those edges' members + targets.
+            const byBasename = graph.getMemberEdgesByProgramBasename(docFsPath);
+            this.trace({ frg_member_edges_by_basename: byBasename.length });
+            if (byBasename.length) {
+                for (const e of byBasename) {
+                    files.add('file:///' + e.fromFile);
+                    files.add('file:///' + e.toFile); // the winning copy — its global CODE can hold callers
+                }
+                logger.info(`[FRG] getLocalClassSearchFiles: widened to ${files.size} file(s) via basename-matched MEMBER edges`);
+                this.trace({ files_source: 'frg-family-basename' });
+                return Array.from(files);
+            }
             // FRG built but yielded nothing useful — fall through to project scan.
         }
 

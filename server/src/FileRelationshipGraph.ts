@@ -769,6 +769,28 @@ export class FileRelationshipGraph {
             .map(e => e.fromFile) ?? [];
     }
 
+    /**
+     * #315 — MEMBER edges whose PROGRAM target matches by BASENAME. resolveFile
+     * asks every project's redirection parser in solution order, so
+     * MEMBER('ap1.clw') edges can resolve to a different copy of the program
+     * file than the one the editor opens (Mark's trace: frg_built=true,
+     * frg_member_edges_of_doc=0 → whole-solution fallback). Same basename =
+     * same logical app; callers use this when the exact-path lookup is empty.
+     */
+    public getMemberEdgesByProgramBasename(programFsPath: string): FileEdge[] {
+        const norm = this.normalizePath(programFsPath);
+        const base = norm.substring(norm.lastIndexOf('/') + 1);
+        if (!base) return [];
+        const out: FileEdge[] = [];
+        for (const [toFile, edges] of this.reverseEdges) {
+            if (!toFile.endsWith('/' + base) && toFile !== base) continue;
+            for (const e of edges) {
+                if (e.type === 'MEMBER') out.push(e);
+            }
+        }
+        return out;
+    }
+
     /** Returns all files that include the given file (reverse INCLUDE). */
     public getReverseIncludes(filePath: string): FileEdge[] {
         return this.reverseEdges.get(this.normalizePath(filePath))

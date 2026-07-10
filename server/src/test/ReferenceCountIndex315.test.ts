@@ -395,6 +395,102 @@ suite('ReferencesProvider #315 — program-file cursor must not scan the whole s
     });
 });
 
+suite('ReferencesProvider #315 — member edges resolved to a different program copy', () => {
+
+    // Mark's FAR trace: frg_built=true but frg_member_edges_of_doc=0 →
+    // project-fallback over 2,989 files. FRG's resolveFile asks every
+    // project's redirection parser in solution order, so MEMBER('ap1.clw')
+    // edges can resolve to a DIFFERENT copy of the program file than the one
+    // the editor opens (redirection search order puts the project root before
+    // genfiles\src). The family lookup must fall back to matching MEMBER
+    // edges by program BASENAME — same logical app, whichever copy won.
+
+    let dir: string;
+    let fixture: MultiFileFixture;
+    let scannedFiles: string[];
+    let origScan: (...args: unknown[]) => unknown;
+    const N = 15;
+
+    setup(() => {
+        setServerInitialized(true);
+        const filesMap: { [rel: string]: string } = {
+            'ap1.clw': [
+                '  PROGRAM',
+                '  MAP',
+                '  END',
+                'ThisGPF              Class(GPFReporterClass)',
+                'Initialize             PROCEDURE () ,VIRTUAL',
+                '                     End',
+                '  CODE',
+                'ThisGPF.Initialize PROCEDURE()',           // line 7 — lens
+                '  CODE',
+                '  RETURN',
+            ].join('\n'),
+            'memb1.clw': [
+                "  MEMBER('ap1.clw')",
+                'SomeProc PROCEDURE',
+                '  CODE',
+                '  ThisGPF.Initialize()',
+            ].join('\n'),
+        };
+        for (let i = 0; i < N; i++) {
+            filesMap[`other${i}.clw`] = [
+                "  MEMBER('apX.clw')",
+                `OtherProc${i} PROCEDURE`,
+                '  CODE',
+                '  SomeObj.Initialize()',
+            ].join('\n');
+        }
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'refidx315base_'));
+        for (const [rel, content] of Object.entries(filesMap)) {
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        fixture = buildMultiFileFixture({ files: filesMap, projectRoot: dir });
+
+        // Seed the member edge pointing at a DIFFERENT-directory copy of
+        // ap1.clw — the shape resolveFile produces when another redirection
+        // path wins. Exact-path lookup for the opened doc finds nothing.
+        const { FileRelationshipGraph } = require('../FileRelationshipGraph') as typeof import('../FileRelationshipGraph');
+        FileRelationshipGraph.getInstance().seedEdgesForTest([{
+            type: 'MEMBER',
+            fromFile: path.join(dir, 'memb1.clw'),
+            toFile: 'C:\\SomeOtherCopy\\ap1.clw',
+            fromLine: 0,
+        }]);
+
+        scannedFiles = [];
+        const proto = ReferencesProvider.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+        origScan = proto['findMemberReferencesInFile'];
+        proto['findMemberReferencesInFile'] = function (this: unknown, ...args: unknown[]) {
+            scannedFiles.push(String(args[0]));
+            return origScan.apply(this, args);
+        };
+    });
+
+    teardown(() => {
+        const proto = ReferencesProvider.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+        proto['findMemberReferencesInFile'] = origScan;
+        const { FileRelationshipGraph } = require('../FileRelationshipGraph') as typeof import('../FileRelationshipGraph');
+        FileRelationshipGraph.getInstance().reset();
+        teardownMultiFileFixture();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('family widens via basename-matched MEMBER edges instead of falling back to all projects', async () => {
+        const provider = new ReferencesProvider();
+        const doc = fixture.documents['ap1.clw'];
+        const refs = await provider.provideReferences(doc, { line: 7, character: 8 }, { includeDeclaration: true });
+
+        assert.ok(refs && refs.length > 0, 'FAR must return references');
+        assert.ok(refs!.some(r => r.uri.toLowerCase().endsWith('memb1.clw')),
+            'member-module call site found via basename-matched family');
+
+        const otherScans = scannedFiles.filter(u => /other\d+\.clw$/i.test(u));
+        assert.strictEqual(otherScans.length, 0,
+            `unrelated files must not be searched (scanned ${otherScans.length}/${N})`);
+    });
+});
+
 suite('ReferencesProvider #315 — class-family walk stays transitive under the word-prune', () => {
 
     // Guard for the frontier-pruned family walk: SubB inherits SubA inherits
