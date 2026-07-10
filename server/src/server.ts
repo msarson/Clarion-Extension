@@ -74,7 +74,7 @@ import { IntroduceEquateCodeActionProvider } from './providers/IntroduceEquateCo
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
 import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
-import { initializingHoverFallback } from './utils/InitializingHover';
+import { initializingHoverFallback, buildIndexingHover } from './utils/InitializingHover';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
@@ -146,6 +146,9 @@ let solutionPipelineReady = false;
 // prebuild completes turns three async passes (open/drain → solutionReady → sdiReady) into ONE
 // fast pass (~1-3s measured post-index). Sync diagnostics still publish immediately throughout.
 let sdiPipelineReady = false;
+// #301: true from solution announcement until the sequenced background chain (SDI -> FRG ->
+// revalidation) finishes - the window in which hover uses the "still indexing" fallback.
+let startupBackgroundActive = false;
 const deferredAsyncDocs = new Set<string>();
 
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
@@ -433,6 +436,7 @@ connection.onInitialize((params) => {
             || '';
         if (announcedSolution) {
             solutionAnnounced = true;
+            startupBackgroundActive = true;
             perfLogger.perf("Phase: solution announced via initializationOptions", {
                 since_module_load_ms: Date.now() - serverModuleLoadedAt,
                 solution: path.basename(announcedSolution)
@@ -1673,6 +1677,7 @@ documents.onDidClose(event => {
 let solutionAnnounced = false;
 connection.onNotification('clarion/solutionPending', (params: { solutionFilePath?: string }) => {
     solutionAnnounced = true;
+    startupBackgroundActive = true;
     perfLogger.perf("Phase: clarion/solutionPending received", {
         since_module_load_ms: Date.now() - serverModuleLoadedAt,
         solution: params?.solutionFilePath ? path.basename(params.solutionFilePath) : '(unnamed)'
@@ -1990,6 +1995,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     doc_count: revalCount,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
+                // #301: end of the startup background chain - hover drops the "still indexing"
+                // fallback from here on.
+                startupBackgroundActive = false;
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -2691,7 +2699,34 @@ connection.onHover(async (params) => {
     }
 
     try {
-        const hover = await hoverProvider.provideHover(document, params.position);
+        const hoverPromise: Promise<import('vscode-languageserver/node').Hover | null> = (async () => {
+            try {
+                return await hoverProvider.provideHover(document, params.position);
+            } catch (error) {
+                logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
+                return null;
+            }
+        })();
+
+        // #301 follow-up: during the startup background window, resolution is exactly what
+        // crawls (queued behind indexing) — waiting for it meant VS Code dismissed the tooltip
+        // before any answer arrived, so the first cut of the "still indexing" note never
+        // rendered. RACE the real resolution against a short budget: a fast hover still wins
+        // (same-file info works fine mid-startup); a slow or empty one yields the note
+        // immediately, early enough to actually display. The resolution keeps running in the
+        // background and warms the caches for the next attempt.
+        if (startupBackgroundActive || !solutionPipelineReady || !sdiPipelineReady) {
+            const raced = await Promise.race([
+                hoverPromise,
+                new Promise<'busy'>(resolve => setTimeout(() => resolve('busy'), 300))
+            ]);
+            if (raced === 'busy' || raced === null) {
+                return buildIndexingHover();
+            }
+            return raced;
+        }
+
+        const hover = await hoverPromise;
         if (hover) {
             logger.info(`✅ Found hover info for ${params.textDocument.uri}`);
         } else {
@@ -2948,6 +2983,7 @@ const drainDeferredIfNoSolution = () => {
         deferred_count: deferredAsyncDocs.size
     });
     solutionPipelineReady = true;
+    startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
     sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);
     deferredAsyncDocs.clear();
