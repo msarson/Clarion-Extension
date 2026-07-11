@@ -45,14 +45,16 @@ function getCodeBlockRanges(
         const codeStart = t.executionMarker.line + 1;
         const procEnd = t.finishesAt ?? tokens[tokens.length - 1].line;
 
+        // #308: the tokenizer splits `MyClass.DoWork PROCEDURE` into
+        // Label("MyClass") + Variable("DoWork"), so the old col-0 Label
+        // scan-back never saw a dot and derived null — silently skipping every
+        // SELF/PARENT dot-call site. The PROCEDURE token itself carries the
+        // full dotted name in `label` (MethodImplementation subtype); the class
+        // is its first segment (covers 3-part Class.Interface.Method too).
         let selfClassName: string | null = null;
-        for (let k = i - 1; k >= 0; k--) {
-            if (tokens[k].line < t.line) break;
-            if (tokens[k].type === TokenType.Label && tokens[k].start === 0) {
-                const parts = tokens[k].value.split('.');
-                selfClassName = parts.length >= 2 ? parts[0] : null;
-                break;
-            }
+        if (sub === TokenType.MethodImplementation && t.label) {
+            const dotIdx = t.label.indexOf('.');
+            if (dotIdx > 0) selfClassName = t.label.substring(0, dotIdx);
         }
 
         ranges.push({ start: codeStart, end: procEnd, selfClassName });

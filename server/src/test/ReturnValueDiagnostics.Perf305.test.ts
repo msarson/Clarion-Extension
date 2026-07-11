@@ -140,12 +140,13 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
             `receiver type resolved once per object name (got ${counts.resolveVariableType})`);
     });
 
-    // Status-quo pin, NOT desired behavior: the dotted implementation label tokenizes as
-    // Label("MyClass") + Variable("DoWork"), so getCodeBlockRanges derives selfClassName=null
-    // and every SELF/PARENT dot-call site is skipped without any resolution. Mark's production
-    // trace confirms it (no SELF.* resolution lines among the 22 sites). Enabling SELF
-    // validation is a diagnostic behavior change tracked separately — see #305 comments.
-    test('SELF sites: currently skipped (selfClassName underivable) — no resolution work', async () => {
+    // #308 (flipped from the #305 status-quo pin): the dotted implementation label
+    // tokenizes as Label("MyClass") + Variable("DoWork"), so the old col-0 scan-back
+    // derived selfClassName=null and every SELF/PARENT dot-call site was skipped
+    // without any resolution (Mark's production trace: no SELF.* lines among the 22
+    // sites). The PROCEDURE token's own `label` carries the full dotted name —
+    // SELF sites now validate like any other receiver.
+    test('#308: SELF sites validate — non-PROC value return warns, PROC stays silent', async () => {
         const code = [
             "  MEMBER('prog.clw')",
             '  MAP',
@@ -166,9 +167,39 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
         const counts = instrument(locator);
         const diags = await validateDiscardedReturnValues(tokens, doc, locator);
 
-        assert.strictEqual(discarded(diags).length, 0, 'SELF sites are skipped today');
-        assert.strictEqual(counts.enumerateMembersInClass + counts.findMemberInClass, 0,
-            'no resolution work is spent on skipped SELF sites');
+        const warns = discarded(diags);
+        assert.strictEqual(warns.length, 1,
+            `SELF.DoA (LONG, no PROC) must warn and SELF.DoB (PROC) must not; got: ${warns.map(w => w.message).join(' | ')}`);
+        assert.ok(warns[0].message.includes('DoA'), 'the warning names DoA');
+        assert.ok(counts.enumerateMembersInClass >= 1, 'SELF sites now spend resolution work');
+    });
+
+    test('#308: PARENT sites resolve through the class hierarchy', async () => {
+        const code = [
+            "  MEMBER('prog.clw')",
+            '  MAP',
+            '  END',
+            'BaseClass  CLASS,TYPE',
+            'Calc         PROCEDURE(),LONG',
+            'Quiet        PROCEDURE(),LONG,PROC',
+            '           END',
+            'MyClass  CLASS(BaseClass),TYPE',
+            'DoWork     PROCEDURE()',
+            '         END',
+            'MyClass.DoWork PROCEDURE',
+            '  CODE',
+            '  PARENT.Calc()',
+            '  PARENT.Quiet()',
+        ].join('\n');
+        const doc = createDoc('perf308parent.clw', code);
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const locator = new MemberLocatorService();
+        const diags = await validateDiscardedReturnValues(tokens, doc, locator);
+
+        const warns = discarded(diags);
+        assert.strictEqual(warns.length, 1,
+            `PARENT.Calc (LONG, no PROC, inherited) must warn; PARENT.Quiet (PROC) must not; got: ${warns.map(w => w.message).join(' | ')}`);
+        assert.ok(warns[0].message.includes('Calc'), 'the warning names Calc');
     });
 
     test('fallback: unresolvable receiver produces no warning and no crash', async () => {
