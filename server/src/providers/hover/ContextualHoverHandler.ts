@@ -223,7 +223,7 @@ export class ContextualHoverHandler {
      */
     handleProcedureKeyword(line: string, isInMapBlock: boolean, isInClass: boolean): Hover | null {
         // Check if this looks like an implementation (has label before PROCEDURE on same line)
-        const isImplementation = line.trim().match(/^\w+(\.\w+)?\s+PROCEDURE/i) !== null;
+        const isImplementation = line.trim().match(/^\w+(\.\w+)?\s+(?:PROCEDURE|FUNCTION)/i) !== null; // #247
         
         if (isImplementation) {
             // This is a procedure implementation

@@ -2,6 +2,7 @@ import { DocumentLink } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import { FileRelationshipGraph, FileEdge } from '../FileRelationshipGraph';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 function uriToFsPath(uri: string): string {
@@ -10,7 +11,7 @@ function uriToFsPath(uri: string): string {
 }
 
 function fsPathToUri(fsPath: string): string {
-    return 'file:///' + fsPath.replace(/\\/g, '/');
+    return pathToCanonicalUri(fsPath); // #251: canonical form (client-facing links)
 }
 
 const logger = LoggerManager.getLogger("DocumentLinkProvider");

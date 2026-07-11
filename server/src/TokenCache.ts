@@ -25,6 +25,10 @@ interface CachedTokenData {
     lineTokens: Map<number, LineTokenData>; // 🚀 PERFORMANCE: Line-based cache
     documentText: string; // Track full text for change detection
     structure?: DocumentStructure; // 🚀 PERFORMANCE: Cached structure
+    /** #260 — the caller-visible URI (original spelling of the last writer).
+     *  The map itself is keyed canonically; consumers that enumerate the cache
+     *  (getAllCachedUris) get THIS, so Locations/documents.get() keep working. */
+    uri: string;
 }
 
 /**
@@ -33,14 +37,45 @@ interface CachedTokenData {
  */
 export class TokenCache {
     private static instance: TokenCache;
+    // #260 — BOTH maps are keyed by canonicalKey(uri) (decoded + lowercased),
+    // so `file:///f%3A/…` and `file:///f:/…` — the same physical file reached
+    // via VS Code (encoded) vs a disk-walk constructor (plain) — share one
+    // entry instead of holding two divergent token sets (#196 disease,
+    // cache-key side). The entry stores the last writer's original URI for
+    // consumers that enumerate the cache.
     private cache = new Map<string, CachedTokenData>();
-    // #188 — parsed tokens for CLOSED files (no live TextDocument), keyed by
-    // lowercased URI and validated by file mtime. Without this, every cross-file
-    // consumer (Find-All-References, CodeLens counts) re-read + re-tokenized the
-    // same on-disk file from scratch on every call — e.g. a single reference
-    // count re-parsed StringTheory.clw ~4-5×. mtime validation guarantees we
-    // never serve stale tokens after an external (on-disk) change.
+    // #188 — parsed tokens for CLOSED files (no live TextDocument), validated
+    // by file mtime. Without this, every cross-file consumer (Find-All-
+    // References, CodeLens counts) re-read + re-tokenized the same on-disk
+    // file from scratch on every call — e.g. a single reference count
+    // re-parsed StringTheory.clw ~4-5×. mtime validation guarantees we never
+    // serve stale tokens after an external (on-disk) change.
+    // #260 — bounded LRU (see closedFileCacheMax): previously grew unbounded
+    // for the server's lifetime, across solution switches.
     private closedFileCache = new Map<string, { tokens: Token[]; mtimeMs: number }>();
+
+    /** #260 — max closed-file entries kept. Map preserves insertion order;
+     *  hits re-insert (LRU), overflow evicts the oldest. Mutable for tests. */
+    public static closedFileCacheMax = 512;
+
+    /** #260 — test/diagnostics visibility into the closed-file cache size. */
+    public get closedFileCacheSize(): number {
+        return this.closedFileCache.size;
+    }
+
+    /**
+     * #260 — canonical cache key for a URI: percent-decoded and lowercased so
+     * encoding (`f%3A` vs `f:`) and case (Windows paths are case-insensitive)
+     * differences collapse to one key. Falls back to lowercased raw input on a
+     * malformed escape (same discipline as canonicalLocationKey / #196).
+     */
+    private static canonicalKey(uri: string): string {
+        try {
+            return decodeURIComponent(uri).toLowerCase();
+        } catch {
+            return uri.toLowerCase();
+        }
+    }
 
     private constructor() {
         // Private constructor to enforce singleton pattern
@@ -63,7 +98,7 @@ export class TokenCache {
      * @returns Cached tokens or empty array if not cached
      */
     public getCachedTokens(document: TextDocument): Token[] {
-        const cached = this.cache.get(document.uri);
+        const cached = this.cache.get(TokenCache.canonicalKey(document.uri));
         if (cached) {
             logger.debug(`⚡ Fast path: returning ${cached.tokens.length} cached tokens for ${document.uri}`);
             return cached.tokens;
@@ -78,7 +113,7 @@ export class TokenCache {
      * falling back to readFileSync (which would return stale disk content).
      */
     public getDocumentText(uri: string): string | null {
-        return this.cache.get(uri)?.documentText ?? null;
+        return this.cache.get(TokenCache.canonicalKey(uri))?.documentText ?? null;
     }
 
     /**
@@ -101,7 +136,7 @@ export class TokenCache {
                 return [];
             }
             
-            const cached = this.cache.get(document.uri);
+            const cached = this.cache.get(TokenCache.canonicalKey(document.uri));
             const currentText = document.getText();
             
             // 🚀 PERFORMANCE: Check if we can use incremental update
@@ -164,12 +199,13 @@ export class TokenCache {
                 })();
                 
                 // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
-                this.cache.set(document.uri, { 
-                    version: document.version, 
+                this.cache.set(TokenCache.canonicalKey(document.uri), {
+                    version: document.version,
                     tokens,
                     lineTokens,
                     documentText: currentText,
-                    structure: structure
+                    structure: structure,
+                    uri: document.uri
                 });
                 
                 const fullTime = performance.now() - fullStart;
@@ -195,36 +231,52 @@ export class TokenCache {
     }
 
     /**
-     * Get DocumentStructure for a document
-     * DocumentStructure is built on-demand and not cached to avoid performance bottlenecks
-     * @param document The text document
-     * @returns DocumentStructure
+     * Get the DocumentStructure for a document — the SAME instance the tokenize
+     * pipeline built and cached alongside the tokens.
+     *
+     * #258: this method previously snapshotted the cache entry BEFORE calling
+     * getTokens() and then unconditionally re-built + re-processed on any miss —
+     * discarding the structure getTokens() had just cached and running the exact
+     * "second process() pass on shared tokens" hazard warned about elsewhere in
+     * this file. It now re-checks the cache AFTER getTokens() (which populates
+     * `structure` on both the full and incremental paths) and only builds fresh
+     * as a last-resort fallback, storing it on the LIVE cache entry.
      */
     public getStructure(document: TextDocument): DocumentStructure {
         const perfStart = performance.now();
-        const uri = document.uri;
+        const uri = TokenCache.canonicalKey(document.uri);
         const cached = this.cache.get(uri);
-        
-        // Return cached structure if available and up-to-date
+
+        // Fast path: cached structure, current version.
         if (cached && cached.structure && cached.version === document.version) {
             const perfEnd = performance.now();
             logger.perf(`getStructure`, { result: 'cached', time_ms: (perfEnd - perfStart).toFixed(2) });
             return cached.structure;
         }
-        
-        // Build and cache new structure
-        logger.info(`Building new DocumentStructure for ${uri} (cached=${!!cached}, hasStructure=${!!(cached?.structure)}, version match=${cached?.version === document.version})`);
+
+        // getTokens() tokenizes (full or incremental) and caches the structure it built.
         const tokens = this.getTokens(document);
+
+        // #258: re-fetch — getTokens() replaced/populated the cache entry.
+        const refreshed = this.cache.get(uri);
+        if (refreshed && refreshed.structure && refreshed.version === document.version) {
+            const perfEnd = performance.now();
+            logger.perf(`getStructure`, { result: 'built_by_getTokens', time_ms: (perfEnd - perfStart).toFixed(2) });
+            return refreshed.structure;
+        }
+
+        // Fallback (should be rare — e.g. tokenizer returned no structure): build once
+        // and store on the LIVE entry so repeat calls return the same instance.
+        logger.info(`Building fallback DocumentStructure for ${uri} (entry=${!!refreshed}, hasStructure=${!!(refreshed?.structure)})`);
         const structure = new DocumentStructure(tokens);
         structure.process();
-        
-        if (cached) {
-            cached.structure = structure;
+        if (refreshed) {
+            refreshed.structure = structure;
         }
-        
+
         const perfEnd = performance.now();
         logger.perf(`getStructure`, { result: 'built_new', time_ms: (perfEnd - perfStart).toFixed(2), tokens: tokens.length });
-        
+
         return structure;
     }
 
@@ -233,58 +285,41 @@ export class TokenCache {
      * Used by ReferencesProvider to avoid disk reads for open documents
      */
     public getAllCachedUris(): string[] {
-        return Array.from(this.cache.keys());
+        // #260 — keys are canonical; return the caller-visible original URIs.
+        return Array.from(this.cache.values(), v => v.uri);
     }
 
     /**
      * Get tokens for a URI without a TextDocument (uses cached data only)
-     * Returns null if the URI is not in the cache
+     * Returns null if the URI is not in the cache.
+     * #260 — keyed canonically, so any spelling (encoding/case) of the same
+     * physical file hits the same entry.
      */
     public getTokensByUri(uri: string): Token[] | null {
-        const cached = this.cache.get(uri);
+        const cached = this.cache.get(TokenCache.canonicalKey(uri));
         return cached ? cached.tokens : null;
     }
 
     /**
-     * Case-insensitive variant of `getTokensByUri`. Walks cached keys when an
-     * exact-match lookup misses and returns the first entry whose URI matches
-     * case-insensitively. Bridges callers that build URIs from sources with
-     * different case-normalisation conventions (e.g. `FileRelationshipGraph`
-     * lowercases all paths via `normalizePath`, while `MultiFileFARFixture` /
-     * VS Code preserve original case). Used by FAR's Tier 6 globalScope load
-     * path (`671d7cd8`) where FRG-derived program-file URIs may not match
-     * TokenCache's original-case keys.
-     *
-     * O(1) on exact-hit; O(n) cache-walk on miss. Callers should prefer the
-     * exact `getTokensByUri` when case alignment is guaranteed.
+     * Historical alias of `getTokensByUri` — #260's canonical keying made the
+     * base lookup encoding- AND case-insensitive, so the O(n) cache-walk this
+     * method used to do is gone. Kept for its call sites (FAR Tier 6 /
+     * `671d7cd8`).
      */
     public getTokensByUriCaseInsensitive(uri: string): Token[] | null {
-        const exact = this.cache.get(uri);
-        if (exact) return exact.tokens;
-        const lower = uri.toLowerCase();
-        for (const [k, v] of this.cache) {
-            if (k.toLowerCase() === lower) return v.tokens;
-        }
-        return null;
+        return this.getTokensByUri(uri);
     }
 
     /**
-     * Look up a cached document's full source text by URI (case-insensitive).
-     * Same lookup discipline as `getTokensByUriCaseInsensitive`. Used by FAR's
+     * Look up a cached document's full source text by URI. Used by FAR's
      * cross-file overloadFilter resolution path (`671d7cd8`) where the cursor's
      * document and the declaration file may differ — the matching loop's
      * declaration-line text needs the declaring file's in-memory text rather
      * than a disk read (which fails for in-memory test fixtures + open-but-
-     * unsaved buffers in production).
+     * unsaved buffers in production). #260: same canonical-key discipline.
      */
     public getDocumentTextByUriCaseInsensitive(uri: string): string | null {
-        const exact = this.cache.get(uri);
-        if (exact) return exact.documentText;
-        const lower = uri.toLowerCase();
-        for (const [k, v] of this.cache) {
-            if (k.toLowerCase() === lower) return v.documentText;
-        }
-        return null;
+        return this.getDocumentText(uri);
     }
 
     /**
@@ -305,9 +340,16 @@ export class TokenCache {
         let mtimeMs: number;
         try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return []; }
 
-        const key = uri.toLowerCase();
+        // #260 — canonical key (decoded + lowercased): encoding variants of the
+        // same file share one entry instead of tokenizing twice into divergence.
+        const key = TokenCache.canonicalKey(uri);
         const cached = this.closedFileCache.get(key);
-        if (cached && cached.mtimeMs === mtimeMs) return cached.tokens;
+        if (cached && cached.mtimeMs === mtimeMs) {
+            // LRU touch: re-insert so this entry becomes newest.
+            this.closedFileCache.delete(key);
+            this.closedFileCache.set(key, cached);
+            return cached.tokens;
+        }
 
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
@@ -315,6 +357,13 @@ export class TokenCache {
             // second process() here would be redundant (and double-push children).
             const tokens = new ClarionTokenizer(content).tokenize();
             this.closedFileCache.set(key, { tokens, mtimeMs });
+            // #260 — bounded: evict oldest entries past the cap (Map preserves
+            // insertion order; hits above re-inserted, so first key = LRU).
+            while (this.closedFileCache.size > TokenCache.closedFileCacheMax) {
+                const oldest = this.closedFileCache.keys().next().value;
+                if (oldest === undefined) break;
+                this.closedFileCache.delete(oldest);
+            }
             return tokens;
         } catch {
             return [];
@@ -328,7 +377,7 @@ export class TokenCache {
      * getStructure(document) instead — that path builds on demand.
      */
     public getStructureByUri(uri: string): DocumentStructure | null {
-        const cached = this.cache.get(uri);
+        const cached = this.cache.get(TokenCache.canonicalKey(uri));
         return cached?.structure ?? null;
     }
 
@@ -338,8 +387,9 @@ export class TokenCache {
      */
     public clearTokens(uri: string): void {
         logger.info(`🗑️ Clearing tokens for ${uri}`);
-        this.cache.delete(uri);
-        this.closedFileCache.delete(uri.toLowerCase()); // #188
+        const key = TokenCache.canonicalKey(uri);
+        this.cache.delete(key);
+        this.closedFileCache.delete(key); // #188
     }
 
     /**
@@ -431,8 +481,9 @@ export class TokenCache {
             const lineData = cached.lineTokens.get(lineNum);
             if (lineData) {
                 const lineUpper = lineData.lineText.toUpperCase();
-                // Check if this line contains a structure keyword
-                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('CLASS') || 
+                // Check if this line contains a structure keyword (#247: PROCEDURE ≡ FUNCTION)
+                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('FUNCTION') ||
+                    lineUpper.includes('CLASS') ||
                     lineUpper.includes('MAP') || lineUpper.includes('INTERFACE') ||
                     lineUpper.includes('MODULE')) {
                     // Find all tokens that are children of this structure
@@ -455,8 +506,9 @@ export class TokenCache {
                         const nextLineData = cached.lineTokens.get(line);
                         if (nextLineData) {
                             const nextUpper = nextLineData.lineText.trim().toUpperCase();
-                            // Stop at next procedure/class or at column 0 keywords that end structures
-                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('CLASS ') ||
+                            // Stop at next procedure/class or at column 0 keywords that end structures (#247)
+                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('FUNCTION ') ||
+                                nextUpper.startsWith('CLASS ') ||
                                 (nextUpper === 'END' && nextLineData.lineText.trim() === 'END')) {
                                 foundEnd = true;
                                 break;
@@ -523,6 +575,13 @@ export class TokenCache {
         
         if (changedLines.size === 0) {
             logger.info(`🚀 No lines changed, using cached tokens (${detectTime.toFixed(2)}ms detection)`);
+            // #260 — CONVERGE the phantom version bump (identical text, higher
+            // version — format-no-op, undo/redo round-trip). Without this the
+            // entry's version stayed behind forever, so getStructure()'s
+            // version-gated fast path failed on every subsequent call and it
+            // rebuilt a fresh structure each time until a real edit landed.
+            cached.version = document.version;
+            cached.documentText = newText;
             return cached.tokens;
         }
         
@@ -613,12 +672,13 @@ export class TokenCache {
         const cacheTime = performance.now() - cacheStart;
         
         // 🚀 PERFORMANCE: Cache the structure to avoid rebuilding it
-        this.cache.set(document.uri, {
+        this.cache.set(TokenCache.canonicalKey(document.uri), {
             version: document.version,
             tokens: mergedTokens,
             lineTokens,
             documentText: newText,
-            structure: structure
+            structure: structure,
+            uri: document.uri
         });
         
         const totalTime = performance.now() - perfStart;

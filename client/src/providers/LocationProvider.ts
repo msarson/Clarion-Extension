@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
+import { PathUtils } from '../PathUtils';
 
 const logger = LoggerManager.getLogger("LocationProvider");
 logger.setLevel("error");
@@ -296,7 +297,9 @@ export class LocationProvider {
         }
         
         logger.info(`Looking for SECTION('${targetSection}') in file: ${fullPath}`);
-        const matchingDocument = workspace.textDocuments.find(document => document.uri.fsPath === fullPath);
+        // #266: equalPath — a strict fsPath === missed on case/separator variants,
+        // silently reading the stale on-disk copy instead of the open buffer.
+        const matchingDocument = workspace.textDocuments.find(document => PathUtils.equalPath(document.uri.fsPath, fullPath));
 
         if (matchingDocument) {
             const lines = matchingDocument.getText().split('\n');

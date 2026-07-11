@@ -6,6 +6,7 @@ import { IncludeVerifier } from '../../utils/IncludeVerifier';
 import { ClassConstantParser } from '../../utils/ClassConstantParser';
 import { ProjectConstantsChecker } from '../../utils/ProjectConstantsChecker';
 import { SolutionManager } from '../../solution/solutionManager';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 
@@ -20,7 +21,9 @@ logger.setLevel('error');
 // "error" at final commit.
 // #158 — level set to "error" post-investigation. Flip to "perf" for
 // future investigations (single-character toggle).
-const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'error');
+// "perf" → the completion breakdown (sdi wait vs include-check vs constant-check) always emits,
+// even in a release VSIX — one line per validation, needed to diagnose slow-solution reports.
+const perfLogger = LoggerManager.getLogger('MissingIncludeDiagnostics.Perf', 'perf');
 
 const includeVerifier = IncludeVerifier.getInstance();
 
@@ -34,7 +37,18 @@ function resolveProjectPaths(document: TextDocument): {
 } {
     const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
     const sm = SolutionManager.getInstance();
-    const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
+    // #290: a file that isn't a project member (e.g. a shared .inc under sharedcode/) must NOT key
+    // the structure index by its own DIRECTORY — getProjectPathForFile's dirname fallback made the
+    // skip-kick below launch a full scan of that directory (17-60s measured) racing the real
+    // per-project build and starving concurrent validators. With a solution loaded, anchor on the
+    // first project's prebuilt index instead (sdi.find(name, path) already falls back to a
+    // cross-index find when the per-project lookup misses, and the project index scan covers the
+    // RED search paths + libsrc where such shared files live). The dirname key remains only for
+    // genuine no-solution mode (#184's last resort).
+    const owningProject = sm?.findProjectForFile(fromPath);
+    const projectPath = owningProject?.path
+        ?? sm?.solution.projects[0]?.path
+        ?? path.dirname(fromPath);
     const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
     return { fromPath, projectPath, cwprojPath };
 }
@@ -115,9 +129,22 @@ export async function validateMissingIncludes(
     includeVerifier.clearCache(document.uri);
     const clearCacheMs = Date.now() - clearCacheStart;
 
-    const sdiStart = Date.now();
     const sdi = StructureDeclarationIndexer.getInstance();
-    await sdi.getOrBuildIndex(projectPath);
+    // #289: never BLOCK a validation pass on the structure-index build — on a large installation
+    // the build takes tens of seconds and this await was 97% of the validator's time
+    // (sdi_getOrBuild_ms=28887 of total_ms=29793 measured on a 40-project VM). Kick/join the
+    // background build and skip; server.ts re-validates open documents when the prebuilt index
+    // completes, so the diagnostics still arrive without ever stalling the pipeline.
+    if (!sdi.isIndexed(projectPath)) {
+        void sdi.getOrBuildIndex(projectPath).catch(() => { /* logged by the indexer */ });
+        perfLogger.perf("validateMissingIncludes skipped — structure index still building", {
+            total_ms: Date.now() - fnStart,
+            uri: document.uri
+        });
+        return diagnostics;
+    }
+    const sdiStart = Date.now();
+    await sdi.getOrBuildIndex(projectPath); // index ready — resolves immediately
     const sdiMs = Date.now() - sdiStart;
 
     const constantParser = new ClassConstantParser();
@@ -226,12 +253,23 @@ export async function validateMissingConstants(
     }
 
     const sdi = StructureDeclarationIndexer.getInstance();
-    await sdi.getOrBuildIndex(projectPath);
+    // #289: same non-blocking rule as validateMissingIncludes — never stall a validation pass on
+    // the structure-index build; server.ts re-validates once the prebuilt index is ready.
+    if (!sdi.isIndexed(projectPath)) {
+        void sdi.getOrBuildIndex(projectPath).catch(() => { /* logged by the indexer */ });
+        return diagnostics;
+    }
+    await sdi.getOrBuildIndex(projectPath); // index ready — resolves immediately
 
     const constantParser = new ClassConstantParser();
     const constantsChecker = new ProjectConstantsChecker();
 
+    // #297: measured 2.5s on a generated module during the startup revalidation — yield on a
+    // time budget so interactive requests interleave with the per-type include/constant checks.
+    const timeSlice = makeTimeSlicer();
+
     for (const { typeToken, typeName, typeNameStart } of collectFileTopLevelTypeTokens(tokens)) {
+        await timeSlice();
         const definitions = (sdi.find(typeName, projectPath).length > 0
             ? sdi.find(typeName, projectPath)
             : sdi.find(typeName)

@@ -462,6 +462,37 @@ CODE
 
 ---
 
+## Refactorings (Ctrl+.)
+
+A batch of CodeRush-inspired refactors, available on **Ctrl+.** (or the Refactor… context menu) and as palette commands. None of them bind new keyboard shortcuts.
+
+### Surround With…
+
+Select one or more statement lines, then **Ctrl+.** → **Surround With…** (or `Clarion: Surround With…` from the palette). Wraps the selection in:
+- `IF … END`
+- `LOOP … END`, `LOOP WHILE … END`, `LOOP UNTIL … END`
+- `CASE … OF … END`
+
+The content is indented one level (relative indentation preserved, `OF` aligned with `CASE`), and the condition placeholder is selected so you can type straight over it.
+
+### Negate Condition
+
+With the cursor on an `IF` / `ELSIF` / `LOOP WHILE` / `LOOP UNTIL` line, flips the condition's logical sense: comparison operators invert (`=` ↔ `<>`, `<` ↔ `>=`, …), a bare expression gains/loses `~`, and a compound boolean is wrapped in `~(…)`. Only the condition span is rewritten — trailing `THEN`, comments, and string contents are untouched.
+
+### Flip IF/ELSE
+
+On a block-form `IF … ELSE … END`, negates the condition and swaps the branches — handy when the `ELSE` holds the common/early path. Not offered when the shape isn't a clean two-branch flip (no `ELSE`, an `ELSIF` chain, or single-line `IF … THEN`), where Negate Condition still covers the IF line.
+
+### Introduce EQUATE
+
+With the cursor on (or a selection of) a numeric or string literal, extracts the magic literal to a named `EQUATE`. A quick pick asks **which data section** it should live in — the routine's `DATA`, the procedure's local data, module data (in a `MEMBER`), global data (in a `PROGRAM`), or even cross-file into the resolved PROGRAM file's global section — then prompts for the name. The literal is replaced with the new name.
+
+### Create Routine from an Unresolved DO
+
+With the cursor on a `DO SomeRoutine` whose target doesn't exist, a quick fix scaffolds the `SomeRoutine ROUTINE` skeleton at the end of the enclosing procedure and drops the cursor into the body. Resolution is procedure-scoped (routine labels legally repeat across procedures), and from inside a local derived method (ABC's `ThisWindow` shape) it offers both placements — local to the method, or procedure-level shared by all methods.
+
+---
+
 ## Code Folding
 
 ### What It Does

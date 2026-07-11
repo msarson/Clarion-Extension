@@ -66,11 +66,15 @@ Open any Clarion solution - just open the folder.
 Jump to definitions, find implementations, and explore references — works in same file immediately, cross-file with solution.
 - Press **F12** to go to definition (same file: no solution needed!)
 - Press **Ctrl+F12** to go to implementation
-- Press **Shift+F12** for **Find All References** — scope-aware across all project files
+- Press **Shift+F12** for **Find All References** — scope-aware across all project files, overload-aware (only the matching overload's sites), routine-aware
 - Press **F2** to **Rename Symbol** — renames across the entire workspace in one step
-- **Document Highlight** — pressing on a symbol highlights all occurrences in the current file
+- **Reference-count CodeLens** — an exact `N references` count above every procedure, method, class, and routine; click to see them (large solutions briefly show a `~` estimate while the exact count computes)
+- **Routines are first-class symbols** — hover, F12, Go-to-Implementation, references, and CodeLens all work on `ROUTINE` labels and `DO` sites, including generated `::` names like `Menu::MENUBAR1`
+- **Module-callout procedures** — references from an implementation reach every module whose MAP includes the callout INC (the generated `MODULE('impl.clw')` + INCLUDE pattern)
+- **Overload resolution by argument types** — F12, Ctrl+F12, hover, and references pick the overload matching the call's arguments (typed variables, members, EQUATEs, implicit variables, `PRE:Field` arguments)
+- **Document Highlight** — scope-aware occurrence highlighting, including procedure call sites
 - **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all solution files
-- Hover for documentation — declaration location, class/interface context, type info
+- Hover for documentation — declaration location, class/interface context, type info, resolved INCLUDE/MODULE/MEMBER file paths
 - **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12, and references resolve through CLASS, QUEUE, and GROUP type chains
 - **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
 - **Typed variable members**: F12/Ctrl+F12/hover on `obj.Method()` where `obj` is any typed variable
@@ -78,6 +82,16 @@ Jump to definitions, find implementations, and explore references — works in s
 - **CLASS type names**: F12 and Find All References work on type names in parameter and variable declarations
 - Cross-file navigation requires solution
 - **[Learn more about Navigation →](docs/features/navigation.md)**
+
+### 🔁 **Refactoring & Quick Fixes**
+CodeRush-inspired refactors on **Ctrl+.** — plus quick fixes attached to diagnostics.
+- **Surround With…** — wrap selected statements in `IF…END`, `LOOP`/`LOOP WHILE`/`LOOP UNTIL…END`, or `CASE…OF…END`
+- **Negate Condition** — flip the logical sense of an `IF` / `ELSIF` / `LOOP WHILE` / `LOOP UNTIL` condition
+- **Flip IF/ELSE** — negate the condition and swap the branches of a block-form `IF…ELSE…END`
+- **Introduce EQUATE** — extract a magic literal to a named `EQUATE`, choosing which data section it lives in (routine / local / module / global — even cross-file into the PROGRAM)
+- **Create routine from `DO`** — an unresolved `DO SomeRoutine` offers to scaffold the `ROUTINE` skeleton in the right scope
+- **Add missing INCLUDE / project DefineConstants** — quick fixes on the corresponding diagnostics
+- **[Learn more about Code Editing →](docs/features/code-editing.md)**
 
 ### 🔧 **Build Integration**
 Generate applications directly from VS Code.
@@ -94,7 +108,21 @@ Catch errors as you type.
 - FILE validation (DRIVER, RECORD)
 - **Missing INCLUDE** — warns when a variable's class type is defined in an `.inc` not included in the file; code action inserts the `INCLUDE` automatically
 - **Missing DefineConstants** — warns when a class's required `Link()`/`DLL()` constants are absent from the `.cwproj`; code action adds them with a QuickPick for static vs DLL mode
+- **Discarded return values** — a value-returning (non-`PROC`) procedure or method called as a statement, including `SELF.`/`PARENT.` call sites
+- **Literal passed by reference** — a literal handed to a `*TYPE` (or complex-type) parameter, which needs an addressable variable
+- **Undeclared variables** (opt-out) — names that resolve to no declaration through the full scope model, cross-file aware
+- **Missing implementations / indistinguishable prototypes** — MAP declarations without bodies, and overloads a call could never disambiguate
+- **Character-set validation** that respects all Windows ANSI code pages (1250–1258) — national letters pass clean, genuine contamination (emoji, box-drawing) is flagged
+- Code inside unconditional `OMIT` blocks is excluded from diagnostics and reference counts (rename still updates it — other build configurations may compile it)
 - **[Learn more about Diagnostics →](docs/features/diagnostics.md)**
+
+### ⚡ **Performance at Scale**
+Built and measured against real-world solutions (40 projects / 3,000+ source files).
+- Solution ready in ~2s, extension interactive in ~5s on large solutions
+- All indexes (structure declarations, file relationships, reference counts) persist across sessions — warm starts re-scan only files that changed
+- Background indexing is time-sliced and never blocks typing, hover, or navigation
+- Project-file regeneration (all `.cwproj` files touched) coalesces into a single refresh
+- Opt-in performance tracing (`clarion.log.performance.enabled`) produces a full diagnostic timeline for support
 
 ### ✏️ **Code Editing Tools**
 Productivity features to write code faster.
@@ -140,13 +168,44 @@ Productivity features to write code faster.
 - **[All Commands](docs/reference/commands.md)** - Complete command reference
 - **[All Settings](docs/reference/settings.md)** - Configuration options
 - **[Snippet Reference](docs/reference/snippets.md)** - Code snippet cheat sheet
-- **[Clarion Language Reference](docs/CLARION_LANGUAGE_REFERENCE.md)** - Language syntax
+- **[Clarion Language Reference](https://github.com/msarson/Clarion-Extension/wiki/Clarion-Language-Reference)** - Language syntax (wiki)
 
 ---
 
 ## 🆕 What's New
 
-### Latest: v0.9.9 (2026-07-04) — Solution-wide scope correctness + no-solution resilience
+### Latest: v1.0.0 — Performance at scale, exact references, refactoring
+
+The 1.0 release is the largest update yet — a ground-up performance overhaul verified on real 40-project / 3,000-file solutions, plus a batch of new editing features.
+
+#### ⚡ Startup & responsiveness overhaul
+- The IDE is **usable seconds after opening a large solution** (previously minutes of spinners): solution tree instant, background indexing strictly sequenced and time-sliced, no event-loop freezes.
+- **All indexes persist across sessions** (structure declarations, file-relationship graph, reference counts) — warm starts re-scan only changed files.
+- A Clarion regeneration touching every `.cwproj` now triggers **one** refresh instead of forty.
+- New `clarion.log.performance.enabled` setting (default off) emits a full diagnostic timeline for support.
+
+#### 🔢 Reference counts you can trust
+- CodeLens counts are **exact** — every lens runs a real scoped Find-All-References in the background and clicking shows the results instantly.
+- **Routines get lenses too**, and are now first-class navigation symbols: hover, F12, Go-to-Implementation, and references work on `ROUTINE` labels and `DO` sites — including generated `::` names.
+- Find-All-References understands the **module-callout pattern** (`MODULE('impl.clw')` INC included into many MAPs): references from an implementation now reach every calling module.
+- Overload-aware everywhere: FAR, F12, Ctrl+F12, hover, and signature help all pick the overload matching the call's **argument types** — typed variables, members, EQUATEs, implicit variables, `PRE:Field` arguments.
+
+#### 🔁 New refactors & quick fixes (Ctrl+.)
+- **Surround With…** (IF / LOOP / CASE), **Negate Condition**, **Flip IF/ELSE**, **Introduce EQUATE** (with data-section placement), and **Create routine from an unresolved `DO`**.
+
+#### 🎯 Diagnostics
+- New: discarded return values (including `SELF.`/`PARENT.` sites), literal-passed-by-reference, undeclared variables, indistinguishable prototypes.
+- Fixed: character-set validation respects all Windows ANSI code pages — national letters no longer flood non-Western files with warnings.
+- Unconditional `OMIT` blocks are invisible to diagnostics and reference counts (rename still updates them).
+
+#### 🧰 Under the hood
+- Language client/server upgraded to **LSP 8.x**; the marketplace package is trimmed to just the runtime files.
+
+**[See the full changelog for the complete list →](CHANGELOG.md)**
+
+---
+
+### Recent: v0.9.9 (2026-07-04) — Solution-wide scope correctness + no-solution resilience
 
 - Tightened **open-solution** scope correctness across cross-file PROGRAM globals, sibling-MEMBER module scope, Tier 1 routine-local shadowing in `SymbolFinder.findSymbol(...)`, and qualifier completion so `Prefix:` only returns symbols for that exact qualifier (e.g. `TGLO:*`).
 - Dot-completion member lists now show inline type information (for example `Var1 LONG`) while preserving clean insert text.
@@ -159,111 +218,6 @@ Productivity features to write code faster.
 
 ---
 
-### Recent: v0.9.8 (2026-07-03) — Documentation corrections
-
-- Updated release documentation to reflect v0.9.8 as the current version.
-- Corrected release timeline references so v0.9.7 is clearly marked as released on 2026-07-02.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.7 (2026-07-02) — No-Solution UX, Formatting, and Diagnostics
-
-#### 🧭 No-solution workflow improvements
-- `clarion.quickOpen` now falls back to VS Code's native Quick Open when no solution is loaded.
-- The extension stays dormant in non-Clarion workspaces (no status bar/LSP startup until Clarion context exists).
-- Version/session behavior is now clearer and more stable across solutions via the newer version-reconciliation flow.
-
-#### 📐 Formatting and navigation quality
-- Added **Format Selection** support via `documentRangeFormattingProvider` (range formatting with full-document context).
-- Interface/class implementation diagnostics now handle inherited implementations and overload differentiation by parameter count.
-- `MODULE(...)` / `LINK(...)` references on CLASS lines are now clickable document links.
-
-#### ⚡ Reliability and performance polish
-- Cross-file diagnostics now read **live open+dirty buffers** for include-based checks (avoids stale-disk false positives).
-- CodeLens reference counts are warmed more aggressively and invalidated more precisely to reduce repeated full scans.
-- Additional rename/reference URI-normalization hardening reduces duplicate-edit collisions.
-
-#### 🧩 Other notable 0.9.7 additions
-- Protected-branch pre-commit guard for release branches (`master`, `main`, `version-x.y.z`).
-- New `clarion.referencesCodeLens.enabled` setting to disable expensive reference-count CodeLens on very large files.
-- Interface and overload diagnostics expanded with indistinguishable-prototype detection and stricter interface implementation checks.
-- Typed-variable overload resolution improved across Go To Definition / Hover / Go To Implementation.
-- New diagnostics include undeclared-variable coverage and missing-MAP declaration checks.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.5 (2026-04-21) — Hover Expansion & Build Integration
-
-#### 📚 310 Built-ins, 158 Attributes
-Hover documentation now covers 310 Clarion built-in functions and 158 window/report attributes. Overload narrowing: hovering `OPEN(Window)` shows only the WINDOW-relevant signatures. Context-aware hover for `HIDE`, `DISABLE`, and `TYPE` — shows attribute or statement usage depending on whether you're inside a WINDOW/REPORT structure.
-
-#### 🏗️ Build Integration Improvements
-- Projects sorted by dependency order in Solution View
-- Active build config auto-detected from `.sln.cache` on open
-- Fixed MSBuild property quoting and per-project log files
-
-#### 🐛 Key Bug Fixes
-- **SDI startup fix**: hover and Go To Definition now work on first open without needing to reopen the solution
-- `LIKE(TypeName)` dot-access chains resolve correctly (e.g. `SELF.OrigWin.Maximized`)
-- Equate hover shows correct type (no longer shows `UNKNOWN`)
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.4 (2026-04-19) — PROP/EVENT Docs, CodeLens & Editor Power-Ups
-
-#### 📚 PROP: / PROPPRINT: Hover Documentation
-Hover over any runtime property equate (`PROP:Enabled`, `PROP:Color`, `PROPPRINT:Device`, …) to see an instant description, read-only badge, and usage example. Covers **336 PROP:** entries and **25 PROPPRINT:** printer properties.
-
-#### ⚡ EVENT: Hover & Autocomplete
-Type `EVENT:` for a full autocomplete list of all **63 EVENT:** equates. Hovering shows category and description.
-
-#### 🔢 CodeLens — Inline Reference Counts
-A `N references` lens above every procedure and CLASS declaration. Dead code is immediately visible. Click to open the References panel.
-
-#### 📐 Expand / Shrink Selection (`Shift+Alt+→` / `Shift+Alt+←`)
-Progressively widen selection through Clarion's scope hierarchy.
-
-#### 🔗 Flatten Continuation Lines (`Ctrl+.`)
-Joins `|`-continued lines, trims whitespace, and collapses adjacent string literals.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.9.2 (2026-04-18) — Navigation & Bug Fixes
-
-#### 🔗 Multi-Level Chain Navigation
-`variable.property.method` chains now resolve all the way through. Hover, F12, and Ctrl+F12 on `thisStartup.Settings.PutGlobalSetting(...)` correctly walk the type chain.
-
-#### 🐛 Key Bug Fixes
-- `PREFIX:Name` reference variables now resolve correctly
-- Hover, F12, and Ctrl+F12 suppressed inside string literals
-- Colon-stripping fallback removed from hover and F12
-
-**[See full changelog →](CHANGELOG.md)**
-
----
-
-### Recent: v0.8.8 (2026-04-12)
-
-#### ✏️ Rename Symbol (F2)
-Rename any user-defined symbol across the entire workspace — scope-aware, protects read-only `.inc` files.
-
-#### 🔆 Document Highlight
-Click a symbol to highlight all its occurrences in the current file.
-
-#### 🔍 Workspace Symbol Search (Ctrl+T)
-Search for any procedure, class, or label across all files in the solution.
-
-**[See full changelog →](CHANGELOG.md)**
-
----
 
 ## 💬 Support & Feedback
 

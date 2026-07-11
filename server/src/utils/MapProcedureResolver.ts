@@ -8,13 +8,19 @@ import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
+import { ProcedureUtils } from './ProcedureUtils';
+import { CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
+import { MethodOverloadResolver } from './MethodOverloadResolver';
 import { DocumentStructure } from '../DocumentStructure';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
+import { cooperativeCheckpoint } from './cooperativeScan';
 import LoggerManager from '../logger';
+import * as fsSync from 'fs';
+import * as pathUtil from 'path';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
@@ -28,6 +34,159 @@ export class MapProcedureResolver {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(tokenCache, solutionManager);
         this.crossFileCache = crossFileCache;
+    }
+
+    /**
+     * #313 — locate a procedure's declaration inside a MODULE block of an INC that
+     * is included in a MAP (the WinEvent pattern: include('winevent.inc') in the
+     * PROGRAM's global MAP, module('winevent.clw') blocks inside the INC). Walks
+     * INCLUDE targets from the given document AND its MEMBER parent. Shared by the
+     * goto-implementation and hover call-site routes — both then run the proven
+     * declaration-side resolution from the returned document/position.
+     */
+    public async findDeclarationInMapIncludes(
+        procName: string,
+        document: TextDocument,
+        tokens: Token[]
+    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+        // #313 follow-up: MAP procedure names never contain dots — a dotted word is
+        // member access, and running this walk for it cost 12s per hover on
+        // PARENT._FindFirstBreak in a PROGRAM file (the walk exhaustively cold-loaded
+        // every reachable INC before concluding "not a MAP procedure").
+        if (procName.includes('.')) return null;
+
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const startPaths: string[] = [currentPath];
+
+        const memberToken = tokens.find(t =>
+            t.line < 5 && t.value.toUpperCase() === 'MEMBER' && t.referencedFile);
+        if (memberToken?.referencedFile) {
+            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, pathUtil.dirname(currentPath));
+            if (parentPath) startPaths.push(parentPath);
+        }
+
+        const visited = new Set<string>();
+        for (const start of startPaths) {
+            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename. */
+    private resolveIncludeTarget(fileName: string, fromDir: string): string | null {
+        const sameDir = pathUtil.join(fromDir, fileName);
+        if (fsSync.existsSync(sameDir)) return sameDir;
+        const sm = SolutionManager.getInstance();
+        if (sm?.solution) {
+            for (const project of sm.solution.projects) {
+                const resolved = project.getRedirectionParser().findFile(fileName);
+                if (resolved?.path && fsSync.existsSync(resolved.path)) return resolved.path;
+            }
+        }
+        return null;
+    }
+
+    /** Load a file's document + tokens, via CrossFileCache when available. */
+    private async loadDocForWalk(filePath: string): Promise<{ document: TextDocument; tokens: Token[] } | null> {
+        if (this.crossFileCache) {
+            const cached = await this.crossFileCache.getOrLoadDocument(filePath);
+            if (cached) return { document: cached.document, tokens: cached.tokens };
+        }
+        try {
+            const content = fsSync.readFileSync(filePath, 'utf8');
+            const doc = TextDocument.create(pathToCanonicalUri(filePath), 'clarion', 1, content);
+            return { document: doc, tokens: TokenCache.getInstance().getTokens(doc) };
+        } catch {
+            return null;
+        }
+    }
+
+    /** #313 — recursive INCLUDE walk for a declaration inside a MODULE block. Bounded + cooperative. */
+    private async findModuleDeclarationInIncludesOf(
+        fromPath: string,
+        procName: string,
+        visited: Set<string>,
+        depth = 0,
+        mapScopedRoot = false
+    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+        if (depth > 4) return null;
+        const key = fromPath.toLowerCase();
+        if (visited.has(key)) return null;
+        visited.add(key);
+        if (await cooperativeCheckpoint(visited.size, undefined, 5)) return null;
+
+        const from = await this.loadDocForWalk(fromPath);
+        if (!from) return null;
+
+        // #313 follow-up: at the ROOT files, only INCLUDEs that sit INSIDE a MAP block
+        // can carry MODULE prototype blocks — walking every include of a PROGRAM file
+        // (equates, class headers, …) multiplied the walk by an order of magnitude for
+        // guaranteed misses. Files reached FROM a MAP include are MAP content
+        // throughout, so the restriction only applies at depth 0.
+        let mapRanges: Array<{ start: number; end: number }> | null = null;
+        if (mapScopedRoot && depth === 0) {
+            mapRanges = from.tokens
+                .filter(t => t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MAP' && t.finishesAt !== undefined)
+                .map(t => ({ start: t.line, end: t.finishesAt! }));
+            if (mapRanges.length === 0) return null; // no MAP → no MAP includes
+        }
+
+        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
+        const content = from.document.getText();
+        const nameLower = procName.toLowerCase();
+        let match: RegExpExecArray | null;
+
+        // Offset→line lookup for the MAP-range filter (built once, binary-searched).
+        let lineStarts: number[] | null = null;
+        if (mapRanges) {
+            lineStarts = [0];
+            for (let i = content.indexOf('\n'); i !== -1; i = content.indexOf('\n', i + 1)) {
+                lineStarts.push(i + 1);
+            }
+        }
+        const offsetToLine = (offset: number): number => {
+            let lo = 0, hi = lineStarts!.length - 1;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (lineStarts![mid] <= offset) lo = mid; else hi = mid - 1;
+            }
+            return lo;
+        };
+
+        while ((match = includePattern.exec(content)) !== null) {
+            if (mapRanges) {
+                const matchLine = offsetToLine(match.index);
+                if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
+            }
+            const incPath = this.resolveIncludeTarget(match[1], pathUtil.dirname(fromPath));
+            if (!incPath || visited.has(incPath.toLowerCase())) continue;
+
+            const inc = await this.loadDocForWalk(incPath);
+            if (!inc) continue;
+
+            // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
+            const moduleRanges = inc.tokens
+                .filter(t => t.type === TokenType.Structure &&
+                    t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+                .map(t => ({ start: t.line, end: t.finishesAt! }));
+            if (moduleRanges.length > 0) {
+                const decl = inc.tokens.find(t =>
+                    (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+                    (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+                    moduleRanges.some(r => t.line > r.start && t.line < r.end)
+                );
+                if (decl) {
+                    logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${decl.line}`);
+                    return { doc: inc.document, tokens: inc.tokens, declLine: decl.line };
+                }
+            }
+
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
+            if (nested) return nested;
+        }
+        return null;
     }
 
     /**
@@ -187,6 +346,76 @@ export class MapProcedureResolver {
     }
 
     /**
+     * #248: when the "signature" callers pass is actually a raw CALL-SITE line
+     * (`x = Rep(4)` — no PROCEDURE/FUNCTION keyword), pick the overload by
+     * classifying the call's ARGUMENTS, exactly like the other overload consumers.
+     * The legacy extractParameterTypes path required the text to start with
+     * `name(` or contain `PROCEDURE(...)`, so a mid-line call yielded [] — which
+     * then "exactly matched" a zero-parameter overload.
+     *
+     * @returns matched candidate index, or -1 when the line isn't a call to
+     *   `procName` / the args don't disambiguate (callers keep their existing
+     *   conservative fallbacks).
+     */
+    private pickCandidateByCallArgs(
+        procName: string,
+        maybeCallLine: string,
+        tokens: Token[],
+        candidateSignatures: string[]
+    ): number {
+        // A line containing PROCEDURE/FUNCTION is a genuine signature — not a call.
+        if (ProcedureUtils.containsProcedureKeyword(maybeCallLine)) return -1;
+        if (candidateSignatures.length < 2) return -1;
+
+        const escaped = procName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(maybeCallLine);
+        if (!callMatch) return -1;
+
+        // Extract the balanced-paren argument text (Clarion strings are '...' with '' escapes).
+        const openIdx = callMatch.index + callMatch[0].length - 1;
+        let depth = 0, inString = false, closeIdx = -1;
+        for (let i = openIdx; i < maybeCallLine.length; i++) {
+            const ch = maybeCallLine[i];
+            if (inString) {
+                if (ch === "'") inString = false; // '' re-enters on the next quote
+                continue;
+            }
+            if (ch === "'") { inString = true; continue; }
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+                depth--;
+                if (depth === 0) { closeIdx = i; break; }
+            }
+        }
+        if (closeIdx < 0) return -1;
+        const argText = maybeCallLine.substring(openIdx + 1, closeIdx);
+
+        // Split top-level commas (depth- and string-aware); keep empty segments —
+        // omitted args hold their position (#250).
+        const segments: string[] = [];
+        let current = '', segDepth = 0, segInString = false;
+        for (const ch of argText) {
+            if (segInString) {
+                current += ch;
+                if (ch === "'") segInString = false;
+                continue;
+            }
+            if (ch === "'") { segInString = true; current += ch; continue; }
+            if (ch === '(') segDepth++;
+            else if (ch === ')') segDepth--;
+            if (ch === ',' && segDepth === 0) { segments.push(current); current = ''; continue; }
+            current += ch;
+        }
+        if (current.trim() !== '' || segments.length > 0) segments.push(current);
+
+        const classifier = new CallSiteArgumentClassifier();
+        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
+        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
+            args, candidateSignatures);
+        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    }
+
+    /**
      * Finds MAP procedure declaration for a PROCEDURE implementation
      * Searches for MapProcedure tokens or Function tokens inside MAP blocks
      * NOW INCLUDES tokens from MAP INCLUDE files
@@ -279,7 +508,7 @@ export class MapProcedureResolver {
                     if (t.sourceFile && t.sourceContext?.isFromInclude) {
                         // Token is from an INCLUDE file
                         logger.info(`   Token found in INCLUDE file: ${t.sourceFile}`);
-                        sourceUri = 'file:///' + t.sourceFile.replace(/\\/g, '/');
+                        sourceUri = pathToCanonicalUri(t.sourceFile); // #251
                         
                         // Read the INCLUDE file to get the signature
                         try {
@@ -317,7 +546,7 @@ export class MapProcedureResolver {
         if (candidates.length === 1) {
             const candidate = candidates[0];
             const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
-                ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                 : document.uri;
             
             logger.info(`Found single MAP declaration for ${procName} at line ${candidate.token.line}`);
@@ -333,9 +562,28 @@ export class MapProcedureResolver {
 
         // Multiple candidates - use overload resolution
         logger.info(`Found ${candidates.length} overloaded MAP declarations for ${procName}`);
-        
-        // If implementation signature provided, try type matching
+
+        // #248: callers routinely pass the raw CALL-SITE line here — pick the overload
+        // by classifying the call's arguments before attempting signature-vs-signature
+        // matching (which mis-fired on call lines: [] "matched" a 0-param overload).
         if (implementationSignature) {
+            const picked = this.pickCandidateByCallArgs(
+                procName, implementationSignature, tokens, candidates.map(c => c.signature));
+            if (picked >= 0) {
+                const candidate = candidates[picked];
+                const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
+                    ? pathToCanonicalUri(candidate.token.sourceFile) // #251
+                    : document.uri;
+                logger.info(`✅ [#248] Call-args matched MAP decl at line ${candidate.token.line}`);
+                return Location.create(targetUri, {
+                    start: { line: candidate.token.line, character: 0 },
+                    end: { line: candidate.token.line, character: candidate.token.value.length }
+                });
+            }
+        }
+
+        // If implementation signature provided, try type matching
+        if (implementationSignature && ProcedureUtils.containsProcedureKeyword(implementationSignature)) {
             const implParams = ProcedureSignatureUtils.extractParameterTypes(implementationSignature);
             logger.info(`Implementation parameter types: [${implParams.join(', ')}]`);
             
@@ -345,7 +593,7 @@ export class MapProcedureResolver {
                 
                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                     const targetUri = candidate.token.sourceFile && candidate.token.sourceContext?.isFromInclude
-                        ? 'file:///' + candidate.token.sourceFile.replace(/\\/g, '/')
+                        ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                         : document.uri;
                     
                     logger.info(`✅ Found exact type match at line ${candidate.token.line}`);
@@ -366,7 +614,7 @@ export class MapProcedureResolver {
         // Fallback to first candidate
         const firstCandidate = candidates[0];
         const targetUri = firstCandidate.token.sourceFile && firstCandidate.token.sourceContext?.isFromInclude
-            ? 'file:///' + firstCandidate.token.sourceFile.replace(/\\/g, '/')
+            ? pathToCanonicalUri(firstCandidate.token.sourceFile) // #251
             : document.uri;
         
         logger.info(`Returning first MAP declaration at line ${firstCandidate.token.line}`);
@@ -424,11 +672,12 @@ export class MapProcedureResolver {
             return null;
         }
 
-        // Check if position is inside a MAP block using DocumentStructure
-        // Use provided structure or create new one (for tests)
+        // Check if position is inside a MAP block using DocumentStructure.
+        // #258: production call sites now pass the CACHED structure via `documentStructure`
+        // (previously all omitted it, re-processing the shared cache tokens on every
+        // hover/F12/Ctrl+F12). The build-from-passed-tokens fallback remains for direct
+        // callers (tests) whose tokens are authoritative and may not be cache-backed.
         const docStructure = documentStructure || new DocumentStructure(tokens);
-        
-        // If we created a new DocumentStructure, ensure it's processed
         if (!documentStructure) {
             docStructure.process();
         }
@@ -592,9 +841,24 @@ export class MapProcedureResolver {
 
         // Multiple candidates - use overload resolution
         logger.info(`Found ${candidates.length} overloaded implementations for ${procName}`);
-        
-        // If declaration signature provided, try type matching
+
+        // #248: callers routinely pass the raw CALL-SITE line here — pick the overload
+        // by classifying the call's arguments before signature-vs-signature matching.
         if (declarationSignature) {
+            const picked = this.pickCandidateByCallArgs(
+                procName, declarationSignature, tokens, candidates.map(c => c.signature));
+            if (picked >= 0) {
+                const candidate = candidates[picked];
+                logger.info(`✅ [#248] Call-args matched implementation at line ${candidate.token.line}`);
+                return Location.create(document.uri, {
+                    start: { line: candidate.token.line, character: 0 },
+                    end: { line: candidate.token.line, character: candidate.token.value.length }
+                });
+            }
+        }
+
+        // If declaration signature provided, try type matching
+        if (declarationSignature && ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
             logger.info(`Declaration parameter types: [${declParams.join(', ')}]`);
             
@@ -646,13 +910,70 @@ export class MapProcedureResolver {
             const solutionManager = SolutionManager.getInstance();
             
             let resolvedPath: string | null = null;
-            
+
+            // #299: MODULE('X.DLL') / MODULE('X.LIB') is an external-library identifier (docs:
+            // "may contain any unique identifier"), typically another project in this solution.
+            // The old flow required redirection to resolve the PHYSICAL binary before trying the
+            // source-project fallback — a DLL that isn't built (or whose output dir isn't in the
+            // RED paths) dead-ended F12 even though every needed source file is in the solution.
+            // Go straight from the library basename to its main source (IBSUTILS.DLL →
+            // ibsutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
+            // #313 (docs: MODULE — "specify MEMBER source file"): the sourcefile string
+            // routinely OMITS the extension — the Language Reference's own example is
+            // MODULE('Loadit') for loadit.clw, and shipped headers do the same
+            // (MODULE('cwHH') in cwhh.inc). An extensionless name that resolves as
+            // '<name>.clw' is a source module; only names that DON'T are treated as
+            // external-library identifiers ("may contain any unique identifier" — the
+            // #292/#299 case). Previously extname('cwHH')==='' routed straight into the
+            // external-library branch and hard-returned null.
+            let effectiveModuleFile = moduleFile;
+            const moduleExt = path.extname(moduleFile).toLowerCase();
+            let isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
+            if (moduleExt === '') {
+                const clwCandidate = `${moduleFile}.clw`;
+                let clwResolved = false;
+                if (solutionManager?.solution) {
+                    for (const project of solutionManager.solution.projects) {
+                        const resolved = project.getRedirectionParser().findFile(clwCandidate);
+                        if (resolved?.path && fs.existsSync(resolved.path)) { clwResolved = true; break; }
+                    }
+                }
+                if (!clwResolved) {
+                    const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
+                    clwResolved = fs.existsSync(path.join(currentDir, clwCandidate));
+                }
+                if (clwResolved) {
+                    logger.info(`✅ #313: extensionless MODULE('${moduleFile}') resolves as source module ${clwCandidate}`);
+                    effectiveModuleFile = clwCandidate;
+                    isSourceModule = true;
+                }
+            }
+            if (!isSourceModule && solutionManager && solutionManager.solution) {
+                const libBase = path.basename(moduleFile, path.extname(moduleFile)).toLowerCase();
+                for (const proj of solutionManager.solution.projects) {
+                    const mainFile = (proj.sourceFiles || []).find(sf =>
+                        sf?.name && sf.name.toLowerCase() === `${libBase}.clw`);
+                    if (mainFile) {
+                        const fullPath = path.join(proj.path, mainFile.relativePath);
+                        if (fs.existsSync(fullPath)) {
+                            logger.info(`✅ #299: external-library MODULE '${moduleFile}' mapped to main source ${fullPath}`);
+                            resolvedPath = fullPath;
+                            break;
+                        }
+                    }
+                }
+                if (!resolvedPath) {
+                    logger.info(`❌ #299: no project main source found for external-library MODULE '${moduleFile}'`);
+                    return null;
+                }
+            }
+
             // Try solution-wide redirection first
-            if (solutionManager && solutionManager.solution) {
+            if (!resolvedPath && solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile);
-                    logger.info(`RedirectionParser.findFile('${moduleFile}') returned:`, resolved);
+                    const resolved = redirectionParser.findFile(effectiveModuleFile);
+                    logger.info(`RedirectionParser.findFile('${effectiveModuleFile}') returned:`, resolved);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         resolvedPath = resolved.path;
                         logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
@@ -710,15 +1031,15 @@ export class MapProcedureResolver {
             // Fallback to relative path from current document
             if (!resolvedPath) {
                 const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
-                const relativePath = path.join(currentDir, moduleFile);
+                const relativePath = path.join(currentDir, effectiveModuleFile);
                 if (fs.existsSync(relativePath)) {
                     resolvedPath = path.resolve(relativePath);
                     logger.info(`✅ Resolved MODULE file via relative path: ${resolvedPath}`);
                 }
             }
-            
+
             if (!resolvedPath) {
-                logger.info(`❌ Could not resolve MODULE file: ${moduleFile}`);
+                logger.info(`❌ Could not resolve MODULE file: ${effectiveModuleFile}`);
                 return null;
             }
             
@@ -774,7 +1095,7 @@ export class MapProcedureResolver {
                                 
                                 if (impl) {
                                     logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                    return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                    return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                         start: { line: impl.line, character: 0 },
                                         end: { line: impl.line, character: impl.value.length }
                                     });
@@ -811,7 +1132,7 @@ export class MapProcedureResolver {
                     // Search in the MAP for the procedure declaration
                     const mapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(
                         mapBlocks[0],
-                        { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => extracted.text } as TextDocument,
+                        { uri: pathToCanonicalUri(resolvedPath), getText: () => extracted.text } as TextDocument, // #251
                         moduleTokens
                     );
                     
@@ -858,7 +1179,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                                 start: { line: impl.line, character: 0 },
                                                 end: { line: impl.line, character: impl.value.length }
                                             });
@@ -901,7 +1222,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found implementation directly in file at line ${impl.line}`);
-                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                         start: { line: impl.line, character: 0 },
                         end: { line: impl.line, character: impl.value.length }
                     });
@@ -917,7 +1238,7 @@ export class MapProcedureResolver {
             // Get all tokens from the MAP (including INCLUDEs)
             const mapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(
                 mapBlock, 
-                { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => content } as TextDocument,
+                { uri: pathToCanonicalUri(resolvedPath), getText: () => content } as TextDocument, // #251
                 moduleTokens
             );
             
@@ -944,7 +1265,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found direct implementation in file at line ${impl.line}`);
-                    return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                         start: { line: impl.line, character: 0 },
                         end: { line: impl.line, character: impl.value.length }
                     });
@@ -1005,7 +1326,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(`file:///${resolved.path.replace(/\\/g, '/')}`, {
+                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
                                                 start: { line: impl.line, character: 0 },
                                                 end: { line: impl.line, character: impl.value.length }
                                             });
@@ -1021,7 +1342,7 @@ export class MapProcedureResolver {
                             return await this.findImplementationInModuleFile(
                                 procName,
                                 moduleToken.referencedFile,
-                                { uri: `file:///${resolvedPath.replace(/\\/g, '/')}`, getText: () => content } as TextDocument,
+                                { uri: pathToCanonicalUri(resolvedPath), getText: () => content } as TextDocument, // #251
                                 declarationSignature
                             );
                         }
@@ -1045,7 +1366,7 @@ export class MapProcedureResolver {
             if (implementations.length === 1) {
                 const impl = implementations[0];
                 logger.info(`✅ Found implementation in MODULE file at line ${impl.line}`);
-                return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                     start: { line: impl.line, character: 0 },
                     end: { line: impl.line, character: impl.value.length }
                 });
@@ -1053,21 +1374,37 @@ export class MapProcedureResolver {
             
             // Multiple implementations - try overload resolution
             logger.info(`Found ${implementations.length} overloaded implementations in MODULE file`);
-            
+
             if (declarationSignature) {
                 const lines = content.split('\n');
-                const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
-                
-                for (const impl of implementations) {
-                    const signature = lines[impl.line].trim();
-                    const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
-                    
-                    if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
-                        logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
-                        return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                            start: { line: impl.line, character: 0 },
-                            end: { line: impl.line, character: impl.value.length }
-                        });
+
+                // #248: raw call-line "signatures" pick by classified call args first.
+                const moduleSigs = implementations.map(impl => (lines[impl.line] ?? '').trim());
+                const picked = this.pickCandidateByCallArgs(
+                    procName, declarationSignature, moduleTokens, moduleSigs);
+                if (picked >= 0) {
+                    const impl = implementations[picked];
+                    logger.info(`✅ [#248] Call-args matched MODULE implementation at line ${impl.line}`);
+                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
+                        start: { line: impl.line, character: 0 },
+                        end: { line: impl.line, character: impl.value.length }
+                    });
+                }
+
+                if (ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
+                    const declParams = ProcedureSignatureUtils.extractParameterTypes(declarationSignature);
+
+                    for (const impl of implementations) {
+                        const signature = lines[impl.line].trim();
+                        const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+
+                        if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
+                            logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
+                            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
+                                start: { line: impl.line, character: 0 },
+                                end: { line: impl.line, character: impl.value.length }
+                            });
+                        }
                     }
                 }
             }
@@ -1075,7 +1412,7 @@ export class MapProcedureResolver {
             // Fallback to first implementation
             const impl = implementations[0];
             logger.info(`Returning first implementation from MODULE file at line ${impl.line}`);
-            return Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
                 start: { line: impl.line, character: 0 },
                 end: { line: impl.line, character: impl.value.length }
             });

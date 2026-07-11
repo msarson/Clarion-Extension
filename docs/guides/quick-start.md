@@ -141,7 +141,7 @@ CODE
 4. See parameter names, types, and descriptions
 5. Type `,` to move to next parameter
 
-**Note:** This extension shows parameter hints for functions you're calling. It does not have auto-complete dropdowns as you type.
+**Tip:** You also get IntelliSense completions — type `SELF.` or any typed variable followed by `.` for member suggestions, or `PROP:` / `EVENT:` for documented equates.
 
 ### Use Code Snippets
 
@@ -186,13 +186,13 @@ Now that you're set up, learn how to do everyday tasks:
 
 ### Learn More Features:
 - **[Navigation Features](../features/navigation.md)** - Master F12, Ctrl+F12, and hover
-- **[IntelliSense](../features/intellisense.md)** - Code completion and signatures
+- **[IntelliSense](../features/signature-help.md)** - Code completion and signatures
 - **[Solution Management](../features/solution-management.md)** - Advanced solution features
 - **[Code Editing Tools](../features/code-editing.md)** - Snippets, wizards, and more
 
 ### Need Help?
 - **[Common Tasks](common-tasks.md)** - Cookbook-style recipes
-- **[Full Documentation](../GETTING_STARTED.md)** - Detailed setup guide
+- **[Installation Guide](installation.md)** - Detailed setup
 - **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)** - Report problems
 
 ---

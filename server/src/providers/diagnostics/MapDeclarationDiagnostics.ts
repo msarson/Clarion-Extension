@@ -9,6 +9,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
@@ -182,7 +183,12 @@ export async function validateMissingMapDeclarations(
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
 
+    // #297: measured 1.9s on a generated module during the startup revalidation — yield on a
+    // time budget so interactive requests interleave with the per-procedure resolution.
+    const timeSlice = makeTimeSlicer();
+
     for (const proc of implementations) {
+        await timeSlice();
         const procName = proc.label!;
 
         // Case 1: self-declared via MODULE('thisfile.clw') — compare signatures locally
@@ -268,8 +274,8 @@ export async function validateMissingMapDeclarations(
                     data: {
                         procName,
                         parentFileUri: resolvedParent
-                            ? 'file:///' + resolvedParent.replace(/\\/g, '/')
-                            : 'file:///' + memberToken.referencedFile!.replace(/\\/g, '/'),
+                            ? pathToCanonicalUri(resolvedParent) // #251
+                            : pathToCanonicalUri(memberToken.referencedFile!),
                         implLine: proc.line,
                         currentFileUri: document.uri
                     }
@@ -304,7 +310,7 @@ export async function validateMissingMapDeclarations(
                             code: 'map-signature-mismatch',
                             data: {
                                 procName,
-                                parentFileUri: 'file:///' + result.file.replace(/\\/g, '/'),
+                                parentFileUri: pathToCanonicalUri(result.file), // #251
                                 declLine: result.line,
                                 implLine: proc.line,
                                 currentFileUri: document.uri
@@ -363,7 +369,28 @@ export async function validateMissingImplementations(
         t.finishesAt !== undefined
     );
 
+    // #297: an app-main CLW (gl1.clw) declares one MODULE per generated file (~178) and each
+    // iteration LOADS AND TOKENIZES that file on cache miss — measured 37s+ of near-continuous
+    // loop occupancy at startup on Mark's VM, starving even in-memory requests. Yield on a time
+    // budget between modules (effective now that the sdiReady pass runs validators sequentially).
+    const timeSliceModules = makeTimeSlicer();
+
+    // #292: a MODULE naming anything other than a Clarion source file is an external-library
+    // reference — per the docs (MODULE, "specify MEMBER source file"): "If the sourcefile is an
+    // external library, this string may contain any unique identifier". Its procedures are
+    // implemented in another binary (typically another project in the solution, prototyped with
+    // the DLL attribute), so "no implementation in 'x.dll'" is a false positive by construction —
+    // and when redirection FOUND the physical .dll, the loader tokenized the binary as text.
+    // Extensionless names are skipped too: they are legal external-library identifiers and
+    // indistinguishable from implicit-.clw source names, and this diagnostic stays conservative.
+    const CLARION_SOURCE_EXTS = new Set(['.clw', '.inc', '.equ', '.eq', '.int']);
+
     for (const moduleToken of moduleTokens) {
+        await timeSliceModules();
+        const moduleExt = nodePath.extname(moduleToken.referencedFile!).toLowerCase();
+        if (!CLARION_SOURCE_EXTS.has(moduleExt)) {
+            continue;
+        }
         // MODULE filenames are stored unresolved on the token
         // (DocumentStructure.resolveFileReferences:1915 — "We're storing
         // unresolved filenames"). Resolve to an absolute path before any URI
@@ -423,6 +450,17 @@ export async function validateMissingImplementations(
 
         for (const decl of moduleDecls) {
             const procName = decl.label!;
+
+            // #292: the DLL prototype attribute means "defined externally in a .DLL" (docs) —
+            // no source implementation exists anywhere in this solution's files by contract.
+            // Belt-and-braces alongside the module-extension gate above: catches a DLL-attributed
+            // prototype even inside a source-named MODULE. Note the docs allow the flag to be an
+            // undefined label (still active), so any DLL(...) or bare DLL counts.
+            const declLineText = docLines[decl.line] ?? '';
+            if (/,\s*DLL\b/i.test(declLineText.replace(/!.*$/, ''))) {
+                continue;
+            }
+
             const range: Range = {
                 start: { line: decl.line, character: 0 },
                 end:   { line: decl.line, character: procName.length }

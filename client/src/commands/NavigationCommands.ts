@@ -1,4 +1,4 @@
-import { commands, Uri, Position, Location, Range, window as vscodeWindow, workspace, TreeView, Disposable } from 'vscode';
+import { commands, Uri, Position, Location, ProgressLocation, Range, window as vscodeWindow, workspace, TreeView, Disposable } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SolutionCache } from '../SolutionCache';
@@ -97,7 +97,7 @@ export function registerNavigationCommands(
             async (uriStr: string, position: { line: number; character: number }, lspLocations: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }[]) => {
                 const uri = Uri.parse(uriStr);
                 const pos = new Position(position.line, position.character);
-                const locations = (lspLocations ?? []).map(loc =>
+                let locations = (lspLocations ?? []).map(loc =>
                     new Location(
                         Uri.parse(loc.uri),
                         new Range(
@@ -106,6 +106,22 @@ export function registerNavigationCommands(
                         )
                     )
                 );
+                // #294: index-counted lenses (and the "counting..." placeholder) pass no
+                // precomputed locations - run the real scoped Find-All-References on click.
+                // #315: surface progress while the scan runs (a silent await read as a dead
+                // click) and say so explicitly when nothing comes back.
+                if (locations.length === 0) {
+                    locations = await vscodeWindow.withProgress(
+                        { location: ProgressLocation.Window, title: 'Finding Clarion references…' },
+                        async () => (await commands.executeCommand<Location[]>(
+                            'vscode.executeReferenceProvider', uri, pos
+                        )) ?? []
+                    );
+                }
+                if (locations.length === 0) {
+                    vscodeWindow.setStatusBarMessage('Clarion: no references found', 5000);
+                    return;
+                }
                 await commands.executeCommand('editor.action.showReferences', uri, pos, locations);
             }
         ),
@@ -132,8 +148,17 @@ export function registerNavigationCommands(
                     : path.join(workspace.workspaceFolders?.[0]?.uri.fsPath || "", filePathStr);
 
                 if (!fs.existsSync(absolutePath)) {
-                    vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
-                    return;
+                    // #297 fix 13: resolve on demand via redirection. Tree file items now attach
+                    // this command up front with whatever path they know (relative or bare name)
+                    // instead of firing a server findFile per rendered node — the one user click
+                    // that needs the resolution pays for it here.
+                    const resolved = await SolutionCache.getInstance().findFileWithExtension(filePathStr);
+                    if (resolved && resolved !== "" && fs.existsSync(resolved)) {
+                        absolutePath = resolved;
+                    } else {
+                        vscodeWindow.showErrorMessage(`❌ File not found: ${absolutePath}`);
+                        return;
+                    }
                 }
 
                 const doc = await workspace.openTextDocument(Uri.file(absolutePath));

@@ -18,6 +18,23 @@ export class ProcedureUtils {
     }
 
     /**
+     * True when a type string (the text after a member label, e.g. 'PROCEDURE(STRING),LONG')
+     * declares a callable — i.e. starts with PROCEDURE or FUNCTION (#247).
+     * Use instead of `type.toUpperCase().startsWith('PROCEDURE')`.
+     */
+    public static startsWithProcedureKeyword(text: string | undefined): boolean {
+        return !!text && /^\s*(?:PROCEDURE|FUNCTION)\b/i.test(text);
+    }
+
+    /**
+     * True when a declaration LINE contains the PROCEDURE or FUNCTION keyword (#247).
+     * Use instead of `/\bPROCEDURE\b/i.test(line)`.
+     */
+    public static containsProcedureKeyword(text: string | undefined): boolean {
+        return !!text && /\b(?:PROCEDURE|FUNCTION)\b/i.test(text);
+    }
+
+    /**
      * Check if a token is a procedure/function declaration keyword
      * @param token Token to check
      * @returns true if token is a PROCEDURE or FUNCTION keyword

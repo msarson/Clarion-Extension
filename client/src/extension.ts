@@ -8,6 +8,7 @@ import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { LoggingConfig } from '../../common/LoggingConfig';
 import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
@@ -18,6 +19,7 @@ import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
+import { registerRefactorCommands } from './commands/RefactorCommands';
 import { registerClassCreationCommands } from './commands/ClassCreationCommands';
 import { registerImplementationCommands } from './commands/ImplementationCommands';
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
@@ -32,7 +34,9 @@ import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 import * as SolutionInitializer from './solution/SolutionInitializer';
 import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
-import { completeInitializationStatusBar, updateInitializationStatusBar } from './statusbar/StatusBarManager';
+// #273 — the initialization indicator is now a Clarion-scoped language status item driven by the
+// solution-load lifecycle (SolutionInitializer), not painted unconditionally on activation. So a
+// non-Clarion (or solution-free) folder shows nothing; per-file language features are unaffected.
 
 const logger = LoggerManager.getLogger("Extension");
 logger.setLevel("error");
@@ -48,8 +52,6 @@ let documentManager: DocumentManager | undefined;
 // Helper function to escape special characters in file paths for RegExp
 
 export async function activate(context: ExtensionContext): Promise<void> {
-    updateInitializationStatusBar('activating');
-
     const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
@@ -61,12 +63,48 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
 
+    // #297 (revised): perf channels are opt-in — clarion.log.performance.enabled gates
+    // their OUTPUT on both sides (server reads it from initializationOptions.settings).
+    LoggingConfig.PERF_CHANNELS_ENABLED =
+        workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false);
+
     // Per-session log file — truncates on activate so each session is fresh.
     // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log
     // (or extension log dir when no workspace is open).
     const wsRoot = workspace.workspaceFolders?.[0]?.uri.fsPath;
     const logBaseDir = wsRoot ?? context.logUri.fsPath;
     LoggerManager.initFileSink(path.join(logBaseDir, '.clarion-debug', 'client.log'));
+
+    // #295 diagnosis: EXTENSION-HOST event-loop lag sampler (mirror of the server's). The tree
+    // view, structure view, and every provider run on the extension host — if THIS thread blocks,
+    // the UI spins no matter how healthy the language server is. A 100ms heartbeat's drift is the
+    // block length; max per 5s window, reported when >100ms, for the first 5 minutes.
+    {
+        const clientPerf = LoggerManager.getLogger("ClientPerf", "perf");
+        const samplerStart = Date.now();
+        let lastTick = Date.now();
+        let windowMaxLag = 0;
+        const heartbeat = setInterval(() => {
+            const now = Date.now();
+            const lag = now - lastTick - 100;
+            lastTick = now;
+            if (lag > windowMaxLag) windowMaxLag = lag;
+        }, 100);
+        const reporter = setInterval(() => {
+            if (windowMaxLag > 100) {
+                clientPerf.perf("ExtensionHost EventLoop lag", {
+                    max_blocked_ms: windowMaxLag,
+                    since_activation_ms: Date.now() - activationStartTime
+                });
+            }
+            windowMaxLag = 0;
+            if (Date.now() - samplerStart > 300_000) {
+                clearInterval(heartbeat);
+                clearInterval(reporter);
+            }
+        }, 5000);
+        context.subscriptions.push({ dispose: () => { clearInterval(heartbeat); clearInterval(reporter); } });
+    }
 
     // #148 — register the Actions-pane webview provider EARLY, before any
     // awaits in the activation flow. The view's `visibility: "visible"`
@@ -120,8 +158,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     ActivationManager.registerEventListeners(context);
     const xmlFileCount = ActivationManager.checkForOpenXmlFiles();
     
-    // Phase 6: Start language server
-    updateInitializationStatusBar('starting-language-server');
+    // Phase 6: Start language server (starts for per-file language features regardless of whether
+    // a solution is open; #273 — no status ping here, the solution-load path surfaces its own).
     await ActivationManager.startClientServer(context, state, xmlFileCount > 0);
     client = state.client;
     
@@ -164,11 +202,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
         disposables
     );
 
-    // If no solution is being initialized, mark activation ready here.
-    if (!globalSolutionFile) {
-        completeInitializationStatusBar();
-    }
-    
+    // #273 — no solution being initialized → stay silent (no "Clarion: Ready"). The init
+    // indicator is solution-load feedback only, driven by SolutionInitializer.
+
     // Always create views
     await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
     
@@ -191,7 +227,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     
     // Register text editing commands (paste as string)
     context.subscriptions.push(...registerTextEditingCommands(context));
-    
+
+    // Register refactor commands (#277 — Surround With)
+    context.subscriptions.push(...registerRefactorCommands(context));
+
     // Register class creation commands
     context.subscriptions.push(...registerClassCreationCommands(context));
     
@@ -260,7 +299,12 @@ async function initializeSolution(context: ExtensionContext, refreshDocs: boolea
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    return await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
+    // #297 fix 12: assign the fresh manager back to the module variable — previously only
+    // returned, so every wrapper capturing `documentManager` (initializeSolution,
+    // closeClarionSolution, workspaceHasBeenTrusted) kept injecting the OLD, disposed instance
+    // after a solution reload, and the stale manager could never be collected.
+    documentManager = await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
+    return documentManager;
 }
 
 

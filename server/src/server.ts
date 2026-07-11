@@ -1,7 +1,10 @@
 import {
     createConnection,
     TextDocuments,
-    ProposedFeatures
+    ProposedFeatures,
+    Diagnostic,
+    CodeLensRefreshRequest,
+    CancellationTokenSource
 } from 'vscode-languageserver/node';
 
 // Add global error handlers to prevent crashes
@@ -16,6 +19,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 import {
+    CodeAction,
     DocumentFormattingParams,
     DocumentRangeFormattingParams,
     DocumentSymbolParams,
@@ -54,6 +58,7 @@ import ClarionFormatter from './ClarionFormatter';
 import { ClarionColorResolver } from './ClarionColorResolver';
 import ClarionFoldingProvider from './ClarionFoldingProvider';
 import { serverSettings } from './serverSettings';
+import { TrailingCoalescer } from './utils/TrailingCoalescer';
 
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
@@ -67,19 +72,25 @@ import { FlattenCodeActionProvider } from './providers/FlattenCodeActionProvider
 import { MapModuleCodeActionProvider } from './providers/MapModuleCodeActionProvider';
 import { MapDeclarationCodeActionProvider } from './providers/MapDeclarationCodeActionProvider';
 import { UnicodeCodeActionProvider } from './providers/UnicodeCodeActionProvider';
+import { GenerateRoutineCodeActionProvider } from './providers/GenerateRoutineCodeActionProvider';
+import { IntroduceEquateCodeActionProvider } from './providers/IntroduceEquateCodeActionProvider';
 import { SelectionRangeProvider } from './providers/SelectionRangeProvider';
-import { ClarionCodeLensProvider, formatReferenceCount } from './providers/ClarionCodeLensProvider';
+import { ClarionCodeLensProvider, formatReferenceCount, formatApproximateReferenceCount } from './providers/ClarionCodeLensProvider';
 import { DiagnosticProvider } from './providers/DiagnosticProvider';
+import { initializingHoverFallback, buildIndexingHover } from './utils/InitializingHover';
 import { SignatureHelpProvider } from './providers/SignatureHelpProvider';
 import { ImplementationProvider } from './providers/ImplementationProvider';
 import { ReferencesProvider } from './providers/ReferencesProvider';
 import { RenameProvider } from './providers/RenameProvider';
 import { DocumentHighlightProvider } from './providers/DocumentHighlightProvider';
+import { ClarionInlayHintsProvider } from './providers/ClarionInlayHintsProvider';
 import { WorkspaceSymbolProvider } from './providers/WorkspaceSymbolProvider';
 import { UnreachableCodeProvider } from './providers/UnreachableCodeProvider';
 import { CompletionProvider } from './providers/CompletionProvider';
 import { DocumentLinkProvider } from './providers/DocumentLinkProvider';
 import { MemberLocatorService } from './services/MemberLocatorService';
+import { CrossFileCache } from './providers/hover/CrossFileCache';
+import { LoggingConfig } from '../../common/LoggingConfig';
 import { SymbolFinderService } from './services/SymbolFinderService';
 import { ReferenceIndex } from './services/ReferenceIndex';
 import { ScopeAnalyzer } from './utils/ScopeAnalyzer';
@@ -100,7 +111,10 @@ logger.setLevel("error");
 // #158 — perfLogger level set to "error" post-investigation. Calls remain
 // in place; flip back to "perf" for future startup-time investigations
 // (toggle is a single-character edit per logger).
-const perfLogger = LoggerManager.getLogger("StartupPerf", "error");
+// "perf" level → these phase markers ALWAYS emit, even in a packaged (release) VSIX where the
+// default log level is "error". Low-volume startup/solution-load timeline so users (and support)
+// can see where solution loading spends its time in the "Clarion Language Server" output channel.
+const perfLogger = LoggerManager.getLogger("StartupPerf", "perf");
 const serverModuleLoadedAt = Date.now();
 perfLogger.perf("Server module loaded", { wallclock_ms: 0 });
 
@@ -130,6 +144,16 @@ let firstValidateFired = false;
 // threshold; loose-file users wait 2s for async diagnostics instead of
 // getting them at t=63ms. Acceptable per Bob's dispatch.
 let solutionPipelineReady = false;
+// #289: the async cross-file validators additionally wait for the SDI structure-index prebuild.
+// Several of them block on the index INTERNALLY (MemberLocatorService/SymbolFinderService await
+// getOrBuildIndex), so running them earlier just parks them behind the 30s+ build — measured:
+// ONE member resolution in discardedReturn = 40.4s while the index built. Deferring until the
+// prebuild completes turns three async passes (open/drain → solutionReady → sdiReady) into ONE
+// fast pass (~1-3s measured post-index). Sync diagnostics still publish immediately throughout.
+let sdiPipelineReady = false;
+// #301: true from solution announcement until the sequenced background chain (SDI -> FRG ->
+// revalidation) finishes - the window in which hover uses the "still indexing" fallback.
+let startupBackgroundActive = false;
 const deferredAsyncDocs = new Set<string>();
 
 // Temporary diagnostic tracer — set to "warn" so traces appear in OUTPUT panel
@@ -150,21 +174,9 @@ const codeLensRefCache = new Map<string, { refs: Location[]; shortName: string }
 const codeLensRefIndex = new ReferenceIndex();
 let codeLensPrecomputeGeneration = 0;
 
-function collectSolutionSourceFilePaths(solution: ClarionSolutionInfo): string[] {
-    const dedup = new Set<string>();
-    const files: string[] = [];
-    for (const project of solution.projects) {
-        for (const sourceFile of project.sourceFiles) {
-            if (!sourceFile.relativePath) continue;
-            const abs = path.join(project.path, sourceFile.relativePath);
-            const key = path.normalize(abs).toLowerCase();
-            if (dedup.has(key)) continue;
-            dedup.add(key);
-            files.push(abs);
-        }
-    }
-    return files;
-}
+// (collectSolutionSourceFilePaths removed with the #293 follow-up: the CodeLens precompute
+// now warms open documents only — see precomputeCodeLensReferenceCounts. Recover from git
+// history if the one-pass inverted reference index (#294) wants solution-wide enumeration.)
 
 /**
  * #189 Phase 4 (initial) — declaration-position probe for FAR fast-path.
@@ -209,14 +221,39 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
 
     if (!serverSettings.referencesCodeLensEnabled) return;
 
-    const filePaths = collectSolutionSourceFilePaths(solution);
+    // #293 follow-up: warm OPEN DOCUMENTS only, not the whole solution. The whole-solution
+    // sweep was designed pre-#293, when the resolution bug meant it only ever saw ~13 files
+    // (52-96s measured). At true solution scale the cost is lenses × full-FAR-scan with BOTH
+    // factors ~75× larger — unaffordable as a background job. Open files (where lenses are
+    // visible) get warm counts; everything else resolves lazily per visible lens with
+    // per-symbol caching, exactly as unopened files always effectively did. The proper
+    // long-term fix is a one-pass inverted reference index (tracked on #290/#294).
+    void solution; // retained in the signature for the settings-toggle re-kick path
+    const filePaths = documents.all()
+        .map(d => {
+            try { return decodeURIComponent(d.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'); }
+            catch { return ''; }
+        })
+        .filter(p => p && /\.(clw|inc|equ|int)$/i.test(p));
     let scannedFiles = 0;
     let indexedLenses = 0;
+    let missingFiles = 0;
     const startedAt = Date.now();
 
     for (const absPath of filePaths) {
         if (generation !== codeLensPrecomputeGeneration) return; // superseded by a newer build
-        if (!fs.existsSync(absPath)) continue;
+        // #290: count (don't hide) paths that fail the existence probe — Mark's run showed
+        // files=13 of ~3016 solution entries, i.e. the project.path + relativePath join may not
+        // reconstruct the real location for most files. A large `missing` count here means the
+        // precompute is silently covering a fraction of the solution (everything else falls back
+        // to live-FAR per visible lens — exactly the slow path #189 was built to avoid).
+        if (!fs.existsSync(absPath)) {
+            missingFiles++;
+            if (missingFiles <= 3) {
+                logger.info(`⚠️ [CodeLens precompute] path does not exist: ${absPath}`);
+            }
+            continue;
+        }
 
         const uri = pathToCanonicalUri(absPath);
         const openDoc = documents.get(uri);
@@ -247,20 +284,29 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
             }
 
             indexedLenses++;
-            if (indexedLenses % 25 === 0) {
-                await new Promise<void>(resolve => setImmediate(resolve));
-            }
+            // #290: yield after EVERY lens — each provideReferences is a cross-file scan; batching
+            // 25 of them between yields produced multi-second event-loop blocks that froze
+            // hover/F12 during startup.
+            await new Promise<void>(resolve => setImmediate(resolve));
         }
 
         scannedFiles++;
-        if (scannedFiles % 10 === 0) {
-            await new Promise<void>(resolve => setImmediate(resolve));
-        }
+        // #290: yield after every file — provideCodeLenses tokenizes the whole (closed) file
+        // synchronously; ten large generated files between yields blocked the loop for seconds.
+        await new Promise<void>(resolve => setImmediate(resolve));
     }
 
     if (generation === codeLensPrecomputeGeneration) {
         codeLensRefIndex.setReady(true);
         logger.info(`⚡ CodeLens reference precompute ready: ${indexedLenses} lenses across ${scannedFiles} files in ${Date.now() - startedAt}ms`);
+        perfLogger.perf("Phase: CodeLens reference precompute complete (background)", {
+            ms: Date.now() - startedAt,
+            lenses: indexedLenses,
+            files: scannedFiles,
+            missing: missingFiles,
+            total_paths: filePaths.length,
+            since_module_load_ms: Date.now() - serverModuleLoadedAt
+        });
     }
 }
 
@@ -279,12 +325,83 @@ const referencesProvider = new ReferencesProvider();
 const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
+const inlayHintsProvider = new ClarionInlayHintsProvider();
 const workspaceSymbolProvider = new WorkspaceSymbolProvider();
 const completionProvider = new CompletionProvider();
 const documentLinkProvider = new DocumentLinkProvider();
 
 // ✅ Create Connection and Documents Manager
 const connection = createConnection(ProposedFeatures.all);
+
+// #297 fix 14 (audit): dispatch instrumentation — the decisive experiment. The server is
+// single-threaded, so "the tree spinner" is always SOME handler occupying the loop; the lag
+// sampler proves occupancy but not identity. Wrap every handler registered via
+// connection.onRequest/onNotification and log any that holds the loop or runs long, so a perf
+// log names the culprit instead of leaving us inferring from gaps. Installed BEFORE any
+// registration so all clarion/* handlers (server.ts + SolutionManager) are covered; built-in
+// feature handlers (onDocumentSymbol etc.) register through dedicated methods and keep their
+// own perf lines.
+{
+    const SLOW_HANDLER_MS = 100;
+    const methodName = (type: unknown): string =>
+        typeof type === 'string' ? type : ((type as { method?: string })?.method ?? 'unknown');
+    const wrapHandler = (kind: 'request' | 'notification', method: string, handler: (...args: unknown[]) => unknown) =>
+        async (...args: unknown[]) => {
+            const t0 = Date.now();
+            try {
+                return await handler(...args);
+            } finally {
+                const ms = Date.now() - t0;
+                if (ms >= SLOW_HANDLER_MS) {
+                    perfLogger.perf("LSP slow handler", { kind, method, ms });
+                }
+            }
+        };
+    const origOnRequest = connection.onRequest.bind(connection);
+    (connection as { onRequest: unknown }).onRequest = (type: unknown, handler?: (...args: unknown[]) => unknown) =>
+        handler === undefined
+            ? origOnRequest(type as never) // star-handler overload — pass through untouched
+            : origOnRequest(type as never, wrapHandler('request', methodName(type), handler) as never);
+    const origOnNotification = connection.onNotification.bind(connection);
+    (connection as { onNotification: unknown }).onNotification = (type: unknown, handler?: (...args: unknown[]) => unknown) =>
+        handler === undefined
+            ? origOnNotification(type as never)
+            : origOnNotification(type as never, wrapHandler('notification', methodName(type), handler) as never);
+
+    // The built-in feature registrars (onDocumentSymbol, onCodeLens, onHover, didChange sync…)
+    // bypass connection.onRequest, so the first VM run's 6.2s sync block never produced a
+    // slow-handler line. Wrap every dedicated `onXxx(handler)` registrar too — only when the
+    // first argument is a function (onProgress and friends have different signatures and pass
+    // through untouched).
+    const conn = connection as unknown as Record<string, unknown>;
+    for (const key of Object.keys(conn)) {
+        if (key === 'onRequest' || key === 'onNotification') continue;
+        const fn = conn[key];
+        if (typeof fn !== 'function' || !/^on[A-Z]/.test(key)) continue;
+        conn[key] = (...args: unknown[]) => {
+            if (typeof args[0] === 'function') {
+                args[0] = wrapHandler('request', key, args[0] as (...a: unknown[]) => unknown);
+            }
+            return (fn as (...a: unknown[]) => unknown).apply(connection, args);
+        };
+    }
+    // languages.* sub-registrars (semanticTokens.on/onDelta/onRange, inlayHint.on)
+    const languages = (connection as unknown as { languages?: Record<string, unknown> }).languages;
+    for (const feature of ['semanticTokens', 'inlayHint']) {
+        const obj = languages?.[feature] as Record<string, unknown> | undefined;
+        if (!obj) continue;
+        for (const key of Object.keys(obj)) {
+            const fn = obj[key];
+            if (typeof fn !== 'function' || !/^on/.test(key)) continue;
+            obj[key] = (...args: unknown[]) => {
+                if (typeof args[0] === 'function') {
+                    args[0] = wrapHandler('request', `${feature}.${key}`, args[0] as (...a: unknown[]) => unknown);
+                }
+                return (fn as (...a: unknown[]) => unknown).apply(obj, args);
+            };
+        }
+    }
+}
 
 // Add global error handling
 process.on('uncaughtException', (error: Error) => {
@@ -309,6 +426,34 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+
+        // #297 (revised): perf channels are opt-in via clarion.log.performance.enabled.
+        // Read it here — onInitialize is the server's first breath, so when enabled the
+        // whole startup timeline (bar the two module-load lines) is captured.
+        const logOpts = (params.initializationOptions as
+            { settings?: { log?: { performance?: { enabled?: boolean } } } } | undefined)?.settings?.log?.performance;
+        LoggingConfig.PERF_CHANNELS_ENABLED = logOpts?.enabled === true;
+
+        // #289: a configured solution announces itself IN the initialize request (race-free — this
+        // handler runs at t≈4ms, before any validation or timer can compete). The explicit
+        // `configuredSolutionFile` field is the contract; the settings fallback covers older
+        // clients. Sets the flag the 2s no-solution fallback checks, so the expensive async
+        // validation pass stays deferred until clarion/solutionReady instead of draining mid-load
+        // in degraded no-solution mode (which starved the solution load itself on big solutions).
+        const initOpts = params.initializationOptions as
+            { configuredSolutionFile?: string; settings?: { currentSolution?: string; solutionFile?: string } } | undefined;
+        const announcedSolution = initOpts?.configuredSolutionFile
+            || initOpts?.settings?.currentSolution
+            || initOpts?.settings?.solutionFile
+            || '';
+        if (announcedSolution) {
+            solutionAnnounced = true;
+            startupBackgroundActive = true;
+            perfLogger.perf("Phase: solution announced via initializationOptions", {
+                since_module_load_ms: Date.now() - serverModuleLoadedAt,
+                solution: path.basename(announcedSolution)
+            });
+        }
         
         // Log workspace folders
         if (params.workspaceFolders) {
@@ -349,6 +494,12 @@ connection.onInitialize((params) => {
                 referencesProvider: true,
                 renameProvider: { prepareProvider: true },
                 documentHighlightProvider: true,
+                // Inlay hints DISABLED (2026-07-07): they added too much visual noise for Clarion.
+                // The provider, handler, and settings are kept intact but dormant — NOT advertising
+                // this capability means VS Code never requests inlay hints, so the handler below is
+                // never called. To re-enable: restore `inlayHintProvider: true` here (and, if desired,
+                // re-add the `clarion.inlayHints.*` settings to package.json).
+                // inlayHintProvider: true,
                 workspaceSymbolProvider: true,
                 hoverProvider: true,
                 codeActionProvider: true,
@@ -584,11 +735,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         //
         // No-solution timeout fallback (registered at bottom of file) marks
         // pipeline ready after 2s if solutionReady never fires.
-        if (!solutionPipelineReady && caller === 'onDidOpen') {
+        // #289: gate widened — async validators wait for BOTH the solution AND the SDI structure
+        // index (several block on the index internally; see sdiPipelineReady above). Applies to
+        // every caller, so an edit during the index-build window defers instead of stalling 40s.
+        // The sdiReady pass re-validates all open docs once both flags are set.
+        if (!solutionPipelineReady || !sdiPipelineReady) {
             deferredAsyncDocs.add(document.uri);
-            perfLogger.perf("validateTextDocument async deferred (solution pending)", {
+            perfLogger.perf("validateTextDocument async deferred (pipeline pending)", {
                 total_ms: Date.now() - validateStart,
                 sync_ms: syncMs,
+                solution_ready: String(solutionPipelineReady),
+                sdi_ready: String(sdiPipelineReady),
                 token_count: tokens.length,
                 diag_count: diagnostics.length,
                 uri: document.uri,
@@ -598,7 +755,10 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         // Async pass: detect discarded return values via cross-file type resolution
-        const memberLocator = new MemberLocatorService();
+        // #305: per-pass CrossFileCache — the locator's loadDocument otherwise re-reads
+        // the same INC files from disk for every resolution in this pass. Per-pass (not
+        // shared) so edits between passes are never served stale.
+        const memberLocator = new MemberLocatorService(new CrossFileCache(tokenCache));
         // 6b40d7da Phase B (#115): undeclared-variable validator runs in this async
         // pass for cross-file scope resolution via SymbolFinderService.
         const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
@@ -615,15 +775,35 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             });
             return result;
         };
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = await Promise.all([
-            timeIt('discardedReturn', DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)),
-            timeIt('missingIncludes', DiagnosticProvider.validateMissingIncludes(tokens, document)),
-            timeIt('missingConstants', DiagnosticProvider.validateMissingConstants(tokens, document)),
-            timeIt('missingMapDecl', DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)),
-            timeIt('missingImpl', DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)),
-            timeIt('undeclaredVar', DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)),
-            timeIt('ifaceImpl', DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)),
-        ]);
+        // #297: thunks, not eagerly-started promises — the batch startup pass must be able to
+        // run these one at a time. Seven concurrent validator chains awaiting mostly-cached
+        // (already-resolved) promises advance on the MICROTASK queue, so the event loop never
+        // reaches its poll phase to read incoming LSP messages while any chain has work — a
+        // cooperative yield inside one validator doesn't help while the other six keep the
+        // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
+        // even with time-sliced loops. Sequential execution restores the yields' effect; total
+        // work is unchanged (single thread — the concurrency never bought parallelism).
+        const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
+            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
+            ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
+            ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
+            ['missingMapDecl', () => DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)],
+            ['missingImpl', () => DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)],
+            ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
+            ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
+        ];
+        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
+            caller === 'sdiReady'
+                ? await (async () => {
+                    const results: Diagnostic[][] = [];
+                    for (const [name, thunk] of validatorThunks) {
+                        results.push(await timeIt(name, thunk()));
+                        // Real macrotask yield between validators — lets queued requests in
+                        await new Promise<void>(resolve => setImmediate(resolve));
+                    }
+                    return results;
+                })()
+                : await Promise.all(validatorThunks.map(([name, thunk]) => timeIt(name, thunk())));
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -785,10 +965,24 @@ connection.onSelectionRanges((params) => {
 });
 
 // Handle CodeLens requests — return unresolved lenses (ranges + data only)
+// #303: a document under libsrcPaths gets NO reference-count lenses. Opening a library class
+// INC (e.g. via F12 from a hover) emitted a lens per method, and one resolve's cross-file scan
+// held the loop for 106 SECONDS as a single sync block on Mark's VM — every request behind it
+// died. Counting solution-wide references for library headers costs a full scan per method for
+// near-zero informational value.
+function isUnderLibsrcPath(uri: string): boolean {
+    if (!serverSettings.libsrcPaths?.length) return false;
+    const fsPath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\').toLowerCase();
+    return serverSettings.libsrcPaths.some(p => {
+        const dir = p.replace(/\//g, '\\').toLowerCase().replace(/\\+$/, '') + '\\';
+        return fsPath.startsWith(dir);
+    });
+}
 connection.onCodeLens((params) => {
     // #185 — reference-count CodeLens is opt-out; when disabled, emit no lenses
     // so no reference searches run (resolveCodeLens is never called).
     if (!serverSettings.referencesCodeLensEnabled) return [];
+    if (isUnderLibsrcPath(params.textDocument.uri)) return [];
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
     try {
@@ -800,10 +994,65 @@ connection.onCodeLens((params) => {
 });
 
 // Handle CodeLens resolve — fill in title + command by counting references
+// #297 fix 8 (audit H1 #5): each cold resolve is a cross-file reference scan measured at
+// 0.5-2.8s — VS Code fires one resolve per visible lens, so a screenful of lenses on a big
+// generated module stacked seconds of scans onto the interactive queue.
+//
+// Follow-up (Mark's VM, GLQuarter): the original budget CANCELLED the scan and returned
+// "0+ references" — which VS Code then cached indefinitely, so hot symbols (whose scans always
+// exceed the budget) never showed a real count. The scan is no longer cancelled: it runs to
+// completion in the background (time-sliced — FILES_PER_YIELD=5 keeps it cooperative), the
+// response beyond the budget is an honest "counting…" placeholder, and when the scan finishes
+// the server asks the client to refresh its lenses (workspace/codeLens/refresh) — the
+// re-resolve then answers instantly from the cache with the REAL count. One in-flight scan per
+// lens, so refresh-triggered re-resolves never duplicate work.
+//
+// #318 exact-lazy: the approximate index count (word occurrences, no receiver resolution —
+// measured ~195 shown vs 3 real on common method names) is demoted from final answer to
+// PLACEHOLDER. Every uncached resolve now also starts the exact scoped scan in the background;
+// the estimate shows immediately and the exact count replaces it via the refresh. This is
+// affordable because the #315 arc made an app-scoped FAR ~100ms — the model TS/rust-analyzer
+// use (exact per visible lens), with clangd's persisted-ref index tracked on #316 as endgame.
+const CODELENS_RESOLVE_BUDGET_MS = 500;
+const inflightLensScans = new Map<string, Promise<Location[]>>();
+
+// #318: a screenful of lenses (~10-30) resolves at once; each exact scan is fast but dozens
+// launched together would still contend the single LSP thread. Scans run at most N-wide;
+// queued scans keep their inflight entry (no duplicate work on refresh re-resolves) and the
+// #303 ceiling clock starts only when a scan leaves the queue.
+const MAX_CONCURRENT_LENS_SCANS = 3;
+let activeLensScans = 0;
+const lensScanQueue: Array<() => void> = [];
+function acquireLensScanSlot(): Promise<void> {
+    if (activeLensScans < MAX_CONCURRENT_LENS_SCANS) {
+        activeLensScans++;
+        return Promise.resolve();
+    }
+    return new Promise(resolve => lensScanQueue.push(resolve));
+}
+function releaseLensScanSlot(): void {
+    const next = lensScanQueue.shift();
+    if (next) next();
+    else activeLensScans--;
+}
+let lensRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleLensRefresh() {
+    if (lensRefreshTimer) return;
+    lensRefreshTimer = setTimeout(() => {
+        lensRefreshTimer = null;
+        connection.sendRequest(CodeLensRefreshRequest.type).catch(() => {
+            // client without refresh support — the count appears on the next natural refresh
+        });
+    }, 250);
+}
 connection.onCodeLensResolve(async (lens) => {
     try {
-        const data = lens.data as { uri: string; line: number; character: number; symbolName: string } | undefined;
+        const data = lens.data as { uri: string; line: number; character: number; symbolName: string; fileScoped?: boolean; routine?: boolean } | undefined;
         if (!data) return lens;
+
+        // #315 belt-and-braces on the #303 gate: a lens emitted for a libsrc doc
+        // before libsrcPaths arrived must never trigger counting on resolve.
+        if (isUnderLibsrcPath(data.uri)) return lens;
 
         const document = documents.get(data.uri);
         if (!document) return lens;
@@ -811,30 +1060,143 @@ connection.onCodeLensResolve(async (lens) => {
         const cacheKey = `${data.uri}:${data.line}:${data.character}`;
         const cached = codeLensRefCache.get(cacheKey);
 
+        // #294: once the reference-count index is built, it answers a count in O(1).
+        // The count is APPROXIMATE (comment/string-stripped identifier occurrences by
+        // name, no receiver resolution) — #318: it is now only the placeholder shown
+        // while the exact scoped scan below runs; the refresh swaps in the real count.
+        let placeholderTitle: string | undefined;
+        // #320: routine lenses skip the approximate index AND the index-building
+        // gate — their exact count is a same-file procedure-scoped scan (Route R),
+        // fast at any startup phase. Straight to the scan path below.
+        if (!cached && !data.routine) {
+            const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
+            const refIndex = ReferenceCountIndex.getInstance();
+            // #315 follow-up: a lens on a class DECLARED in this CLW (e.g.
+            // CapeSoft GPF Reporter generates an identical ThisGPF into every
+            // app) never counts across applications. Scope by where the CLW
+            // sits: a PROGRAM file's global classes are visible app-wide, so
+            // count across the program + its MEMBER modules (the file graph
+            // knows the family); a MEMBER module's class is file-local.
+            let idxCount: number | undefined;
+            if (data.fileScoped) {
+                const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+                const graph = FileRelationshipGraph.getInstance();
+                const fsPath = decodeURIComponent(data.uri.replace(/^file:\/\/\/?/i, ''));
+                const memberFiles = graph.isBuilt ? graph.getMemberFiles(fsPath) : [];
+                if (memberFiles.length) {
+                    idxCount = refIndex.getCountInFiles(data.symbolName ?? '', [fsPath, ...memberFiles]);
+                } else {
+                    idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                }
+                if (idxCount === undefined && refIndex.isBuilt) {
+                    // File not indexed (e.g. outside the project list) — sync the
+                    // live buffer we already have in hand, then answer from it.
+                    refIndex.updateFile(data.uri, document.getText());
+                    idxCount = refIndex.getCountInFile(data.symbolName ?? '', data.uri);
+                }
+            } else {
+                idxCount = refIndex.getCount(data.symbolName ?? '');
+            }
+            if (idxCount !== undefined) {
+                // #315: the '~' marks the count as an estimate — #318: it shows only
+                // until the background exact scan lands and the refresh replaces it.
+                placeholderTitle = formatApproximateReferenceCount(idxCount);
+            } else if (solutionAnnounced || SolutionManager.getInstance()?.solution) {
+                // #294 follow-up: while the index is still building (solution mode), do NOT
+                // fall back to the scan path — that path is exactly the 106s/114s/110s block
+                // family (a lens resolve at +6s cold-tokenized the whole solution inside
+                // buildInheritanceMap before any checkpoint could land). Show the honest
+                // placeholder; the index-built refresh repaints every visible lens moments
+                // later (#318: exact scans only start once the index — and its mayContain
+                // pruning — is warm). No-solution mode (index never builds) keeps the scan
+                // path — its search space is a single file + directory.
+                lens.command = {
+                    title: 'counting…',
+                    command: 'clarion.showReferences',
+                    arguments: [data.uri, { line: data.line, character: data.character }, []],
+                };
+                return lens;
+            }
+        }
+
         let refs: Location[] | null;
         if (cached) {
             refs = cached.refs;
         } else {
-            refs = await referencesProvider.provideReferences(
-                document,
-                { line: data.line, character: data.character },
-                { includeDeclaration: true }
-            );
-            const resolved = refs ?? [];
-            // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
-            // name-based invalidation when an edit adds a new reference (#189 Phase 2).
-            const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
-            codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
-            // Track which files this symbol's references live in, so a later edit to one
-            // of those files evicts this count (and only the affected counts).
-            codeLensRefIndex.removeSymbol(cacheKey);
-            for (const loc of resolved) {
-                codeLensRefIndex.add(cacheKey, {
-                    uri: loc.uri,
-                    line: loc.range.start.line,
-                    character: loc.range.start.character,
+            let scan = inflightLensScans.get(cacheKey);
+            if (!scan) {
+                const queuedAt = Date.now();
+                scan = acquireLensScanSlot().then(async () => {
+                    // #303: hard ceiling on the background scan. The refresh design wants scans
+                    // to complete, but unbounded they can run away (a libsrc-INC scan held the
+                    // loop 106s). 15s is far above any healthy scan; the cancellation lands at
+                    // the scan's cooperative checkpoints. The clock starts when the scan leaves
+                    // the #318 queue, not when it enters it.
+                    const ceiling = new CancellationTokenSource();
+                    const ceilingTimer = setTimeout(() => ceiling.cancel(), 15_000);
+                    const scanStart = Date.now();
+                    try {
+                        const found = await referencesProvider.provideReferences(
+                            document,
+                            { line: data.line, character: data.character },
+                            { includeDeclaration: true },
+                            ceiling.token
+                        );
+                        // #318 experiment: one perf line per exact lens count — this is the
+                        // measurement that decides whether exact-lazy stays. (#309: always
+                        // name the symbol so slow scans are diagnosable from user logs.)
+                        perfLogger.perf("CodeLens exact count", {
+                            ms: Date.now() - scanStart,
+                            queued_ms: scanStart - queuedAt,
+                            symbol: data.symbolName,
+                            results: found?.length ?? 0,
+                            cancelled: String(ceiling.token.isCancellationRequested),
+                            uri: data.uri
+                        });
+                        const resolved = found ?? [];
+                        // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
+                        // name-based invalidation when an edit adds a new reference (#189 Phase 2).
+                        const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+                        codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
+                        // Track which files this symbol's references live in, so a later edit to one
+                        // of those files evicts this count (and only the affected counts).
+                        codeLensRefIndex.removeSymbol(cacheKey);
+                        for (const loc of resolved) {
+                            codeLensRefIndex.add(cacheKey, {
+                                uri: loc.uri,
+                                line: loc.range.start.line,
+                                character: loc.range.start.character,
+                            });
+                        }
+                        return resolved;
+                    } finally {
+                        clearTimeout(ceilingTimer);
+                        releaseLensScanSlot();
+                    }
+                }).finally(() => {
+                    inflightLensScans.delete(cacheKey);
                 });
+                inflightLensScans.set(cacheKey, scan);
             }
+
+            const raced = await Promise.race([
+                scan,
+                new Promise<'budget'>(resolve =>
+                    setTimeout(() => resolve('budget'), CODELENS_RESOLVE_BUDGET_MS))
+            ]);
+            if (raced === 'budget') {
+                // Real count arrives via the refresh once the background scan lands. #318:
+                // the approximate index count is the interim answer when available — far
+                // more useful than "counting…", and visibly marked '~' until the flip.
+                scan.then(() => scheduleLensRefresh()).catch(() => { /* logged at source */ });
+                lens.command = {
+                    title: placeholderTitle ?? 'counting…',
+                    command: 'clarion.showReferences',
+                    arguments: [data.uri, { line: data.line, character: data.character }, []],
+                };
+                return lens;
+            }
+            refs = raced;
         }
 
         const count = refs?.length ?? 0;
@@ -872,22 +1234,24 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
     // Get current document text
     const text = document.getText();
     
-    // 🚀 PERF: Get cached tokens to detect what changed
+    // 🚀 PERF: Get cached text to detect what changed
     // If no cache exists, this is first edit - let incremental handle it
-    const cached = tokenCache['cache'].get(document.uri);
-    if (!cached || !cached.documentText) {
+    // #260: use the public accessor (the private-map reach would silently miss
+    // now that cache keys are canonicalized).
+    const cachedText = tokenCache.getDocumentText(document.uri);
+    if (!cachedText) {
         return false; // No baseline to compare, incremental will handle
     }
-    
+
     // 🚀 PERF: Quick length check - if document length changed significantly, likely structural
-    const lengthDiff = Math.abs(text.length - cached.documentText.length);
+    const lengthDiff = Math.abs(text.length - cachedText.length);
     if (lengthDiff > 50) {
         return true; // Large changes likely affect structure
     }
-    
+
     // 🔍 CORRECTNESS: Detect changed lines by comparing text
     const newLines = text.split(/\r?\n/);
-    const oldLines = cached.documentText.split(/\r?\n/);
+    const oldLines = cachedText.split(/\r?\n/);
     
     // Check each changed line for structure-affecting keywords
     const maxLines = Math.max(newLines.length, oldLines.length);
@@ -1030,6 +1394,12 @@ documents.onDidChangeContent(event => {
         // instead of every cached count. Counts for other files stay warm.
         invalidateCodeLensForFile(document);
 
+        // #294: keep the approximate reference-count index in sync with the live
+        // buffer — a single regex re-scan of THIS file, totals adjusted by delta.
+        void import('./services/ReferenceCountIndex').then(({ ReferenceCountIndex }) =>
+            ReferenceCountIndex.getInstance().updateFile(uri, document.getText())
+        ).catch(() => { /* non-fatal — counts self-heal on next build */ });
+
         // Skip XML files
         if (uri.toLowerCase().endsWith('.xml') || uri.toLowerCase().endsWith('.cwproj')) {
             return;
@@ -1050,6 +1420,7 @@ documents.onDidChangeContent(event => {
         
         // 🚀 PERF: Invalidate caches immediately so fresh data is computed after debounce
         symbolCache.delete(uri);
+        symbolCacheVersions.delete(uri);
         foldingCache.delete(uri);
         
         // Invalidate cross-file cache for this document
@@ -1242,11 +1613,20 @@ connection.onDocumentRangeFormatting((params: DocumentRangeFormattingParams): Te
 
 // Cache for document symbols to avoid recomputing during rapid typing
 const symbolCache = new Map<string, DocumentSymbol[]>();
+// #297 S5: version stamp for symbolCache entries — an unchanged document answers
+// onDocumentSymbol straight from cache (VS Code re-requests symbols on every focus change;
+// each recompute was 100-800ms of loop time on generated modules).
+const symbolCacheVersions = new Map<string, number>();
 const foldingCache = new Map<string, FoldingRange[]>();
 
 connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
+    // #297: while an announced solution is still loading, the FRG's no-solution guard falls
+    // through and builds a THROWAWAY degraded-mode graph for this document (measured 3.2s on
+    // the queue during the busiest window). Skip — the server sends
+    // clarion/refreshDocumentLinks at solutionReady, so links populate then.
+    if (solutionAnnounced && !SolutionManager.getInstance()?.solution) return [];
     return documentLinkProvider.provideDocumentLinks(document);
 });
 
@@ -1273,6 +1653,11 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
             return [];
         }
 
+        // #297 S5: same document version → same symbols; skip the recompute entirely.
+        if (symbolCacheVersions.get(uri) === document.version && symbolCache.has(uri)) {
+            return symbolCache.get(uri)!;
+        }
+
         logger.info(`📂 [DEBUG] Computing document symbols for: ${uri}, language: ${document.languageId}`);
         
         const tokenStart = performance.now();
@@ -1294,6 +1679,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams) => {
         
         // Cache the symbols for quick retrieval during typing
         symbolCache.set(uri, symbols);
+        symbolCacheVersions.set(uri, document.version);
         
         logger.info(`🧩 [DEBUG] Returned ${symbols.length} document symbols for ${uri}`);
 
@@ -1420,6 +1806,7 @@ documents.onDidClose(event => {
         try {
             tokenCache.clearTokens(uri);
             symbolCache.delete(uri);
+            symbolCacheVersions.delete(uri);
             foldingCache.delete(uri);
             logger.info(`🔍 [CRITICAL] Successfully cleared tokens for document: ${uri}`);
         } catch (cacheError) {
@@ -1431,6 +1818,21 @@ documents.onDidClose(event => {
     }
 });
 
+
+// #289: the client announces a configured solution the moment its language client is ready —
+// long before the heavy init flow sends clarion/updatePaths. This is what lets the 2s
+// no-solution fallback below know a solution is on its way (previously it had NO signal until
+// updatePaths arrived, fired mid-startup, and the degraded async validation pass it drained
+// starved the solution load itself).
+let solutionAnnounced = false;
+connection.onNotification('clarion/solutionPending', (params: { solutionFilePath?: string }) => {
+    solutionAnnounced = true;
+    startupBackgroundActive = true;
+    perfLogger.perf("Phase: clarion/solutionPending received", {
+        since_module_load_ms: Date.now() - serverModuleLoadedAt,
+        solution: params?.solutionFilePath ? path.basename(params.solutionFilePath) : '(unnamed)'
+    });
+});
 
 connection.onNotification('clarion/updatePaths', async (params: {
     redirectionPaths: string[];
@@ -1445,6 +1847,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
     undeclaredVariablesEnabled?: boolean; // #62 opt-in
     indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
     referencesCodeLensEnabled?: boolean; // #185 opt-out
+    inlayHintsParameterNames?: boolean;  // inlay hints opt-out
+    inlayHintsImplicitTypes?: boolean;   // inlay hints opt-out
 }) => {
     const startTime = performance.now();
     logger.info(`🕒 Starting solution initialization`);
@@ -1459,6 +1863,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
         serverSettings.libsrcPaths = params.libsrcPaths || [];
         serverSettings.redirectionFile = params.redirectionFile || "";
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
+
+        // #315: lenses requested BEFORE libsrcPaths arrived bypassed the #303
+        // libsrc gate (empty list matches nothing) and stick in the editor.
+        // Re-request them now that the gate can answer correctly.
+        if (serverSettings.libsrcPaths.length) scheduleLensRefresh();
 
         // Clear the SDI cache so any stale empty index (built before redirectionFile was known)
         // is discarded — it will be rebuilt with correct paths by the setImmediate below.
@@ -1481,6 +1890,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
         }
         if (params.indistinguishablePrototypesEnabled !== undefined) {
             serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
+        }
+        if (params.inlayHintsParameterNames !== undefined) {
+            serverSettings.inlayHintsParameterNames = params.inlayHintsParameterNames === true;
+        }
+        if (params.inlayHintsImplicitTypes !== undefined) {
+            serverSettings.inlayHintsImplicitTypes = params.inlayHintsImplicitTypes === true;
         }
         if (params.referencesCodeLensEnabled !== undefined) {
             serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
@@ -1539,6 +1954,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             await initializeSolutionManager(solutionPath);
             const initEndTime = performance.now();
             logger.info(`✅ Solution manager initialized successfully in ${(initEndTime - initStartTime).toFixed(2)}ms`);
+            perfLogger.perf("Phase: SolutionManager init (parse .sln + load project source files)", {
+                ms: Math.round(initEndTime - initStartTime),
+                project_count: SolutionManager.getInstance()?.solution.projects.length ?? 0,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
             
             // Log the solution manager state
             const solutionManager = SolutionManager.getInstance();
@@ -1582,6 +2002,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
             globalSolution = await buildClarionSolution();
             const buildEndTime = performance.now();
             logger.info(`⏱️ [STARTUP] Solution build done: ${globalSolution.projects.length} projects, ${globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0)} source files in ${(buildEndTime - buildStartTime).toFixed(0)}ms`);
+            perfLogger.perf("Phase: buildClarionSolution", {
+                ms: Math.round(buildEndTime - buildStartTime),
+                project_count: globalSolution.projects.length,
+                source_file_count: globalSolution.projects.reduce((n, p) => n + p.sourceFiles.length, 0),
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
             logger.info(`✅ Solution built successfully with ${globalSolution.projects.length} projects in ${(buildEndTime - buildStartTime).toFixed(2)}ms`);
             
             // Always-visible project summary
@@ -1596,7 +2022,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // until after we have real project data (avoids flooding the LSP pipe with
             // thousands of clarion/findFile requests when getSolutionTree returns 0 projects).
             connection.sendNotification('clarion/solutionReady', {
-                solutionFilePath: solutionPath,
+                // #263: must be the solution FILE path — the client compares it against its
+                // globalSolutionFile to reject stale notifications. `solutionPath` here is the
+                // solution DIRECTORY (projectPaths[0]), which never matches and silently killed
+                // the deferred-activation path for slow-loading solutions.
+                solutionFilePath: serverSettings.solutionFilePath || solutionPath,
                 projectCount: globalSolution.projects.length
             });
             logger.info(`⏱️ [STARTUP] clarion/solutionReady sent: ${globalSolution.projects.length} projects`);
@@ -1625,13 +2055,24 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const deferredCount = deferredAsyncDocs.size;
             deferredAsyncDocs.clear();
 
-            for (const doc of openDocs) {
-                validateTextDocument(doc, 'solutionReady');
+            // #306: while the SDI is still pending, this pass was pure waste — its sync
+            // validators are same-file (already ran at onDidOpen, same content) and its
+            // async validators defer anyway; the sdiReady pass re-validates everything
+            // with full context. Running it blocked the loop ~1s per open doc inside the
+            // clarion/updatePaths handler. Queue the docs for the sdiReady pass instead;
+            // if the SDI is somehow already ready (tiny solutions), validate now.
+            if (!sdiPipelineReady) {
+                for (const doc of openDocs) deferredAsyncDocs.add(doc.uri);
+            } else {
+                for (const doc of openDocs) {
+                    validateTextDocument(doc, 'solutionReady');
+                }
             }
             perfLogger.perf("Phase: Post-solution re-validation dispatched", {
                 dispatch_ms: Date.now() - revalDispatchStart,
                 doc_count: openDocs.length,
                 deferred_drained: deferredCount,
+                deferred_to_sdi_pass: String(!sdiPipelineReady),
                 since_module_load_ms: Date.now() - serverModuleLoadedAt
             });
             // NOTE: dispatch_ms only measures the synchronous loop. Each
@@ -1648,13 +2089,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
             logger.info("🔗 Document-link refresh notification sent to client");
 
             // #189 Phase 2 — precompute CodeLens reference counts in the background.
-            // Keeps `onCodeLensResolve` mostly cache-hit/O(1) after startup while still
-            // preserving live FAR fallback when precompute is incomplete.
-            setImmediate(() => {
-                precomputeCodeLensReferenceCounts(globalSolution!).catch(err =>
-                    logger.error(`❌ CodeLens reference precompute failed: ${err instanceof Error ? err.message : String(err)}`)
-                );
-            });
+            // #290: moved to run AFTER the sdiReady validation pass (see the SDI prebuild block
+            // below). It performs a cross-file reference scan per lens (measured 4,140 scans /
+            // ~96s on a large solution) — started here it interleaved with the deferred
+            // validators and multiplied their wall time (a 1-3s member resolution stretched to
+            // 33s). Live-FAR fallback covers CodeLens counts until the cache warms, so it is
+            // safe to be last in line.
 
             // Pre-build structure declaration index for all project paths in the background.
             // Without this, the first hover on a CLASS/INTERFACE/EQUATE etc. triggers a full scan
@@ -1667,17 +2107,96 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 )];
                 const sdiStart = Date.now();
                 logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
-                await Promise.all(projectPaths.map(p =>
-                    indexer.getOrBuildIndex(p).catch(err =>
+                await Promise.all(projectPaths.map(async p => {
+                    const t = Date.now();
+                    await indexer.getOrBuildIndex(p).catch(err =>
                         logger.error(`❌ [INDEX] Background build failed for ${p}: ${err}`)
-                    )
-                ));
+                    );
+                    perfLogger.perf("SDI: project structure index built", {
+                        ms: Date.now() - t,
+                        project: path.basename(p)
+                    });
+                }));
                 logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                perfLogger.perf("Phase: SDI structure-index build complete (background)", {
+                    ms: Date.now() - sdiStart,
+                    project_count: projectPaths.length,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+
+                // #289: the async cross-file validators were deferred until this point (several
+                // block on the index internally — running them earlier parked them behind the
+                // build). Index ready → user edits validate normally from here on.
+                sdiPipelineReady = true;
+                deferredAsyncDocs.clear();
+                lastValidatedVersions.clear();
+
+                // #290/#294: the automatic CodeLens precompute is GONE. Even scoped to open
+                // documents, it ran a project-wide reference scan PER LENS (a large generated
+                // module ≈ 178 lenses × ~178 files) — minutes of main-thread churn that made the
+                // IDE unresponsive right after load, for a pure optimization. Counts now resolve
+                // lazily per VISIBLE lens (user-proportional work) with per-symbol caching; the
+                // settings-toggle path can still trigger a manual warm. The real fix — off-thread
+                // or persisted reference indexing — is tracked in #294/#295.
+
+                // #297: background work is strictly sequenced, and the ORDER matters. VM run 3
+                // put the batch revalidation first (all docs Promise.all'd) and it pinned the
+                // loop for 35s+ — cross-file validators fall back to directory scans while the
+                // FRG doesn't exist yet, and a tree expand at +44s starved to its 15s timeout on
+                // an in-memory getProjectFiles. So: short settle (client's post-ready burst
+                // drains) → FRG build (yields every 10 files — interactive requests interleave)
+                // → revalidation ONE DOC AT A TIME, each pass benefiting from the built graph.
+                await new Promise<void>(resolve => setTimeout(resolve, 2000));
+                await buildFileRelationshipGraph();
+
+                // #319: the reference-count index builds BEFORE the revalidation pass.
+                // The undeclaredVar validator's cross-file miss path (the sibling-MEMBER
+                // walk in SymbolFinderService) prunes through this index; under the old
+                // #294 "last and lowest priority" order the first revalidation ran with
+                // the index unbuilt and cold-tokenized the whole program family per miss
+                // (8.2s sync block on Mark's VM). Warm start is stat-only (~0.5s); the
+                // batched build yields, and moving it up also gets lens estimates + the
+                // exact-scan gate (#318) live sooner. Net: the flag-drop below happens
+                // EARLIER because the revalidation stops paying the un-pruned walk.
+                const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
+                const refIdxFiles: string[] = [];
+                const smForIdx = SolutionManager.getInstance();
+                if (smForIdx?.solution) {
+                    for (const project of smForIdx.solution.projects) {
+                        for (const sourceFile of project.sourceFiles) {
+                            const absPath = sourceFile.getAbsolutePath();
+                            if (absPath) refIdxFiles.push(absPath);
+                        }
+                    }
+                }
+                await ReferenceCountIndex.getInstance().buildInBackground(refIdxFiles).catch(err =>
+                    logger.error(`❌ [RefIndex] Background build failed: ${err}`)
+                );
+                // Counts are now O(1) — repaint visible lenses with real numbers.
+                scheduleLensRefresh();
+
+                const revalStart = Date.now();
+                let revalCount = 0;
+                for (const doc of documents.all()) {
+                    try {
+                        await validateTextDocument(doc, 'sdiReady');
+                    } catch { /* validator errors are logged at source */ }
+                    revalCount++;
+                }
+                perfLogger.perf("Phase: sdiReady revalidation pass complete", {
+                    ms: Date.now() - revalStart,
+                    doc_count: revalCount,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+                // #301: end of the startup background chain - hover drops the "still indexing"
+                // fallback from here on.
+                startupBackgroundActive = false;
             });
-            
+
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
             // Enables O(1) reverse lookups for local MAP scope (#91) and include chains (#52).
-            setImmediate(async () => {
+            // #297: invoked from the sequenced background chain above, no longer self-starting.
+            const buildFileRelationshipGraph = async () => {
                 const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
                 const graph = FileRelationshipGraph.getInstance();
                 const solutionManager = SolutionManager.getInstance();
@@ -1697,13 +2216,26 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
                 logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
+                perfLogger.perf("Phase: FRG file-relationship-graph build complete (background)", {
+                    ms: Date.now() - frgStart,
+                    file_count: allFiles.length,
+                    scanned: graph.lastBuildStats?.scanned ?? -1,
+                    reused_from_disk: graph.lastBuildStats?.reusedFromDisk ?? -1,
+                    // #315: memberEdges=0 on a real solution = degraded resolution
+                    // environment — the direct signal for the poisoned-cache family
+                    // of failures (frg_member_edges_of_doc=0 in FAR traces).
+                    member_edges: graph.lastBuildStats?.memberEdges ?? -1,
+                    include_edges: graph.lastBuildStats?.includeEdges ?? -1,
+                    module_edges: graph.lastBuildStats?.moduleEdges ?? -1,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
                 connection.sendNotification('clarion/graphStatus', {
                     status: 'built',
                     fileCount: graph.fileCount,
                     edgeCount: graph.edgeCount,
                     durationMs: graph.buildDurationMs
                 });
-            });
+            };
 
             // Log each project in the global solution
             for (let i = 0; i < globalSolution.projects.length; i++) {
@@ -1763,20 +2295,58 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
 // Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
 // The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
-connection.onNotification('clarion/projectConstantsChanged', () => {
-    logger.test('📥 clarion/projectConstantsChanged — re-validating all open documents');
+//
+// #317: the client fires this once PER PROJECT (40x on a real solution) — the old
+// handler re-validated every open document and reset the file-relationship graph
+// per notification (~25 revalidations of the same unchanged file in one burst;
+// one missingConstants pass measured 44s during the concurrent FRG cold-rescan
+// window it caused itself). Coalesced: a burst costs ONE pass. The FRG is also
+// REBUILT, not just reset — a bare reset left it dead until the next restart,
+// degrading every family-scoped consumer (FAR scope, sibling-walk prune, hover).
+const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
+    const passStart = Date.now();
     // Clear the version-skip cache so validateTextDocument doesn't skip documents
     // whose source hasn't changed but whose cwproj has.
     lastValidatedVersions.clear();
-    for (const document of documents.all()) {
-        validateTextDocument(document).catch(err =>
-            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
-        );
+
+    // Rebuild the file relationship graph — the project file list may have changed.
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const graph = FileRelationshipGraph.getInstance();
+    graph.reset();
+    const smForGraph = SolutionManager.getInstance();
+    const graphFiles: string[] = [];
+    if (smForGraph?.solution) {
+        for (const project of smForGraph.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const absPath = sourceFile.getAbsolutePath();
+                if (absPath) graphFiles.push(absPath);
+            }
+        }
     }
-    // Reset file relationship graph — project file list may have changed
-    import('./FileRelationshipGraph').then(({ FileRelationshipGraph }) => {
-        FileRelationshipGraph.getInstance().reset();
+    if (graphFiles.length) {
+        await graph.buildInBackground(graphFiles).catch(err =>
+            logger.error(`❌ [FRG] constants-change rebuild failed: ${err}`));
+    }
+
+    // One doc at a time — same discipline as the startup revalidation chain.
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'constantsChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    perfLogger.perf("projectConstantsChanged coalesced pass complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        frg_files: graphFiles.length
     });
+});
+connection.onNotification('clarion/projectConstantsChanged', () => {
+    logger.test('📥 clarion/projectConstantsChanged — coalescing (#317)');
+    projectConstantsCoalescer.trigger();
 });
 
 
@@ -2149,8 +2719,17 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
     }
 
     logger.info(`📜 [Server] Handling documentSymbols request for ${params.uri}`);
+    // #297 S5: open documents answer from the version-keyed cache (disk-loaded fallbacks
+    // above have no live version to key on, so they compute fresh).
+    if (documents.get(params.uri) && symbolCacheVersions.get(params.uri) === document.version && symbolCache.has(params.uri)) {
+        return symbolCache.get(params.uri)!;
+    }
     const tokens = getTokens(document);
     const symbols = clarionDocumentSymbolProvider.provideDocumentSymbols(tokens, params.uri, document);
+    if (documents.get(params.uri)) {
+        symbolCache.set(params.uri, symbols);
+        symbolCacheVersions.set(params.uri, document.version);
+    }
     logger.info(`✅ [Server] Returning ${symbols.length} symbols`);
     return symbols;
 });
@@ -2248,10 +2827,41 @@ connection.onReferences(async (params: ReferenceParams, token) => {
             }
         }
 
-        const references = await Promise.race([
-            referencesProvider.provideReferences(document, params.position, params.context, token),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 15000))
-        ]);
+        // #315: this used to race the scan against a 15s timeout that resolved
+        // null — the peek showed NOTHING while the scan burned on in the
+        // background (Mark's log: 7× onReferences at ~15.0-15.5s, empty peek
+        // each time, re-click, repeat). A slow right answer beats a fast empty
+        // one; the client's cancellation token still aborts abandoned requests.
+        const farStart = Date.now();
+        const references = await referencesProvider.provideReferences(document, params.position, params.context, token);
+        const farMs = Date.now() - farStart;
+        if (farMs >= 1_000) {
+            perfLogger.perf("FAR slow", {
+                ms: farMs,
+                count: references?.length ?? 0,
+                cancelled: String(token.isCancellationRequested),
+                line: params.position.line,
+                uri: params.textDocument.uri
+            });
+        }
+
+        // A completed FAR at a lens declaration IS the exact count — persist it
+        // so the lens title upgrades from the ~estimate and repeat clicks are O(1).
+        if (lensData && references && params.context.includeDeclaration && !token.isCancellationRequested) {
+            const cacheKey = `${lensData.uri}:${lensData.line}:${lensData.character}`;
+            const shortName = (lensData.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+            codeLensRefCache.set(cacheKey, { refs: references, shortName });
+            codeLensRefIndex.removeSymbol(cacheKey);
+            for (const loc of references) {
+                codeLensRefIndex.add(cacheKey, {
+                    uri: loc.uri,
+                    line: loc.range.start.line,
+                    character: loc.range.start.character,
+                });
+            }
+            scheduleLensRefresh();
+        }
+
         logger.info(references ? `✅ Found ${references.length} reference(s)` : `⚠️ No references found`);
         return references;
     } catch (error) {
@@ -2305,6 +2915,23 @@ connection.onDocumentHighlight(async (params) => {
     }
 });
 
+// Inlay hints — implicit-variable types + parameter-name hints at call sites.
+// DORMANT (2026-07-07): the `inlayHintProvider` capability is no longer advertised (see the
+// server capabilities block above), so VS Code never calls this handler. Kept for easy re-enable.
+connection.languages.inlayHint.on((params) => {
+    if (!serverInitialized) return null;
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    try {
+        const tokens = getTokens(document);
+        if (!tokens || tokens.length === 0) return [];
+        return inlayHintsProvider.provideInlayHints(document, params.range, tokens);
+    } catch (error) {
+        logger.error(`❌ Error providing inlay hints: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+});
+
 // Handle workspace symbol search
 connection.onWorkspaceSymbol(async (params, token) => {
     if (!serverInitialized) return [];
@@ -2319,26 +2946,63 @@ connection.onWorkspaceSymbol(async (params, token) => {
 
 connection.onHover(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
-    
+
+    // #301: while startup pipelines run, an unresolved hover shows a "still indexing" note
+    // instead of null — a null makes VS Code's "Loading…" placeholder vanish silently, which
+    // reads as "this symbol has no hover" when the truth is "not ready yet".
+    const hoverReadiness = () => ({
+        serverInitialized,
+        solutionAnnounced,
+        solutionPipelineReady,
+        sdiPipelineReady
+    });
+
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying hover request`);
-        return null;
+        return initializingHoverFallback(null, hoverReadiness());
     }
-    
+
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         logger.info(`⚠️ Document not found: ${params.textDocument.uri}`);
         return null;
     }
-    
+
     try {
-        const hover = await hoverProvider.provideHover(document, params.position);
+        const hoverPromise: Promise<import('vscode-languageserver/node').Hover | null> = (async () => {
+            try {
+                return await hoverProvider.provideHover(document, params.position);
+            } catch (error) {
+                logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
+                return null;
+            }
+        })();
+
+        // #301 follow-up: during the startup background window, resolution is exactly what
+        // crawls (queued behind indexing) — waiting for it meant VS Code dismissed the tooltip
+        // before any answer arrived, so the first cut of the "still indexing" note never
+        // rendered. RACE the real resolution against a short budget: a fast hover still wins
+        // (same-file info works fine mid-startup); a slow or empty one yields the note
+        // immediately, early enough to actually display. The resolution keeps running in the
+        // background and warms the caches for the next attempt.
+        if (startupBackgroundActive || !solutionPipelineReady || !sdiPipelineReady) {
+            const raced = await Promise.race([
+                hoverPromise,
+                new Promise<'busy'>(resolve => setTimeout(() => resolve('busy'), 300))
+            ]);
+            if (raced === 'busy' || raced === null) {
+                return buildIndexingHover();
+            }
+            return raced;
+        }
+
+        const hover = await hoverPromise;
         if (hover) {
             logger.info(`✅ Found hover info for ${params.textDocument.uri}`);
         } else {
             logger.info(`⚠️ No hover info found for ${params.textDocument.uri}`);
         }
-        return hover;
+        return initializingHoverFallback(hover, hoverReadiness());
     } catch (error) {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
         return null;
@@ -2363,39 +3027,47 @@ connection.onCodeAction(async (params) => {
     try {
         const caStart = Date.now();
 
-        const t0 = Date.now();
-        logger.info(`⏱️ [CODE-ACTION] ClassConstants starting`);
-        const codeActionProvider = new ClassConstantsCodeActionProvider();
-        const actions = await codeActionProvider.provideCodeActions(
-            document,
-            params.range,
-            params.context,
-            params as any
-        );
-        logger.info(`⏱️ [CODE-ACTION] ClassConstants done: ${Date.now() - t0}ms → ${actions.length} actions`);
+        // #312: VS Code fires code-action requests on every cursor move — on large
+        // generated modules the chain measured 100-300ms per invocation. Run the
+        // providers through a timed table so a slow request NAMES its provider in
+        // the release perf log (the per-provider info lines are suppressed there).
+        const providerRuns: Array<[string, () => CodeAction[] | Promise<CodeAction[]>]> = [
+            ['classConstants', () => new ClassConstantsCodeActionProvider().provideCodeActions(document, params.range, params.context, params as any)],
+            ['flatten', () => new FlattenCodeActionProvider().provideCodeActions(document, params.range)],
+            ['mapModule', () => new MapModuleCodeActionProvider().provideCodeActions(document, params.range)],
+            ['mapDecl', () => new MapDeclarationCodeActionProvider().provideCodeActions(document, params.range, params.context)],
+            ['unicode', () => new UnicodeCodeActionProvider().provideCodeActions(document, params.range, params.context)],
+            ['generateRoutine', () => new GenerateRoutineCodeActionProvider().provideCodeActions(document, params.range)],
+            ['introduceEquate', () => new IntroduceEquateCodeActionProvider().provideCodeActions(document, params.range)],
+        ];
 
-        const t2 = Date.now();
-        const flattenProvider = new FlattenCodeActionProvider();
-        const flattenActions = flattenProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] Flatten done: ${Date.now() - t2}ms → ${flattenActions.length} actions`);
+        const allActions: CodeAction[] = [];
+        const timings: Array<[string, number]> = [];
+        for (const [name, run] of providerRuns) {
+            const t0 = Date.now();
+            const produced = await run();
+            const ms = Date.now() - t0;
+            timings.push([name, ms]);
+            logger.info(`⏱️ [CODE-ACTION] ${name} done: ${ms}ms → ${produced.length} actions`);
+            allActions.push(...produced);
+        }
 
-        const t4 = Date.now();
-        const mapModuleProvider = new MapModuleCodeActionProvider();
-        const mapModuleActions = mapModuleProvider.provideCodeActions(document, params.range);
-        logger.info(`⏱️ [CODE-ACTION] MapModule done: ${Date.now() - t4}ms → ${mapModuleActions.length} actions`);
-
-        const t6 = Date.now();
-        const mapDeclProvider = new MapDeclarationCodeActionProvider();
-        const mapDeclActions = mapDeclProvider.provideCodeActions(document, params.range, params.context);
-        logger.info(`⏱️ [CODE-ACTION] MapDecl done: ${Date.now() - t6}ms → ${mapDeclActions.length} actions`);
-
-        const t8 = Date.now();
-        const unicodeProvider = new UnicodeCodeActionProvider();
-        const unicodeActions = unicodeProvider.provideCodeActions(document, params.range, params.context);
-        logger.info(`⏱️ [CODE-ACTION] Unicode done: ${Date.now() - t8}ms → ${unicodeActions.length} actions`);
-
-        const allActions = [...actions, ...flattenActions, ...mapModuleActions, ...mapDeclActions, ...unicodeActions];
-        logger.info(`⏱️ [CODE-ACTION] ■ total ${Date.now() - caStart}ms → ${allActions.length} actions returned`);
+        const totalMs = Date.now() - caStart;
+        if (totalMs >= 100) {
+            const top = timings
+                .filter(([, ms]) => ms >= 10)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([name, ms]) => `${name}=${ms}`)
+                .join(', ');
+            perfLogger.perf("CodeAction chain slow", {
+                total_ms: totalMs,
+                top: top || '(spread below 10ms each)',
+                line: params.range.start.line,
+                uri: params.textDocument.uri
+            });
+        }
+        logger.info(`⏱️ [CODE-ACTION] ■ total ${totalMs}ms → ${allActions.length} actions returned`);
         return allActions;
     } catch (error) {
         logger.error(`❌ Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
@@ -2423,12 +3095,9 @@ connection.onSignatureHelp(async (params) => {
         if (signatureHelp) {
             logger.debug(`✅ [SIG-HELP] Found ${signatureHelp.signatures.length} signature(s) for ${params.textDocument.uri}`);
             logger.debug(`✅ [SIG-HELP] Active signature: ${signatureHelp.activeSignature}, Active parameter: ${signatureHelp.activeParameter}`);
-            // Convert undefined to null for activeSignature and activeParameter to match protocol
-            return {
-                ...signatureHelp,
-                activeSignature: signatureHelp.activeSignature ?? null,
-                activeParameter: signatureHelp.activeParameter ?? null
-            };
+            // vscode-languageclient@8: activeSignature/activeParameter are optional uinteger
+            // (number | undefined) — the old undefined→null conversion is no longer valid.
+            return signatureHelp;
         } else {
             logger.debug(`⚠️ [SIG-HELP] No signature help found for ${params.textDocument.uri}`);
         }
@@ -2552,21 +3221,77 @@ connection.onExit(() => {
 // real no-solution-mode workspaces produce no solutionReady at all. 2s is
 // well under perceived-startup-blocking; loose-file users wait 2s for
 // async diagnostics instead of getting them at t=63ms. Acceptable trade.
-setTimeout(() => {
-    if (!solutionPipelineReady) {
-        perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
-            since_module_load_ms: Date.now() - serverModuleLoadedAt,
+//
+// #289: when a solution IS on its way (path known / manager created / load in
+// flight), RESCHEDULE instead of draining. Draining mid-load ran the full
+// async cross-file pass on every deferred doc in degraded no-solution mode,
+// only for solutionReady to re-validate them all again — double the most
+// expensive work on exactly the biggest solutions. Genuine no-solution
+// workspaces have none of these signals and still drain at 2s as before.
+const drainDeferredIfNoSolution = () => {
+    if (solutionPipelineReady) return;
+    const sinceLoad = Date.now() - serverModuleLoadedAt;
+    const solutionOnItsWay =
+        solutionAnnounced ||
+        (global as any).solutionOperationInProgress === true ||
+        SolutionManager.getInstance() !== null ||
+        !!serverSettings.solutionFilePath;
+    // Hard cap: if an announced solution never finishes loading (load failure), don't defer
+    // async diagnostics forever — drain after 60s regardless.
+    if (solutionOnItsWay && sinceLoad < 60_000) {
+        perfLogger.perf("Phase B addendum — no-solution timeout deferred (solution load under way)", {
+            since_module_load_ms: sinceLoad,
             deferred_count: deferredAsyncDocs.size
         });
-        solutionPipelineReady = true;
-        const queuedUris = Array.from(deferredAsyncDocs);
-        deferredAsyncDocs.clear();
-        for (const uri of queuedUris) {
-            const doc = documents.get(uri);
-            if (doc) validateTextDocument(doc, 'noSolutionTimeout');
-        }
+        setTimeout(drainDeferredIfNoSolution, 2000);
+        return;
     }
-}, 2000);
+    perfLogger.perf("Phase B addendum — no-solution timeout fired, draining deferred async queue", {
+        since_module_load_ms: Date.now() - serverModuleLoadedAt,
+        deferred_count: deferredAsyncDocs.size
+    });
+    solutionPipelineReady = true;
+    startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
+    sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
+    const queuedUris = Array.from(deferredAsyncDocs);
+    deferredAsyncDocs.clear();
+    for (const uri of queuedUris) {
+        const doc = documents.get(uri);
+        if (doc) validateTextDocument(doc, 'noSolutionTimeout');
+    }
+};
+setTimeout(drainDeferredIfNoSolution, 2000);
+
+// #289 diagnostics: event-loop lag sampler for the first 120s. A 100ms heartbeat drifts by
+// however long the loop was blocked; the max drift per 5s window is reported (only when it
+// exceeds 100ms, to keep the log lean). This directly distinguishes "phase X is genuinely slow"
+// from "phase X's wall-clock ballooned because something else starved the single-threaded loop"
+// — the run-3/run-4 SolutionManager-init variance (0.7s vs 15s, identical work) needs exactly
+// this attribution.
+{
+    const samplerStart = Date.now();
+    let lastTick = Date.now();
+    let windowMaxLag = 0;
+    const heartbeat = setInterval(() => {
+        const now = Date.now();
+        const lag = now - lastTick - 100;
+        lastTick = now;
+        if (lag > windowMaxLag) windowMaxLag = lag;
+    }, 100);
+    const reporter = setInterval(() => {
+        if (windowMaxLag > 100) {
+            perfLogger.perf("EventLoop lag", {
+                max_blocked_ms: windowMaxLag,
+                since_module_load_ms: Date.now() - serverModuleLoadedAt
+            });
+        }
+        windowMaxLag = 0;
+        if (Date.now() - samplerStart > 120_000) {
+            clearInterval(heartbeat);
+            clearInterval(reporter);
+        }
+    }, 5000);
+}
 
 // Listen on the connection
 logger.info("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD]");

@@ -2,6 +2,8 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position, Range } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
+import { ScopeResolver } from '../scope/ScopeResolver';
+import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 
 /**
  * Shared utility for token and scope navigation
@@ -30,47 +32,16 @@ export class TokenHelper {
      * Implementation of getInnermostScopeAtLine
      */
     public static getInnermostScopeAtLine(tokensOrStructure: Token[] | DocumentStructure, line: number): Token | undefined {
-        // Check if we received a DocumentStructure
-        if ('getParent' in tokensOrStructure) {
-            // 🚀 PERFORMANCE: Use structure's parent index
-            const structure = tokensOrStructure as DocumentStructure;
-            
-            // Get all tokens on this line
-            const lineTokens = structure.getTokensByLine(line);
-            if (!lineTokens || lineTokens.length === 0) {
-                return undefined;
-            }
-            
-            // Find any token on this line
-            const anyToken = lineTokens[0];
-            
-            // Walk up the parent chain to find the innermost scope
-            let current: Token | undefined = anyToken;
-            let innermostScope: Token | undefined = undefined;
-            
-            while (current) {
-                if (this.isScopeDefiningToken(current)) {
-                    innermostScope = current;
-                }
-                current = structure.getParent(current);
-            }
-            
-            return innermostScope;
-        } else {
-            // Legacy implementation using token array (O(n) filter)
-            const tokens = tokensOrStructure as Token[];
-            const scopes = tokens.filter(token =>
-                // Only consider actual procedure implementations and global procedures, not method declarations in CLASS
-                (token.subType === TokenType.Procedure ||
-                    token.subType === TokenType.GlobalProcedure ||
-                    token.subType === TokenType.MethodImplementation ||
-                    token.subType === TokenType.Routine) &&
-                token.line <= line &&
-                (token.finishesAt === undefined || token.finishesAt >= line)
-            );
-
-            return scopes.length > 0 ? scopes[scopes.length - 1] : undefined;
-        }
+        // Issue #233 Stage 2: one rule-driven source of truth. Both overloads now return the
+        // INNERMOST enclosing scope (a ROUTINE for a routine-body line — with the procedure as
+        // its parent — a procedure/method for procedure-body lines), Rule-1 aware. Previously
+        // the DocumentStructure path returned the OUTERMOST procedure for routine lines (silently
+        // dropping routine scope) while the legacy Token[] path returned the routine; the two
+        // disagreed. Returns undefined at global/module scope.
+        const resolver = ('getParent' in tokensOrStructure)
+            ? (tokensOrStructure as DocumentStructure).getScopeResolver()
+            : new ScopeResolver(tokensOrStructure as Token[]);
+        return resolver.resolveScopeAt(line).token ?? undefined;
     }
 
     /**
@@ -101,34 +72,68 @@ export class TokenHelper {
             const structure = tokensOrStructure as DocumentStructure;
             return structure.getParentScope(routineScope);
         } else {
-            // Legacy implementation using token array (O(n) filter)
-            const tokens = tokensOrStructure as Token[];
-            const parentScopes = tokens.filter(token =>
-                (token.subType === TokenType.Procedure ||
-                    token.subType === TokenType.GlobalProcedure ||
-                    token.subType === TokenType.MethodImplementation ||
-                    token.subType === TokenType.MethodDeclaration) &&
-                token.line < routineScope.line &&
-                (token.finishesAt === undefined || token.finishesAt >= routineScope.line)
-            );
-
-            if (parentScopes.length === 0) {
-                return undefined;
-            }
-
-            // Return the closest parent (highest line number)
-            return parentScopes.reduce((a, b) => a.line > b.line ? a : b);
+            // Issue #233 Stage 2: unify the legacy path onto the resolver — the parent scope of
+            // a routine is the enclosing procedure/method in its visible chain. Replaces the old
+            // "closest parent by highest line" range reduce.
+            const node = new ScopeResolver(tokensOrStructure as Token[]).resolveScopeAt(routineScope.line);
+            return node.parent?.token ?? undefined;
         }
     }
 
     /**
-     * Check if a token defines a scope (procedure, routine, etc.)
+     * #264: resolves a `DO routineName` reference to its ROUTINE token, scoped to the
+     * ENCLOSING PROCEDURE — Clarion ROUTINE labels are procedure-local and legally
+     * repeat across procedures, so a whole-file first-match scan returns the wrong
+     * routine whenever two procedures share a routine name. This is the #211
+     * algorithm extracted from DefinitionProvider so hover (RoutineHoverResolver),
+     * F12 (DefinitionProvider), and Ctrl+F12 (ImplementationProvider) share ONE
+     * implementation and always agree.
+     *
+     * @returns the ROUTINE token inside the cursor's enclosing procedure, or
+     *   undefined when the cursor isn't inside a procedure or the procedure has no
+     *   such routine (callers should return null — falling back to a file-wide
+     *   match would reintroduce the wrong-routine bug).
      */
-    private static isScopeDefiningToken(token: Token): boolean {
-        return token.subType === TokenType.Procedure ||
-               token.subType === TokenType.GlobalProcedure ||
-               token.subType === TokenType.MethodImplementation ||
-               token.subType === TokenType.Routine;
+    public static findScopedRoutineToken(
+        structure: DocumentStructure,
+        routineName: string,
+        cursorLine: number
+    ): Token | undefined {
+        // #285: search the routine-hosting scopes visible from the cursor, innermost first. A
+        // method-local routine shadows a procedure-level one; a LOCAL DERIVED method also sees the
+        // routines of its class's declaring procedure (Rule 4), so `DO ProcLevelRoutine` inside such
+        // a method resolves — previously only the immediate method scope was searched, so F12/Ctrl+F12
+        // returned nothing while hover fell through to a broader (unscoped) resolver and did resolve.
+        const scopes = TokenHelper.getRoutineHostingScopes(structure, cursorLine);
+        for (const scope of scopes) {
+            const match = structure.findRoutines(routineName).find(routineToken => {
+                const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+                return parentScope?.line === scope.line &&
+                       parentScope?.value.toUpperCase() === scope.value.toUpperCase();
+            });
+            if (match) return match;
+        }
+        return undefined;
+    }
+
+    /**
+     * The chain of PROCEDURE / METHOD scopes that can host a ROUTINE visible from `line`, innermost
+     * first. A ROUTINE cannot itself host a routine (routines don't nest), so a routine-body line
+     * starts from its owning scope. A local derived METHOD's visible chain climbs through its
+     * declaring procedure (Rule 4), so both the method and that procedure appear — which is what
+     * lets a procedure-level routine resolve from inside one of its class's methods. Empty at
+     * global/module scope. Shared by findScopedRoutineToken (#285) and the Create-routine quick
+     * fix (#280) so navigation and generation agree on which scopes hold a routine.
+     */
+    public static getRoutineHostingScopes(structure: DocumentStructure, line: number): Token[] {
+        const node = structure.getScopeResolver().resolveScopeAt(line);
+        const scopes: Token[] = [];
+        let n: ScopeNode | null = node.kind === ScopeKind.Routine ? node.parent : node;
+        while (n && (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method)) {
+            if (n.token) scopes.push(n.token);
+            n = n.parent;
+        }
+        return scopes;
     }
 
     /**

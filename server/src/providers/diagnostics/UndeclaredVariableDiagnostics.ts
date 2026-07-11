@@ -4,6 +4,9 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import LoggerManager from '../../logger';
 
 // Inherit the default log level (debug in dev, error in release per
@@ -179,7 +182,11 @@ async function augmentDeclaredViaSymbolFinder(
 ): Promise<void> {
     const candidateNames = new Set<string>();
     for (const t of ctx.tokens) {
-        if (t.type !== TokenType.Variable) continue;
+        // #300: match detectCheckableName's own acceptance set. Dotted receivers
+        // (`thisStartup.Module`) tokenize as TokenType.StructureField — the Variable-only gate
+        // here meant the COLLECT pass flagged their leading name while this AUGMENT pass never
+        // attempted to resolve it: the diagnostic condemned names it never looked up.
+        if (t.type !== TokenType.Variable && t.type !== TokenType.StructureField) continue;
         if (!ctx.isInsideCode(t.line)) continue;
         const candidate = detectCheckableName(t);
         if (!candidate) continue;
@@ -199,8 +206,23 @@ async function augmentDeclaredViaSymbolFinder(
     // correctly. Clarion is case-insensitive — passing the upper-cased name
     // resolves identically.
     const probePos = { line: ctx.codeRanges[0].codeStart + 1, character: 0 };
+    // #297: each findSymbol is a scope walk that can span files; on big generated modules the
+    // candidate set is large and the loop holds the LSP loop — yield on a time budget.
+    const timeSlice = makeTimeSlicer();
+    // #298: SymbolFinder's variable-scope chain does not cover INCLUDE-chain / libsrc EQUATEs
+    // (SelectRecord, CtrlShiftP…) — but the structure declaration index does (EQUATE +
+    // ITEMIZE_EQUATE across the redirection search paths and libsrc), and hover answers from
+    // it. This diagnostic is conservative by contract: if ANY of our own resolution paths
+    // knows the name, don't flag it. The SDI lookup is an in-memory map hit, so it runs
+    // FIRST — sparing the (more expensive) findSymbol scope walk for genuine variables.
+    const sdi = StructureDeclarationIndexer.getInstance();
     for (const upperName of candidateNames) {
+        await timeSlice();
         try {
+            if (sdi.find(upperName).length > 0) {
+                ctx.declaredNames.add(upperName);
+                continue;
+            }
             const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
             if (resolved) ctx.declaredNames.add(upperName);
         } catch (err) {
@@ -347,6 +369,11 @@ function detectCheckableName(token: Token): CheckableName | null {
             // tokenize as TokenType.Variable. Suppress them here so the walker doesn't
             // false-positive on `IF a AND b` or `a = b TO 10`.
             if (KeywordService.getInstance().isKeyword(token.value)) return null;
+            // #319 — structural words KeywordService doesn't carry (DO, GOTO, …) also
+            // tokenize as Variable. `DO` alone cost 6.9s of a 7.7s validation on the
+            // real app: it's stoplisted in the reference index, so mayContain answers
+            // true conservatively and the sibling walk loaded the whole family for it.
+            if (CLARION_STRUCTURAL_WORDS.has(token.value.toLowerCase())) return null;
             return { name: token.value, length: token.value.length };
         }
     }

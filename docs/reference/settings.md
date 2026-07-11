@@ -2,306 +2,100 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all Clarion Extension configuration settings.
+Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.0**.
 
-## Configuration Location
+Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` directly.
 
-Settings are stored in `.vscode/settings.json` within your solution folder:
-
-```json
-{
-  "clarion.clarionPath": "C:\\Clarion11\\Bin",
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties",
-  "clarion.configuration": "Release|Win32"
-}
-```
+> **Managed automatically:** several settings (`clarion.currentSolution`, `clarion.solutions`, `clarion.activeVersion`, `clarion.activePropertiesFile`, `clarion.versionMigrated`, `clarion.solutionVersionMemoryBackfilled`) are written by the extension as you open solutions and pick versions. You rarely need to edit them by hand; the internal one-shot flags should not be edited at all.
 
 ---
 
-## Essential Settings
+## Language Features
 
-### `clarion.clarionPath`
-**Type:** `string`  
-**Default:** `null`
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.referencesCodeLens.enabled` | `true` | Shows the `N references` CodeLens above each procedure, method implementation, CLASS, and ROUTINE. Each lens runs a scoped Find-All-References in the background for an exact count. Disable if you prefer no lenses. |
+| `clarion.unreachableCode.enabled` | `true` | Visually dims unreachable code (after an unconditional `RETURN`, `EXIT`, or `HALT` at top execution level). |
+| `clarion.prefixHighlighting.enabled` | `true` | Prefix highlighting for Clarion variables (`PRE:Field` coloring). |
+| `clarion.highlighting` | — | Fine-grained highlighting settings for Clarion code elements (object). |
+| `clarion.procedurePrototypeStyle` | `"keyword"` | Prototype style when the extension inserts procedure declarations into MAP/MODULE structures: `keyword` (`PROCEDURE(...)`) or `shorthand`. |
+| `clarion.maxNumberOfProblems` | `100` | Maximum number of problems the language server reports per file. |
 
-Path to your Clarion BIN directory containing `ClarionCl.exe`.
+## Diagnostics
 
-**Example:**
-```json
-{
-  "clarion.clarionPath": "C:\\Clarion11\\Bin"
-}
-```
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.diagnostics.undeclaredVariables.enabled` | `true` | Warns when an identifier in executable code resolves to no declaration through the full scope model (cross-file aware; automatically suppressed until a solution is loaded). |
+| `clarion.diagnostics.indistinguishablePrototypes.enabled` | `true` | Warns when two procedure declarations in the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the compiler. |
 
-**Set via UI:**
-- `Ctrl+Shift+P` → "Clarion: Set Clarion Path"
-- Click status bar (bottom-right)
+## Build
 
----
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.saveBeforeBuild` | `true` | Save all unsaved files before any build, so the compiler always sees the latest content. |
+| `clarion.build.revealOutput` | `"never"` | When to show the build output terminal: `never`, `always`, or `onError`. |
+| `clarion.build.showInOutputPanel` | `false` | Also mirror build output into the Output panel (in addition to the Problems panel). |
+| `clarion.build.logFilePath` | `""` | Custom path for the build output log. Empty = solution directory. |
+| `clarion.build.preserveLogFile` | `false` | Keep `build_output.log` after the build completes. |
+| `clarion.startupProject` | `""` | GUID of the project run by **Ctrl+F5** (Run Without Debugging). Unset = the project containing the current file. Usually set via right-click → *Set as Startup Project* in the Solution View. |
+| `clarion.configuration` | `""` | Selected build configuration (Debug/Release/custom). Usually set via the status bar or `Clarion: Set Configuration`. |
 
-### `clarion.propertiesPath`
-**Type:** `string`  
-**Default:** `null`
+## Paste as Clarion String
 
-Path to your `.clarion.properties` file for redirection configuration.
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.pasteAsString.lineTerminator` | `"space"` | How pasted lines are joined: `space`, `crlf` (`<13,10>`), or `none`. |
+| `clarion.pasteAsString.trimLeadingWhitespace` | `true` | Strip leading whitespace from each pasted line — recommended when pasting indented code. |
 
-**Example:**
-```json
-{
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties"
-}
-```
+## File Resolution & Quick Open
 
-**Set via UI:**
-- `Ctrl+Shift+P` → "Clarion: Set Clarion Properties"
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.defaultLookupExtensions` | `[".clw", ".inc", ".equ", ".eq"]` | Extensions used for document links and hover previews for files outside any project. |
+| `clarion.fileSearchExtensions` | `[".clw", ".inc", ".equ", ".eq"]` | Extensions searched by `Clarion: Quick Open` (redirection-aware Ctrl+P). |
 
----
+## Solution & Version Management
 
-### `clarion.configuration`
-**Type:** `string`  
-**Default:** `"Release|Win32"`
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.solutionFile` | `""` | Path to the Clarion solution (`.sln`) file. |
+| `clarion.currentSolution` | `""` | Path of the currently open solution (managed by the extension). |
+| `clarion.solutions` | `[]` | Per-solution settings memory (managed by the extension). |
+| `clarion.version` / `clarion.activeVersion` | `""` | Selected Clarion version (e.g. `Clarion 11.1`). `activeVersion` is user-scoped so version-derived state (libsrc paths, redirection, macros) works without an open solution. |
+| `clarion.propertiesFile` / `clarion.activePropertiesFile` | `""` | Path to the `ClarionProperties.xml` backing the selected version. |
+| `clarion.enableLocalSlnFallback` | `true` | Parse the `.sln` locally as a fast fallback when the language server isn't ready yet. |
+| `clarion.firstFetchTimeoutMs` | `2500` | Timeout for the first solution fetch after activation. |
 
-Build configuration (Debug/Release and platform).
+## Snippets
 
-**Example:**
-```json
-{
-  "clarion.configuration": "Debug|Win32"
-}
-```
+| Setting | Default | Description |
+|---|---|---|
+| `clarion-extensions.spacing.className` | `4` | Spacing between ClassName and `CLASS` in snippets. |
+| `clarion-extensions.spacing.methodName` | `2` | Spacing between MethodName and `PROCEDURE` in snippets. |
 
-**Set via UI:**
-- Click configuration in status bar
-- `Ctrl+Shift+P` → "Clarion: Set Configuration"
+## Logging, Tracing & Telemetry
 
----
-
-## Feature Settings
-
-### `clarion.unreachableCode.enabled`
-**Type:** `boolean`  
-**Default:** `true`
-
-Enable/disable visual dimming of unreachable code after RETURN/EXIT/HALT statements.
-
-**Example:**
-```json
-{
-  "clarion.unreachableCode.enabled": false
-}
-```
+| Setting | Default | Description |
+|---|---|---|
+| `clarion.log.performance.enabled` | `false` | **Support/diagnostic switch.** Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the *Clarion Language Server* output channel. The instrumentation always runs at negligible cost — flip this on (plus a window reload) to produce a full diagnostic timeline when reporting a performance issue. |
+| `clarion.trace.server` | `"off"` | LSP wire tracing: `off`, `messages`, or `verbose`. |
+| `clarion.telemetry.enabled` | `true` | Anonymous usage telemetry. No personal information is collected. |
 
 ---
 
-### `clarion.diagnostics.enabled`
-**Type:** `boolean`  
-**Default:** `true`
+## Reporting a performance problem?
 
-Enable/disable all diagnostic features (error detection).
+1. Set `clarion.log.performance.enabled` to `true`
+2. Reload the window (`Ctrl+Shift+P` → *Developer: Reload Window*)
+3. Reproduce the slowness
+4. Copy the *Clarion Language Server* output channel contents into a [GitHub issue](https://github.com/msarson/Clarion-Extension/issues)
 
-**Example:**
-```json
-{
-  "clarion.diagnostics.enabled": true
-}
-```
-
----
-
-### `clarion.diagnostics.validateStructures`
-**Type:** `boolean`  
-**Default:** `true`
-
-Validate structure blocks (IF/END, LOOP/END, CASE/END, etc.) are properly terminated.
-
----
-
-### `clarion.diagnostics.validateFiles`
-**Type:** `boolean`  
-**Default:** `true`
-
-Validate FILE declarations have required DRIVER and RECORD attributes.
-
----
-
-### `clarion.pasteAsClarionString.lineTerminator`
-**Type:** `string`  
-**Default:** `"space"`  
-**Options:** `"space"`, `"crlf"`, `"none"`
-
-Line terminator to use when pasting as Clarion string.
-
-**Examples:**
-```json
-// Space continuation (default)
-{
-  "clarion.pasteAsClarionString.lineTerminator": "space"
-}
-// Output: 'Line 1' & |
-//         'Line 2'
-
-// CRLF continuation
-{
-  "clarion.pasteAsClarionString.lineTerminator": "crlf"
-}
-// Output: 'Line 1' & |
-//         '<13,10>' & |
-//         'Line 2'
-
-// No line breaks
-{
-  "clarion.pasteAsClarionString.lineTerminator": "none"
-}
-// Output: 'Line 1Line 2'
-```
-
----
-
-### `clarion.pasteAsClarionString.trimLeading`
-**Type:** `boolean`  
-**Default:** `true`
-
-Trim leading whitespace from each line when pasting as Clarion string.
-
----
-
-## Editor Integration Settings
-
-### `editor.quickSuggestions`
-Recommended settings for Clarion IntelliSense:
-
-```json
-{
-  "editor.quickSuggestions": {
-    "comments": false,
-    "strings": true,
-    "other": true
-  }
-}
-```
-
----
-
-### `editor.acceptSuggestionOnCommitCharacter`
-**Recommended:** `true`
-
-Accept IntelliSense suggestions with commit characters like `(`, `.`, etc.
-
----
-
-### `editor.acceptSuggestionOnEnter`
-**Recommended:** `"on"`
-
-Accept IntelliSense suggestions with Enter key.
-
----
-
-## Advanced Settings
-
-### Build System
-
-#### `clarion.build.showOutputOnError`
-**Type:** `boolean`  
-**Default:** `true`
-
-Automatically show build output panel when build errors occur.
-
----
-
-#### `clarion.build.clearOutputOnBuild`
-**Type:** `boolean`  
-**Default:** `true`
-
-Clear previous build output before starting new build.
-
----
-
-### Solution Management
-
-#### `clarion.solution.autoRefresh`
-**Type:** `boolean`  
-**Default:** `true`
-
-Automatically refresh solution view when files change.
-
----
-
-#### `clarion.solution.maxRecentSolutions`
-**Type:** `number`  
-**Default:** `20`
-
-Maximum number of recent solutions to remember.
-
----
-
-## Example Full Configuration
-
-```json
-{
-  // Essential
-  "clarion.clarionPath": "C:\\Clarion11\\Bin",
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties",
-  "clarion.configuration": "Release|Win32",
-  
-  // Features
-  "clarion.unreachableCode.enabled": true,
-  "clarion.diagnostics.enabled": true,
-  "clarion.diagnostics.validateStructures": true,
-  "clarion.diagnostics.validateFiles": true,
-  
-  // Paste as String
-  "clarion.pasteAsClarionString.lineTerminator": "space",
-  "clarion.pasteAsClarionString.trimLeading": true,
-  
-  // Editor Integration
-  "editor.quickSuggestions": {
-    "comments": false,
-    "strings": true,
-    "other": true
-  },
-  "editor.acceptSuggestionOnCommitCharacter": true,
-  "editor.acceptSuggestionOnEnter": "on",
-  
-  // Build
-  "clarion.build.showOutputOnError": true,
-  "clarion.build.clearOutputOnBuild": true,
-  
-  // Solution
-  "clarion.solution.autoRefresh": true,
-  "clarion.solution.maxRecentSolutions": 20
-}
-```
-
----
-
-## Workspace vs User Settings
-
-### User Settings
-Global settings that apply to all solutions:
-- **File → Preferences → Settings** (`Ctrl+,`)
-- Stored in `%APPDATA%\Code\User\settings.json`
-
-**Use for:**
-- Clarion path (same for all projects)
-- Editor preferences
-- UI customization
-
-### Workspace Settings
-Settings specific to your solution:
-- Stored in `.vscode/settings.json` within solution folder
-- Can be committed to version control
-
-**Use for:**
-- Solution-specific configuration
-- Properties file path
-- Build configuration
-- Team-shared settings
+The log contains phase-by-phase timings that usually identify the exact cause.
 
 ---
 
 ## Related Documentation
 
-- **[Commands Reference](commands.md)** - All available commands
-- **[Installation Guide](../guides/installation.md)** - Setup instructions
-- **[Common Tasks](../guides/common-tasks.md)** - How-to recipes
-
+- **[All Commands](commands.md)** — command reference
+- **[Solution Management](../features/solution-management.md)** — solutions, builds, configurations
+- **[Diagnostics](../features/diagnostics.md)** — what each diagnostic checks

@@ -13,6 +13,8 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as crypto from 'crypto';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
@@ -22,6 +24,9 @@ import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
+// #294/#295 diagnostics: always-on build progress — at real solution scale (3,016 files) the
+// build's true cost was invisible because it never completed within any captured window.
+const perfLogger = LoggerManager.getLogger("FileRelationshipGraph.Perf", "perf");
 logger.setLevel("error");
 
 /**
@@ -41,6 +46,30 @@ export interface FileEdge {
     fromLine?: number;              // 0-based line of the token that created this edge
     containingProcedure?: string;   // for MODULE edges inside a local MAP (inside a procedure)
     containingClass?: string;       // for CLASS_MODULE edges: the class label declaring this implementation
+}
+
+// #307 — mtime-keyed disk persistence (mirrors the SDI's cache, #290). Bump when
+// FileEdge or the scanner semantics change.
+// v2 (#315): purge caches written by pre-#297 self-starting builds — those ran
+// before the solution's redirection parsers were primed, so every MEMBER('x.clw')
+// resolution failed and the persisted edge lists were missing their MEMBER edges
+// (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
+const DISK_CACHE_VERSION = 2;
+
+interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
+
+interface FrgDiskCacheFile {
+    version: number;
+    /** Resolution environment — cached edges embed redirection-RESOLVED paths, so a
+     *  changed .red / libsrc setup invalidates the whole cache, not per-file mtimes. */
+    signature: string;
+    files: Record<string, FrgDiskCacheEntry>;
+}
+
+export interface FrgBuildStats {
+    files: number; scanned: number; reusedFromDisk: number; ms: number;
+    /** #315 diagnostics — edge counts by type; a solution build with memberEdges=0 signals degraded resolution. */
+    memberEdges?: number; includeEdges?: number; moduleEdges?: number;
 }
 
 export class FileRelationshipGraph {
@@ -69,7 +98,10 @@ export class FileRelationshipGraph {
         return FileRelationshipGraph.instance;
     }
 
+    private _lastBuildStats: FrgBuildStats | undefined;
+
     public get isBuilt(): boolean { return this._built; }
+    public get lastBuildStats(): FrgBuildStats | undefined { return this._lastBuildStats; }
     public get isBuilding(): boolean { return this._building; }
     public get buildDurationMs(): number | undefined { return this._buildDurationMs; }
     public get buildStartTime(): Date | undefined { return this._buildStartTime; }
@@ -101,10 +133,25 @@ export class FileRelationshipGraph {
         this._noSolutionSourceUri = undefined;
 
         const buildStart = Date.now();
+        this.buildOwnerProjectIndex(); // #315: O(1) owner lookups during resolveFile
         const visited = new Set<string>();
         const queue: string[] = projectFiles.map(f => this.normalizePath(f));
+        const totalSeeds = queue.length;
+        let processed = 0;
+        let nextProgressAt = 500;
 
-        const PARALLEL_BATCH = 20;
+        // #307 — mtime-keyed disk cache: unchanged files replay their stored edges
+        // (one stat each) instead of a read + regex scan. Measured 1.9-8.3s rebuilds
+        // per start on the same 3,016 unchanged files.
+        const signature = this.buildCacheSignature();
+        const diskCache = this.loadDiskCache(projectFiles, signature);
+        const freshEntries: Record<string, FrgDiskCacheEntry> = {};
+        let scanned = 0;
+        let reusedFromDisk = 0;
+
+        // #295: smaller batches — 20 concurrently-completing regex scans between yields produced
+        // multi-second event-loop blocks on large generated modules; 10 halves the worst chunk.
+        const PARALLEL_BATCH = 10;
 
         while (queue.length > 0) {
             // Dequeue up to PARALLEL_BATCH unvisited files
@@ -125,7 +172,19 @@ export class FileRelationshipGraph {
             // thousands of files and make startup unresponsive on large solutions.
             // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
             // reverse-include lookups work for files directly referenced by project files.
-            await Promise.all(batch.map(f => this.processFile(f)));
+            await Promise.all(batch.map(async f => {
+                const reused = await this.processFileWithCache(f, diskCache, freshEntries);
+                if (reused) reusedFromDisk++; else scanned++;
+            }));
+            processed += batch.length;
+            if (processed >= nextProgressAt) {
+                nextProgressAt += 500;
+                perfLogger.perf("FRG build progress", {
+                    files_done: processed,
+                    total_seeds: totalSeeds,
+                    elapsed_ms: Date.now() - buildStart
+                });
+            }
 
             // Yield back to the event loop between batches
             await new Promise<void>(resolve => setImmediate(resolve));
@@ -135,8 +194,136 @@ export class FileRelationshipGraph {
         this._buildEndTime = new Date();
         this._built = true;
         this._building = false;
+
+        let memberEdges = 0;
+        let includeEdges = 0;
+        let moduleEdges = 0;
+        for (const edges of this.forwardEdges.values()) {
+            for (const e of edges) {
+                if (e.type === 'MEMBER') memberEdges++;
+                else if (e.type === 'INCLUDE') includeEdges++;
+                else if (e.type === 'MODULE' || e.type === 'CLASS_MODULE') moduleEdges++;
+            }
+        }
+        this._lastBuildStats = {
+            files: processed, scanned, reusedFromDisk, ms: this._buildDurationMs,
+            memberEdges, includeEdges, moduleEdges
+        };
+
+        // #315: a sizeable solution build that produced ZERO MEMBER edges means the
+        // resolution environment was degraded (redirection parsers not primed) —
+        // every MEMBER('x.clw') target failed to resolve. Persisting that would
+        // poison every warm start until the source files' mtimes change (the exact
+        // failure replayed on Mark's VM). Skip the save: next start re-scans (~2s).
+        const smAtSave = SolutionManager.getInstance();
+        const degraded = memberEdges === 0 && processed >= 50 && !!smAtSave?.solution?.projects?.length;
+        if (degraded) {
+            logger.warn(`[FRG] build produced 0 MEMBER edges across ${processed} files — NOT persisting (degraded resolution environment?)`);
+        } else {
+            // Awaited but async I/O — doesn't block the loop; a failed save just means
+            // the next start scans cold.
+            await this.saveDiskCache(projectFiles, signature, freshEntries);
+        }
         const edgeCount = this.getAllEdges().length;
         logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
+    }
+
+    /**
+     * #307 — process one file via the disk cache when possible.
+     * Returns true when the file's edges were replayed from the cache.
+     * Open documents (live tokens) always take the scan path — their buffer may
+     * differ from disk, and their edges are NOT persisted (next start re-scans).
+     */
+    private async processFileWithCache(
+        filePath: string,
+        diskCache: FrgDiskCacheFile | null,
+        freshEntries: Record<string, FrgDiskCacheEntry>
+    ): Promise<boolean> {
+        const tokenCache = TokenCache.getInstance();
+        const hasLiveTokens = !!(
+            tokenCache.getTokensByUri(this.pathToUri(filePath))
+            ?? tokenCache.getTokensByUri('file:///' + filePath.replace(/\\/g, '/'))
+        );
+
+        let mtimeMs: number | undefined;
+        if (!hasLiveTokens) {
+            try { mtimeMs = (await fs.promises.stat(filePath)).mtimeMs; } catch { mtimeMs = undefined; }
+            const entry = diskCache?.files[filePath];
+            if (entry && mtimeMs !== undefined && entry.mtimeMs === mtimeMs) {
+                for (const edge of entry.edges) this.addEdge(edge);
+                freshEntries[filePath] = entry;
+                return true;
+            }
+        }
+
+        await this.processFile(filePath);
+        if (!hasLiveTokens && mtimeMs !== undefined) {
+            freshEntries[filePath] = { mtimeMs, edges: this.forwardEdges.get(filePath) ?? [] };
+        }
+        return false;
+    }
+
+    /**
+     * Resolution-environment signature. Cached edges embed redirection-RESOLVED
+     * paths, so anything that changes how filenames resolve invalidates the cache:
+     * the redirection file setting, its per-project mtimes, and the libsrc paths.
+     */
+    private buildCacheSignature(): string {
+        const parts: string[] = [String(DISK_CACHE_VERSION), serverSettings.redirectionFile ?? ''];
+        for (const p of [...(serverSettings.libsrcPaths ?? [])].map(x => this.normalizePath(x)).sort()) {
+            parts.push(p);
+        }
+        const sm = SolutionManager.getInstance();
+        // #315: edge resolution quality depends on the solution's project set —
+        // a build with fewer/no projects loaded resolves MEMBER/INCLUDE targets
+        // differently (or not at all). Bake the shape in so a build under a
+        // degraded environment can never satisfy a healthy environment's load.
+        parts.push(`projects:${sm?.solution?.projects?.length ?? 0}`);
+        if (sm?.solution && serverSettings.redirectionFile) {
+            const redMtimes = new Set<string>();
+            for (const project of sm.solution.projects) {
+                try {
+                    const redPath = path.join(project.path, serverSettings.redirectionFile);
+                    redMtimes.add(`${this.normalizePath(redPath)}:${fs.statSync(redPath).mtimeMs}`);
+                } catch { /* project without a local red file — covered by the setting itself */ }
+            }
+            parts.push(...[...redMtimes].sort());
+        }
+        return parts.join('|');
+    }
+
+    /** Per-project-set cache location (OS temp dir — never pollutes the user's solution). */
+    private diskCachePath(projectFiles: string[]): string {
+        const key = projectFiles.map(f => this.normalizePath(f)).sort().join(';');
+        const hash = crypto.createHash('md5').update(key).digest('hex').slice(0, 16);
+        return path.join(os.tmpdir(), 'clarion-extension-frg', `frg-${hash}.json`);
+    }
+
+    private loadDiskCache(projectFiles: string[], signature: string): FrgDiskCacheFile | null {
+        try {
+            const raw = fs.readFileSync(this.diskCachePath(projectFiles), 'utf8');
+            const parsed = JSON.parse(raw) as FrgDiskCacheFile;
+            if (parsed?.version !== DISK_CACHE_VERSION || typeof parsed.files !== 'object') return null;
+            if (parsed.signature !== signature) return null; // resolution environment changed
+            return parsed;
+        } catch {
+            return null; // missing / corrupt / stale-format → full scan
+        }
+    }
+
+    private async saveDiskCache(
+        projectFiles: string[],
+        signature: string,
+        files: Record<string, FrgDiskCacheEntry>
+    ): Promise<void> {
+        try {
+            const file = this.diskCachePath(projectFiles);
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            const payload: FrgDiskCacheFile = { version: DISK_CACHE_VERSION, signature, files };
+            await fs.promises.writeFile(file, JSON.stringify(payload));
+        } catch (err) {
+            logger.debug(`[FRG] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     /**
@@ -188,6 +375,7 @@ export class FileRelationshipGraph {
      * Clear the graph. Called when the solution/project changes so it can be rebuilt.
      */
     public reset(): void {
+        this.ownerProjectByFile = null;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
         this.classModuleIndex.clear();
@@ -512,6 +700,13 @@ export class FileRelationshipGraph {
 
         let isProgramFile = false;
         let mapDepth = 0;
+        // #315: MEMBER must be the file's FIRST STATEMENT, but Clarion allows any
+        // number of comment/blank lines before it — template-generated modules
+        // put a banner there. A fixed "line 0 or 1" window silently dropped the
+        // MEMBER edge of every banner-prefixed generated module (Mark's VM: zero
+        // MEMBER edges for ap1.clw across 162 generated members). The window now
+        // stays open until the first non-blank, non-comment line.
+        let memberWindowOpen = true;
 
         for (let lineNum = 0; lineNum < lines.length; lineNum++) {
             const line = lines[lineNum];
@@ -523,8 +718,8 @@ export class FileRelationshipGraph {
             if (mapOpenRe.test(stripped)) mapDepth++;
             if (mapCloseRe.test(stripped) && mapDepth > 0) mapDepth--;
 
-            // MEMBER('file') — only valid on line 0 or 1
-            if (lineNum <= 1) {
+            if (memberWindowOpen && stripped.trim() !== '') {
+                memberWindowOpen = false; // first real statement — MEMBER or not
                 const m = memberRe.exec(stripped);
                 if (m) {
                     const resolved = this.resolveFile(m[1], filePath);
@@ -604,6 +799,18 @@ export class FileRelationshipGraph {
             ?.filter(e => e.type === 'MODULE') ?? [];
     }
 
+    /**
+     * #322 — all files that INCLUDE the given file (reverse INCLUDE edges).
+     * A module-callout INC (MODULE + prototype, INCLUDE'd into many modules'
+     * MAPs) is visible in exactly these files — FAR's candidate set for the
+     * procedures it declares.
+     */
+    public getIncludingFiles(filePath: string): string[] {
+        return this.reverseEdges.get(this.normalizePath(filePath))
+            ?.filter(e => e.type === 'INCLUDE')
+            .map(e => e.fromFile) ?? [];
+    }
+
     /** Returns the PROGRAM file path that a MEMBER file belongs to. */
     public getProgramFile(memberFilePath: string): string | undefined {
         return this.forwardEdges.get(this.normalizePath(memberFilePath))
@@ -620,6 +827,28 @@ export class FileRelationshipGraph {
         return this.reverseEdges.get(this.normalizePath(programFilePath))
             ?.filter(e => e.type === 'MEMBER')
             .map(e => e.fromFile) ?? [];
+    }
+
+    /**
+     * #315 — MEMBER edges whose PROGRAM target matches by BASENAME. resolveFile
+     * asks every project's redirection parser in solution order, so
+     * MEMBER('ap1.clw') edges can resolve to a different copy of the program
+     * file than the one the editor opens (Mark's trace: frg_built=true,
+     * frg_member_edges_of_doc=0 → whole-solution fallback). Same basename =
+     * same logical app; callers use this when the exact-path lookup is empty.
+     */
+    public getMemberEdgesByProgramBasename(programFsPath: string): FileEdge[] {
+        const norm = this.normalizePath(programFsPath);
+        const base = norm.substring(norm.lastIndexOf('/') + 1);
+        if (!base) return [];
+        const out: FileEdge[] = [];
+        for (const [toFile, edges] of this.reverseEdges) {
+            if (!toFile.endsWith('/' + base) && toFile !== base) continue;
+            for (const e of edges) {
+                if (e.type === 'MEMBER') out.push(e);
+            }
+        }
+        return out;
     }
 
     /** Returns all files that include the given file (reverse INCLUDE). */
@@ -728,12 +957,45 @@ export class FileRelationshipGraph {
      * `fromFile` is preserved on the signature for the 6 token-walk callers
      * but is no longer threaded into the parser call.
      */
+    /**
+     * #315 — normalized seed path → owning project. Built ONCE per graph build.
+     * The first cut called `findProjectForFile` per resolution, which scans
+     * every project's source-file list per call — that turned the cold build
+     * from seconds into 16.7 MINUTES on Mark's VM (3,016 files × ~6 references
+     * × a 3,016-entry scan each). This index makes owner lookup O(1).
+     */
+    private ownerProjectByFile: Map<string, { getRedirectionParser(): { findFile(filename: string): { path: string } | null | undefined } }> | null = null;
+
+    private buildOwnerProjectIndex(): void {
+        this.ownerProjectByFile = new Map();
+        const sm = SolutionManager.getInstance();
+        if (!sm?.solution) return;
+        for (const project of sm.solution.projects) {
+            if (typeof (project as { getRedirectionParser?: unknown }).getRedirectionParser !== 'function') continue;
+            for (const sf of project.sourceFiles ?? []) {
+                const abs = sf.getAbsolutePath?.();
+                if (abs) this.ownerProjectByFile.set(this.normalizePath(abs), project);
+            }
+        }
+    }
+
     private resolveFile(filename: string, _fromFile: string): string | null {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
 
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
+            // #315 (review finding): try the FROM file's own project first — the
+            // solution-order walk below can resolve an ambiguous basename (each
+            // app has generated modules with common names) through the WRONG
+            // project's redirection, mis-targeting the edge.
+            const owner = this.ownerProjectByFile?.get(this.normalizePath(_fromFile));
+            if (owner) {
+                const ownResolved = owner.getRedirectionParser().findFile(filename);
+                if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
+                    return ownResolved.path;
+                }
+            }
             for (const project of solutionManager.solution.projects) {
                 const resolved = project.getRedirectionParser().findFile(filename);
                 if (resolved?.path && fs.existsSync(resolved.path)) {

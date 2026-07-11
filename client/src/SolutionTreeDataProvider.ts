@@ -16,6 +16,9 @@ import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
+// #295 diagnosis: always-on timing for tree expansion — Mark reports node clicks "just spin";
+// this tells us whether the time goes in the server round-trip or client-side node building.
+const treePerf = LoggerManager.getLogger("SolutionTreePerf", "perf");
 
 // Create a specialized debug logger for file resolution issues
 const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
@@ -60,6 +63,99 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     // Track refresh state
     private refreshInProgress = false;
+
+    // #297 fix 11: one in-flight getProjectFiles per project GUID — a whole-tree fire()
+    // re-queries every expanded project, and without dedup each re-query stacked another
+    // server request behind a busy queue.
+    private _inflightProjectFiles: Map<string, Promise<{ files: any[] } | null>> = new Map();
+    // 5s, not more: when the server doesn't answer (single-threaded LSP busy with the startup
+    // validator pass — see #295), the local cwproj fallback below takes over, so a long wait
+    // buys nothing.
+    private static readonly PROJECT_FILES_TIMEOUT_MS = 5_000;
+
+    /**
+     * #297: last-resort expansion path that makes the tree independent of server load — parse
+     * the project's own .cwproj (the same <Compile Include> entries the server reads) and build
+     * the file list locally. File nodes only need name+relativePath; clicking resolves the full
+     * path lazily (fix 13), so no redirection logic is needed here.
+     */
+    private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
+        try {
+            const projectPath = projectData?.path ?? projectData?.projectPath;
+            const filename = projectData?.filename;
+            if (!projectPath || !filename) return null;
+            const cwprojPath = path.join(String(projectPath), String(filename));
+            if (!fs.existsSync(cwprojPath)) return null;
+            const content = fs.readFileSync(cwprojPath, 'utf-8');
+            const files: { name: string; relativePath: string }[] = [];
+            const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
+            let m: RegExpExecArray | null;
+            while ((m = compileRe.exec(content)) !== null) {
+                files.push({ name: path.basename(m[1]), relativePath: m[1] });
+            }
+            treePerf.perf("Tree expand: local cwproj fallback", { project: label, files: files.length });
+            return files.length > 0 ? { files } : null;
+        } catch (error) {
+            logger.error(`❌ Local cwproj parse failed for ${label}: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
+    }
+
+    /**
+     * #297 fix 11: fetch a project's file list with an entry breadcrumb (so an expand that
+     * starves server-side still shows up in the log), in-flight dedup per GUID, and a hard
+     * timeout — an unanswerable request previously left the spinner forever with zero output.
+     * Returns null on timeout/error.
+     */
+    private fetchProjectFiles(projectGuid: string, label: string): Promise<{ files: any[] } | null> {
+        const client = getLanguageClient();
+        if (!client) {
+            logger.error("❌ Language client not available");
+            return Promise.resolve(null);
+        }
+        let inflight = this._inflightProjectFiles.get(projectGuid);
+        if (inflight) return inflight;
+
+        treePerf.perf("Tree expand: getProjectFiles requested", { project: label, guid: projectGuid });
+        const reqStart = Date.now();
+        inflight = (async () => {
+            try {
+                const result = await Promise.race([
+                    client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', { projectGuid }),
+                    new Promise<null>(resolve =>
+                        setTimeout(() => resolve(null), SolutionTreeDataProvider.PROJECT_FILES_TIMEOUT_MS))
+                ]);
+                treePerf.perf("Tree expand: getProjectFiles round-trip", {
+                    ms: Date.now() - reqStart,
+                    project: label,
+                    files: result?.files?.length ?? -1,
+                    timed_out: String(result === null)
+                });
+                return result;
+            } catch (error) {
+                logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
+                return null;
+            } finally {
+                this._inflightProjectFiles.delete(projectGuid);
+            }
+        })();
+        this._inflightProjectFiles.set(projectGuid, inflight);
+        return inflight;
+    }
+
+    /**
+     * #297 fix 11: shown instead of an eternal spinner when getProjectFiles times out or
+     * errors. NOT stored in element.children, so the next tree refresh re-fetches naturally.
+     */
+    private makeProjectLoadErrorNode(element: TreeNode): TreeNode {
+        const node = new TreeNode(
+            "⚠ Couldn't load files (server busy) — click to retry",
+            TreeItemCollapsibleState.None,
+            { type: 'retryProjectLoad' },
+            element
+        );
+        return node;
+    }
 
     // Application sort order: 'solution' (as in .sln) or 'build' (dependency order)
     private _applicationSortOrder: 'solution' | 'build' = 'solution';
@@ -445,43 +541,56 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     }
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+        // #296: time EVERY getChildren so tree busy/spin episodes are attributable — the
+        // provider's void-only fire() refreshes the whole tree, so VS Code re-queries every
+        // expanded node on every fire.
+        const gcStart = Date.now();
+        try {
+            return await this.getChildrenInner(element);
+        } finally {
+            const ms = Date.now() - gcStart;
+            if (ms > 50) {
+                treePerf.perf("Tree getChildren", { ms, element: String(element?.label ?? '(root)') });
+            }
+        }
+    }
+
+    private async getChildrenInner(element?: TreeNode): Promise<TreeNode[]> {
         // If we have a filter and this is a request for children of a specific element
         if (element) {
             logger.info(`🔍 Getting children for element: ${element.label}`);
-            
+
             // Check if this is a project node that needs to load its details
             if (element.data && (element.data as any).kind === 'project') {
+                // #296: return cached children — this branch previously re-fetched from the
+                // server on EVERY query, and since fire() is whole-tree, every refresh re-ran
+                // getProjectFiles for every expanded project and rebuilt all its nodes.
+                // Solution reloads rebuild the root with fresh TreeNode objects (empty
+                // children), so invalidation comes free via node replacement.
+                if (element.children && element.children.length > 0) {
+                    return element.children;
+                }
                 // This is a project node that needs to load its details from the server
                 const projectData = element.data as any;
-                
-                // Show loading indicator
-                const loadingNode = new TreeNode(
-                    "Loading...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'loading' }
-                );
-                
-                // Return the loading node while we fetch the details
-                const loadingResult = [loadingNode];
-                
+
                 // Get project information from the data payload
                 const { projectId } = projectData;
-                
-                // Get the language client
-                const client = getLanguageClient();
-                if (!client) {
-                    logger.error("❌ Language client not available");
-                    return loadingResult;
-                }
-                
-                try {
-                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectId}`);
-                    
-                    // Request project files from the server
-                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                        projectGuid: projectId
-                    });
-                    
+
+                {
+                    // #297: LOCAL-FIRST — the cwproj on disk is the same source the server's
+                    // list is derived from (<Compile Include> entries), file nodes only need
+                    // name+relativePath, and clicks resolve real paths lazily (fix 13). Parsing
+                    // it directly makes expansion instant and independent of server load; the
+                    // server request is only a fallback for an unreadable cwproj.
+                    let response = this.parseProjectFilesLocally(projectData, String(element.label));
+                    if (response === null) {
+                        response = await this.fetchProjectFiles(String(projectId), String(element.label));
+                    }
+                    if (response === null) {
+                        // Both paths failed — surface a retry node instead of an eternal spinner
+                        return [this.makeProjectLoadErrorNode(element)];
+                    }
+
                     if (response && response.files) {
                         logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
                         
@@ -541,44 +650,24 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         
                         return [];
                     }
-                } catch (error) {
-                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
-                    
-                    // Return the loading node to indicate an error
-                    return loadingResult;
                 }
             }
-            
+
             // Check if this is a project node with the old format (for backward compatibility)
             else if (element.data && (element.data as any).guid) {
                 // This is a project node that needs to load its details from the server
                 const projectData = element.data as any;
-                
-                // Show loading indicator
-                const loadingNode = new TreeNode(
-                    "Loading...",
-                    TreeItemCollapsibleState.None,
-                    { type: 'loading' }
-                );
-                
-                // Return the loading node while we fetch the details
-                const loadingResult = [loadingNode];
-                
-                // Get the language client
-                const client = getLanguageClient();
-                if (!client) {
-                    logger.error("❌ Language client not available");
-                    return loadingResult;
-                }
-                
-                try {
-                    logger.info(`🔄 Requesting children for ${element.label} from server with GUID: ${projectData.guid}`);
-                    
-                    // Request project files from the server
-                    const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                        projectGuid: projectData.guid
-                    });
-                    
+
+                {
+                    // #297: local-first, same rationale as the branch above
+                    let response = this.parseProjectFilesLocally(projectData, String(element.label));
+                    if (response === null) {
+                        response = await this.fetchProjectFiles(String(projectData.guid), String(element.label));
+                    }
+                    if (response === null) {
+                        return [this.makeProjectLoadErrorNode(element)];
+                    }
+
                     if (response && response.files) {
                         logger.info(`✅ Received ${response.files.length} files from server for project ${element.label}`);
                         
@@ -638,14 +727,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                         
                         return [];
                     }
-                } catch (error) {
-                    logger.error(`❌ Error getting project files from server: ${error instanceof Error ? error.message : String(error)}`);
-                    
-                    // Return the loading node to indicate an error
-                    return loadingResult;
                 }
             }
-            
+
             // Check if we have a filter active
             if (this._filterText && this._filterText.trim() !== '') {
                 // Create a cache key based on the element's path
@@ -730,13 +814,26 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     getTreeItem(element: TreeNode): TreeItem {
         const label = element.label || "Unnamed Item";
         const treeItem = new TreeItem(label, element.collapsibleState);
-        
+
         // Set description if available
         if (element.description) {
             treeItem.description = element.description;
         }
-        
+
         const data = element.data;
+
+        // #297 fix 1 (audit H2): stable TreeItem identity so VS Code can match nodes across
+        // whole-tree rebuilds (expansion state + selection survive; no silent child re-resolution
+        // against stale handles). File nodes carry a per-project uniqueId; project nodes their GUID.
+        const fileUniqueId = (data as any)?.uniqueId;
+        const projectGuid = (data as any)?.kind === 'project'
+            ? ((data as any).projectId ?? (data as any).guid)
+            : undefined;
+        if (fileUniqueId) {
+            treeItem.id = `file:${fileUniqueId}`;
+        } else if (projectGuid) {
+            treeItem.id = `project:${projectGuid}`;
+        }
         logger.info(`🏗 Processing item with label: ${label}`);
         // Reduce logging to improve performance
         logger.info(`🏗 Item data type: ${data?.type || (data?.guid ? 'project' : (data?.relativePath ? 'file' : 'other'))}`);
@@ -830,6 +927,20 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         if ((data as any)?.type === 'warning') {
             treeItem.iconPath = new ThemeIcon('warning');
             treeItem.tooltip = (data as any).tooltip;
+            return treeItem;
+        }
+
+        // #297 fix 11: retry node shown when getProjectFiles timed out — clicking refreshes
+        // the tree; the failed project's children were never stored, so it re-fetches.
+        if ((data as any)?.type === 'retryProjectLoad') {
+            treeItem.iconPath = new ThemeIcon('warning');
+            treeItem.tooltip = "The language server didn't answer in time. Click to retry.";
+            treeItem.collapsibleState = TreeItemCollapsibleState.None;
+            treeItem.command = {
+                title: 'Retry',
+                command: 'clarion.solutionTree.retryProjectLoad',
+                arguments: []
+            };
             return treeItem;
         }
 
@@ -1014,86 +1125,36 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.iconPath = new ThemeIcon('file-code');
             treeItem.contextValue = 'clarionFile';
 
-            const solutionCache = SolutionCache.getInstance();
-            // Log more details about the file for debugging
-            logger.info(`🔍 Looking for file: ${file.name || 'undefined'}, relativePath: ${file.relativePath || 'undefined'}`);
-            
-            // Get the parent project node to help with debugging
-            let projectNode = element.parent;
-            let projectName = "unknown";
-            let projectPath = "unknown";
-            
-            if (projectNode && projectNode.data && (projectNode.data as any).guid) {
-                const projectData = projectNode.data as ClarionProjectInfo;
-                projectName = projectData.name || "unnamed";
-                projectPath = projectData.path || "unknown";
-                logger.info(`🔍 File belongs to project: ${projectName}, path: ${projectPath}`);
-                
-                // Make sure we have a valid relative path
-                const relativePath = file.relativePath || file.name || "unknown-file";
-                logger.info(`🔍 Full relative path: ${path.join(projectPath, relativePath)}`);
-                
-                // Try direct path first as a quick check
-                // Make sure we have a valid relative path
-                const fileRelativePath = file.relativePath || file.name || "unknown-file";
-                const directPath = path.join(projectPath, fileRelativePath);
-                
+            // #297 fix 13 (audit H1/#296): getTreeItem is now fully SYNCHRONOUS. It previously
+            // fired a fire-and-forget server findFile round-trip per rendered node whose direct
+            // path missed, and attached the command AFTER returning the item — VS Code had
+            // already consumed it, so those requests were pure server load and the clicks were
+            // dead. Now: attach the command up front with the best path we know; the
+            // clarion.openFile handler resolves via redirection on demand (the one click that
+            // needs it pays for it).
+            const fileRelativePath = file.relativePath || file.name || "unknown-file";
+            const projectNode = element.parent;
+            const parentData = projectNode?.data as any;
+            const parentPath: string | undefined = parentData?.projectPath ?? parentData?.path;
+
+            let commandArg = fileRelativePath;
+            let tooltipPath = fileRelativePath;
+            if (parentPath) {
+                const directPath = path.join(parentPath, fileRelativePath);
                 if (fs.existsSync(directPath)) {
-                    logger.info(`✅ File found immediately using direct path: ${directPath}`);
-                    treeItem.command = {
-                        title: 'Open File',
-                        command: 'clarion.openFile',
-                        arguments: [directPath]
-                    };
-                    treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${directPath} (direct)`;
-                    return treeItem;
+                    commandArg = directPath;
+                    tooltipPath = `${directPath} (direct)`;
+                } else {
+                    // Pass the relative path — clarion.openFile resolves via redirection on click.
+                    tooltipPath = `${fileRelativePath} (resolved on open)`;
                 }
             }
-            
-            // If direct path didn't work, try server resolution
-            // Make sure we have a valid path to search for
-            const searchPath = file.relativePath || file.name || "unknown-file";
-            solutionCache.findFileWithExtension(searchPath).then(fullPath => {
-                logger.info(`🔍 Result from findFileWithExtension: ${fullPath}`);
-                
-                if (fullPath && fullPath !== "") {
-                    treeItem.command = {
-                        title: 'Open File',
-                        command: 'clarion.openFile',
-                        arguments: [fullPath]
-                    };
-                    logger.info(`📄 getTreeItem(): File – ${file.name || path.basename(searchPath)} (${fullPath})`);
-                    
-                    // Add tooltip with file path for debugging
-                    treeItem.tooltip = `File: ${file.name || path.basename(searchPath)}\nPath: ${fullPath}`;
-                } else {
-                    // Try with full path as fallback
-                    if (projectNode && projectNode.data && (projectNode.data as any).guid) {
-                        const projectData = projectNode.data as ClarionProjectInfo;
-                        // Make sure we have a valid relative path
-                        const fallbackPath = file.relativePath || file.name || "unknown-file";
-                        const fullFilePath = path.join(projectData.path, fallbackPath);
-                        
-                        if (fs.existsSync(fullFilePath)) {
-                            logger.info(`✅ File found using direct path: ${fullFilePath}`);
-                            treeItem.command = {
-                                title: 'Open File',
-                                command: 'clarion.openFile',
-                                arguments: [fullFilePath]
-                            };
-                            treeItem.tooltip = `File: ${file.name || path.basename(fallbackPath)}\nPath: ${fullFilePath} (direct)`;
-                        } else {
-                            treeItem.tooltip = `⚠️ File not found: ${file.name || fallbackPath}`;
-                            logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || fallbackPath}`);
-                        }
-                    } else {
-                        treeItem.tooltip = `⚠️ File not found: ${file.name || file.relativePath || "unknown-file"}`;
-                        logger.warn(`⚠️ getTreeItem(): File not found for ${file.name || file.relativePath || "unknown-file"}`);
-                    }
-                }
-            }).catch(err => {
-                logger.error(`❌ getTreeItem(): Error finding file for ${file.relativePath}: ${err}`);
-            });
+            treeItem.command = {
+                title: 'Open File',
+                command: 'clarion.openFile',
+                arguments: [commandArg]
+            };
+            treeItem.tooltip = `File: ${file.name || path.basename(fileRelativePath)}\nPath: ${tooltipPath}`;
             return treeItem;
         }
 
@@ -1339,6 +1400,21 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 );
             }
             
+            // #297 fix 1 (audit H2): every root rebuild used to create fresh project nodes with
+            // children=[], discarding fetched children — so the guaranteed solutionReady refresh
+            // (and any other refresh) silently re-issued getProjectFiles for every expanded
+            // project during the busiest server window. Carry fetched children across rebuilds,
+            // keyed by project GUID.
+            const previousChildren = new Map<string, TreeNode[]>();
+            if (this._root && this._root[0]?.children) {
+                for (const oldProject of this._root[0].children) {
+                    const guid = (oldProject.data as any)?.projectId ?? (oldProject.data as any)?.guid;
+                    if (guid && oldProject.children && oldProject.children.length > 0) {
+                        previousChildren.set(String(guid), oldProject.children);
+                    }
+                }
+            }
+
             for (const project of sortedProjects) {
                 // Create a project node with no children initially
                 // Add project identity data to allow lazy loading on expand
@@ -1354,6 +1430,15 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     },
                     solutionNode
                 );
+
+                // #297 fix 1: reattach previously fetched children (reparented to the new node)
+                const carried = previousChildren.get(String(project.guid));
+                if (carried) {
+                    for (const child of carried) {
+                        child.parent = projectNode;
+                    }
+                    projectNode.children = carried;
+                }
                 
                 // Add counts to the project node label if available
                 const projectWithCounts = project as any;

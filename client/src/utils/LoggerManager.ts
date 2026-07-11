@@ -91,7 +91,10 @@ class Logger {
      * deliberate perf instrumentation; flip to "error" when not measuring.
      */
     perf(message: string, metrics?: Record<string, number | string>) {
-        if (this.level !== "perf" && !LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
+        // Mirrors server logger: "perf" channels are additionally gated behind
+        // clarion.log.performance.enabled (LoggingConfig.PERF_CHANNELS_ENABLED).
+        const perfChannelOn = this.level === "perf" && LoggingConfig.PERF_CHANNELS_ENABLED;
+        if (!perfChannelOn && !LoggingConfig.PERF_TEST_MODE && !this.shouldLog("debug")) return;
         const suffix = metrics
             ? ` | ${Object.entries(metrics).map(([k, v]) => `${k}=${v}`).join(', ')}`
             : '';
@@ -144,13 +147,23 @@ class LoggerManager {
         }
     }
 
+    // #295: buffered async sink. The previous per-line appendFileSync ran ON THE EXTENSION HOST
+    // (UI) thread — the CPU profile showed writeFileUtf8 as the single largest non-idle cost
+    // (2.1s of sync writes), i.e. the diagnostic logging was itself causing UI lag. Lines are
+    // buffered and flushed asynchronously at most every 250ms.
+    private static pendingLines: string[] = [];
+    private static flushTimer: ReturnType<typeof setTimeout> | undefined;
+
     static writeToFileSink(line: string): void {
         if (!LoggerManager.fileSinkPath) return;
-        try {
-            fs.appendFileSync(LoggerManager.fileSinkPath, line + '\n', 'utf8');
-        } catch {
-            // swallow — diagnostic-only sink, never break the caller
-        }
+        LoggerManager.pendingLines.push(line);
+        if (LoggerManager.flushTimer) return;
+        LoggerManager.flushTimer = setTimeout(() => {
+            LoggerManager.flushTimer = undefined;
+            const batch = LoggerManager.pendingLines.join('\n') + '\n';
+            LoggerManager.pendingLines = [];
+            fs.appendFile(LoggerManager.fileSinkPath!, batch, 'utf8', () => { /* diagnostic-only */ });
+        }, 250);
     }
 
     /**

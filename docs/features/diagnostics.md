@@ -218,6 +218,10 @@ COMPILE('DEBUG')
   ! ❌ Error: Missing COMPILE terminator
 ```
 
+#### Compiled-Out Code Is Skipped
+
+Code inside an **unconditional `OMIT`** block isn't part of the active build, so diagnostics are not raised inside it and it doesn't count toward reference-count lenses — matching how C++ IDEs treat `#if 0` regions. Structural checks (like the unterminated-block errors above) still apply. **Rename deliberately still rewrites omitted code** — Clarion projects build multiple configurations from one source, and skipping inactive regions would silently break the others. Conditional `OMIT`/`COMPILE` (with a define argument) is conservatively treated as live.
+
 ---
 
 ### Reserved Keyword Usage
@@ -232,7 +236,7 @@ LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a lab
 
 ### Discarded Return Values
 
-**Warns when a procedure with a return type is called but the result is discarded:**
+**Warns when a procedure or method with a return type is called as a statement and the result is discarded:**
 
 ```clarion
 MAP
@@ -240,11 +244,57 @@ MAP
 END
 
 CODE
-  GetCount()   ! ⚠️ Warning: Return value of GetCount() is discarded
-  x = GetCount()  ! ✅ OK
+  GetCount()        ! ⚠️ Warning: Return value of GetCount() is discarded
+  x = GetCount()    ! ✅ OK
+  obj.Calc()        ! ⚠️ Warning — method calls on typed variables are checked too
+  SELF.Calc()       ! ⚠️ Warning — SELF./PARENT. call sites are checked (v1.0)
 ```
 
-Note: Only applies to plain MAP/MODULE procedures, not class methods.
+**What stays quiet:**
+- Prototypes carrying the `,PROC` attribute (the language's own "callable as a statement" marker) — ABC's generated calls (`SELF.Init()`, `SELF.Run()`, …) are declared with `PROC` and never warn
+- Calls whose receiver type can't be resolved (conservative — no guessing)
+
+---
+
+### Literal Passed By Reference
+
+**Flags a literal passed to a parameter that requires an addressable variable:**
+
+```clarion
+MAP
+  UpdateIt(*LONG counter)
+END
+
+CODE
+  UpdateIt(5)     ! ⚠️ Warning: a literal has no address and can't bind to *LONG
+  UpdateIt(myVar) ! ✅ OK
+```
+
+Applies to `*TYPE` reference parameters and complex types (`QUEUE`/`GROUP`/`FILE`/`VIEW`/`RECORD`/`CLASS` — by-reference even without the `*`). Conservative: only fires when the call resolves to a single unambiguous same-file MAP signature.
+
+---
+
+### Undeclared Variables
+
+**Flags names used in executable code that resolve to no declaration** through the full Clarion scope model — routine-local, parameters, procedure locals, module data, the MEMBER parent's PROGRAM globals, and INCLUDE-chain/libsrc EQUATEs.
+
+- Cross-file aware: a global declared in the app's PROGRAM file or an EQUATE from `KEYCODES.CLW` never fires
+- Suppressed entirely until a solution is loaded (accuracy depends on the solution's indexes)
+- Opt-out: `clarion.diagnostics.undeclaredVariables.enabled`
+
+---
+
+### Indistinguishable Prototypes
+
+**Flags MAP overloads that a call could never disambiguate** (same name and effectively identical parameter shapes). Opt-out: `clarion.diagnostics.indistinguishablePrototypes.enabled`.
+
+---
+
+### Character-Set Validation
+
+**Flags characters that can't be represented in any Windows ANSI code page (1250–1258)** — pasted emoji, box-drawing characters, other-script contamination.
+
+National letters for every locale (`č`, `ć`, `š`, `ž`, `đ`, Cyrillic, Greek, Turkish, …) pass clean — the check is *"representable in some ANSI code page"*, not *"is Windows-1252"*. The **Fix all** quick fix uses the same test, so it never deletes valid characters.
 
 ---
 

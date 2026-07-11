@@ -26,7 +26,7 @@ logger.setLevel("error"); // Enable debug logging to troubleshoot follow cursor
 
 // 📊 PERFORMANCE: Create perf logger that always logs
 const perfLogger = LoggerManager.getLogger("StructureViewPerf");
-perfLogger.setLevel("error"); // Reduce perf logging noise
+perfLogger.setLevel("error"); // #297 release decision: info chatter off (error lines still emit; was info for #295 diagnosis)
 
 // No thresholds needed - solution view priority is handled on the server side
 
@@ -70,6 +70,10 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
     private _retryTimeout: NodeJS.Timeout | null = null; // Scheduled retry after timeout
     private _consecutiveTimeouts: number = 0;            // Retry backoff counter; reset on success or editor change
     private static readonly _maxConsecutiveTimeouts: number = 3;
+    // #297 fixes 4+5 (audit H3): single-flight symbol request shared by concurrent callers
+    // (render + follow-cursor + refresh notifications) so a second caller can no longer
+    // invalidate the response the tree actually renders.
+    private _inflightSymbols: { uri: string; version: number; promise: Promise<DocumentSymbol[] | undefined> } | null = null;
 
     // Centralized element tracking registry
     private registry = new SymbolElementRegistry();
@@ -89,6 +93,7 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
             
             this.activeEditor = editor;
             this._lastKnownSymbols = []; // Stale symbols from previous file are invalid
+            this._inflightSymbols = null; // #297: previous document's in-flight request is stale
             this._consecutiveTimeouts = 0; // Reset backoff counter for the new document
             if (this._retryTimeout) { clearTimeout(this._retryTimeout); this._retryTimeout = null; }
             if (this.documentChangeDebounceTimeout) { clearTimeout(this.documentChangeDebounceTimeout); this.documentChangeDebounceTimeout = null; }
@@ -792,23 +797,45 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         try {
             const symbolsStart = performance.now();
 
-            // Bump generation so any in-flight request from a previous call can be discarded
+            // #297 fixes 4+5 (audit H3): SINGLE-FLIGHT per (uri, version). Previously every caller
+            // (tab-switch render, follow-cursor revealActiveSelection ~100ms later, symbolsRefreshed
+            // notification) issued its OWN request and bumped the generation — so whenever the
+            // server took >100ms, the response belonging to the render VS Code actually shows was
+            // discarded (returning the just-cleared cache) and the view went blank/spinning.
+            // Concurrent same-document callers now share one in-flight request.
+            const docUri = this.activeEditor.document.uri.toString();
+            const docVersion = this.activeEditor.document.version;
             const myGeneration = ++this._symbolRequestGeneration;
 
-            // Race the symbol request against a timeout to avoid infinite spinner
-            const timeoutPromise = new Promise<undefined>(resolve =>
-                setTimeout(() => resolve(undefined), this._symbolRequestTimeoutMs)
-            );
-            const symbols = await Promise.race([
-                commands.executeCommand<DocumentSymbol[]>(
-                    'vscode.executeDocumentSymbolProvider',
-                    this.activeEditor.document.uri
-                ),
-                timeoutPromise
-            ]);
+            let requestPromise: Promise<DocumentSymbol[] | undefined>;
+            if (this._inflightSymbols &&
+                this._inflightSymbols.uri === docUri &&
+                this._inflightSymbols.version === docVersion) {
+                requestPromise = this._inflightSymbols.promise;
+            } else {
+                // Race the symbol request against a timeout to avoid infinite spinner
+                const timeoutPromise = new Promise<undefined>(resolve =>
+                    setTimeout(() => resolve(undefined), this._symbolRequestTimeoutMs)
+                );
+                requestPromise = Promise.race([
+                    commands.executeCommand<DocumentSymbol[]>(
+                        'vscode.executeDocumentSymbolProvider',
+                        this.activeEditor.document.uri
+                    ),
+                    timeoutPromise
+                ]);
+                this._inflightSymbols = { uri: docUri, version: docVersion, promise: requestPromise };
+            }
 
-            // Discard response if a newer request has been issued since this one started
-            if (myGeneration !== this._symbolRequestGeneration) {
+            const symbols = await requestPromise;
+            if (this._inflightSymbols?.promise === requestPromise) {
+                this._inflightSymbols = null;
+            }
+
+            // Discard only when the ACTIVE DOCUMENT moved on while we were in flight —
+            // same-document concurrent callers share the promise and must all consume the result.
+            if (myGeneration !== this._symbolRequestGeneration &&
+                this.activeEditor?.document.uri.toString() !== docUri) {
                 return this._lastKnownSymbols;
             }
 

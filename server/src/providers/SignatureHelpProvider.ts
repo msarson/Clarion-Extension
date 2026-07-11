@@ -6,8 +6,9 @@ import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
-import { ArgClassification } from '../utils/CallSiteArgumentClassifier';
+import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
@@ -28,7 +29,9 @@ logger.setLevel("error");
 export class SignatureHelpProvider {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver = new MethodOverloadResolver();
+    private argClassifier = new CallSiteArgumentClassifier();
     private memberResolver = new ClassMemberResolver();
+    private argTypeResolver = new ArgumentTypeResolver();
     private memberLocator = new MemberLocatorService();
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
@@ -114,7 +117,18 @@ export class SignatureHelpProvider {
             // legacy paramCount-only `selectActiveSignature` when no segments classify
             // (empty call shape, etc.).
             let activeSignature: number;
-            const partialArgs = argSegments.map(s => this.classifyArgText(s));
+            // #242 — classify each already-typed argument with the SAME token-based inference
+            // the hover/go-to-definition path uses (literals, EQUATE #240, implicit vars #241,
+            // dotted/prefixed) plus a resolver for typed variables, so the highlighted overload
+            // matches the argument types. Replaces the former literal-only text heuristic.
+            const ctx: ClassifierContext = {
+                resolveSymbolType: (name) => this.findVariableType(tokens, name, position.line) ?? undefined
+            };
+            const partialArgs = argSegments.map(s => this.argClassifier.classifyArgumentText(s, tokens, ctx));
+            // #243/#245 — the sync ctx above can't type dotted-member / reference / cross-file
+            // args (e.g. `Self.Probs` where `Probs &Problems`). The shared ArgumentTypeResolver
+            // fills in their type name + structure kind (used by all overload consumers).
+            await this.argTypeResolver.enrichArgs(partialArgs, tokens, document, position);
             const hasClassifiableArgs = partialArgs.some(a => a.kind !== 'unknown');
             if (hasClassifiableArgs) {
                 // Reshape each SignatureInformation.label (`methodName(...)`) into a
@@ -236,27 +250,6 @@ export class SignatureHelpProvider {
     }
 
     /**
-     * #126 — text-based arg classifier for partial-arg shapes the user is
-     * mid-typing. The CallSiteArgumentClassifier's token-based pipeline
-     * needs a closed `(...)` shape; signature help fires while the user is
-     * typing, so we classify the raw segment text via simple heuristics
-     * sufficient for picking the active overload.
-     */
-    private classifyArgText(text: string): ArgClassification {
-        const trimmed = text.trim();
-        if (trimmed === '') {
-            return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
-        }
-        if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
-            return { kind: 'literal_string', rawText: trimmed, line: 0, character: 0 };
-        }
-        if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-            return { kind: 'literal_numeric', rawText: trimmed, line: 0, character: 0 };
-        }
-        return { kind: 'variable', rawText: trimmed, line: 0, character: 0 };
-    }
-
-    /**
      * Counts the number of parameters by counting commas at depth 0
      */
     private countParameters(text: string): number {
@@ -321,7 +314,7 @@ export class SignatureHelpProvider {
                     const content = document.getText();
                     const lines = content.split('\n');
                     const scopeLine = lines[currentScope.line];
-                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
                     if (classMethodMatch) {
                         className = classMethodMatch[1];
                         logger.info(`Extracted class name from line: ${className}`);
@@ -617,7 +610,7 @@ export class SignatureHelpProvider {
                             }
                             
                             // Check if line starts with the method name (label at column 0)
-                            const methodMatch = methodLine.match(new RegExp(`^${methodName}\\s+PROCEDURE`, 'i'));
+                            const methodMatch = methodLine.match(new RegExp(`^${methodName}\\s+(?:PROCEDURE|FUNCTION)`, 'i')); // #247
                             if (methodMatch) {
                                 const signature = methodLine.trim();
                                 const declParamCount = this.overloadResolver.countParametersInDeclaration(signature);
@@ -726,7 +719,8 @@ export class SignatureHelpProvider {
         const varTokens = tokens.filter(token =>
             (token.type === TokenType.Variable ||
              token.type === TokenType.ReferenceVariable ||
-             token.type === TokenType.ImplicitVariable) &&
+             token.type === TokenType.ImplicitVariable ||
+             token.type === TokenType.Label) && // #242: a column-0 typed local declares as a Label
             token.value.toLowerCase() === variableName.toLowerCase() &&
             token.start === 0 &&
             token.line < currentLine
@@ -749,6 +743,14 @@ export class SignatureHelpProvider {
 
         return typeToken ? typeToken.value : null;
     }
+
+    /**
+     * #243 — resolve the declared TYPE NAME of an argument that the sync classifier context
+     * can't type: a dotted member access (`Self.Probs`, `obj.field`), a reference variable, or
+     * a cross-file declaration. Returns the type name (e.g. `Problems` for `Probs &Problems`)
+     * so overload matching can compare it against a `*Problems` / `Problems` parameter, or
+     * undefined when it can't be resolved (caller keeps the conservative match-all fallback).
+     */
 
     /**
      * Creates a SignatureInformation object from a signature string.

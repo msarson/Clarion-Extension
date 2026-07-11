@@ -38,6 +38,13 @@ export class OmitCompileDetector {
      */
     public static isLineOmittedWithBlocks(line: number, blocks: DirectiveBlock[]): boolean {
         for (const block of blocks) {
+            // #255 polarity — only OMIT excludes its body. An UNCONDITIONAL
+            // COMPILE('term') is the "always compile this" directive: its body is
+            // LIVE code. (Conditional forms of both never become blocks — see
+            // findDirectiveBlocks — so they stay conservatively live too.)
+            // COMPILE blocks are still returned by findDirectiveBlocks because
+            // the folding provider folds them.
+            if (block.type !== 'OMIT') continue;
             if (block.endLine === null) {
                 // Block never ends - check if we're after start
                 if (line > block.startLine) {

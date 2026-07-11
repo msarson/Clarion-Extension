@@ -7,9 +7,13 @@ import { Connection } from 'vscode-languageserver';
 import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
+import { DirectoryFileIndex } from './DirectoryFileIndex';
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
+// Always-on ("perf" level) timeline for solution loading — emits even in a release VSIX so slow
+// per-project source-file loads are visible in the "Clarion Language Server" output channel.
+const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 
 export class SolutionManager {
     public solution: ClarionSolutionServer;
@@ -146,32 +150,49 @@ export class SolutionManager {
     private async parseSolution(): Promise<ClarionSolutionServer> {
         const startTime = performance.now();
         logger.info(`🕒 Starting parseSolution`);
-        
+        // #290: sub-phase marks — an unattributed ~9.6s sync block was observed inside the
+        // SolutionManager-init window BEFORE the (sub-second) project loop; these pin which
+        // sub-phase carries it on the next perf capture.
+        const mark = (phase: string, from: number) =>
+            perfLogger.perf(`SolutionLoad: parseSolution ${phase}`, { ms: Math.round(performance.now() - from) });
+
         try {
             // Try to load from cache first
+            const cacheStart = performance.now();
             if (await this.loadFromCache()) {
                 const endTime = performance.now();
                 logger.info(`🕒 parseSolution completed in ${(endTime - startTime).toFixed(2)}ms (loaded from cache)`);
                 return this.solution;
             }
-            
+            mark('cache-miss check', cacheStart);
+
             // Use async file existence check
+            const accessStart = performance.now();
             try {
                 await fs.promises.access(this.solutionFilePath, fs.constants.F_OK);
             } catch {
                 logger.error(`❌ Solution file not found: ${this.solutionFilePath}`);
                 return new ClarionSolutionServer();
             }
+            // #297: ~5s of unattributed sync occupancy sits between the cache-miss mark and the
+            // first RED-parse outcome on Mark's VM — these marks bisect that window.
+            mark('sln access', accessStart);
 
             try {
                 // Use async file reading
+                const readStart = performance.now();
                 const content = await fs.promises.readFile(this.solutionFilePath, 'utf-8');
+                mark('sln read', readStart);
                 logger.info(`📂 Solution file content length: ${content.length} bytes`);
                 
                 // Count the number of project entries in the solution file
                 const projectCount = (content.match(/Project\("/g) || []).length;
                 logger.info(`📂 Found ${projectCount} project entries in solution file`);
                 
+                // #288: fresh directory index per load — projects share search dirs, so each unique
+                // dir is readdir'd once for the whole solution instead of stat-per-file-per-dir.
+                DirectoryFileIndex.getInstance().clear();
+
                 const regex = /Project\("([^\"]+)"\) = "([^\"]+)", "([^\"]+)", "([^\"]+)"/g;
                 let match: RegExpExecArray | null;
                 
@@ -184,6 +205,7 @@ export class SolutionManager {
                 const projectPromises: Promise<void>[] = [];
                 const projectsToAdd: ClarionProjectServer[] = [];
 
+                const loopStart = performance.now();
                 while ((match = regex.exec(content)) !== null) {
                     try {
                         const [, projectType, projectName, projectPath, projectGuid] = match;
@@ -196,12 +218,28 @@ export class SolutionManager {
                         // Add to the list of projects to add to the solution
                         projectsToAdd.push(project);
                         
-                        // Create a promise for loading this project's source files
-                        const projectPromise = project.loadSourceFilesFromProjectFile()
-                            .catch(projectError => {
+                        // Create a promise for loading this project's source files (timed per project
+                        // so a slow redirection / source enumeration shows up against its neighbours).
+                        const projectPromise = (async () => {
+                            const projStart = performance.now();
+                            try {
+                                await project.loadSourceFilesFromProjectFile();
+                            } catch (projectError) {
                                 logger.error(`❌ Error loading source files for project ${projectName}: ${projectError instanceof Error ? projectError.message : String(projectError)}`);
                                 // We'll still add the project even if loading source files failed
+                            }
+                            perfLogger.perf("SolutionLoad: project source files loaded", {
+                                ms: Math.round(performance.now() - projStart),
+                                read_parse_ms: project.lastLoadReadParseMs,
+                                resolve_ms: project.lastLoadResolveMs,
+                                project: projectName,
+                                source_files: project.sourceFiles.length,
+                                // #293: unresolved Compile items are kept with bare names and
+                                // silently break every consumer that reconstructs absolute paths.
+                                unresolved: project.lastLoadUnresolved,
+                                unresolved_sample: project.lastLoadUnresolvedSample.join(';') || '(none)'
                             });
+                        })();
                         
                         projectPromises.push(projectPromise);
                     } catch (matchError) {
@@ -209,8 +247,20 @@ export class SolutionManager {
                     }
                 }
 
+                mark('project scan loop (constructors + promise starts)', loopStart);
+
                 // Wait for all projects to load in parallel
+                const loadAllStart = performance.now();
                 await Promise.all(projectPromises);
+                mark('all project loads', loadAllStart);
+
+                // #288: how much stat traffic the directory index absorbed this load.
+                const idx = DirectoryFileIndex.getInstance().stats();
+                perfLogger.perf("SolutionLoad: directory index stats", {
+                    dirs_read: idx.dirsRead,
+                    dirs_cached: idx.dirsCached,
+                    existence_lookups: idx.lookups
+                });
                 
                 // Add all projects to the solution
                 for (const project of projectsToAdd) {
@@ -220,13 +270,17 @@ export class SolutionManager {
 
                 // Parse Clarion .APP files from Solution Items section
                 logger.info(`🔍 Searching for Solution Items with APP files`);
+                const appFilesStart = performance.now();
                 this.parseApplicationFiles(content, solution);
+                mark('parseApplicationFiles', appFilesStart);
 
                 logger.info(`📂 Finished parsing solution file. Found ${solution.projects.length} projects and ${solution.applications.length} applications.`);
-                
+
                 // Save the parsed solution to cache
                 this.solution = solution;
+                const saveCacheStart = performance.now();
                 await this.saveToCache();
+                mark('saveToCache', saveCacheStart);
 
                 const endTime = performance.now();
                 logger.info(`🕒 parseSolution completed in ${(endTime - startTime).toFixed(2)}ms`);
@@ -384,147 +438,110 @@ export class SolutionManager {
         return this.equatesPath;
     }
 
+    // #297 fix 7 (audit H1): the old implementation fanned out EVERY candidate across all 40
+    // projects with Promise.all (no early exit), had no negative cache (every miss re-ran the
+    // whole fan-out), and no in-flight coalescing (the client fires bursts of identical names).
+    // The audit's own evidence: "113 parallel clarion/findFile requests block the server 5+
+    // seconds". Now: positive cache → negative cache (TTL) → coalesced sequential search with
+    // first-hit early exit, existence answered by the runtime directory index (memory).
+    private inflightFinds: Map<string, Promise<{ path: string, source: string }>> = new Map();
+    private negativeFindCache: Map<string, number> = new Map();
+    private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
+
     public async findFileWithExtension(filename: string): Promise<{ path: string, source: string }> {
+        if (!filename) {
+            logger.warn(`⚠️ Filename is undefined or null`);
+            return { path: '', source: "" };
+        }
+        const key = filename.toLowerCase();
+
+        // Positive cache (existence revalidated via the runtime index — cheap)
+        if (this.fileCache.has(filename)) {
+            const cachedPath = this.fileCache.get(filename)!;
+            if (DirectoryFileIndex.getRuntime().existsPath(cachedPath)) {
+                return { path: cachedPath, source: "cache" };
+            }
+            this.fileCache.delete(filename);
+        }
+
+        // Negative cache — a name that just missed will miss again; don't re-run the search
+        const negAt = this.negativeFindCache.get(key);
+        if (negAt !== undefined && Date.now() - negAt < SolutionManager.NEGATIVE_FIND_TTL_MS) {
+            return { path: '', source: "" };
+        }
+
+        // In-flight coalescing — concurrent requests for the same name share one search
+        const inflight = this.inflightFinds.get(key);
+        if (inflight) {
+            return inflight;
+        }
+        const search = this.findFileWithExtensionInner(filename, key);
+        this.inflightFinds.set(key, search);
         try {
-            // Helper for async existence check
-            const fileExists = async (filePath: string) => {
-                try {
-                    await fs.promises.access(filePath, fs.constants.F_OK);
-                    return true;
-                } catch {
-                    return false;
-                }
-            };
-    
-            // Check cache first
-            if (this.fileCache.has(filename)) {
-                const cachedPath = this.fileCache.get(filename)!;
-                if (await fileExists(cachedPath)) {
-                    logger.info(`✅ Found file in cache: ${cachedPath}`);
-                    return { path: cachedPath, source: "cache" };
-                } else {
-                    // Remove invalid cache entry
-                    this.fileCache.delete(filename);
-                }
-            }
-    
-            logger.info(`🔍 Searching for file: ${filename}`);
-            
-            // Handle potential undefined or null filename
-            if (!filename) {
-                logger.warn(`⚠️ Filename is undefined or null`);
-                return { path: '', source: "" };
-            }
-            
-            const ext = path.extname(filename).toLowerCase();
-    
-            // Create an array of promises to check all possible locations in parallel
-            const checkPromises: Promise<{ path: string, source: string } | null>[] = [];
-    
-            // Check project source files
-            for (const project of this.solution.projects) {
-                // Skip if project has no source files
-                if (!project.sourceFiles || project.sourceFiles.length === 0) {
-                    continue;
-                }
-                
-                const sourceFile = project.sourceFiles.find(sf => {
-                    // Handle potential undefined name
-                    if (!sf || !sf.name) {
-                        return false;
-                    }
-                    return sf.name.toLowerCase() === path.basename(filename).toLowerCase();
-                });
-
-            if (sourceFile) {
-                // Handle potential undefined relativePath
-                if (sourceFile.relativePath) {
-                    const fullPath = path.join(project.path, sourceFile.relativePath);
-                    checkPromises.push(
-                        fileExists(fullPath).then(exists => {
-                            if (exists) {
-                                logger.info(`✅ Found file in project source files: ${fullPath}`);
-                                this.fileCache.set(filename, fullPath);
-                                return { path: fullPath, source: "project" };
-                            }
-                            return null;
-                        })
-                    );
-                } else {
-                    logger.warn(`⚠️ Source file ${sourceFile.name || 'unknown'} has no relativePath`);
-                }
-            }
+            return await search;
+        } finally {
+            this.inflightFinds.delete(key);
         }
-
-        // Check redirection entries and search paths
-        for (const project of this.solution.projects) {
-            // Try using the redirection parser directly
-            const redParser = project.getRedirectionParser();
-            const redResult = redParser.findFile(filename);
-            if (redResult && redResult.path) {
-                checkPromises.push(
-                    fileExists(redResult.path).then(exists => {
-                        if (exists) {
-                            logger.info(`✅ Found file through redirection: ${redResult.path}`);
-                            this.fileCache.set(filename, redResult.path);
-                            return { path: redResult.path, source: "redirected" };
-                        }
-                        return null;
-                    })
-                );
-            }
-
-            // Check search paths
-            const searchPaths = project.getSearchPaths(ext);
-            for (const searchPath of searchPaths) {
-                const fullPath = path.join(searchPath, filename);
-                checkPromises.push(
-                    fileExists(fullPath).then(exists => {
-                        if (exists) {
-                            logger.info(`✅ Found file in search path: ${fullPath}`);
-                            this.fileCache.set(filename, fullPath);
-                            return { path: fullPath, source: "project-search-path" };
-                        }
-                        return null;
-                    })
-                );
-            }
-        }
-
-        // Wait for all checks to complete and find the first successful result
-        const results = await Promise.all(checkPromises);
-        const firstMatch = results.find(result => result !== null);
-
-        if (firstMatch) {
-            return firstMatch;
-        }
-
-        logger.warn(`❌ File '${filename}' not found in any project paths.`);
-        return { path: '', source: "" };
-    } catch (error) {
-        logger.error(`❌ Error searching for file: ${error instanceof Error ? error.message : String(error)}`);
-        return { path: '', source: "" };
     }
+
+    private async findFileWithExtensionInner(filename: string, key: string): Promise<{ path: string, source: string }> {
+        try {
+            logger.info(`🔍 Searching for file: ${filename}`);
+            const ext = path.extname(filename).toLowerCase();
+            const runtimeIndex = DirectoryFileIndex.getRuntime();
+            const baseNameLower = path.basename(filename).toLowerCase();
+
+            // 1. Project source-file lists (authoritative post-#293) — first hit wins.
+            for (const project of this.solution.projects) {
+                if (!project.sourceFiles || project.sourceFiles.length === 0) continue;
+                const sourceFile = project.sourceFiles.find(sf => sf?.name && sf.name.toLowerCase() === baseNameLower);
+                if (sourceFile?.relativePath) {
+                    const fullPath = path.join(project.path, sourceFile.relativePath);
+                    if (runtimeIndex.existsPath(fullPath)) {
+                        this.fileCache.set(filename, fullPath);
+                        return { path: fullPath, source: "project" };
+                    }
+                }
+            }
+
+            // 2. Redirection resolution per project — findFile already answers existence from the
+            //    runtime index, so this is a memory walk; first hit wins.
+            for (const project of this.solution.projects) {
+                const redResult = project.getRedirectionParser().findFile(filename);
+                if (redResult?.path && runtimeIndex.existsPath(redResult.path)) {
+                    this.fileCache.set(filename, redResult.path);
+                    return { path: redResult.path, source: "redirected" };
+                }
+            }
+
+            // 3. Raw search-path joins as the last tier — memory lookups via the index.
+            for (const project of this.solution.projects) {
+                for (const searchPath of project.getSearchPaths(ext)) {
+                    const fullPath = path.join(searchPath, filename);
+                    if (runtimeIndex.existsPath(fullPath)) {
+                        this.fileCache.set(filename, fullPath);
+                        return { path: fullPath, source: "project-search-path" };
+                    }
+                }
+            }
+
+            logger.warn(`❌ File '${filename}' not found in any project paths.`);
+            this.negativeFindCache.set(key, Date.now());
+            return { path: '', source: "" };
+        } catch (error) {
+            logger.error(`❌ Error searching for file: ${error instanceof Error ? error.message : String(error)}`);
+            return { path: '', source: "" };
+        }
     }
 
     public registerHandlers(connection: Connection): void {
         logger.info("🔄 Registering solution manager handlers");
-        
-        connection.onRequest('clarion/getSolutionTree', () => {
-            try {
-                // Set the solution operation flag to true
-                (global as any).solutionOperationInProgress = true;
-                
-                logger.info("📂 Received request for solution tree");
-                const tree = this.getSolutionTree();
-                logger.info(`📂 Returning solution tree with ${tree.projects.length} projects and ${tree.applications?.length || 0} applications`);
-                return tree;
-            } finally {
-                // Reset the solution operation flag when done
-                (global as any).solutionOperationInProgress = false;
-            }
-        });
-        
+
+        // #297 S1: clarion/getSolutionTree is deliberately NOT registered here — server.ts owns
+        // the single registration (it prefers this manager's tree and falls back to the cached
+        // globalSolution). Registering it here too silently REPLACED that handler mid-startup,
+        // losing the fallback path and making "which handler answered?" ambiguous in traces.
+
         // Add a new handler for getting project details on demand
         connection.onRequest('clarion/getProjectDetails', (params: { projectGuid: string }) => {
             try {

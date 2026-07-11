@@ -12,6 +12,9 @@ import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
 import { KeywordService } from '../../utils/KeywordService';
+import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
+import { ArgumentTypeResolver } from '../../utils/ArgumentTypeResolver';
+import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -32,6 +35,9 @@ export class HoverRouter {
     private eventService = EventService.getInstance();
     private directiveService = DirectiveService.getInstance();
     private keywordService = KeywordService.getInstance();
+    private argClassifier = new CallSiteArgumentClassifier();
+    private argTypeResolver = new ArgumentTypeResolver();
+    private overloadResolver = new MethodOverloadResolver();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -112,7 +118,7 @@ export class HoverRouter {
         if (languageKeywordHover) return languageKeywordHover;
 
         // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
-        const builtinHover = this.handleBuiltin(word, line, wordRange, document, position, tokens);
+        const builtinHover = await this.handleBuiltin(word, line, wordRange, document, position, tokens);
         if (builtinHover) return builtinHover;
 
         // 11. Variables handled by downstream logic (structure access, self.member, local/global vars)
@@ -152,7 +158,7 @@ export class HoverRouter {
             return this.contextHandler.handleElseKeyword(tokens, position);
         }
 
-        if (upperWord === 'PROCEDURE') {
+        if (upperWord === 'PROCEDURE' || upperWord === 'FUNCTION') { // #247: PROCEDURE ≡ FUNCTION
             return this.contextHandler.handleProcedureKeyword(line, isInMapBlock, isInClassBlock);
         }
 
@@ -401,7 +407,7 @@ export class HoverRouter {
     /**
      * Handle built-in functions
      */
-    private handleBuiltin(word: string, line: string, wordRange: any, document: any, position: any, tokens: any[]): Hover | null {
+    private async handleBuiltin(word: string, line: string, wordRange: any, document: any, position: any, tokens: Token[]): Promise<Hover | null> {
         if (!this.builtinService.isBuiltin(word)) {
             return null;
         }
@@ -422,10 +428,79 @@ export class HoverRouter {
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Parameter count in call: ${paramCount}`);
 
-        // Resolve structureType of first argument for overload narrowing (e.g. OPEN(Names) → 'FILE')
-        const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
+        // #272 — resolve WHICH overload applies from the call-site argument types, converging
+        // on the same classifier/resolver stack signature help uses. Only overrides the legacy
+        // narrowing when the arguments actually carry a resolvable type.
+        const resolvedIndices = await this.resolveBuiltinOverloadIndices(word, signatures, document, position, tokens);
+        if (resolvedIndices) {
+            return this.formatter.formatBuiltin(word, signatures, paramCount, undefined, resolvedIndices);
+        }
 
+        // Legacy fallback: narrow by first argument's structureType (e.g. OPEN(Names) → 'FILE').
+        const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
         return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined);
+    }
+
+    /**
+     * #272 — classify the built-in call's arguments and resolve which overload(s) apply,
+     * reusing the shared `CallSiteArgumentClassifier` → `ArgumentTypeResolver` →
+     * `MethodOverloadResolver` stack that signature help / go-to-definition use. Returns:
+     *   - `[uniqueIndex]` when the argument types pick one overload;
+     *   - the compatible-family indices when they narrow but don't uniquely disambiguate;
+     *   - `null` when there is nothing to resolve (too few typed overloads, no argument
+     *     list, no resolvable argument type, or no narrowing) — caller keeps legacy behaviour.
+     */
+    private async resolveBuiltinOverloadIndices(
+        word: string,
+        signatures: any[],
+        document: any,
+        position: { line: number; character: number },
+        tokens: Token[]
+    ): Promise<number[] | null> {
+        // Need at least two parameter-bearing overloads to disambiguate.
+        const typedOverloadCount = signatures.filter(s => (s.parameters?.length ?? 0) > 0).length;
+        if (typedOverloadCount < 2) return null;
+
+        // Locate the call's name token under the cursor.
+        const callNameIdx = tokens.findIndex(t =>
+            t.line === position.line &&
+            t.value.toUpperCase() === word.toUpperCase() &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (callNameIdx < 0) return null;
+
+        const args = this.argClassifier.classifyArguments(tokens, callNameIdx);
+        if (!args || args.length === 0) return null; // no argument list → nothing to resolve
+
+        // Fill in types that need real resolution (dotted members, references, typed locals).
+        await this.argTypeResolver.enrichArgs(args, tokens, document, position);
+
+        // Only override the legacy path when at least one argument carries a resolvable type
+        // (literal, EQUATE, implicit var, or a resolved variable/structure kind); otherwise a
+        // conservative match-all would add nothing over the existing behaviour.
+        const hasTypedArg = args.some(a => a.inferredType !== undefined || a.structureKind !== undefined);
+        if (!hasTypedArg) return null;
+
+        // Reshape built-in signatures into PROCEDURE(...) form so the shared resolver's type
+        // extraction (which expects PROCEDURE/FUNCTION) accepts them (mirrors SignatureHelpProvider).
+        const procShaped = signatures.map(s =>
+            `PROCEDURE(${(s.parameters ?? []).map((p: any) => (typeof p.label === 'string' ? p.label : '')).join(', ')})`
+        );
+
+        // Unique, most-specific pick first.
+        const unique = this.overloadResolver.findOverloadByArgClassifications(args, procShaped);
+        if (!unique.matchedAll && unique.matchedIndex >= 0) {
+            return [unique.matchedIndex];
+        }
+
+        // Otherwise narrow to the arg-type-compatible family (still hides unrelated kinds).
+        const compatible = this.overloadResolver.filterOverloadsByArgClassifications(args, procShaped);
+        if (compatible.length > 0 && compatible.length < signatures.length) {
+            return compatible;
+        }
+
+        return null; // couldn't narrow — fall back to legacy behaviour
     }
 
     /**

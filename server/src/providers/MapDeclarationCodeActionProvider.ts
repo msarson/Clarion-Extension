@@ -16,6 +16,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('MapDeclarationCodeActionProvider');
@@ -28,7 +29,7 @@ function uriToPath(uri: string): string {
 }
 
 function pathToUri(absPath: string): string {
-    return 'file:///' + absPath.replace(/\\/g, '/');
+    return pathToCanonicalUri(absPath); // #251: canonical form (workspace-edit URIs)
 }
 
 /**

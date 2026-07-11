@@ -19,10 +19,14 @@ import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../provide
 import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
-import { cooperativeCheckpoint } from '../utils/cooperativeScan';
+import { cooperativeCheckpoint, makeTimeSlicer } from '../utils/cooperativeScan';
+import { ReferenceCountIndex } from './ReferenceCountIndex';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -189,8 +193,8 @@ export class SymbolFinderService {
             return null;
         }
         
-        // Match PROCEDURE(...) signature
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        // Match PROCEDURE(...)/FUNCTION(...) signature (#247)
+        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i);
         if (!match || !match[1]) {
             return null;
         }
@@ -361,25 +365,25 @@ export class SymbolFinderService {
                 }
             }
 
-            // If the current scope is a method implementation, the class was declared inside
-            // a GlobalProcedure whose locals are shared with the method. Search all GlobalProcedure
-            // data sections (before their CODE line) for the variable.
+            // If the current scope is a Local Derived Method, it shares ONLY its declaring
+            // procedure's scope (Issue #233, Rule 4) — the procedure whose LOCAL data declared
+            // this method's CLASS. Resolve that single procedure deterministically instead of
+            // scanning every GlobalProcedure (the former broad scan leaked unrelated procedures'
+            // locals, so hover disagreed with completion in files with multiple procedures).
             if (scopeToken.subType === TokenType.MethodImplementation) {
-                logger.info(`Scope is MethodImplementation — searching GlobalProcedure scopes for "${searchText}"`);
-                const globalProcs = tokens.filter(t =>
-                    (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
-                    t.subType === TokenType.GlobalProcedure
-                );
-                for (const gp of globalProcs) {
-                    // Check parameters of the outer procedure first
-                    const paramResult = this.findParameter(word, document, gp);
+                const declaringProc = new ScopeResolver(tokens).findDeclaringProcedureForMethod(scopeToken);
+                if (declaringProc) {
+                    logger.info(`Scope is a Local Derived Method — searching declaring procedure at line ${declaringProc.line} for "${searchText}"`);
+
+                    // Check parameters of the declaring procedure first.
+                    const paramResult = this.findParameter(word, document, declaringProc);
                     if (paramResult) {
-                        logger.info(`✅ Found "${searchText}" as parameter of outer GlobalProcedure at line ${gp.line}`);
+                        logger.info(`✅ Found "${searchText}" as parameter of declaring procedure at line ${declaringProc.line}`);
                         return paramResult;
                     }
 
-                    const gpStart = gp.line;
-                    const gpEnd = gp.finishesAt ?? Number.MAX_SAFE_INTEGER;
+                    const gpStart = declaringProc.line;
+                    const gpEnd = declaringProc.finishesAt ?? Number.MAX_SAFE_INTEGER;
                     const found = tokens.find(t =>
                         t.line >= gpStart && t.line <= gpEnd &&
                         t.start === 0 &&
@@ -395,17 +399,17 @@ export class SymbolFinderService {
                              t.subType === TokenType.GlobalProcedure ||
                              t.subType === TokenType.MethodDeclaration)
                         );
-                        if (isProcDecl) continue;
-
-                        logger.info(`✅ Found "${searchText}" in GlobalProcedure scope at line ${found.line}`);
-                        return {
-                            token: found,
-                            type: SymbolFinderService.extractTypeInfo(found, tokens),
-                            scope: { token: gp, type: 'local' },
-                            location: { uri: document.uri, line: found.line, character: found.start },
-                            originalWord: originalWord || word,
-                            searchWord: word
-                        };
+                        if (!isProcDecl) {
+                            logger.info(`✅ Found "${searchText}" in declaring procedure scope at line ${found.line}`);
+                            return {
+                                token: found,
+                                type: SymbolFinderService.extractTypeInfo(found, tokens),
+                                scope: { token: declaringProc, type: 'local' },
+                                location: { uri: document.uri, line: found.line, character: found.start },
+                                originalWord: originalWord || word,
+                                searchWord: word
+                            };
+                        }
                     }
                 }
             }
@@ -558,7 +562,7 @@ export class SymbolFinderService {
         const firstProcToken = tokens.find(t =>
             (t.subType === TokenType.GlobalProcedure ||
              t.subType === TokenType.MethodImplementation) &&
-            t.value.toUpperCase() === 'PROCEDURE'
+            ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
         );
         
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
@@ -628,14 +632,52 @@ export class SymbolFinderService {
             return null;
         }
 
+        const memberFiles = graph.getMemberFiles(programFile);
+
+        // #319: this walk read + fully tokenized EVERY member module of the program
+        // on a lookup miss — 161 files cold on Mark's VM = one 8.2s synchronous
+        // event-loop block (the undeclaredVar validator probes misses by definition).
+        // Prune with the reference index, the #315 FAR pattern: a module-scope
+        // declaration of `word` requires `word` to OCCUR in the file, so an indexed
+        // file with zero occurrences is skipped without touching disk. One batched
+        // freshness pass up front keeps mayContain stat-free (no per-file sync stat
+        // storm); compound words (BRW1::View:Browse) are never a single indexed
+        // name, so only bare identifiers prune; unknown files always load.
+        const refIdx = ReferenceCountIndex.getInstance();
+        const canPrune = refIdx.isBuilt && /^[A-Za-z_][A-Za-z0-9_]*$/.test(word);
+        if (canPrune) {
+            await refIdx.verifyFilesFresh(memberFiles);
+        }
+        const timeSlice = makeTimeSlicer();
+
         const visited = new Set<string>();
-        for (const memberFile of graph.getMemberFiles(programFile)) {
+        for (const memberFile of memberFiles) {
             const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
             if (visited.has(normMember)) continue;
             visited.add(normMember);
 
             const memberPath = memberFile.replace(/\//g, '\\');
             if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
+
+            if (canPrune && !refIdx.mayContain(memberPath, word)) continue;
+            // Un-pruned files still tokenize synchronously — yield between them so
+            // a cold family walk never holds the LSP loop (#319/#295).
+            await timeSlice();
+
+            // #319 (reopen): a module-scope declaration is a COLUMN-0 label by
+            // language rule. A file that merely USES the word (every generated
+            // module mentions globals/equates like WM_QUERYENDSESSION) passes
+            // mayContain but can never declare it — probe the raw text for a
+            // column-0 occurrence before paying tokenization (a read is ~40x
+            // cheaper than tokenizing a generated module). Files already in the
+            // token cache skip the probe — their scan is cheap anyway.
+            if (canPrune && !this.tokenCache.getTokensByUriCaseInsensitive(`file:///${memberPath.replace(/\\/g, '/')}`)) {
+                try {
+                    const raw = fs.readFileSync(memberPath, 'utf-8');
+                    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    if (!new RegExp(`^${esc}(?![A-Za-z0-9_:])`, 'im').test(raw)) continue;
+                } catch { /* unreadable — let loadTokensForFile handle/report it */ }
+            }
 
             const sibling = this.loadTokensForFile(memberPath);
             if (!sibling) continue;
@@ -937,8 +979,8 @@ export class SymbolFinderService {
     private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument): Promise<SymbolInfo | null> {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
-        const resolvedPath = path.resolve(currentFileDir, parentFile);
-        const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+        let resolvedPath = path.resolve(currentFileDir, parentFile);
+        let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
         logger.info(`Searching parent file: ${resolvedPath}`);
 
@@ -958,9 +1000,37 @@ export class SymbolFinderService {
         try {
             if (!parentTokens || !parentDoc) {
                 if (!fs.existsSync(resolvedPath)) {
-                    logger.warn(`Parent file not found: ${resolvedPath}`);
-                    return null;
+                    // #300: MEMBER targets aren't necessarily same-dir — generated multi-DLL
+                    // apps put member modules in genfiles\src while the app main lives elsewhere
+                    // (project root per the RED). Cache first, same-dir next, redirection LAST —
+                    // the same shape every other cross-file resolution path uses. Without this
+                    // the whole Tier-6 global walk dead-ended and the undeclared-variable
+                    // diagnostic flagged parent-file globals that hover resolves. The fresh-read
+                    // URI is canonical (#251) — hand-built file:/// shapes keep causing
+                    // cache-identity bugs.
+                    const solutionManager = SolutionManager.getInstance();
+                    const viaRedirection = solutionManager
+                        ? await solutionManager.findFileWithExtension(parentFile)
+                        : null;
+                    if (viaRedirection?.path && fs.existsSync(viaRedirection.path)) {
+                        logger.info(`✅ #300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
+                        resolvedPath = viaRedirection.path;
+                        parentUri = pathToCanonicalUri(resolvedPath);
+                        // The redirected target may itself be cached (open in the editor)
+                        parentTokens = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                        if (parentTokens) {
+                            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                            if (cachedText !== null) {
+                                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                            }
+                        }
+                    } else {
+                        logger.warn(`Parent file not found: ${resolvedPath}`);
+                        return null;
+                    }
                 }
+            }
+            if (!parentTokens || !parentDoc) {
                 const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
                 parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                 parentTokens = this.tokenCache.getTokens(parentDoc);
@@ -1081,12 +1151,16 @@ export class SymbolFinderService {
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
 
-            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
-            if (siblingModuleResult) return siblingModuleResult;
-            
-            // Try global variable
+            // #319 (reopen): global BEFORE the sibling walk. Globals like
+            // GlobalResponse occur in EVERY member module, so the index prune
+            // can't help the walk — and the parent lookup is one file. Clarion
+            // visibility agrees: global data IS in scope here; a sibling's
+            // module data is not (the walk stays as a last-resort finder).
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
+
+            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
+            if (siblingModuleResult) return siblingModuleResult;
 
             // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
             const fieldResult = this.findStructureField(word, tokens, position.line, document);
@@ -1127,16 +1201,20 @@ export class SymbolFinderService {
             return result;
         }
 
-        result = await this.findModuleVariableInSiblingMembers(word, document, position);
-        if (result) {
-            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
-            return result;
-        }
-        
-        // 4. Try as global variable
+        // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
+        // Globals like GlobalResponse occur in EVERY member module (the index
+        // prune can't help), and the parent lookup is one file vs a 161-file
+        // family tokenization. Clarion visibility agrees: global data IS in
+        // scope in a member; a sibling's module data is not.
         result = await this.findGlobalVariable(word, tokens, document);
         if (result) {
             logger.info(`✅ Found as global variable: ${word}`);
+            return result;
+        }
+
+        result = await this.findModuleVariableInSiblingMembers(word, document, position);
+        if (result) {
+            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
             return result;
         }
         
@@ -1189,17 +1267,18 @@ export class SymbolFinderService {
                 return result;
             }
 
-            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
-            if (result) {
-                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
-                result.originalWord = word;
-                return result;
-            }
-            
-            // Try global variable with stripped word
+            // Try global variable with stripped word — #319: global before the
+            // sibling walk (same rationale as tier 4).
             result = await this.findGlobalVariable(searchWord, tokens, document);
             if (result) {
                 logger.info(`✅ Found as global variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+
+            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
+            if (result) {
+                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
                 result.originalWord = word;
                 return result;
             }

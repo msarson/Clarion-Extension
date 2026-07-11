@@ -1,9 +1,10 @@
-import { Uri, workspace, window, Progress, ProgressLocation } from 'vscode';
+import { Uri, workspace, window } from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { ClarionSolutionTreeNode, ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from '../../common/types';
 import LoggerManager from './utils/LoggerManager';
+import { PathUtils } from './PathUtils';
 import { globalSettings } from './globals';
 import { LanguageClientManager, isClientReady, getClientReadyPromise } from './LanguageClientManager';
 import { SolutionParser } from './SolutionParser';
@@ -390,6 +391,20 @@ export class SolutionCache {
      */
     // Debounce mechanism to prevent multiple simultaneous requests
     private fetchInProgressPromise: Promise<ClarionSolutionInfo | null> | null = null;
+
+    // #297 S1: ONE clarion/getSolutionTree request on the wire at a time. Initialize, refresh,
+    // and the background-refresh path each raced their own copy — during startup that stacked
+    // identical requests on the busiest queue. Callers keep their own timeouts; only the
+    // underlying request is shared.
+    private inflightGetSolutionTree: Promise<ClarionSolutionInfo | null> | null = null;
+    private sendGetSolutionTreeRequest(): Promise<ClarionSolutionInfo | null> {
+        if (!this.inflightGetSolutionTree) {
+            this.inflightGetSolutionTree = this.client!
+                .sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree')
+                .finally(() => { this.inflightGetSolutionTree = null; });
+        }
+        return this.inflightGetSolutionTree;
+    }
     private fetchDebounceTimeoutId: NodeJS.Timeout | null = null;
     private readonly FETCH_DEBOUNCE_DELAY = 300; // ms
     
@@ -434,7 +449,7 @@ export class SolutionCache {
                     
                     // Race between the actual request and the timeout
                     const solution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     
@@ -798,14 +813,11 @@ export class SolutionCache {
                     return false;
                 }
 
-                // Show progress notification
-                await window.withProgress({
-                    location: ProgressLocation.Notification,
-                    title: 'Loading solution...',
-                    cancellable: false
-                }, async (progress: Progress<{ message?: string; increment?: number }>) => {
-                    progress.report({ message: 'Fetching solution structure...' });
-                    
+                // #291: no progress toast — the editor is fully usable during this fetch
+                // (heavy work is deferred/background by design post-#288/#289/#290) and the
+                // notification read as "wait". The status-bar initialization item is the
+                // single progress surface; only the TIMEOUT path surfaces a warning.
+                {
                     // Set a timeout to prevent hanging if the server doesn't respond
                     const timeoutPromise = new Promise<null>((resolve) => {
                         setTimeout(() => {
@@ -818,9 +830,12 @@ export class SolutionCache {
                     logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
                     // Race between the actual request and the timeout
                     this.solutionInfo = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
+                    if (this.solutionInfo === null) {
+                        window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
+                    }
                     const requestEndTime = performance.now();
                     logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
@@ -849,16 +864,14 @@ export class SolutionCache {
                             logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
                             logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
                         }
-                        
-                        progress.report({ message: 'Solution loaded successfully', increment: 100 });
                     } else {
                         logger.warn("⚠️ Server returned null solution tree");
-                        
+
                         // Try local parsing as a fallback
                         if (this.isLocalSlnFallbackEnabled()) {
                             logger.info("🔄 Attempting local .sln parsing as fallback...");
                             const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
-                            
+
                             if (localTree) {
                                 this.solutionInfo = localTree;
                                 logger.info("✅ Using locally parsed solution tree as fallback");
@@ -880,7 +893,7 @@ export class SolutionCache {
                             };
                         }
                     }
-                });
+                }
                 
                 const endTime = performance.now();
                 logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
@@ -976,7 +989,7 @@ export class SolutionCache {
                     
                     // Race between the actual request and the timeout
                     const solution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
                     
@@ -1129,14 +1142,9 @@ export class SolutionCache {
             logger.info("🔄 Fetching solution tree from server (bypassing cache)...");
             
             try {
-                // Show progress notification
-                await window.withProgress({
-                    location: ProgressLocation.Notification,
-                    title: 'Loading solution...',
-                    cancellable: false
-                }, async (progress: Progress<{ message?: string; increment?: number }>) => {
-                    progress.report({ message: 'Fetching solution structure...' });
-                    
+                // #291: no progress toast (see the fetch site above) — status bar carries
+                // the state; only the timeout path warns.
+                {
                     // Set a timeout to prevent hanging if the server doesn't respond
                     const timeoutPromise = new Promise<null>((resolve) => {
                         setTimeout(() => {
@@ -1144,13 +1152,16 @@ export class SolutionCache {
                             resolve(null);
                         }, 15000); // 15 second timeout
                     });
-                    
+
                     const requestStartTime = performance.now();
                     // Race between the actual request and the timeout
                     const serverSolution = await Promise.race([
-                        this.client!.sendRequest<ClarionSolutionInfo | null>('clarion/getSolutionTree'),
+                        this.sendGetSolutionTreeRequest(),
                         timeoutPromise
                     ]);
+                    if (serverSolution === null) {
+                        window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
+                    }
                     const requestEndTime = performance.now();
                     logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
                     
@@ -1178,11 +1189,9 @@ export class SolutionCache {
                             logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
                             logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
                         }
-                        
-                        progress.report({ message: 'Solution loaded successfully', increment: 100 });
                     } else {
                         logger.warn("⚠️ Server returned null or empty solution tree");
-                        
+
                         // Don't overwrite existing solution info if it has projects
                         if (!this.solutionInfo || !this.solutionInfo.projects || this.solutionInfo.projects.length === 0) {
                             logger.info("ℹ️ No existing solution info with projects, creating minimal placeholder");
@@ -1196,7 +1205,7 @@ export class SolutionCache {
                             logger.info(`ℹ️ Keeping existing solution info with ${this.solutionInfo.projects.length} projects`);
                         }
                     }
-                });
+                }
                 
                 const endTime = performance.now();
                 logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
@@ -1591,8 +1600,10 @@ export class SolutionCache {
         if (!this.solutionInfo) return undefined;
 
         try {
-            // Normalize the file path for case-insensitive comparison
-            const normalizedFilePath = filePath.toLowerCase();
+            // #266: full normalization (separators/trailing-slash/case), not bare
+            // toLowerCase — the exact/relative path strategies never matched
+            // separator variants before.
+            const normalizedFilePath = PathUtils.normalizeForKey(filePath) || filePath.toLowerCase();
             const baseFileName = path.basename(filePath).toLowerCase();
             
             logger.info(`[SOURCE_LOOKUP] Looking for source file: ${baseFileName} (from ${filePath})`);
@@ -1607,12 +1618,13 @@ export class SolutionCache {
                 for (const sourceFile of project.sourceFiles) {
                     if (!sourceFile.relativePath) continue;
                     
-                    // Check if the file's absolute path matches the input path
-                    const fullPath = path.isAbsolute(sourceFile.relativePath)
-                        ? sourceFile.relativePath.toLowerCase()
-                        : path.join(project.path, sourceFile.relativePath).toLowerCase();
-                    
-                    if (fullPath === normalizedFilePath) {
+                    // Check if the file's absolute path matches the input path (#266: normalized)
+                    const fullPath = PathUtils.normalizeForKey(
+                        path.isAbsolute(sourceFile.relativePath)
+                            ? sourceFile.relativePath
+                            : path.join(project.path, sourceFile.relativePath));
+
+                    if (fullPath && fullPath === normalizedFilePath) {
                         logger.info(`[SOURCE_LOOKUP] Exact path match found: ${fullPath} in project ${project.name}`);
                         logger.info(`✅ Found source file by exact path in project: ${project.name} (${project.guid})`);
                         return sourceFile;
@@ -2104,7 +2116,7 @@ export class SolutionCache {
             return null;
         }
 
-        const project = instance.solutionInfo.projects.find(p => p.path === projectPath);
+        const project = instance.solutionInfo.projects.find(p => PathUtils.equalPath(p.path, projectPath)); // #266
         return project || null;
     }
 

@@ -8,6 +8,8 @@ import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
+import { ProcedureUtils } from './ProcedureUtils';
+import { pathToCanonicalUri } from './UriUtils';
 import { cooperativeCheckpoint } from './cooperativeScan';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -94,7 +96,8 @@ export function scanClassBodyForAllMembers(
                 const name = memberMatch[1];
                 const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
                 const access = detectMemberAccess(raw);
-                const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+                // #247: PROCEDURE ≡ FUNCTION — both declare methods.
+                const kind: 'method' | 'property' = ProcedureUtils.startsWithProcedureKeyword(typeStr) ? 'method' : 'property';
 
                 results.push({
                     name,
@@ -173,7 +176,7 @@ export function scanClassBodyForMember(
                     const afterMember = memberLine.substring(memberMatch[0].length).trim();
                     const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
                     let declParamCount = 0;
-                    if (type.toUpperCase().startsWith('PROCEDURE')) {
+                    if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
                         declParamCount = countParamsInDecl(memberLine);
                     }
                     candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
@@ -182,7 +185,7 @@ export function scanClassBodyForMember(
 
             const bestMatch = selectBestOverload(candidates, paramCount);
             if (bestMatch) {
-                const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                const fileUri = pathToCanonicalUri(filePath); // #251
                 return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
             }
         }
@@ -282,7 +285,7 @@ export class ClassMemberResolver {
             const content = document.getText();
             const lines = content.split('\n');
             const scopeLine = lines[currentScope.line];
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+PROCEDURE/i);
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
             }
@@ -353,9 +356,9 @@ export class ClassMemberResolver {
                         const type = typeToken ? typeToken.value : 'Unknown';
                         logger.info(`   Type token: ${type}, line: ${i}`);
                         
-                        // Count parameters in declaration if it's a PROCEDURE
+                        // Count parameters in declaration if it's a PROCEDURE/FUNCTION (#247)
                         let declParamCount = 0;
-                        if (type.toUpperCase() === 'PROCEDURE') {
+                        if (ProcedureUtils.isProcedureKeyword(type)) {
                             const fullLine = lines[i];
                             declParamCount = this.countParametersInDeclaration(fullLine);
                         }
@@ -418,6 +421,7 @@ export class ClassMemberResolver {
             if (solutionManager && solutionManager.solution) {
                 for (const project of solutionManager.solution.projects) {
                     const redirectionParser = project.getRedirectionParser();
+                    if (!redirectionParser) continue; // #233 Stage 2: project may have no redirection parser
                     const resolved = redirectionParser.findFile(includeFileName);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         resolvedPath = resolved.path;
@@ -480,9 +484,9 @@ export class ClassMemberResolver {
                                 const typeWithoutComment = afterMember.split(/\s*[!\/\/]/).shift() || afterMember;
                                 const type = typeWithoutComment.trim() || 'Unknown';
                                 
-                                // Count parameters if it's a PROCEDURE
+                                // Count parameters if it's a PROCEDURE/FUNCTION (#247)
                                 let declParamCount = 0;
-                                if (type.toUpperCase().startsWith('PROCEDURE')) {
+                                if (ProcedureUtils.startsWithProcedureKeyword(type)) {
                                     declParamCount = this.countParametersInDeclaration(memberLine);
                                     logger.info(`Counting params in: ${memberLine}`);
                                     logger.info(`Detected ${declParamCount} parameters`);
@@ -497,7 +501,7 @@ export class ClassMemberResolver {
                         const bestMatch = this.selectBestOverload(candidates, paramCount);
                         if (bestMatch) {
                             // Convert file path to URI format
-                            const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                            const fileUri = pathToCanonicalUri(resolvedPath); // #251
                             return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
                         }
 
@@ -529,15 +533,25 @@ export class ClassMemberResolver {
      * Simple implementation: counts commas at parenthesis depth 0
      */
     public countParametersInCall(line: string, methodName: string): number {
-        // Find the opening parenthesis after the method name
-        const methodIndex = line.toLowerCase().indexOf(methodName.toLowerCase());
-        if (methodIndex === -1) return 0;
-        
-        const afterMethod = line.substring(methodIndex + methodName.length);
-        const parenIndex = afterMethod.indexOf('(');
-        if (parenIndex === -1) return 0;
-        
-        const paramList = afterMethod.substring(parenIndex + 1);
+        // #249: anchor by WORD BOUNDARY — a bare substring indexOf locked onto a longer
+        // identifier containing the name (resolving `SetValue` on a line with
+        // `SetValueEx(1,2)` counted SetValueEx's args). Prefer a direct call shape
+        // `name(`; fall back to a standalone `name` followed later by '(' (covers
+        // declaration lines like `SetValue PROCEDURE(STRING)`, whose param count the
+        // decl-cursor anchor relies on).
+        const escaped = methodName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(line);
+        let paramList: string;
+        if (callMatch) {
+            paramList = line.substring(callMatch.index + callMatch[0].length);
+        } else {
+            const wordMatch = new RegExp(`\\b${escaped}\\b`, 'i').exec(line);
+            if (!wordMatch) return 0;
+            const afterMethod = line.substring(wordMatch.index + methodName.length);
+            const parenIndex = afterMethod.indexOf('(');
+            if (parenIndex === -1) return 0;
+            paramList = afterMethod.substring(parenIndex + 1);
+        }
         
         let depth = 0;
         let commaCount = 0;
@@ -592,7 +606,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;
@@ -656,7 +670,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;
@@ -815,7 +829,7 @@ export class ClassMemberResolver {
         paramCount: number | undefined,
         structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
     ): MemberInfo | null {
-        const uri = `file:///${filePath.replace(/\\/g, '/')}`;
+        const uri = pathToCanonicalUri(filePath); // #251
         const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         const result = scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
@@ -905,7 +919,7 @@ export class ClassMemberResolver {
      * Extracts parameter list from PROCEDURE(...) 
      */
     public countParametersInDeclaration(line: string): number {
-        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
         if (!match) return 0;
         
         const paramList = match[1].trim();
@@ -984,7 +998,7 @@ export class ClassMemberResolver {
             }
 
             const best = candidates[bestIdx];
-            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+            const fileUri = pathToCanonicalUri(filePath); // #251
             return Location.create(fileUri, Range.create(best.lineNum, 0, best.lineNum, 0));
         } catch {
             return null;

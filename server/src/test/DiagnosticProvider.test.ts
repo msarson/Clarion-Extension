@@ -1808,7 +1808,14 @@ CallerProc  PROCEDURE()
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
         });
 
-        test('cross-file: unopened project file is scanned via solution sourceFiles', async () => {
+        test('cross-file: scan covers CACHED files only — unopened project files are deliberately out of scope (#294)', async () => {
+            // CONTRACT CHANGE (2026-07-09, Mark's call): #162 V1 swept EVERY solution source file
+            // per validated document. That was only affordable while the #293 resolution bug
+            // capped "every file" at ~41; at a real solution's scale (~3,016 files) the sweep
+            // cold-tokenized the whole solution per document and froze the server for minutes.
+            // Scope is now cached/open files (pre-#162 behavior); full-solution coverage returns
+            // with the one-pass reference index (#294). This test pins BOTH sides of the new
+            // contract: no warning from an unopened file, warning present once the file is cached.
             const fs = require('fs');
             const os = require('os');
             const path = require('path');
@@ -1836,8 +1843,6 @@ CallerProc  PROCEDURE()
 
             const savedSm = (SolutionManager as unknown as { instance: unknown }).instance;
             try {
-                // Do not pre-populate program tokens in TokenCache — this pins V1:
-                // diagnostics must still discover returning MAP procs from unopened files.
                 TokenCache.getInstance().clearAllTokens();
                 const memberDoc = createDoc(`file:///${memberPath.replace(/\\/g, '/')}`, memberCode);
                 const tokens = TokenCache.getInstance().getTokens(memberDoc);
@@ -1852,12 +1857,23 @@ CallerProc  PROCEDURE()
                 (SolutionManager as unknown as { instance: unknown }).instance = fakeSm;
 
                 const locator = new MemberLocatorService();
-                const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
-                const plain = diags.filter((d: { message: string }) =>
+
+                // Side 1: program file NOT cached → out of scope → no warning.
+                const coldDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+                const coldPlain = coldDiags.filter((d: { message: string }) =>
                     /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
                 );
-                assert.strictEqual(plain.length, 1, 'should warn from unopened project file declaration');
-                assert.ok(plain[0].message.includes("'TestProc'"));
+                assert.strictEqual(coldPlain.length, 0, 'unopened files are out of scope by design (#294 restores coverage)');
+
+                // Side 2: cache the program file (as an open/previously-seen doc would be) → warns.
+                const progDoc = createDoc(`file:///${programPath.replace(/\\/g, '/')}`, programCode);
+                TokenCache.getInstance().getTokens(progDoc);
+                const warmDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
+                const warmPlain = warmDiags.filter((d: { message: string }) =>
+                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                );
+                assert.strictEqual(warmPlain.length, 1, 'cached program file declaration should warn');
+                assert.ok(warmPlain[0].message.includes("'TestProc'"));
             } finally {
                 (SolutionManager as unknown as { instance: unknown }).instance = savedSm;
                 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -2747,6 +2763,7 @@ LocalVar LONG
             const { TokenCache } = await import('../TokenCache');
             const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
             const { SymbolFinderService } = await import('../services/SymbolFinderService');
+            const { SolutionManager } = await import('../solution/solutionManager');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
@@ -2754,8 +2771,14 @@ LocalVar LONG
             const doc = createDocument(code);
             const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            // #287: the async wrapper now also gates on a loaded solution (no cross-file index in
+            // no-solution mode). Establish a loaded-solution precondition so this test isolates the
+            // ENABLE gate. A bare {} is enough — SymbolFinder resolves TyposVar to nothing regardless.
+            const smSlot = SolutionManager as unknown as { instance: unknown };
+            const savedSm = smSlot.instance;
             try {
                 serverSettings.undeclaredVariablesEnabled = true;
+                smSlot.instance = {};
                 const tokenCache = TokenCache.getInstance();
                 const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
                 const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
@@ -2764,6 +2787,7 @@ LocalVar LONG
                 assert.ok(undecl[0].message.includes("'TyposVar'"));
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
+                smSlot.instance = savedSm;
             }
         });
 
@@ -2771,6 +2795,7 @@ LocalVar LONG
             const { TokenCache } = await import('../TokenCache');
             const { ScopeAnalyzer } = await import('../utils/ScopeAnalyzer');
             const { SymbolFinderService } = await import('../services/SymbolFinderService');
+            const { SolutionManager } = await import('../solution/solutionManager');
             const code = `MyProc PROCEDURE()
   CODE
   TyposVar = 1
@@ -2778,8 +2803,13 @@ LocalVar LONG
             const doc = createDocument(code);
             const tokens = new ClarionTokenizer(code).tokenize();
             const wasEnabled = serverSettings.undeclaredVariablesEnabled;
+            // Loaded-solution precondition (#287) so this proves the ENABLE gate silences it, not the
+            // no-solution gate.
+            const smSlot = SolutionManager as unknown as { instance: unknown };
+            const savedSm = smSlot.instance;
             try {
                 serverSettings.undeclaredVariablesEnabled = false;
+                smSlot.instance = {};
                 const tokenCache = TokenCache.getInstance();
                 const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
                 const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
@@ -2787,6 +2817,7 @@ LocalVar LONG
                 assert.strictEqual(undecl.length, 0, 'gate off → no diagnostic, even with undeclared LHS');
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
+                smSlot.instance = savedSm;
             }
         });
 
@@ -4100,6 +4131,121 @@ suite('MapDeclarationDiagnostics — MODULE filename URI resolution (d2fadc09)',
             `${JSON.stringify(duplicates)}. The 5b42b29b fix should canonicalise ` +
             `URIs at construction so no two entries normalise to the same path.`
         );
+
+        for (const u of newEntries) {
+            TokenCache.getInstance().clearTokens(u);
+        }
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #292 — MAP MODULE('*.dll'): binary/external-library modules are exempt from
+// the missing-implementation diagnostic.
+//
+// Clarion docs (MODULE, "specify MEMBER source file"): "If the sourcefile is
+// an external library, this string may contain any unique identifier" — a
+// MODULE naming a .dll/.lib makes NO promise that a Clarion source file
+// exists, so "declared in the MAP but has no implementation in 'x.dll'" is a
+// false positive by construction. Worse, when redirection/same-dir resolution
+// FOUND the physical .dll, the validator loaded and TOKENIZED the binary as
+// text (user-visible startup cost on multi-DLL solutions).
+//
+// Contract pinned here (bidirectional):
+//   1. No diagnostics for procedures declared in a MODULE('*.dll') — with or
+//      without the DLL prototype attribute (docs: DLL attribute = "defined
+//      externally in a .DLL"; without it the module is still an external
+//      library reference, e.g. static .lib link).
+//   2. The physical .dll is never loaded into the token cache.
+//   3. A genuine Clarion-source MODULE ('*.clw') with a missing implementation
+//      still fires — the exemption must not swallow the real check.
+// ─────────────────────────────────────────────────────────────────────────────
+suite('MapDeclarationDiagnostics — MODULE(*.dll) exemption (#292)', () => {
+
+    let tmpDir292: string;
+    let mainClwPath: string;
+    let dllPath: string;
+    let realModPath: string;
+
+    suiteSetup(() => {
+        tmpDir292 = nodeFs.mkdtempSync(nodePathTest.join(nodeOs.tmpdir(), 'issue292-'));
+        mainClwPath = nodePathTest.join(tmpDir292, 'Main.clw');
+        dllPath = nodePathTest.join(tmpDir292, 'vuFT3.dll');
+        realModPath = nodePathTest.join(tmpDir292, 'RealMod.clw');
+
+        nodeFs.writeFileSync(mainClwPath,
+            '  PROGRAM\n' +
+            '\n' +
+            '  MAP\n' +
+            "    MODULE('vuFT3.dll')\n" +
+            'vuCPUSpeed PROCEDURE(),LONG,PASCAL,DLL(1)\n' +
+            'vuNoAttrib PROCEDURE(),LONG,PASCAL\n' +
+            '    END\n' +
+            "    MODULE('RealMod.clw')\n" +
+            'MissingProc PROCEDURE()\n' +
+            '    END\n' +
+            '  END\n' +
+            '  CODE\n' +
+            '  RETURN\n',
+            'utf8'
+        );
+
+        // A same-dir binary so resolution FINDS it (reproduces the tokenize-the-binary path)
+        nodeFs.writeFileSync(dllPath, Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0xff, 0xfe, 0x00, 0x01]));
+
+        // A genuine source module that does NOT implement MissingProc
+        nodeFs.writeFileSync(realModPath,
+            "  MEMBER('Main.clw')\n" +
+            '\n' +
+            '  MAP\n' +
+            '  END\n' +
+            'SomeOtherProc PROCEDURE()\n' +
+            '  CODE\n' +
+            '  RETURN\n',
+            'utf8'
+        );
+    });
+
+    suiteTeardown(() => {
+        try {
+            nodeFs.unlinkSync(mainClwPath);
+            nodeFs.unlinkSync(dllPath);
+            nodeFs.unlinkSync(realModPath);
+            nodeFs.rmdirSync(tmpDir292);
+        } catch { /* best-effort cleanup */ }
+    });
+
+    test('MODULE(*.dll) procedures are exempt; the binary is never tokenized; real source modules still fire', async () => {
+        const mainContent = nodeFs.readFileSync(mainClwPath, 'utf8');
+        const driveAndPath = mainClwPath.replace(/\\/g, '/');
+        const colonIdx = driveAndPath.indexOf(':');
+        const encodedDrive = driveAndPath.slice(0, colonIdx).toLowerCase() + '%3A';
+        const mainUri = 'file:///' + encodedDrive + driveAndPath.slice(colonIdx + 1);
+        const mainDoc = TextDocument.create(mainUri, 'clarion', 1, mainContent);
+        const mainTokens = new ClarionTokenizer(mainContent).tokenize();
+
+        const cacheBefore = new Set(TokenCache.getInstance().getAllCachedUris());
+
+        const diagnostics = await validateMissingImplementations(mainTokens, mainDoc);
+
+        // 1. Nothing fires for the DLL module's procedures — with or without DLL attribute
+        const dllDiags = diagnostics.filter(d =>
+            /vuCPUSpeed|vuNoAttrib/i.test(d.message));
+        assert.strictEqual(dllDiags.length, 0,
+            `MODULE('vuFT3.dll') procedures must be exempt from missing-implementation. Got: ` +
+            JSON.stringify(dllDiags.map(d => d.message)));
+
+        // 2. The physical binary was never loaded into the token cache
+        const newEntries = TokenCache.getInstance().getAllCachedUris()
+            .filter(u => !cacheBefore.has(u));
+        const dllCacheEntry = newEntries.find(u => u.toLowerCase().endsWith('.dll'));
+        assert.strictEqual(dllCacheEntry, undefined,
+            `The .dll binary must not be loaded/tokenized. Cache gained: ${JSON.stringify(newEntries)}`);
+
+        // 3. The genuine source module still fires for its missing implementation
+        const realDiag = diagnostics.find(d => /MissingProc/i.test(d.message));
+        assert.ok(realDiag,
+            `MODULE('RealMod.clw') with a missing implementation must still fire. ` +
+            `All diagnostics: ${JSON.stringify(diagnostics.map(d => d.message))}`);
 
         for (const u of newEntries) {
             TokenCache.getInstance().clearTokens(u);

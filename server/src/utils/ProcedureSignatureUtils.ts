@@ -130,21 +130,49 @@ export class ProcedureSignatureUtils {
         if (implParams.length !== declParams.length) {
             return false;
         }
-        
+
         for (let i = 0; i < implParams.length; i++) {
             const implType = implParams[i];
             const declType = declParams[i];
-            
+
             // Normalize for comparison (remove extra spaces)
-            const normalizedImpl = implType.replace(/\s+/g, ' ').trim();
-            const normalizedDecl = declType.replace(/\s+/g, ' ').trim();
-            
+            const normalizedImpl = this.normalizeComplexRef(implType.replace(/\s+/g, ' ').trim());
+            const normalizedDecl = this.normalizeComplexRef(declType.replace(/\s+/g, ' ').trim());
+
             if (normalizedImpl !== normalizedDecl) {
                 return false;
             }
         }
-        
+
         return true;
+    }
+
+    /** Built-in scalar types, mirroring MethodOverloadResolver.isStringType/isNumericType.
+     *  For scalars `*X` ≠ `X` is a real overload discriminator (by-ref vs by-value). */
+    private static readonly SCALAR_TYPES = new Set([
+        'STRING', 'CSTRING', 'PSTRING', 'ASTRING',
+        'LONG', 'SHORT', 'BYTE', 'ULONG', 'USHORT', 'SIGNED', 'UNSIGNED',
+        'REAL', 'SREAL', 'BFLOAT4', 'BFLOAT8', 'DECIMAL', 'PDECIMAL',
+        'DATE', 'TIME', 'BOOL',
+    ]);
+
+    /**
+     * #248 (Rule 6, mirroring MethodOverloadResolver.extractParameterType): `*` is
+     * implicit for COMPLEX types — `*GroupType` ≡ `GroupType` (complex params are
+     * by-reference even without the `*`), so the two spellings are ONE overload.
+     * Scalar `*STRING` ≠ `STRING` is preserved (a genuine by-ref discriminator).
+     * Previously only MethodOverloadResolver applied this, so the two signature
+     * matchers disagreed about whether such decl/impl pairs were the same overload.
+     */
+    private static normalizeComplexRef(type: string): string {
+        if (!type.startsWith('*')) return type;
+        const base = type.slice(1).trim();
+        // Strip size args for the scalar check: *CSTRING(20) is still scalar.
+        const baseName = (base.split('(')[0] ?? '').trim().toUpperCase();
+        if (baseName && !this.SCALAR_TYPES.has(baseName)) {
+            return base;
+        }
+        return type;
     }
     
     /**

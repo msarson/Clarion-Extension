@@ -8,6 +8,7 @@ import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ScopeResolver } from '../scope/ScopeResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
@@ -351,6 +352,11 @@ export class WordCompletionProvider {
         const containingProc = scope?.containingProcedure ?? inferredProcedure;
         const containingRoutine = scope?.containingRoutine ?? inferredRoutine;
 
+        // Issue #233 (Rule 4): resolve a Local Derived Method's declaring procedure
+        // deterministically (the procedure whose LOCAL data declared its class) rather than
+        // guessing the owner by token range.
+        const resolver = new ScopeResolver(tokens);
+
         if (containingRoutine) {
             // Routine-local data section
             const routineEnd = containingRoutine.executionMarker?.line ?? containingRoutine.finishesAt ?? Number.MAX_SAFE_INTEGER;
@@ -369,7 +375,7 @@ export class WordCompletionProvider {
                 // Routine inside a MethodImplementation also sees the enclosing
                 // GlobalProcedure data section.
                 if (containingProc.subType === TokenType.MethodImplementation) {
-                    const ownerGlobal = this.findOwningGlobalProcedure(tokens, containingProc);
+                    const ownerGlobal = resolver.findDeclaringProcedureForMethod(containingProc);
                     if (ownerGlobal) {
                         this.collectProcLocals(tokens, ownerGlobal, procDeclLines, add);
                         this.collectProcPrefixedFields(tokens, ownerGlobal, add);
@@ -391,7 +397,7 @@ export class WordCompletionProvider {
 
             // MethodImplementation shares the enclosing GlobalProcedure's locals
             if (isInMethodImpl) {
-                const ownerGlobal = this.findOwningGlobalProcedure(tokens, containingProc);
+                const ownerGlobal = resolver.findDeclaringProcedureForMethod(containingProc);
                 if (ownerGlobal) {
                     this.collectProcLocals(tokens, ownerGlobal, procDeclLines, add);
                     this.collectProcPrefixedFields(tokens, ownerGlobal, add);
@@ -578,23 +584,6 @@ export class WordCompletionProvider {
     ): void {
         const codeMarkerLine = proc.executionMarker?.line ?? proc.finishesAt ?? Number.MAX_SAFE_INTEGER;
         this.collectPrefixedFieldsInRange(tokens, proc.line, codeMarkerLine, add);
-    }
-
-    /** Resolve the GlobalProcedure that owns a MethodImplementation token. */
-    private findOwningGlobalProcedure(tokens: Token[], methodProc: Token): Token | undefined {
-        const byRange = tokens.find(t =>
-            t.subType === TokenType.GlobalProcedure &&
-            t.finishesAt !== undefined &&
-            methodProc.line >= t.line &&
-            methodProc.line <= t.finishesAt
-        );
-        if (byRange) return byRange;
-
-        // Fallback for imperfect finishesAt metadata: pick nearest preceding GlobalProcedure.
-        const precedingGlobals = tokens
-            .filter(t => t.subType === TokenType.GlobalProcedure && t.line < methodProc.line)
-            .sort((a, b) => b.line - a.line);
-        return precedingGlobals[0];
     }
 
     // -------------------------------------------------------------------------

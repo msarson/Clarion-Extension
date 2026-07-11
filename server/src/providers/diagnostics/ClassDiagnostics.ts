@@ -3,6 +3,7 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 
 /**
  * Warns when a CLASS declares `IMPLEMENTS(SomeInterface)` but does not provide an
@@ -35,19 +36,31 @@ import { MemberLocatorService } from '../../services/MemberLocatorService';
 export async function validateClassInterfaceImplementationAsync(
     tokens: Token[],
     document: TextDocument,
-    memberLocator: MemberLocatorService
+    memberLocator: MemberLocatorService,
+    documentStructure?: DocumentStructure
 ): Promise<Diagnostic[]> {
     const diagnostics: Diagnostic[] = [];
 
-    const structure = new DocumentStructure(tokens);
-    structure.process();
+    // #258: production callers (DiagnosticProvider) pass the CACHED structure — this
+    // previously re-processed the shared token array on every validation cycle. The
+    // build-from-passed-tokens fallback remains for direct callers (tests).
+    let structure = documentStructure;
+    if (!structure) {
+        structure = new DocumentStructure(tokens);
+        structure.process();
+    }
 
     const classes = structure.getClasses();
     if (classes.length === 0) return diagnostics;
 
     const inlineAllowed = structure.getDocumentKind() !== undefined;
 
+    // #297: per-class resolution walks include chains / modules cross-file — yield on a time
+    // budget so a class-heavy file doesn't hold the LSP loop through the whole pass.
+    const timeSlice = makeTimeSlicer();
+
     for (const cls of classes) {
+        await timeSlice();
         const implemented = cls.implementedInterfaces;
         if (!implemented || implemented.length === 0) continue;
 

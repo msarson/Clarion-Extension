@@ -301,6 +301,6 @@ Build output appears in the integrated terminal.
 ### Need More Help?
 
 - **[Installation Guide](installation.md)** - Detailed setup
-- **[Full Documentation](../GETTING_STARTED.md)** - Complete guide
+- **[Installation Guide](installation.md)** - Detailed setup
 - **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)** - Report bugs
 

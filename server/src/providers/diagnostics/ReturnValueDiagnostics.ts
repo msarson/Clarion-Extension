@@ -4,11 +4,13 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { selectBestMemberOverload, OverloadCandidate } from '../../utils/ClassMemberResolver';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
 import { SolutionManager } from '../../solution/solutionManager';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 
@@ -20,7 +22,10 @@ logger.setLevel("error");
 // "error" at final commit.
 // #158 — level set to "error" post-investigation. Flip to "perf" for
 // future investigations (single-character toggle).
-const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "error");
+// "perf" → the completion breakdown (dotcall loop vs crossfile scan, unique member resolutions)
+// always emits, even in a release VSIX — one line per validation, needed to diagnose slow-solution
+// reports.
+const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "perf");
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
@@ -40,14 +45,16 @@ function getCodeBlockRanges(
         const codeStart = t.executionMarker.line + 1;
         const procEnd = t.finishesAt ?? tokens[tokens.length - 1].line;
 
+        // #308: the tokenizer splits `MyClass.DoWork PROCEDURE` into
+        // Label("MyClass") + Variable("DoWork"), so the old col-0 Label
+        // scan-back never saw a dot and derived null — silently skipping every
+        // SELF/PARENT dot-call site. The PROCEDURE token itself carries the
+        // full dotted name in `label` (MethodImplementation subtype); the class
+        // is its first segment (covers 3-part Class.Interface.Method too).
         let selfClassName: string | null = null;
-        for (let k = i - 1; k >= 0; k--) {
-            if (tokens[k].line < t.line) break;
-            if (tokens[k].type === TokenType.Label && tokens[k].start === 0) {
-                const parts = tokens[k].value.split('.');
-                selfClassName = parts.length >= 2 ? parts[0] : null;
-                break;
-            }
+        if (sub === TokenType.MethodImplementation && t.label) {
+            const dotIdx = t.label.indexOf('.');
+            if (dotIdx > 0) selfClassName = t.label.substring(0, dotIdx);
         }
 
         ranges.push({ start: codeStart, end: procEnd, selfClassName });
@@ -81,6 +88,9 @@ function isNonProcReturnMethod(typeStr: string): boolean {
     return /\b(LONG|SHORT|BYTE|SIGNED|UNSIGNED|STRING|CSTRING|PSTRING|REAL|DECIMAL|DATE|TIME|SREAL|BLOB|QUEUE|GROUP|CLASS|BOOL|ANY|BFILE|FILE)\b/.test(afterParen);
 }
 
+/** #294 visibility: how many files the last cross-file plain-call scan actually covered. */
+let lastCrossFileFilesScanned = 0;
+
 function validateCrossFilePlainCalls(
     currentTokens: Token[],
     document: TextDocument,
@@ -108,23 +118,16 @@ function validateCrossFilePlainCalls(
         filesToScan.set(uri.toLowerCase(), { uri });
     }
 
-    // #162 V1 — include unopened project files, not just TokenCache entries.
-    const solutionManager = SolutionManager.getInstance();
-    if (solutionManager?.solution?.projects?.length) {
-        for (const project of solutionManager.solution.projects) {
-            for (const sourceFile of project.sourceFiles) {
-                const fullPath = path.isAbsolute(sourceFile.relativePath)
-                    ? sourceFile.relativePath
-                    : path.join(project.path, sourceFile.relativePath);
-                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
-                if (uri.toLowerCase() === currentUri.toLowerCase()) continue;
-                const key = uri.toLowerCase();
-                if (!filesToScan.has(key)) {
-                    filesToScan.set(key, { uri, fsPath: fullPath });
-                }
-            }
-        }
-    }
+    // #162 V1 included EVERY unopened project source file here. That was only ever affordable
+    // because the #293 resolution bug capped "every project file" at ~41; with resolution fixed
+    // (~3,016 files) this pass cold-loads and tokenizes the entire solution per validated
+    // document, freezing the server for minutes. REVERTED to cached/open files (pre-#162 scope)
+    // per Mark's call — identical to the behavior users actually observed. True solution-wide
+    // coverage returns with the one-pass reference index (#294), which makes it O(total tokens)
+    // once instead of per-document sweeps. NOTE (no silent caps): the
+    // "validateDiscardedReturnValues complete" perf line carries crossfile_files_scanned so the
+    // reduced scope stays visible.
+    lastCrossFileFilesScanned = filesToScan.size;
 
     for (const { uri, fsPath } of filesToScan.values()) {
         let otherTokens = cache.getTokensByUri(uri);
@@ -265,15 +268,19 @@ function isInsideMapOrClass(structure: DocumentStructure, token: Token): boolean
     return false;
 }
 
-export function validateReturnStatements(tokens: Token[], document: TextDocument): Diagnostic[] {
+export function validateReturnStatements(tokens: Token[], document: TextDocument, documentStructure?: DocumentStructure): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const docLines = document.getText().split('\n');
 
-    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership
-    // (replaces the bespoke depth tracking below). Fresh instance + single process(),
-    // mirroring AttributeDiagnostics/ClassDiagnostics.
-    const structure = new DocumentStructure(tokens);
-    structure.process();
+    // #163 — consume the shared parent-index substrate for MAP/CLASS scope membership.
+    // #258: production callers (DiagnosticProvider) pass the CACHED structure — this
+    // previously re-processed the shared token array on every validation cycle. The
+    // build-from-passed-tokens fallback remains for direct callers (tests).
+    let structure = documentStructure;
+    if (!structure) {
+        structure = new DocumentStructure(tokens);
+        structure.process();
+    }
 
     const declarationsWithReturnTypes: Array<{
         name: string;
@@ -732,7 +739,83 @@ export async function validateDiscardedReturnValues(
     let dotCallSites = 0;
     let cacheHits = 0;
 
+    // #305 — the #158 tuple memo only collapses REPEATS of the same method; distinct
+    // methods on the same receiver each still paid a full multi-tier cross-file walk
+    // (16s for 22 sites / 14 unique tuples on a generated report module — inherited
+    // members miss every include-chain tier before the parent-chain tier hits).
+    // Receivers repeat far more than (receiver, method) tuples, so:
+    //   1. resolve each receiver's TYPE once (typeMemo), and
+    //   2. enumerate each unique receiver CLASS's members (incl. ancestors) once
+    //      (classMembersMemo, one inheritance-chain walk), answering every method
+    //      lookup from the enumeration.
+    // `callerClass=className` disables the access filter — parity with
+    // findMemberInClass, which never filtered. A class that can't be enumerated
+    // (interface receivers, GROUP/QUEUE types, unresolvable) falls back to the
+    // #158 per-site path so decisions never regress.
+    const typeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
+    const classMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+    let enumResolvedSites = 0;
+    let fallbackSites = 0;
+
+    const countParamsInSignature = (line: string): number => {
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
+        if (!match) return 0;
+        const paramList = match[1].trim();
+        if (!paramList) return 0;
+        let depth = 0, count = 0;
+        for (const char of paramList) {
+            if (char === '(') depth++;
+            else if (char === ')') depth--;
+            else if (char === ',' && depth === 0) count++;
+        }
+        return count + 1;
+    };
+
+    const getClassMembers = (className: string): Promise<Map<string, OverloadCandidate[]> | null> => {
+        const classKey = className.toLowerCase();
+        let promise = classMembersMemo.get(classKey);
+        if (!promise) {
+            promise = (async () => {
+                try {
+                    const enumStart = Date.now();
+                    const items = await memberLocator.enumerateMembersInClass(className, document, className);
+                    const enumMs = Date.now() - enumStart;
+                    if (enumMs >= 250) {
+                        perfLogger.perf("RVD slow class enumeration", {
+                            class: className, ms: enumMs, members: items?.length ?? 0
+                        });
+                    }
+                    if (!items || items.length === 0) return null;
+                    const byName = new Map<string, OverloadCandidate[]>();
+                    for (const item of items) {
+                        const nameKey = item.name.toLowerCase();
+                        let list = byName.get(nameKey);
+                        if (!list) { list = []; byName.set(nameKey, list); }
+                        list.push({
+                            type: item.type,
+                            line: item.line,
+                            paramCount: countParamsInSignature(item.signature),
+                            signature: item.signature
+                        });
+                    }
+                    return byName;
+                } catch {
+                    return null; // enumeration failure → per-site fallback, never a dead validator
+                }
+            })();
+            classMembersMemo.set(classKey, promise);
+        }
+        return promise;
+    };
+
+    // #297: this loop measured 3.9s on a 5k-token generated module (dotcall_loop_ms=3876,
+    // essentially one sync stretch) and scales with document size — on the 20k-token gl1.clw
+    // it pinned the LSP loop long enough to starve an in-memory tree request past its 15s
+    // timeout. Yield on a time budget so interactive requests interleave.
+    const timeSlice = makeTimeSlicer();
+
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
+        await timeSlice();
         const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
         if (!range) continue;
 
@@ -785,28 +868,74 @@ export async function validateDiscardedReturnValues(
         const isSelfOrParent = objUpper === 'SELF' || objUpper === 'PARENT';
         if (isSelfOrParent && !range.selfClassName) continue;
 
-        const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
-        const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
-
-        let memberInfoPromise = memberCache.get(cacheKey);
-        if (!memberInfoPromise) {
-            if (isSelfOrParent) {
-                memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
-            } else {
-                memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
-            }
-            memberCache.set(cacheKey, memberInfoPromise);
+        // #305: receiver class — from the code range for SELF/PARENT, else one
+        // memoized type resolution per receiver name.
+        let className: string | null;
+        if (isSelfOrParent) {
+            className = range.selfClassName!;
         } else {
-            cacheHits++;
+            let typePromise = typeMemo.get(objUpper);
+            if (!typePromise) {
+                // #310 follow-up: name slow receiver-type resolutions — the 8.5s→6.6s
+                // shortfall means the cost split (type resolution vs enumeration vs
+                // guard-skipped SDI) is not what the aggregate line suggests.
+                const typeStart = Date.now();
+                typePromise = memberLocator.resolveVariableType(objectName, tokens, document);
+                typePromise.then(() => {
+                    const typeMs = Date.now() - typeStart;
+                    if (typeMs >= 250) {
+                        perfLogger.perf("RVD slow receiver-type resolution", { object: objectName, ms: typeMs });
+                    }
+                }).catch(() => { /* logged at source */ });
+                typeMemo.set(objUpper, typePromise);
+            }
+            const typeInfo = await typePromise;
+            if (!typeInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: receiver type unresolved for ${objectName}.${methodName}`);
+                continue; // parity: resolveDotAccess skipped on a type miss
+            }
+            className = typeInfo.typeName;
         }
-        const memberInfo = await memberInfoPromise;
 
-        if (!memberInfo) {
-            logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
-            continue;
+        let typeStr: string | null = null;
+        const members = await getClassMembers(className);
+        if (members) {
+            enumResolvedSites++;
+            const candidates = members.get(methodName.toLowerCase());
+            // Class known, member absent → the tiered path also resolved null here.
+            if (!candidates || candidates.length === 0) continue;
+            const best = selectBestMemberOverload(candidates, paramCount);
+            if (!best) continue;
+            typeStr = best.type;
+        } else {
+            // Class not enumerable — #158 per-site tiered path (interface receivers,
+            // GROUP/QUEUE types), memoized per (obj|method|paramCount|selfContext).
+            fallbackSites++;
+            const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
+            const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
+
+            let memberInfoPromise = memberCache.get(cacheKey);
+            if (!memberInfoPromise) {
+                if (isSelfOrParent) {
+                    memberInfoPromise = memberLocator.findMemberInClass(range.selfClassName!, methodName, document, paramCount);
+                } else {
+                    memberInfoPromise = memberLocator.resolveDotAccess(objectName, methodName, document, paramCount);
+                }
+                memberCache.set(cacheKey, memberInfoPromise);
+            } else {
+                cacheHits++;
+            }
+            const memberInfo = await memberInfoPromise;
+
+            if (!memberInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: no memberInfo resolved for ${objectName}.${methodName}`);
+                continue;
+            }
+            typeStr = memberInfo.type ?? '';
         }
-        logger.debug(`🔍 Line ${lineIdx + 1}: ${objectName}.${methodName} → type="${memberInfo.type}" isNonProc=${isNonProcReturnMethod(memberInfo.type ?? '')}`);
-        if (!isNonProcReturnMethod(memberInfo.type ?? '')) continue;
+
+        logger.debug(`🔍 Line ${lineIdx + 1}: ${objectName}.${methodName} → type="${typeStr}" isNonProc=${isNonProcReturnMethod(typeStr ?? '')}`);
+        if (!isNonProcReturnMethod(typeStr ?? '')) continue;
 
         const colStart = rawLine.search(/\S/);
         diagnostics.push({
@@ -831,7 +960,11 @@ export async function validateDiscardedReturnValues(
         total_ms: Date.now() - fnStart,
         dotcall_loop_ms: dotCallMs,
         crossfile_ms: crossFileMs,
+        crossfile_files_scanned: lastCrossFileFilesScanned,
         dotcall_sites: dotCallSites,
+        enum_classes: classMembersMemo.size,
+        enum_resolved_sites: enumResolvedSites,
+        fallback_sites: fallbackSites,
         cache_hits: cacheHits,
         cache_unique_keys: memberCache.size,
         diag_count: diagnostics.length,

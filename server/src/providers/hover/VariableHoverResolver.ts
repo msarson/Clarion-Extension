@@ -9,6 +9,7 @@ import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
@@ -65,10 +66,10 @@ export class VariableHoverResolver {
                 type: symbolInfo.type,
                 line: symbolInfo.location.line
             };
-            const baseHover = this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document, hoverLine);
-            
-            // Enhance with class definition info if applicable
-            return await this.enhanceHoverWithClassInfo(baseHover, symbolInfo.type, document);
+            // #302 follow-up (Mark): no class-definition appendix — the declaration line and
+            // location already carry everything the hover needs; F12 on the type covers "where
+            // is the class defined".
+            return this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document, hoverLine);
         }
         return null;
     }
@@ -256,7 +257,7 @@ export class VariableHoverResolver {
             ``
         ];
         
-        const isProcedure = typeInfo === 'PROCEDURE';
+        const isProcedure = ProcedureUtils.isProcedureKeyword(typeInfo); // #247: PROCEDURE ≡ FUNCTION
         const isEquate = typeInfo === 'EQUATE';
 
         if (isClassProperty) {
@@ -383,81 +384,4 @@ export class VariableHoverResolver {
         return this.tokenCache.getTokens(document);
     }
 
-    /**
-     * Enhance hover text with class definition info from the indexer
-     * @param baseHover The base hover text
-     * @param typeName The type name to look up
-     * @param document The current document
-     * @returns Enhanced hover or original if no class info found
-     */
-    async enhanceHoverWithClassInfo(baseHover: Hover, typeName: string, document: TextDocument): Promise<Hover> {
-        try {
-            // Extract just the type name without decorators like & or *
-            const cleanTypeName = typeName.replace(/^[&*\s]+/, '').trim();
-            
-            logger.info(`Looking up class definition for type: ${cleanTypeName}`);
-            
-            // Get project path from document URI
-            const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            const projectPath = SolutionManager.getInstance()?.getProjectPathForFile(docPath) ?? path.dirname(docPath);
-            
-            // Try to get or build index for this project
-            const index = await this.sdi.getOrBuildIndex(projectPath);
-            
-            // Look up the class
-            const definitions = this.sdi.find(cleanTypeName, projectPath);
-            
-            const classDefs = definitions.filter(d =>
-                d.structureType === 'CLASS' || d.structureType === 'INTERFACE'
-            );
-            if (classDefs.length > 0) {
-                const def = classDefs[0]; // Use first class/interface definition
-                
-                logger.info(`Found class definition: ${def.name} in ${def.filePath}:${def.line + 1}`);
-                
-                // Extract just the filename from the full path
-                const fileName = path.basename(def.filePath);
-                
-                // Build enhanced hover text
-                const classInfo = [
-                    ``,
-                    `---`,
-                    `**${def.structureType} Definition:**`,
-                    `- Type: ${def.structureType}${def.isType ? ',TYPE' : ''}`,
-                ];
-                
-                if (def.parentName) {
-                    classInfo.push(`- Parent: \`${def.parentName}\``);
-                }
-                classInfo.push(`${fileName}:${def.line + 1}`);
-                
-                // Append to existing hover content
-                let existingContent = '';
-                if (typeof baseHover.contents === 'string') {
-                    existingContent = baseHover.contents;
-                } else if ('kind' in baseHover.contents && 'value' in baseHover.contents) {
-                    existingContent = baseHover.contents.value;
-                } else if (Array.isArray(baseHover.contents)) {
-                    existingContent = baseHover.contents.map(c => typeof c === 'string' ? c : c.value).join('\n');
-                }
-                
-                const enhancedContent = existingContent + '\n' + classInfo.join('\n');
-                
-                return {
-                    contents: {
-                        kind: 'markdown',
-                        value: enhancedContent
-                    },
-                    range: baseHover.range
-                };
-            }
-            
-            logger.info(`No class definition found for: ${cleanTypeName}`);
-        } catch (error) {
-            logger.error(`Error enhancing hover with class info: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        
-        // Return original hover if no enhancement possible
-        return baseHover;
     }
-}

@@ -495,7 +495,7 @@ export class CompletionProvider {
         }
 
         // Method — extract params from PROCEDURE(...)
-        const procMatch = typeStr.match(/^PROCEDURE\s*(\([^)]*\))?(?:\s*,\s*(.+))?$/i);
+        const procMatch = typeStr.match(/^(?:PROCEDURE|FUNCTION)\s*(\([^)]*\))?(?:\s*,\s*(.+))?$/i); // #247
         if (procMatch) {
             const params = procMatch[1] ?? '()';
             const ret = (procMatch[2] ?? '').trim();

@@ -33,15 +33,13 @@ export async function getAllOpenDocuments(): Promise<TextDocument[]> {
 
                     // Check if this is a file URI (not a settings or other special URI)
                     if (documentUri.scheme === 'file') {
-                        let doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
-
-                        if (!doc) {
-                            try {
-                                doc = await workspace.openTextDocument(documentUri);
-                            } catch (error) {
-                                logger.error(`❌ Failed to open document: ${documentUri.fsPath}`, error);
-                            }
-                        }
+                        // #297 fix 10: session-restored tabs are lazy — VS Code hasn't loaded
+                        // their documents yet. The old workspace.openTextDocument() here forced
+                        // every restored tab to load, firing a didOpen (and a server-side
+                        // tokenize+validate) per tab at the busiest moment of startup. Only
+                        // documents VS Code has actually materialised are refreshed; a lazy tab
+                        // gets its didOpen naturally when the user first views it.
+                        const doc = workspace.textDocuments.find(d => d.uri.toString() === documentUri.toString());
 
                         if (doc) {
                             openDocuments.push(doc);

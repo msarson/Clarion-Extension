@@ -6,6 +6,7 @@ import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection } from '../globals';
 import { readActiveConfigFromSlnCache, configNameFromFull } from './SlnCacheUtils';
 import LoggerManager from './LoggerManager';
+import { PathUtils } from '../PathUtils';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -67,8 +68,8 @@ export class SmartSolutionOpener {
             }>>('solutions', []);
 
             // Find the solution in the array
-            const existingSolution = solutions.find(s => 
-                s.solutionFile.toLowerCase() === solutionPath.toLowerCase()
+            const existingSolution = solutions.find(s =>
+                PathUtils.equalPath(s.solutionFile, solutionPath) // #266
             );
 
             if (!existingSolution) {

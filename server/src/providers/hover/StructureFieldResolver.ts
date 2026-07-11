@@ -214,7 +214,7 @@ export class StructureFieldResolver {
                         // #125 — arg-classify overlay for typed-var dot-access call hovers.
                         // Pick the matching overload before falling through to paramCount-only.
                         if (hasParentheses) {
-                            const picked = this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
+                            const picked = await this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
                             if (picked) {
                                 logger.info(`✅ Arg-classify resolved typed-var hover "${fieldName}" in "${varType}" to line ${picked.line}`);
                                 return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
@@ -244,32 +244,19 @@ export class StructureFieldResolver {
      * `MethodHoverResolver.resolveChainedMethodCall`; returns null to signal
      * "fall through to existing paramCount-only path".
      */
-    private tryArgClassifyResolve(
+    private async tryArgClassifyResolve(
         tokens: Token[],
         document: TextDocument,
         className: string,
         methodName: string,
         callLine: number
-    ): { type: string; className: string; line: number; file: string } | null {
-        const lowerMethod = methodName.toLowerCase();
-        const callNameIdx = tokens.findIndex(t =>
-            t.line === callLine && (
-                t.value.toLowerCase() === lowerMethod ||
-                t.value.toLowerCase().endsWith('.' + lowerMethod)
-            ));
-        if (callNameIdx < 0) return null;
-
-        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
-        if (!args) return null;
-
-        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
-        if (candidates.length < 2) return null;
-
-        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
-            args, candidates.map(c => c.signature));
-        if (matchedAll || matchedIndex < 0) return null;
-
-        const picked = candidates[matchedIndex];
+    ): Promise<{ type: string; className: string; line: number; file: string } | null> {
+        // #252 — delegates to the single enriched choke point (this method was a
+        // verbatim un-enriched copy of MethodOverloadResolver.resolveOverloadDeclByArgs,
+        // so typed arguments never disambiguated on this hover path).
+        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
+            className, methodName, document, tokens, callLine);
+        if (!picked) return null;
         return { type: 'PROCEDURE', className, line: picked.line, file: picked.file };
     }
 

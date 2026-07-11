@@ -26,6 +26,7 @@ import { ProcedureHoverResolver } from './hover/ProcedureHoverResolver';
 import { MethodHoverResolver } from './hover/MethodHoverResolver';
 import { RoutineHoverResolver } from './hover/RoutineHoverResolver';
 import { HoverContextBuilder } from './hover/HoverContextBuilder';
+import { FileDefinitionResolver } from '../utils/FileDefinitionResolver';
 import { HoverRouter } from './hover/HoverRouter';
 import { StructureFieldResolver } from './hover/StructureFieldResolver';
 import { CrossFileCache } from './hover/CrossFileCache';
@@ -40,6 +41,18 @@ import * as path from 'path';
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("error");
 
+// Hover attribution — the "LSP slow handler | onHover" line gives a total but not
+// WHERE it went. Visible when clarion.log.performance.enabled; emits only for
+// hovers ≥ threshold, naming the stages of the resolution ladder.
+const perfLogger = LoggerManager.getLogger("HoverProvider.Perf", "perf");
+const HOVER_SLOW_REPORT_MS = 250;
+
+/** Per-request stage trace threaded through the resolution ladder. */
+interface HoverTrace {
+    stages: Array<[string, number]>;
+    word?: string;
+}
+
 /**
  * Provides hover information for local variables and parameters
  */
@@ -50,6 +63,7 @@ export class HoverProvider {
     private crossFileCache: CrossFileCache;
     private mapResolver: MapProcedureResolver;
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
+    private fileResolver = new FileDefinitionResolver(); // #265 — shared with F12's #171 path
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
@@ -103,19 +117,65 @@ export class HoverProvider {
      * Provides hover information for a position in the document
      */
     public async provideHover(document: TextDocument, position: Position): Promise<Hover | null> {
-        return this._provideHoverInternal(document, position);
+        const t0 = Date.now();
+        const trace: HoverTrace = { stages: [] };
+        try {
+            return await this._provideHoverInternal(document, position, trace);
+        } finally {
+            const totalMs = Date.now() - t0;
+            if (totalMs >= HOVER_SLOW_REPORT_MS) {
+                const top = trace.stages
+                    .filter(([, ms]) => ms >= 25)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5)
+                    .map(([name, ms]) => `${name}=${ms}`)
+                    .join(', ');
+                perfLogger.perf("Hover slow", {
+                    total_ms: totalMs,
+                    top: top || '(all stages <25ms — cost is queue/tokenize)',
+                    word: trace.word ?? '(pre-context)',
+                    line: position.line,
+                    character: position.character,
+                    uri: document.uri
+                });
+            }
+        }
     }
 
-    private async _provideHoverInternal(document: TextDocument, position: Position): Promise<Hover | null> {
+    private async _provideHoverInternal(document: TextDocument, position: Position, trace: HoverTrace): Promise<Hover | null> {
+        let stageStart = Date.now();
+        const mark = (name: string) => {
+            const now = Date.now();
+            trace.stages.push([name, now - stageStart]);
+            stageStart = now;
+        };
 
         try {
+            // #265 — INCLUDE/MODULE/MEMBER/LINK filename hover (mirror of F12's
+            // #171 exception). The context builder bails on any cursor inside a
+            // string literal, so this must run BEFORE it: when the cursor is on
+            // the filename argument of a file-ref statement, show the RESOLVED
+            // path (the redirection answer — the filename alone doesn't tell you
+            // which copy wins). The detector scopes to the FIRST string after the
+            // file-ref token, so SECTION args still fall through to the bail.
+            {
+                const preTokens = this.tokenCache.getTokens(document);
+                const fileRefStr = TokenHelper.getFileRefArgStringToken(preTokens, position.line, position.character);
+                mark('tokenize+fileRef');
+                if (fileRefStr) {
+                    return this.buildFileRefHover(fileRefStr, preTokens, document);
+                }
+            }
+
             // Build hover context
             const context = await this.contextBuilder.build(document, position);
+            mark('contextBuild');
             if (!context) {
                 return null; // No word or in OMIT block
             }
-            
+
             const { word, wordRange, line, tokens, currentScope } = context;
+            trace.word = word;
 
             // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
             // GROUP(Type), INTERFACE(Type), or LIKE(Type) — skip all slow symbol resolution
@@ -132,6 +192,7 @@ export class HoverProvider {
 
             // ✅ Hover on IMPLEMENTS(InterfaceName): show interface method signatures
             const implementsHover = await this.buildImplementsHover(word, line, position, document, tokens);
+            mark('implementsHover');
             if (implementsHover) return implementsHover;
 
             // ✅ Hover on 3-part method line (ClassName.InterfaceName.MethodName PROCEDURE)
@@ -149,14 +210,17 @@ export class HoverProvider {
 
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
             const routedHover = await this.router.route(context);
+            mark('router');
             if (routedHover) { return routedHover; }
 
             // Check for structure.field access (e.g., MyGroup.MyVar)
             const structureHover = await this.structureFieldResolver.resolveStructureAccess(word, line, position, document);
+            mark('structureAccess');
             if (structureHover) { return structureHover; }
 
             // Check for field access after dot (e.g., self.member or variable.member)
             const fieldHover = await this.structureFieldResolver.resolveFieldAccess(word, line, position, document, this.countParametersInCall.bind(this));
+            mark('fieldAccess');
             if (fieldHover) { return fieldHover; }
 
             // currentScope already destructured above from context
@@ -169,22 +233,26 @@ export class HoverProvider {
             );
             if (declarationScope) {
                 const declarationParamHover = this.variableResolver.findParameterHover(word, document, declarationScope);
+                mark('declParam');
                 if (declarationParamHover) return declarationParamHover;
             }
 
             if (!currentScope) {
                 // Check for global variable (in current file or MEMBER parent)
                 const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document, position.line);
+                mark('globalVar(noScope)');
                 if (globalVarHover) return globalVarHover;
-                
+
                 logger.info('No scope found and no global variable found - cannot provide hover');
-                
+
                 const classTypeHover = await this.checkClassTypeHover(word, document);
+                mark('classType(noScope)');
                 if (classTypeHover) return classTypeHover;
 
                 const structTypeHover = await this.structureFieldResolver.resolveTypeNameHover(word, document);
+                mark('structType(noScope)');
                 if (structTypeHover) return structTypeHover;
-                
+
                 return null;
             }
 
@@ -193,6 +261,7 @@ export class HoverProvider {
             // First, try searching with the full word (handles labels with colons like BRW1::View:Browse)
             logger.info(`Checking if ${word} (full word) is a parameter...`);
             let parameterHover = this.variableResolver.findParameterHover(word, document, currentScope);
+            mark('paramFull');
             if (parameterHover) return parameterHover;
 
             // If the current scope is a MethodImplementation (e.g. ThisWindow.Init inside Main),
@@ -210,10 +279,12 @@ export class HoverProvider {
 
             logger.info(`Checking if ${word} (full word) is a local variable...`);
             let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line);
+            mark('localVar');
             if (variableHover) return variableHover;
-            
+
             logger.info(`Checking for ${word} (full word) as module-local variable...`);
             let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
+            mark('moduleVar');
             if (moduleVarHover) return moduleVarHover;
 
             logger.info(`${word} not found locally - checking MEMBER parent file`);
@@ -235,17 +306,19 @@ export class HoverProvider {
                 logger.info(`Resolved MEMBER path: ${resolvedPath}`);
                 
                 const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
+                mark('memberParentLoad');
                 if (cached) {
                     const { document: parentDoc, tokens: parentTokens } = cached;
                     logger.info(`Loaded parent file, found ${parentTokens.length} tokens`);
-                    
+
                     // First check if this is a procedure in the MAP (before treating as variable)
                     const localScope = getLocalMapScope(document.uri);
                     const mapDecl = this.mapResolver.findMapDeclaration(word, parentTokens, parentDoc, line, localScope?.containingProcedure);
-                    
+                    mark('parentMapDecl');
+
                     if (mapDecl) {
                         logger.info(`✅ Found MAP declaration for ${word} in parent - treating as procedure call`);
-                        
+
                         const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                         const procImpl = await this.mapResolver.findProcedureImplementation(
                             word,
@@ -254,27 +327,31 @@ export class HoverProvider {
                             mapPosition,
                             line
                         );
-                        
+                        mark('parentProcImpl');
+
                         return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
                     }
-                    
+
                     // Not a procedure — check for global variable in parent's own scope only.
                     // Use full word (e.g., Access:IBSDataSets) — colon is part of the label name.
                     // shallowOnly=true: skips recursive include chain, handled by findInIncludesAndEquates below.
                     const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
+                    mark('parentGlobalVar');
                     if (globalVarHover) return globalVarHover;
                 }
             }
-            
+
             logger.info(`❌ ${word} not found in MEMBER parent`);
-            
+
             // Check INCLUDE files of the current file and equates.clw
             const includesHover = await this.variableResolver.findInIncludesAndEquates(word, tokens, document);
+            mark('includesAndEquates');
             if (includesHover) return includesHover;
 
             // 🔍 Last resort: Check if this word is a CLASS type reference
             logger.debug(`Falling through to checkClassTypeHover for "${word}"`);
             const classTypeHover = await this.checkClassTypeHover(word, document);
+            mark('classType');
             if (classTypeHover) {
                 logger.info(`✅ HOVER-RETURN: Found CLASS type hover for ${word}`);
                 return classTypeHover;
@@ -283,6 +360,7 @@ export class HoverProvider {
             // 🔍 Check if this word is a structure type (QUEUE/GROUP) declared in an INCLUDE file
             // Handles hovering over type names in LIKE(TypeName), QUEUE(TypeName), etc.
             const structTypeHover = await this.structureFieldResolver.resolveTypeNameHover(word, document);
+            mark('structType');
             if (structTypeHover) {
                 logger.info(`✅ HOVER-RETURN: Found structure type hover for ${word}`);
                 return structTypeHover;
@@ -783,6 +861,37 @@ export class HoverProvider {
      */
     public clearCache(): void {
         this.crossFileCache.clear();
+    }
+
+    /**
+     * #265 — hover card for a file-ref filename (INCLUDE / MODULE / MEMBER /
+     * LINK argument): statement keyword + filename + the redirection-resolved
+     * absolute path, or a not-found note. Shares FileDefinitionResolver with
+     * F12 so both surfaces always agree on which physical file wins.
+     */
+    private async buildFileRefHover(fileRefStr: Token, tokens: Token[], document: TextDocument): Promise<Hover | null> {
+        const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
+        if (!filename) return null;
+
+        // The statement keyword: the file-ref-carrying token on the same line.
+        const refToken = tokens.find(t =>
+            t.line === fileRefStr.line && t.referencedFile !== undefined && t.referencedFile.length > 0);
+        const keyword = refToken ? refToken.value.toUpperCase() : 'INCLUDE';
+
+        const loc = await this.fileResolver.findFileDefinition(filename, document.uri);
+        const lines: string[] = [`**${keyword}** \`${filename}\``];
+        if (loc) {
+            const fsPath = decodeURIComponent(loc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            lines.push(`Resolves to: \`${fsPath}\``);
+        } else {
+            lines.push('⚠️ File not found via project paths or redirection');
+        }
+        return {
+            contents: { kind: 'markdown', value: lines.join('\n\n') },
+            range: Range.create(
+                fileRefStr.line, fileRefStr.start,
+                fileRefStr.line, fileRefStr.start + fileRefStr.value.length)
+        };
     }
 
     /**

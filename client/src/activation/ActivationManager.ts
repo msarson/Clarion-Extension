@@ -13,10 +13,9 @@ import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { shouldRestoreSolutionFromHistory } from '../utils/SolutionFallbackPolicy';
-import { updateBuildProjectStatusBar } from '../statusbar/StatusBarManager';
+import { refreshActiveEditorScopedStatusBars } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
-import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 
 const logger = LoggerManager.getLogger("ActivationManager");
 logger.setLevel("error");
@@ -74,7 +73,9 @@ export function registerEventListeners(context: ExtensionContext): void {
     logger.info("🔄 Phase 4: Setting up event listeners...");
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor(() => {
-            updateBuildProjectStatusBar();
+            // #273 — re-scope version/config/build visibility to the active editor's language
+            // (this also recomputes the build item for the newly focused file).
+            refreshActiveEditorScopedStatusBars();
         })
     );
     logger.info("✅ Phase 4 complete: Event listeners registered");
@@ -218,7 +219,10 @@ export async function setupFolderDependentFeatures(
         );
 
         if (!isRefreshingRef.value) {
-            await refreshOpenDocuments(state.documentManager);
+            // #297 fix 9: the refreshOpenDocuments(state.documentManager) that lived here ran
+            // BEFORE the DocumentManager exists — a guaranteed no-op that still awaited a
+            // 0.3-0.8s enumeration of workspace.textDocuments on the activation path. The real
+            // refresh runs in the clarion/solutionReady handler once the manager is live.
 
             // #146 audit (#169): the GlobalSolutionHistory restore below was bypassing
             // the explicit-close gate that initializeFromWorkspace honours at

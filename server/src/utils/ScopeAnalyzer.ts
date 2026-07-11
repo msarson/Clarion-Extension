@@ -4,6 +4,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from './TokenHelper';
+import { ScopeKind } from '../scope/ScopeTypes';
 import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
 import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
@@ -55,8 +56,20 @@ export class ScopeAnalyzer {
 
         const isProgramFile = this.isProgramFile(tokens);
         const memberModuleName = this.getMemberModuleName(tokens);
-        const containingProcedure = this.findContainingProcedure(tokens, position.line);
-        const containingRoutine = this.findContainingRoutine(tokens, position.line);
+
+        // Issue #233 Stage 2: derive the containing scope from the canonical ScopeResolver
+        // (innermost, Rule-1 aware) instead of the former independent FIRST-match range scans.
+        // For a routine-body line this yields the routine plus its enclosing procedure, matching
+        // the previous ScopeInfo shape; for overlapping/nested ranges it is strictly more correct.
+        const node = this.tokenCache.getStructure(document).getScopeResolver().resolveScopeAt(position.line);
+        let containingProcedure: Token | undefined;
+        let containingRoutine: Token | undefined;
+        if (node.kind === ScopeKind.Routine) {
+            containingRoutine = node.token ?? undefined;
+            containingProcedure = node.parent?.token ?? undefined;
+        } else if (node.kind === ScopeKind.Procedure || node.kind === ScopeKind.Method) {
+            containingProcedure = node.token ?? undefined;
+        }
 
         // Determine scope level
         let scopeLevel: ScopeLevel;
@@ -245,33 +258,32 @@ export class ScopeAnalyzer {
             return false;
         }
 
-        // Same file - check scope hierarchy
-        // Global scope is accessible from anywhere
-        if (declScope.type === 'global') {
+        // Same file — global and module data are always visible within the file/module.
+        if (declScope.type === 'global' || declScope.type === 'module') {
             return true;
         }
 
-        // Module-local is accessible within the same module (file)
-        if (declScope.type === 'module') {
-            return true; // Same file, so same module
-        }
+        // Procedure- and routine-local visibility is decided by the reference's VISIBLE SCOPE
+        // CHAIN (Issue #233, Rules 3–5): the set of scopes reachable from the reference,
+        // innermost → outermost. This is what makes a Local Derived Method see its declaring
+        // procedure's locals (Rule 4) and a ROUTINE see its enclosing procedure's locals (Rule 3),
+        // while still denying access to unrelated procedures/routines.
+        const refChain = this.tokenCache
+            .getStructure(referenceDocument)
+            .getScopeResolver()
+            .getVisibleScopeChain(referenceLocation.line);
 
-        // Procedure-local: accessible from same procedure and its routines
         if (declScope.type === 'procedure') {
-            // Check if reference is in same procedure or a routine within it
-            if (refScope.containingProcedure?.line === declScope.containingProcedure?.line) {
-                return true;
-            }
-            return false;
+            // Visible iff the declaring procedure is one of the reference's visible scopes
+            // (same procedure, one of its routines, or a Local Derived Method of it).
+            const declProcLine = declScope.containingProcedure?.line;
+            return refChain.some(n => n.token != null && n.token.line === declProcLine);
         }
 
-        // Routine-local: only accessible within that routine
         if (declScope.type === 'routine') {
-            // Must be in the exact same routine
-            if (refScope.containingRoutine?.line === declScope.containingRoutine?.line) {
-                return true;
-            }
-            return false;
+            // Routine-local data is visible only from the exact same routine.
+            const declRoutineLine = declScope.containingRoutine?.line;
+            return refChain.some(n => n.kind === ScopeKind.Routine && n.token?.line === declRoutineLine);
         }
 
         return false;
@@ -396,23 +408,8 @@ export class ScopeAnalyzer {
         return undefined;
     }
 
-    private findContainingProcedure(tokens: Token[], line: number): Token | undefined {
-        return tokens.find(token =>
-            (token.subType === TokenType.Procedure ||
-             token.subType === TokenType.GlobalProcedure ||
-             token.subType === TokenType.MethodImplementation) &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-    }
-
-    private findContainingRoutine(tokens: Token[], line: number): Token | undefined {
-        return tokens.find(token =>
-            token.subType === TokenType.Routine &&
-            token.line <= line &&
-            (token.finishesAt === undefined || token.finishesAt >= line)
-        );
-    }
+    // findContainingProcedure / findContainingRoutine removed in #233 Stage 2 — getTokenScope
+    // now derives the containing scope from ScopeResolver.resolveScopeAt (see above).
 
     /**
      * Get tokens from a MAP block, including tokens from INCLUDEd files
@@ -649,12 +646,11 @@ export class ScopeAnalyzer {
             if (tokens) {
                 logger.info(`         ✅ Tokenized file: ${tokens.length} tokens`);
                 
-                // Process tokens through DocumentStructure to set referencedFile on MODULE/INCLUDE/LINK tokens
-                // This is critical for MODULE resolution to work from INCLUDE files
-                const DocumentStructure = require('../DocumentStructure').DocumentStructure;
-                const docStructure = new DocumentStructure(tokens);
-                logger.info(`         ✅ Processed tokens through DocumentStructure to set referencedFile properties`);
-                
+                // #262: tokens from getTokens() are ALREADY processed — the tokenize
+                // pipeline runs DocumentStructure.process(), which sets referencedFile
+                // on MODULE/INCLUDE/LINK tokens. A previous no-op `new DocumentStructure`
+                // construction here (never used, never process()ed) claimed to do this.
+
                 // Cache the tokens with modification time
                 this.includeFileCache.set(filePath, { tokens, mtime });
                 

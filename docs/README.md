@@ -1,44 +1,37 @@
 # Documentation
 
-This folder contains **user-facing documentation** for the Clarion Extension.
+User-facing documentation for the Clarion Extension, versioned with each release.
 
-## 📚 User Guides
+## 🚀 Guides
 
-### Getting Started
-- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Complete setup and installation guide
-- **[FEATURES.md](FEATURES.md)** - Full feature documentation
-- **[COMMANDS_AND_SETTINGS.md](COMMANDS_AND_SETTINGS.md)** - Commands and settings reference
-- **[CheatSheet.md](CheatSheet.md)** - Quick reference for snippets
-- **[BuildSettings.md](BuildSettings.md)** - Build configuration guide
+- **[Quick Start](guides/quick-start.md)** — 5 minutes to your first solution
+- **[Installation](guides/installation.md)** — detailed setup
+- **[Common Tasks](guides/common-tasks.md)** — everyday workflows
 
-### Language Reference
-- **[clarion-knowledge-base.md](clarion-knowledge-base.md)** - Clarion language rules and syntax patterns
-- **[CLARION_LANGUAGE_REFERENCE.md](CLARION_LANGUAGE_REFERENCE.md)** - Comprehensive language reference
+## ✨ Features
 
-### Test Files
-- **clarion-tests/** - Example Clarion code for testing language features
+- **[Navigation](features/navigation.md)** — F12, references, CodeLens, rename
+- **[Signature Help & IntelliSense](features/signature-help.md)** — parameter hints, completions, hover
+- **[Diagnostics](features/diagnostics.md)** — what each validation checks
+- **[Code Editing](features/code-editing.md)** — refactors, snippets, wizards
+- **[Solution Management](features/solution-management.md)** — solutions, builds, configurations
 
-## 📋 Release Information
-- **RELEASE_NOTES_v0.5.8.md** - What's new in v0.5.8
+## 📖 Reference
 
-## 🔧 Developer Documentation
-Internal development docs are in the **`dev/`** subfolder:
-- Bug fix analyses and refactoring plans
-- Test session summaries and technical deep-dives
-- Publishing guide and testing procedures
-- Known issues and TODO tracking
+- **[Commands](reference/commands.md)** — every command and keybinding
+- **[Settings](reference/settings.md)** — every configuration option
+- **[Snippets](reference/snippets.md)** — snippet cheat sheet
 
-See **[dev/README.md](dev/README.md)** for the full developer documentation index.
+## 📚 Wiki (evergreen reference)
 
-## 🤖 AI Context Documentation
-AI prompts and context documents are in the **`ai/`** subfolder:
-- Startup prompts and tier documentation
-- Feature descriptions for AI assistance
-- Session resume documents
+Language material that evolves independently of releases lives on the **[project wiki](https://github.com/msarson/Clarion-Extension/wiki)**:
 
-See **[ai-prompts/README.md](ai-prompts/README.md)** for AI context documentation.
+- [Clarion Language Reference](https://github.com/msarson/Clarion-Extension/wiki/Clarion-Language-Reference)
+- [Clarion Knowledge Base](https://github.com/msarson/Clarion-Extension/wiki/Clarion-Knowledge-Base)
+- [Cheat Sheet](https://github.com/msarson/Clarion-Extension/wiki/Cheat-Sheet)
+- [Build Settings](https://github.com/msarson/Clarion-Extension/wiki/Build-Settings)
+- [Troubleshooting: Post-Compile](https://github.com/msarson/Clarion-Extension/wiki/Troubleshooting-Post-Compile)
 
-## 🔗 Project Documentation
-High-level project docs are in the **root directory**:
-- `README.md` - Project overview and installation
-- `CHANGELOG.md` - Complete version history
+## 🔧 Internal
+
+Development notes, audits, session logs, and historical material live under **`dev/docs-internal/`** in the repository root — they are not user documentation.

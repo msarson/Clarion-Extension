@@ -1,6 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
-import { globalSettings } from '../globals';
+import { globalSettings, globalSolutionFile } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
 import { DocumentManager } from '../documentManager';
 import { StructureViewProvider } from '../views/StructureViewProvider';
@@ -74,7 +74,13 @@ export async function startLanguageServer(
         documentSelector: documentSelectors,
         initializationOptions: {
             settings: workspace.getConfiguration('clarion'),
-            lookupExtensions: lookupExtensions
+            lookupExtensions: lookupExtensions,
+            // #289: announce the configured solution INSIDE the initialize request itself, so the
+            // server knows a solution is coming at t≈0 — the clarion/solutionPending notification
+            // proved racy (it queues behind whatever the busy event loop is processing and lost to
+            // the 2s no-solution fallback timer by 0ms on Mark's VM).
+            configuredSolutionFile: workspace.getConfiguration('clarion').get<string>('currentSolution', '')
+                || workspace.getConfiguration('clarion').get<string>('solutionFile', '')
         },
         synchronize: {
             fileEvents: [
@@ -135,16 +141,19 @@ export async function startLanguageServer(
                 return next(document, position, token);
             }
         },
-        // Add error handling options
+        // Add error handling options.
+        // #276 — vscode-languageclient@8 changed the ErrorHandler contract: `error` returns an
+        // `ErrorHandlerResult` and `closed` a `CloseHandlerResult` (a `{ action }` object), not the
+        // bare `ErrorAction`/`CloseAction` enum the @7 API accepted.
         errorHandler: {
             error: (error, message, count) => {
                 logger.error(`Language server error: ${error.message || error}`);
-                return ErrorAction.Continue;
+                return { action: ErrorAction.Continue };
             },
             closed: () => {
                 logger.warn("Language server connection closed");
                 // Always try to restart the server
-                return CloseAction.Restart;
+                return { action: CloseAction.Restart };
             }
         }
     };
@@ -152,10 +161,12 @@ export async function startLanguageServer(
     logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     const client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
-    
-    // Start the language client
-    const disposable = client.start();
-    context.subscriptions.push(disposable);
+
+    // Start the language client. In vscode-languageclient@8, start() returns a Promise that
+    // resolves once the client is ready (the @7 onReady() + Disposable-return API was removed);
+    // register stop() for cleanup.
+    await client.start();
+    context.subscriptions.push({ dispose: () => { void client.stop(); } });
 
     // Set the client in the LanguageClientManager
     setLanguageClient(client);
@@ -164,6 +175,21 @@ export async function startLanguageServer(
         // Wait for the language client to become ready
         await getClientReadyPromise();
         logger.info("✅ Language client started and is ready");
+
+        // #289: announce a configured solution to the server IMMEDIATELY — long before the full
+        // client-side init flow sends clarion/updatePaths. Without this the server's 2s
+        // no-solution fallback fires mid-startup (it has no signal a solution is coming), runs
+        // the expensive async cross-file validation pass on open documents in degraded
+        // no-solution mode, and that work starves the solution load itself. The announcement is
+        // just a flag — the real load still arrives via clarion/updatePaths.
+        const cfg = workspace.getConfiguration('clarion');
+        const configuredSolution = globalSolutionFile
+            || cfg.get<string>('currentSolution', '')
+            || cfg.get<string>('solutionFile', '');
+        if (configuredSolution) {
+            client.sendNotification('clarion/solutionPending', { solutionFilePath: configuredSolution });
+            logger.info(`⏱️ [STARTUP] clarion/solutionPending sent (${configuredSolution})`);
+        }
         
         // Log server capabilities
         const capabilities = client.initializeResult?.capabilities;
@@ -177,8 +203,19 @@ export async function startLanguageServer(
         }
         
         // 🔄 Listen for symbol refresh notifications from server
+        // #297 fix 6 (audit H3): only refresh the Structure view when the notification is about
+        // the ACTIVE editor. The server emits this per didOpen/didChange for EVERY document —
+        // refreshing on all of them issued extra documentSymbol fetches mid-flight, feeding the
+        // generation race that blanked the view.
         client.onNotification('clarion/symbolsRefreshed', (params: { uri: string }) => {
-            logger.info(`🔄 Received symbolsRefreshed notification for: ${params.uri}`);
+            const activeUri = vscodeWindow.activeTextEditor?.document.uri.toString();
+            const same = !!activeUri && !!params?.uri &&
+                decodeURIComponent(activeUri).toLowerCase() === decodeURIComponent(params.uri).toLowerCase();
+            if (!same) {
+                logger.info(`🔄 symbolsRefreshed for non-active document ignored: ${params?.uri}`);
+                return;
+            }
+            logger.info(`🔄 Received symbolsRefreshed notification for active document: ${params.uri}`);
             if (structureViewProvider) {
                 structureViewProvider.refresh();
             }

@@ -4,6 +4,7 @@ import * as path from "path";
 import * as fs from "fs";
 import LoggerManager from "../logger";
 import { serverSettings } from "../serverSettings";
+import { DirectoryFileIndex } from "./DirectoryFileIndex";
 
 const logger = LoggerManager.getLogger("RedirectionParserServer");
 logger.setLevel("error");
@@ -66,7 +67,16 @@ export function matchesActiveConfiguration(
   configuration: string
 ): boolean {
   const sectionLower = entry.section.toLowerCase();
-  return sectionLower === 'common' || sectionLower === configuration.toLowerCase();
+  if (sectionLower === 'common') return true;
+  const configLower = configuration.toLowerCase();
+  if (sectionLower === configLower) return true;
+  // #293 — a solution build configuration arrives as "Config|Platform" (e.g. "Debug|Win32")
+  // while RED sections are named by the build configuration alone ([Debug]/[Release]/custom).
+  // The strict comparison dropped every configuration section, silently collapsing the search
+  // paths to [Common]-only — on a real 40-project solution that left ~99% of source files
+  // unresolvable at load (generated sources live under [Debug]/[Release] paths).
+  const configSegment = configLower.split('|')[0].trim();
+  return configSegment.length > 0 && sectionLower === configSegment;
 }
 
 export class RedirectionFileParserServer {
@@ -142,10 +152,14 @@ export class RedirectionFileParserServer {
     return Math.floor(Math.random() * 10000);
   }
 
+  /** #293 diagnostics: the red file the last parse actually used ('(none)' when not found). */
+  public lastRedFileParsed = '';
+
   public parseRedFile(projectPath: string): RedirectionEntry[] {
     this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
+      this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
@@ -161,9 +175,11 @@ export class RedirectionFileParserServer {
         logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
       } else {
         logger.test("No valid redirection file found.");
+        this.lastRedFileParsed = '(none)';
         this.entries = [];
         return this.entries;
       }
+      this.lastRedFileParsed = redFileToParse;
 
       // Create a cache key using the file path and mtime
       const cacheKey = this.createCacheKey(redFileToParse);
@@ -203,6 +219,7 @@ export class RedirectionFileParserServer {
     this.projectPath = projectPath;
     if (!serverSettings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
+      this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
     const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
@@ -222,10 +239,12 @@ export class RedirectionFileParserServer {
           logger.warn(`Project-specific redirection file not found. Using global: ${globalRedFile}`);
         } catch {
           logger.test("No valid redirection file found.");
+          this.lastRedFileParsed = '(none)';
           this.entries = [];
           return this.entries;
         }
       }
+      this.lastRedFileParsed = redFileToParse;
 
       // Create a cache key using the file path and mtime
       const cacheKey = this.createCacheKey(redFileToParse);
@@ -549,17 +568,25 @@ export class RedirectionFileParserServer {
    *      Tier 3: walk `serverSettings.libsrcPaths` sequentially.
    *
    * @param filename The filename to find
+   * @param dirIndex #288 — optional batch existence index. The solution-load path passes the
+   *   load-scoped index (no TTL, cleared per load). When omitted, the shared RUNTIME index is
+   *   used (#289): per-candidate existence checks cost one cached readdir per directory per
+   *   TTL window instead of an existsSync each — this is what makes cross-file validators
+   *   (which resolve hundreds of include names through every project's entries) affordable.
+   *   Worst-case staleness for a newly created file is DirectoryFileIndex.RUNTIME_TTL_MS.
    * @returns The resolved file path info if found, null otherwise
    */
-  public findFile(filename: string): ResolvedFilePath | null {
+  public findFile(filename: string, dirIndex?: DirectoryFileIndex): ResolvedFilePath | null {
     // Add instrumentation
     const t0 = Date.now();
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
+    const idx = dirIndex ?? DirectoryFileIndex.getRuntime();
+    const candidateExists = (p: string): boolean => idx.existsPath(p);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {
-      const result = fs.existsSync(filename)
+      const result = candidateExists(filename)
         ? { path: filename, source: FilePathSource.Project, entry: undefined }
         : null;
       const duration = Date.now() - t0;
@@ -575,7 +602,7 @@ export class RedirectionFileParserServer {
         return null;
       }
       const candidate = path.normalize(path.join(this.projectPath, filename));
-      if (fs.existsSync(candidate)) {
+      if (candidateExists(candidate)) {
         const duration = Date.now() - t0;
         logger.debug(`[RED][resolve:end] name="${filename}" → ${candidate} (pathed) durMs=${duration}`);
         return { path: candidate, source: FilePathSource.Project, entry: undefined };
@@ -630,7 +657,7 @@ export class RedirectionFileParserServer {
 
             checkedPaths.add(normalizedCandidate);
 
-            if (fs.existsSync(normalizedCandidate)) {
+            if (candidateExists(normalizedCandidate)) {
               const result = {
                 path: normalizedCandidate,
                 source: FilePathSource.Redirected,
@@ -654,7 +681,7 @@ export class RedirectionFileParserServer {
       const projectCandidate = path.normalize(path.join(this.projectPath, filename));
       if (!checkedPaths.has(projectCandidate)) {
         checkedPaths.add(projectCandidate);
-        if (fs.existsSync(projectCandidate)) {
+        if (candidateExists(projectCandidate)) {
           const duration = Date.now() - t0;
           logger.debug(`[RED][resolve:end] name="${filename}" → ${projectCandidate} (Tier 2 projRoot) durMs=${duration}`);
           return {
@@ -675,7 +702,7 @@ export class RedirectionFileParserServer {
         const normalized = path.normalize(candidate);
         if (checkedPaths.has(normalized)) continue;
         checkedPaths.add(normalized);
-        if (fs.existsSync(normalized)) {
+        if (candidateExists(normalized)) {
           const result = {
             path: normalized,
             source: FilePathSource.LibSrc,
@@ -701,15 +728,10 @@ export class RedirectionFileParserServer {
     const resolverInstanceId = this.hashCode();
     logger.debug(`[RED][resolve] name="${filename}" instId=${resolverInstanceId}`);
 
-    // Helper for async existence check
-    const fileExists = async (filePath: string) => {
-      try {
-        await fs.promises.access(filePath, fs.constants.F_OK);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    // Existence check via the shared runtime directory index (#289) — one cached readdir per
+    // directory per TTL window instead of an fs access per candidate. See findFile's JSDoc.
+    const runtimeIndex = DirectoryFileIndex.getRuntime();
+    const fileExists = async (filePath: string) => runtimeIndex.existsPath(filePath);
 
     // 1. Absolute filename — existsSync direct.
     if (path.isAbsolute(filename)) {

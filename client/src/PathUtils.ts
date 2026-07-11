@@ -8,7 +8,17 @@ const fileResolutionLogger = LoggerManager.getLogger("FileResolution");
 
 /**
  * Utility functions for path handling and normalization
- * These functions ensure consistent path handling across the codebase
+ * These functions ensure consistent path handling across the codebase.
+ *
+ * #266 — THE canonical client-side path helper (the mirror of the server's
+ * UriUtils). Do NOT hand-roll `x.toLowerCase() === y.toLowerCase()` or bare
+ * `fsPath ===` comparisons for file paths: Windows paths are case-insensitive
+ * AND the same file can arrive with different separators / trailing slashes /
+ * drive-letter casing, which silently breaks open-editor lookups (unsaved
+ * edits get dropped in favor of the stale on-disk copy). Use:
+ *   - `PathUtils.equalPath(a, b)`      — path equality
+ *   - `PathUtils.normalizeForKey(p)`   — cache/map keys
+ *   - `PathUtils.isUnderRoot(f, root)` — containment checks
  */
 export class PathUtils {
     /**

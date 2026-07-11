@@ -10,8 +10,11 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { pathToCanonicalUri } from '../utils/UriUtils';
+import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
+import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
@@ -37,6 +40,7 @@ export class DefinitionProvider {
     private memberResolver = new ClassMemberResolver();
     private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private argTypeResolver = new ArgumentTypeResolver();
     private mapResolver = new MapProcedureResolver();
     private symbolResolver = new SymbolDefinitionResolver();
     private fileResolver = new FileDefinitionResolver();
@@ -158,7 +162,7 @@ export class DefinitionProvider {
                         // overloads that differ only by argument type).
                         const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
                         if (selfClass) {
-                            const argResolved = this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
+                            const argResolved = await this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
                             if (argResolved) {
                                 logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
                                 return argResolved;
@@ -190,7 +194,7 @@ export class DefinitionProvider {
                         // first-declared overload regardless of argument type).
                         const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
                         if (parentInfo?.parentClassName) {
-                            const argResolved = this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
+                            const argResolved = await this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
                             if (argResolved) {
                                 logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
                                 return argResolved;
@@ -216,7 +220,7 @@ export class DefinitionProvider {
                         if (hasParentheses) {
                             const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                             if (finalClass) {
-                                const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
                                 if (argResolved) {
                                     logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
                                     return argResolved;
@@ -259,7 +263,7 @@ export class DefinitionProvider {
                             if (hasParentheses) {
                                 const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                                 if (finalClass) {
-                                    const argResolved = this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
+                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
                                     if (argResolved) {
                                         logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
                                         return argResolved;
@@ -292,7 +296,7 @@ export class DefinitionProvider {
                                 // empty candidates or matchedAll fallback (preserves UX for cross-
                                 // file classes / un-disambiguatable calls).
                                 if (hasParentheses) {
-                                    const argClassifyResult = this.tryArgClassifyResolve(
+                                    const argClassifyResult = await this.tryArgClassifyResolve(
                                         tokens, document, classType, methodName, position.line);
                                     if (argClassifyResult) {
                                         logger.info(`✅ Arg-classify resolved typed-var "${methodName}" in "${classType}" to line ${argClassifyResult.range.start.line}`);
@@ -314,7 +318,10 @@ export class DefinitionProvider {
             }
 
             // ✅ #211 DO routine reference: F12 on routine name in `DO RoutineName` → ROUTINE label
-            const doRoutineMatch = line.match(/\bDO\s+(\w+)/i);
+            // #320: shared DO_ROUTINE pattern — the old inline \w+ stopped at ':' so
+            // `DO Menu::MENUBAR1` captured only "Menu", silently skipping this route
+            // (a fallback happened to resolve it; hover/impl/F12 now converge on one pattern).
+            const doRoutineMatch = line.match(ClarionPatterns.DO_ROUTINE);
             if (doRoutineMatch) {
                 const routineName = doRoutineMatch[1];
                 if (routineName.toLowerCase() === word.toLowerCase()) {
@@ -395,7 +402,8 @@ export class DefinitionProvider {
                         tokens,
                         document,
                         position,
-                        line // Pass declaration signature for overload matching
+                        line, // Pass declaration signature for overload matching
+                        this.tokenCache.getStructure(document) // #258: reuse cached structure
                     );
                     
                     if (implLocation) {
@@ -658,12 +666,13 @@ export class DefinitionProvider {
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
             // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
-            const isInsideProcSignature = /\bPROCEDURE\s*\(/i.test(line) && (() => {
-                const parenOpen = line.indexOf('(', line.search(/\bPROCEDURE\s*\(/i));
+            const isInsideProcSignature = /\b(?:PROCEDURE|FUNCTION)\s*\(/i.test(line) && (() => { // #247
+                const parenOpen = line.indexOf('(', line.search(/\b(?:PROCEDURE|FUNCTION)\s*\(/i));
                 const parenClose = line.lastIndexOf(')');
                 return parenOpen >= 0 && position.character > parenOpen && position.character <= parenClose;
             })();
-            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line);
+            const mapProcImpl = !isInsideProcSignature && this.mapResolver.findProcedureImplementation(word, tokens, document, position, line,
+                this.tokenCache.getStructure(document)); // #258: reuse cached structure
             if (mapProcImpl) {
                 return mapProcImpl;
             }
@@ -957,31 +966,11 @@ export class DefinitionProvider {
      * Find the current procedure/method context for a given line
      */
     private findCurrentContext(tokens: Token[], currentLine: number): Token | undefined {
-        // First, look for method implementations (Class.Method)
-        for (const token of tokens) {
-            if (token.subType === TokenType.Class &&
-                token.line <= currentLine &&
-                (token.finishesAt === undefined || token.finishesAt >= currentLine)) {
-
-                // Check if this is a method implementation (Class.Method)
-                if (token.value && token.value.includes('.')) {
-                    logger.info(`Found method context: ${token.value} for line ${currentLine}`);
-                    return token;
-                }
-            }
-        }
-
-        // If no method found, look for procedure/routine
-        for (const token of tokens) {
-            if ((token.subType === TokenType.Procedure || token.subType === TokenType.Routine) &&
-                token.line <= currentLine &&
-                (token.finishesAt === undefined || token.finishesAt >= currentLine)) {
-                logger.info(`Found procedure/routine context: ${token.value} for line ${currentLine}`);
-                return token;
-            }
-        }
-
-        return undefined;
+        // Issue #233 Stage 2: use the canonical resolver's innermost scope (procedure / method
+        // impl / routine). Replaces the former FIRST-match scan, which only matched the bare
+        // TokenType.Procedure subtype (missing GlobalProcedure / MethodImplementation) and had a
+        // CLASS-with-dot branch that never fired (a CLASS token's value is 'CLASS').
+        return new ScopeResolver(tokens).resolveScopeAt(currentLine).token ?? undefined;
     }
 
     /**
@@ -1748,29 +1737,15 @@ export class DefinitionProvider {
  * Gets all enclosing scopes from innermost outward (L4 to L2) for fallback resolution
  */
     private getEnclosingScopes(tokens: Token[], innermost: Token): Token[] {
-        const allScopes: Token[] = [];
-
-        let current: Token | undefined = innermost;
-        while (current) {
-            allScopes.push(current);
-            current = this.findEnclosingScope(tokens, current);
-        }
-
-        return allScopes;
-    }
-
-    /**
-     * Finds the next outer scope that encloses the given token
-     */
-    private findEnclosingScope(tokens: Token[], inner: Token): Token | undefined {
-        const candidates = tokens.filter(token =>
-            (token.subType === TokenType.Procedure || token.subType === TokenType.Routine || token.subType === TokenType.Class) &&
-            token.line < inner.line &&
-            (token.finishesAt === undefined || token.finishesAt > inner.line)
-        );
-
-        // Return the closest enclosing one
-        return candidates.length > 0 ? candidates[candidates.length - 1] : undefined;
+        // Issue #233 Stage 2: the enclosing scopes are the resolver's visible scope chain from
+        // the innermost scope outward (routine → procedure/method → declaring procedure of a
+        // Local Derived Method → …), which is Rule-4 aware — the prior range-walk missed the
+        // declaring procedure because its range ends before the method impl. Synthetic
+        // global/module tiers (null token) are skipped: they carry no scope token to
+        // range-filter against, matching the prior walk which only yielded scope tokens.
+        const chain = new ScopeResolver(tokens).getVisibleScopeChain(innermost.line);
+        const scopes = chain.map(n => n.token).filter((t): t is Token => t != null);
+        return scopes.length > 0 ? scopes : [innermost];
     }
 
     /**
@@ -1805,7 +1780,7 @@ export class DefinitionProvider {
         }
         
         // Match PROCEDURE(...) pattern to extract parameters
-        const match = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
         if (!match || !match[1]) {
             logger.info(`No parameters found in procedure signature`);
             return null;
@@ -1893,7 +1868,7 @@ export class DefinitionProvider {
             logger.info(`Scope line text: "${scopeLine}"`);
             
             // Match ClassName.MethodName PROCEDURE pattern
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+PROCEDURE/i);
+            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
                 logger.info(`Extracted class name from line: ${className}`);
@@ -1923,37 +1898,20 @@ export class DefinitionProvider {
      *   - the resolver returns `matchedAll=true` (un-disambiguatable; conservative
      *     fallback preserves UX per `feedback_silent_regression_pushback`).
      */
-    private tryArgClassifyResolve(
+    private async tryArgClassifyResolve(
         tokens: Token[],
         document: TextDocument,
         className: string,
         methodName: string,
         callLine: number
-    ): Location | null {
-        // The call site's name token is either:
-        //   - a bare identifier matching methodName (`Foo(...)`)
-        //   - a dotted token like `obj.methodName` (TokenType.StructureField — the typical
-        //     shape for `prefix.method` style calls). Either way, the classifier just
-        //     needs the token immediately before `(`.
-        const lowerMethod = methodName.toLowerCase();
-        const callNameIdx = tokens.findIndex(t =>
-            t.line === callLine && (
-                t.value.toLowerCase() === lowerMethod ||
-                t.value.toLowerCase().endsWith('.' + lowerMethod)
-            ));
-        if (callNameIdx < 0) return null;
-
-        const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
-        if (!args) return null;
-
-        const candidates = this.overloadResolver.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
-        if (candidates.length < 2) return null;
-
-        const { matchedIndex, matchedAll } = this.overloadResolver.findOverloadByArgClassifications(
-            args, candidates.map(c => c.signature));
-        if (matchedAll || matchedIndex < 0) return null;
-
-        const picked = candidates[matchedIndex];
+    ): Promise<Location | null> {
+        // #252 — delegates to the single enriched choke point. This was F12's own
+        // classify + enrich + resolve copy (#245); hover/Ctrl+F12 gained the same
+        // enrichment inside resolveOverloadDeclByArgs, so all consumers now share
+        // one implementation and cannot drift.
+        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
+            className, methodName, document, tokens, callLine);
+        if (!picked) return null;
         return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
     }
 
@@ -2060,7 +2018,7 @@ export class DefinitionProvider {
                 t.label?.toLowerCase() === ifaceName.toLowerCase()
             );
             if (eq) {
-                const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
+                const uri = pathToCanonicalUri(equatesPath); // #251: client-facing Location
                 return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
             }
         }
@@ -2203,7 +2161,7 @@ export class DefinitionProvider {
             const info = await this.symbolFinder.findIndexedTypeDeclaration(word, document);
             if (!info) return null;
 
-            const uri = `file:///${info.filePath.replace(/\\/g, '/')}`;
+            const uri = pathToCanonicalUri(info.filePath); // #251: client-facing Location
             logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
             return Location.create(uri, Range.create(info.line, 0, info.line, 0));
         } catch (e) {
@@ -2233,7 +2191,7 @@ export class DefinitionProvider {
                 if (content) {
                     const lines = content.split('\n');
                     const procedureLine = lines[currentScope.line] ?? '';
-                    const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+                    const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
                     if (sigMatch?.[1]) {
                         const wordLower = variableName.toLowerCase();
                         for (const param of sigMatch[1].split(',')) {
@@ -2418,28 +2376,17 @@ export class DefinitionProvider {
      */
     private findRoutineDefinition(routineName: string, document: TextDocument, position: Position, tokens: Token[]): Location | null {
         logger.info(`🔍 [#211] Resolving DO routine reference: "${routineName}"`);
-        
+
+        // #264: the #211 procedure-scoped algorithm now lives in
+        // TokenHelper.findScopedRoutineToken, shared with hover (RoutineHoverResolver)
+        // and Ctrl+F12 (ImplementationProvider) so all three always agree.
         const structure = this.tokenCache.getStructure(document);
-        
-        const enclosingProc = TokenHelper.getInnermostScopeAtLine(structure, position.line);
-        if (!enclosingProc || !TokenHelper.isProcedureOrFunction(enclosingProc)) {
-            logger.info(`❌ No enclosing procedure found at line ${position.line}`);
-            return null;
-        }
-        
-        logger.info(`Found enclosing procedure: "${enclosingProc.value}" (lines ${enclosingProc.line}-${enclosingProc.finishesAt})`);
-
-        const routineTokens = structure.findRoutines(routineName).filter(routineToken => {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
-            return parentScope?.line === enclosingProc.line && parentScope?.value.toUpperCase() === enclosingProc.value.toUpperCase();
-        });
-
-        if (routineTokens.length === 0) {
-            logger.info(`❌ No ROUTINE label found for "${routineName}" in procedure "${enclosingProc.value}"`);
+        const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
+        if (!routineToken) {
+            logger.info(`❌ No ROUTINE label found for "${routineName}" in the enclosing procedure`);
             return null;
         }
 
-        const routineToken = routineTokens[0];
         logger.info(`✅ Found ROUTINE "${routineName}" at line ${routineToken.line}`);
         return Location.create(document.uri, Range.create(routineToken.line, 0, routineToken.line, routineToken.value.length));
     }

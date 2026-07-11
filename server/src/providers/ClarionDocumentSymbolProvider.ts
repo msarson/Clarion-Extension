@@ -1917,6 +1917,19 @@ export class ClarionDocumentSymbolProvider {
 
                 // Skip label tokens (don't include the variable name in the type)
                 if (t.type === TokenType.Label || t.type === TokenType.StructurePrefix || t.type === TokenType.Variable) {
+                    // #302: a USER-declared type — a class instance (`udpt UltimateDebugProcedureTracker`)
+                    // or type alias — tokenizes as a plain identifier too. The variable's own name is
+                    // the one at column 0; a LATER identifier while the type is still empty IS the
+                    // type. Skipping it left fullType empty and the default-STRING fallback below
+                    // invented a type hover then displayed.
+                    if (!foundType && fullType === '' && t.start > 0 &&
+                        t.value.toLowerCase() !== variableName.toLowerCase()) {
+                        fullType += t.value;
+                        fullDeclaration += t.value;
+                        logger.info(`     - Identifier as user-declared type: "${t.value}"`);
+                        j++;
+                        continue;
+                    }
                     logger.info(`     - Skipping label/variable token`);
                     j++;
                     continue;

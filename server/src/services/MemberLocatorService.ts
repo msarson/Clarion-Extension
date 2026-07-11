@@ -14,6 +14,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
+import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
@@ -42,7 +43,7 @@ export class MemberLocatorService {
         const lines = document.getText().split(/\r?\n/);
         const methodLower = methodName.toLowerCase();
         for (const line of lines) {
-            const match = line.match(/^\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s+PROCEDURE\b/i);
+            const match = line.match(/^\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s+(?:PROCEDURE|FUNCTION)\b/i); // #247
             if (!match) continue;
             const className = match[1];
             const candidateMethod = (match[3] ?? match[2]).toLowerCase();
@@ -167,6 +168,20 @@ export class MemberLocatorService {
             if (visited.has(key)) break;
             visited.add(key);
 
+            // #310: LIKE aliases are variable-style labels, not structure declarations.
+            // When the type name has no LOCAL declaration and the SDI knows it as a
+            // concrete structure, it cannot be a reachable alias — skip the cross-file
+            // dereference walk. Measured 4.2s COLD for `udpt`'s class name: the walk
+            // loaded the generated MEMBER parent plus its entire include chain just to
+            // conclude "not an alias". A local declaration still takes the full check,
+            // so same-file aliases keep exact semantics.
+            const hasLocalDecl = tokens.some(t =>
+                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, key));
+            if (!hasLocalDecl) {
+                await this.ensureIndexBuilt();
+                if (this.sdi.find(current.typeName).length > 0) break;
+            }
+
             const aliasDecl = await this.findVariableTokenCrossFile(current.typeName, tokens, document, scopeLine);
             if (!aliasDecl) break;
 
@@ -208,7 +223,7 @@ export class MemberLocatorService {
         const procedureLine = lines[scopeToken.line];
         if (!procedureLine) return null;
 
-        const sigMatch = procedureLine.match(/PROCEDURE\s*\((.*?)\)/i);
+        const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
         if (!sigMatch || !sigMatch[1]) return null;
 
         const wordLower = varName.toLowerCase();
@@ -249,14 +264,42 @@ export class MemberLocatorService {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
-        // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback)
+        // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
+        // #314: use the tokens already in hand — scanBodyForMember re-loaded the CURRENT
+        // document from disk three times (once per structure kind), and its disk content
+        // can be STALE against the live buffer anyway.
         const fromCurrentDoc =
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'CLASS') ??
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'GROUP') ??
-            await this.scanBodyForMember(docPath, className, memberName, paramCount, 'QUEUE');
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS') ??
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'GROUP') ??
+            this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'QUEUE');
         if (fromCurrentDoc) {
             this.trace(`findMemberInClass hit current document file="${fromCurrentDoc.file}" line=${fromCurrentDoc.line}`);
             return fromCurrentDoc;
+        }
+
+        // 0.5 (#314, mirrors #310): when the SDI UNAMBIGUOUSLY names the declaring file,
+        // scan that body directly — and if the member isn't there (inherited), ascend the
+        // parent chain immediately. The include-chain / MEMBER-parent walks below are
+        // guaranteed full-chain COLD misses in that case (the class lives nowhere else):
+        // hover on PARENT._FindFirstBreak measured 12.1s walking them before the ascent.
+        await this.ensureIndexBuilt();
+        const sdiInfos = this.sdi.find(className);
+        const sdiDeclFiles = new Set(sdiInfos.map(d => d.filePath.toLowerCase()));
+        if (sdiDeclFiles.size === 1) {
+            const info = sdiInfos.find(d => !d.isType) || sdiInfos[0];
+            const kind = (['CLASS', 'GROUP', 'QUEUE', 'INTERFACE'].includes(info.structureType)
+                ? info.structureType : 'CLASS') as 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
+            const fromSdi = await this.scanBodyForMember(info.filePath, className, memberName, paramCount, kind);
+            if (fromSdi) {
+                this.trace(`findMemberInClass hit SDI-located body file="${fromSdi.file}" line=${fromSdi.line}`);
+                return fromSdi;
+            }
+            const fromAscent = await this.walkParentChain(className, memberName, paramCount, new Set(), document);
+            if (fromAscent) {
+                this.trace(`findMemberInClass hit parent chain (SDI-first) file="${fromAscent.file}" line=${fromAscent.line}`);
+                return fromAscent;
+            }
+            // Ascent failed too — fall through to the legacy walks as a last resort.
         }
 
         // 1. Walk INCLUDE chain reachable from this document
@@ -437,16 +480,34 @@ export class MemberLocatorService {
         // When scopeLine is known, build a set of "other procedure" line ranges to skip.
         // This prevents picking up a same-named local variable from a sibling procedure
         // (e.g. `Info` at line 932 inside INIClass.Update when we're inside INIClass.UpdateWindowInfo).
+        // #304: two scope shapes must stay searchable that innermost-scope line equality broke:
+        //   - ROUTINE bodies see their parent procedure's data → keep any procedure range that
+        //     CONTAINS scopeLine (containment, not header-line equality).
+        //   - Method implementations of a class DECLARED IN a procedure's data section
+        //     (ABC's `ThisWindow CLASS(WindowManager)` pattern) see that host procedure's
+        //     locals → when the current scope's label is dotted (Class.Method), the procedure
+        //     range containing the owner class's declaration also stays searchable.
         let excludedRanges: Array<{ start: number; end: number }> = [];
         if (scopeLine !== undefined) {
             const structure = this.tokenCache.getStructure(document);
             const currentScope = TokenHelper.getInnermostScopeAtLine(structure, scopeLine);
-            const currentScopeLine = currentScope?.line;
+            const visibleLines = [scopeLine];
+            const scopeLabel = currentScope?.label;
+            if (scopeLabel?.includes('.')) {
+                const ownerClass = scopeLabel.split('.')[0].toLowerCase();
+                for (const t of tokens) {
+                    if (t.type === TokenType.Structure &&
+                        t.value.toUpperCase() === 'CLASS' &&
+                        t.label?.toLowerCase() === ownerClass) {
+                        visibleLines.push(t.line);
+                    }
+                }
+            }
             excludedRanges = tokens
                 .filter(t =>
                     TokenHelper.isProcedureOrFunction(t) &&
                     t.finishesAt !== undefined &&
-                    t.line !== currentScopeLine
+                    !visibleLines.some(line => line >= t.line && line <= t.finishesAt!)
                 )
                 .map(t => ({ start: t.line, end: t.finishesAt! }));
         }
@@ -944,6 +1005,19 @@ export class MemberLocatorService {
             return currentInfo;
         }
 
+        // #314 (mirrors #310): the SDI answers class location in one lookup — walking the
+        // include chain first cold-loaded every reachable INC per ANCESTOR during
+        // walkParentChain ascents (12.1s hover on PARENT._FindFirstBreak). Unambiguous
+        // SDI hit wins; ambiguous names keep the scoped chain walk as tie-breaker.
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(className);
+        const distinctDeclFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
+        if (distinctDeclFiles.size === 1) {
+            const fromIndex = infos.find(d => !d.isType) || infos[0];
+            this.trace(`resolveClassDeclarationInfo "${className}" from SDI (unambiguous) "${fromIndex.filePath}" line=${fromIndex.line}`);
+            return fromIndex;
+        }
+
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
         const fromInclude = await this.findClassDeclarationInfoInIncludeChain(
             className,
@@ -956,14 +1030,12 @@ export class MemberLocatorService {
             return fromInclude;
         }
 
-        await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
         if (infos.length === 0) {
             this.trace(`resolveClassDeclarationInfo "${className}" not found in SDI`);
             return null;
         }
         const fromIndex = infos.find(d => !d.isType) || infos[0];
-        this.trace(`resolveClassDeclarationInfo "${className}" from SDI "${fromIndex.filePath}" line=${fromIndex.line}`);
+        this.trace(`resolveClassDeclarationInfo "${className}" from SDI (ambiguous fallback) "${fromIndex.filePath}" line=${fromIndex.line}`);
         return fromIndex;
     }
 
@@ -1241,7 +1313,7 @@ export class MemberLocatorService {
     }
 
     private countParamsInDecl(line: string): number {
-        const match = line.match(/PROCEDURE\s*\(([^)]*)\)/i);
+        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
         if (!match) return 0;
         const paramList = match[1].trim();
         if (!paramList) return 0;
@@ -1305,7 +1377,7 @@ export class MemberLocatorService {
             const name = memberMatch[1];
             const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
             const access = detectMemberAccess(raw);
-            const kind: 'method' | 'property' = /^PROCEDURE\b/i.test(typeStr) ? 'method' : 'property';
+            const kind: 'method' | 'property' = /^(?:PROCEDURE|FUNCTION)\b/i.test(typeStr) ? 'method' : 'property'; // #247
 
             results.push({ name, kind, signature: raw.trim(), type: typeStr, access, fromClass: className, line: token.line, file: filePath });
         }
@@ -1361,7 +1433,7 @@ export class MemberLocatorService {
             const afterMember = memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart();
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
-            if (type.toUpperCase().startsWith('PROCEDURE')) {
+            if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
                 declParamCount = this.countParamsInDecl(memberLine);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
@@ -1612,26 +1684,59 @@ export class MemberLocatorService {
                 : diskMembersQueue;
         if (diskMembers.length > 0) return diskMembers;
 
-        // 2. INCLUDE chain
+        // 2. SDI, when it UNAMBIGUOUSLY names the declaring file (#310). The include-chain
+        // walk below loads + tokenizes every reachable INC until the class turns up —
+        // ~1.2s per cold ancestor on a real solution (8.5s for one generated module's 7
+        // receiver hierarchies), while the mtime-persisted index answers in one lookup.
+        // Ambiguous names (several declaring files — e.g. generated `ThisWindow` in every
+        // module, though those are normally caught by the current-document tier above)
+        // keep the scoped chain walk so the closest declaration wins.
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(className);
+        const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
+        if (distinctFiles.size === 1) {
+            const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);
+            if (fromSdi.length > 0) {
+                this.trace(`findAllMembersInClass "${className}" via SDI tier: ${infos[0].filePath}`);
+                return fromSdi;
+            }
+        } else if (distinctFiles.size > 1) {
+            // #310 follow-up: the ambiguity guard punts to the (expensive) chain walk —
+            // make that decision visible so real traces show WHICH classes bounce.
+            this.trace(`findAllMembersInClass "${className}" SDI ambiguous (${distinctFiles.size} files: ${[...distinctFiles].join('; ')}) — falling to chain walk`);
+        }
+
+        // 3. INCLUDE chain (scoped resolution — also the ambiguity tie-breaker)
         const fromInclude = await this.findAllMembersInIncludeChain(
             className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
         );
-        if (fromInclude.length > 0) return fromInclude;
+        if (fromInclude.length > 0) {
+            this.trace(`findAllMembersInClass "${className}" via include-chain walk: ${fromInclude[0].file}`);
+            return fromInclude;
+        }
 
-        // 3. StructureDeclarationIndexer
-        await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
+        // 4. SDI last-resort: ambiguous entries where the chain walk found nothing —
+        // pre-#310 behavior (first non-TYPE entry wins).
         if (infos.length > 0) {
-            const info = infos.find(d => !d.isType) || infos[0];
-            const indexedData = await this.loadDocument(info.filePath);
-            if (indexedData) {
-                const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-                if (indexedMembers.length > 0) return indexedMembers;
-            }
-            return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            this.trace(`findAllMembersInClass "${className}" via SDI last-resort (ambiguous, chain missed)`);
+            return this.enumerateMembersFromSdiInfo(infos, className);
         }
 
         return [];
+    }
+
+    /** Enumerates members from an SDI hit's declaring file (token-based, disk fallback). */
+    private async enumerateMembersFromSdiInfo(
+        infos: StructureDeclarationInfo[],
+        className: string
+    ): Promise<MemberEnumItem[]> {
+        const info = infos.find(d => !d.isType) || infos[0];
+        const indexedData = await this.loadDocument(info.filePath);
+        if (indexedData) {
+            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            if (indexedMembers.length > 0) return indexedMembers;
+        }
+        return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
     }
 
     /** Walks the INCLUDE chain searching for className and enumerating its members. */

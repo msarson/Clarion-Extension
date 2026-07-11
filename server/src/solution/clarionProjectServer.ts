@@ -5,11 +5,17 @@ import LoggerManager from '../logger';
 import { RedirectionEntry, RedirectionFileParserServer, matchesActiveConfiguration } from './redirectionFileParserServer';
 import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
+import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
 logger.setLevel("error");// Production: Only log errors
+// #293 diagnostics: always-on RED-parse outcome (which red file, how many entries, what search
+// paths) — emitted once per unique project directory so a broken redirection setup is visible
+// in a release VSIX instead of silently collapsing resolution to project-root + libsrc.
+const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
+const redOutcomeLogged = new Set<string>();
 
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
@@ -31,7 +37,20 @@ export class ClarionProjectServer {
         logger.info(`📁 Initializing ClarionProjectServer: ${name}`);
     }
 
+    /** #289 diagnostics: phase breakdown of the last loadSourceFilesFromProjectFile call. */
+    public lastLoadReadParseMs = 0;
+    public lastLoadResolveMs = 0;
+    /** #293 diagnostics: how many Compile items failed path resolution (kept with bare names). */
+    public lastLoadUnresolved = 0;
+    /** #293 diagnostics: first few unresolved names, for the perf line. */
+    public lastLoadUnresolvedSample: string[] = [];
+
     async loadSourceFilesFromProjectFile(): Promise<void> {
+        const loadStart = performance.now();
+        this.lastLoadReadParseMs = 0;
+        this.lastLoadResolveMs = 0;
+        this.lastLoadUnresolved = 0;
+        this.lastLoadUnresolvedSample = [];
         logger.info(`🔄 Loading source files for project: ${this.name} (${this.path})`);
         
         // Reset collections before loading
@@ -66,7 +85,8 @@ export class ClarionProjectServer {
                 });
                 
                 const parsed = await parser.parseStringPromise(xmlContent);
-                
+                this.lastLoadReadParseMs = Math.round(performance.now() - loadStart);
+
                 // Process all ItemGroups
                 if (parsed?.project?.itemgroup) {
                     // Convert to array if it's not already (happens when there's only one itemgroup)
@@ -195,6 +215,7 @@ export class ClarionProjectServer {
                     // Process source files (most expensive operation, do it last)
                     // Create an array of promises for resolving file paths in parallel
                     // We only process Compile items as source files
+                    const resolveStart = performance.now();
                     const filePromises = compileItems.map(async (file, index) => {
                         try {
                             // Log the raw file object to understand its structure
@@ -250,9 +271,11 @@ export class ClarionProjectServer {
                             }
                             
                             logger.info(`📂 Processing file from project: ${fileName}`);
-                            
-                            // Use the async version of findFileInProjectPaths
-                            const resolvedPath = await this.findFileInProjectPathsAsync(fileName);
+
+                            // Use the async version of findFileInProjectPaths. #288: route existence
+                            // checks through the shared directory index — one readdir per unique
+                            // search dir across ALL projects instead of a stat per file per dir.
+                            const resolvedPath = await this.findFileInProjectPathsAsync(fileName, DirectoryFileIndex.getInstance());
                             if (resolvedPath) {
                                 const relativePath = path.relative(this.path, resolvedPath);
                                 logger.info(`✅ Resolved path for ${fileName}: ${relativePath}`);
@@ -260,7 +283,13 @@ export class ClarionProjectServer {
                             } else {
                                 logger.warn(`❌ Could not resolve file: ${fileName}, but will still include it in the project`);
                                 // Still include the file even if we can't resolve its path
-                                // Use the fileName as both the name and relativePath
+                                // Use the fileName as both the name and relativePath.
+                                // #293: count it — silent bare-name inclusion left FRG/CodeLens
+                                // consumers running on ~1% of a real solution with no signal.
+                                this.lastLoadUnresolved++;
+                                if (this.lastLoadUnresolvedSample.length < 3) {
+                                    this.lastLoadUnresolvedSample.push(fileName);
+                                }
                                 logger.info(`📂 Including file with original name: ${fileName}`);
                                 return new ClarionSourcerFileServer(fileName, fileName, this);
                             }
@@ -298,7 +327,8 @@ export class ClarionProjectServer {
                     
                     // Wait for all file resolutions to complete
                     const resolvedFiles = await Promise.all(filePromises);
-                    
+                    this.lastLoadResolveMs = Math.round(performance.now() - resolveStart);
+
                     // No need to filter out null values since we always return a ClarionSourcerFileServer
                     this.sourceFiles = resolvedFiles as ClarionSourcerFileServer[];
                     
@@ -477,10 +507,13 @@ export class ClarionProjectServer {
         return null;
     }
     
-    // Add an asynchronous version for better performance
-    private async findFileInProjectPathsAsync(fileName: string): Promise<string | null> {
+    // Add an asynchronous version for better performance.
+    // #288: `dirIndex` (solution-load path only) batches existence checks — one cached readdir
+    // per directory instead of a stat per candidate. Omitted → behaves exactly as before.
+    private async findFileInProjectPathsAsync(fileName: string, dirIndex?: DirectoryFileIndex): Promise<string | null> {
         // Helper for async existence check
         const fileExists = async (filePath: string) => {
+            if (dirIndex) return dirIndex.existsPath(filePath);
             try {
                 await fs.promises.access(filePath, fs.constants.F_OK);
                 return true;
@@ -488,10 +521,10 @@ export class ClarionProjectServer {
                 return false;
             }
         };
-        
+
         // First try using the redirection parser directly
         const redParser = this.getRedirectionParser();
-        const redResult = redParser.findFile(fileName);
+        const redResult = redParser.findFile(fileName, dirIndex);
         if (redResult && redResult.path) {
             // Verify the file exists
             if (await fileExists(redResult.path)) {
@@ -499,7 +532,7 @@ export class ClarionProjectServer {
                 return redResult.path;
             }
         }
-        
+
         // Fallback to search paths
         const ext = path.extname(fileName).toLowerCase();
         const searchPaths = this.getSearchPaths(ext);
@@ -512,7 +545,7 @@ export class ClarionProjectServer {
             }
             return null;
         });
-        
+
         // Wait for all path checks to complete
         const results = await Promise.all(pathPromises);
         const foundPath = results.find(p => p !== null);
@@ -525,16 +558,16 @@ export class ClarionProjectServer {
             // Create an array of promises for each extension
             const extPromises = serverSettings.defaultLookupExtensions.map(async (defaultExt) => {
                 const fileNameWithExt = `${fileName}${defaultExt}`;
-                
+
                 // Try with redirection parser first
-                const redResultWithExt = redParser.findFile(fileNameWithExt);
+                const redResultWithExt = redParser.findFile(fileNameWithExt, dirIndex);
                 if (redResultWithExt && redResultWithExt.path) {
                     if (await fileExists(redResultWithExt.path)) {
                         logger.info(`✅ Found file with added extension through redirection: ${redResultWithExt.path} (source: ${redResultWithExt.source})`);
                         return redResultWithExt.path;
                     }
                 }
-                
+
                 // Create promises for each search path with this extension
                 const extPathPromises = searchPaths.map(async (spath) => {
                     const full = path.normalize(path.join(spath, fileNameWithExt));
@@ -544,12 +577,12 @@ export class ClarionProjectServer {
                     }
                     return null;
                 });
-                
+
                 // Wait for all path checks for this extension to complete
                 const extResults = await Promise.all(extPathPromises);
                 return extResults.find(p => p !== null) || null;
             });
-            
+
             // Wait for all extension checks to complete
             const extResults = await Promise.all(extPromises);
             const foundExtPath = extResults.find(p => p !== null);
@@ -576,6 +609,25 @@ export class ClarionProjectServer {
         logger.info(`🔄 Creating new RedirectionFileParserServer instance for project: ${this.name}`);
         this.redirectionParser = new RedirectionFileParserServer();
         this.redirectionEntries = this.redirectionParser.parseRedFile(this.path);
+
+        // #293: one-shot RED-parse outcome per unique project dir. entries=0 or a tiny search-path
+        // list here IS the resolution-failure smoking gun (only project root + libsrc get probed).
+        const pathKey = this.path.toLowerCase();
+        if (!redOutcomeLogged.has(pathKey)) {
+            redOutcomeLogged.add(pathKey);
+            let clwSearchPaths: string[] = [];
+            try { clwSearchPaths = this.getSearchPaths('.clw'); } catch { /* diagnostic only */ }
+            perfLogger.perf("SolutionLoad: RED parse outcome", {
+                project_dir: this.path,
+                red_file: this.redirectionParser.lastRedFileParsed || '(unknown)',
+                entries: this.redirectionEntries.length,
+                configuration: serverSettings.configuration,
+                macro_count: Object.keys(serverSettings.macros ?? {}).length,
+                redirection_file_setting: serverSettings.redirectionFile || '(empty)',
+                primary_red_path: serverSettings.primaryRedirectionPath || '(empty)',
+                clw_search_paths: clwSearchPaths.slice(0, 12).join(';') || '(none)'
+            });
+        }
         return this.redirectionParser;
     }
 

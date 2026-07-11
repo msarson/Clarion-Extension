@@ -7,11 +7,22 @@ import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
 import { getLanguageClient } from '../LanguageClientManager';
 import LoggerManager from '../utils/LoggerManager';
+import { TrailingCoalescer } from '../utils/TrailingCoalescer';
 import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("FileWatcherManager");
 logger.setLevel("error");
+
+// #317: a Clarion regeneration touches every .cwproj in the solution (40 on a
+// real one) and every red file event repeats the same full refresh. Each
+// watcher event previously ran reinitializeEnvironment + tree refresh +
+// registerLanguageFeatures + a toast + (for cwproj) a server notification that
+// re-validated all open docs — all x40. One coalescer per handler collapses a
+// burst into a single refresh; they're re-created on each watcher (re)build so
+// they always capture the latest context/documentManager.
+let projectChangeCoalescer: TrailingCoalescer | null = null;
+let redirectionChangeCoalescer: TrailingCoalescer | null = null;
 
 /**
  * Creates file watchers for solution-specific files
@@ -37,6 +48,14 @@ export async function createSolutionFileWatchers(
 
     const solutionDir = path.dirname(globalSolutionFile);
     logger.info(`🔍 Creating file watchers for solution directory: ${solutionDir}`);
+
+    // #317: one refresh per BURST, not per file event. 1s trailing quiet period —
+    // a regeneration writes the cwproj/red files over a stretch, and every event
+    // restarts the clock, so the refresh runs once after the writer goes quiet.
+    projectChangeCoalescer = new TrailingCoalescer(1000, () =>
+        handleProjectFileChange(context, reinitializeEnvironment, documentManager));
+    redirectionChangeCoalescer = new TrailingCoalescer(1000, () =>
+        handleRedirectionFileChange(context, reinitializeEnvironment, documentManager));
 
     // Create watchers for the solution file itself
     const solutionWatcher = workspace.createFileSystemWatcher(globalSolutionFile);
@@ -70,9 +89,9 @@ export async function createSolutionFileWatchers(
                 // Mark as a file watcher for cleanup
                 (projectWatcher as any)._isFileWatcher = true;
 
-                projectWatcher.onDidChange(async (uri) => {
+                projectWatcher.onDidChange((uri) => {
                     logger.info(`🔄 Project file changed: ${uri.fsPath}`);
-                    await handleProjectFileChange(context, uri, reinitializeEnvironment, documentManager);
+                    projectChangeCoalescer?.trigger();
                 });
 
                 context.subscriptions.push(projectWatcher);
@@ -89,9 +108,9 @@ export async function createSolutionFileWatchers(
                 // Mark as a file watcher for cleanup
                 (redFileWatcher as any)._isFileWatcher = true;
 
-                redFileWatcher.onDidChange(async (uri) => {
+                redFileWatcher.onDidChange((uri) => {
                     logger.info(`🔄 Redirection file changed: ${uri.fsPath}`);
-                    await handleRedirectionFileChange(context, reinitializeEnvironment, documentManager);
+                    redirectionChangeCoalescer?.trigger();
                 });
 
                 context.subscriptions.push(redFileWatcher);
@@ -113,9 +132,9 @@ export async function createSolutionFileWatchers(
 
                                     (includedRedWatcher as any)._isFileWatcher = true;
 
-                                    includedRedWatcher.onDidChange(async (uri) => {
+                                    includedRedWatcher.onDidChange((uri) => {
                                         logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
-                                        await handleRedirectionFileChange(context, reinitializeEnvironment, documentManager);
+                                        redirectionChangeCoalescer?.trigger();
                                     });
 
                                     context.subscriptions.push(includedRedWatcher);
@@ -140,9 +159,9 @@ export async function createSolutionFileWatchers(
         // Mark as a file watcher for cleanup
         (globalRedWatcher as any)._isFileWatcher = true;
 
-        globalRedWatcher.onDidChange(async (uri) => {
+        globalRedWatcher.onDidChange((uri) => {
             logger.info(`🔄 Global redirection file changed: ${uri.fsPath}`);
-            await handleRedirectionFileChange(context, reinitializeEnvironment, documentManager);
+            redirectionChangeCoalescer?.trigger();
         });
 
         context.subscriptions.push(globalRedWatcher);
@@ -205,11 +224,10 @@ async function handleSolutionFileChange(
  */
 async function handleProjectFileChange(
     context: ExtensionContext,
-    uri: Uri,
     reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
     documentManager: DocumentManager | undefined
 ) {
-    logger.info(`🔄 Project file changed: ${uri.fsPath}. Refreshing environment...`);
+    logger.info(`🔄 Project file(s) changed. Refreshing environment...`);
 
     // Reinitialize the Solution Cache and Document Manager
     await reinitializeEnvironment(true);

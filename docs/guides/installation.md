@@ -87,11 +87,14 @@ All settings are saved in `.vscode/settings.json` within your solution folder:
 
 ```json
 {
-  "clarion.clarionPath": "C:\\Clarion11\\Bin",
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties",
-  "clarion.configuration": "Release|Win32"
+  "clarion.solutionFile": "C:\\MyProject\\MySolution.sln",
+  "clarion.propertiesFile": "C:\\Clarion11\\bin\\ClarionProperties.xml",
+  "clarion.version": "Clarion 11.1",
+  "clarion.configuration": "Release"
 }
 ```
+
+These are written automatically when you open a solution and pick a Clarion version — you rarely edit them by hand.
 
 **Benefits:**
 - Settings persist when reopening the solution
@@ -156,8 +159,8 @@ All settings are saved in `.vscode/settings.json` within your solution folder:
 
 ```json
 {
-  "clarion.pasteAsClarionString.lineTerminator": "crlf",  // "space", "crlf", or "none"
-  "clarion.pasteAsClarionString.trimLeading": true
+  "clarion.pasteAsString.lineTerminator": "crlf",  // "space", "crlf", or "none"
+  "clarion.pasteAsString.trimLeadingWhitespace": true
 }
 ```
 
@@ -165,11 +168,21 @@ All settings are saved in `.vscode/settings.json` within your solution folder:
 
 ```json
 {
-  "clarion.diagnostics.enabled": true,
-  "clarion.diagnostics.validateStructures": true,
-  "clarion.diagnostics.validateFiles": true
+  "clarion.diagnostics.undeclaredVariables.enabled": true,
+  "clarion.diagnostics.indistinguishablePrototypes.enabled": true,
+  "clarion.referencesCodeLens.enabled": true
 }
 ```
+
+### Performance Tracing (for support)
+
+```json
+{
+  "clarion.log.performance.enabled": true
+}
+```
+
+Reload the window after changing this; the *Clarion Language Server* output channel then carries a full timing timeline — attach it when reporting performance issues.
 
 **[See all settings →](../reference/settings.md)**
 

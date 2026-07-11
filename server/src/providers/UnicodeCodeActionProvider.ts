@@ -1,5 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CodeAction, CodeActionKind, CodeActionContext, Range, TextEdit, WorkspaceEdit } from 'vscode-languageserver/node';
+import { isUnrepresentableInAnsi } from './diagnostics/UnicodeDiagnostics';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("UnicodeCodeActionProvider");
@@ -58,18 +59,20 @@ export class UnicodeCodeActionProvider {
             });
         }
 
-        // "Fix all" — scan the whole document for every invalid char, not just the current position
+        // "Fix all" — scan the whole document for every invalid char, not just the current position.
+        // Uses the SAME representability test as the diagnostic (not a raw > 0xFF), so it never
+        // deletes legitimate national characters (e.g. č/ž for CP-1250) that aren't flagged.
         const allEdits: TextEdit[] = [];
         const text = document.getText();
-        for (let i = 0; i < text.length; i++) {
-            const code = text.charCodeAt(i);
-            if (code > 0xFF) {
-                const pos = document.positionAt(i);
-                const range: Range = { start: pos, end: { line: pos.line, character: pos.character + 1 } };
-                const char = text[i];
-                const replacement = REPLACEMENTS.get(char);
+        for (let i = 0; i < text.length;) {
+            const code = text.codePointAt(i)!;
+            const charLen = code > 0xFFFF ? 2 : 1;
+            if (isUnrepresentableInAnsi(code)) {
+                const range: Range = { start: document.positionAt(i), end: document.positionAt(i + charLen) };
+                const replacement = REPLACEMENTS.get(String.fromCodePoint(code));
                 allEdits.push(replacement ? TextEdit.replace(range, replacement) : TextEdit.del(range));
             }
+            i += charLen;
         }
         if (allEdits.length > 1) {
             actions.push({

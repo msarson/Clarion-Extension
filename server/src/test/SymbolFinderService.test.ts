@@ -521,3 +521,170 @@ RoutineOnly LONG
         });
     });
 });
+
+/**
+ * #319 — the sibling-MEMBER module-variable walk (findModuleVariableInSiblingMembers)
+ * loadTokensForFile'd EVERY member file of the program family on a lookup miss:
+ * readFileSync + full synchronous tokenization per file, no pruning, no yields.
+ * On Mark's VM the undeclaredVar validator's first cross-file miss walked 161
+ * generated modules cold — an 8.2s synchronous event-loop block.
+ *
+ * Fix under test: the walk consults ReferenceCountIndex (batched verifyFilesFresh
+ * up front, then mayContain per file — the #315 FAR prune pattern). A module-scope
+ * declaration of `word` requires `word` to OCCUR in the file, so an indexed file
+ * with zero occurrences is skipped without reading a byte. Compound words
+ * (BRW1::View:Browse) are never a single scanned word, so only bare identifiers
+ * prune; unknown-to-index files always load (conservative).
+ */
+suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference index', () => {
+    // Deferred import keeps the suite header clean; resolved once in setup.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { ReferenceCountIndex } = require('../services/ReferenceCountIndex');
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
+    let dir: string;
+    let fixture: ReturnType<typeof buildMultiFileFixture>;
+    let service319: SymbolFinderService;
+    let loadCalls: string[];
+    let origLoad: (filePath: string) => unknown;
+
+    const filesMap: { [rel: string]: string } = {
+        'main.clw': [
+            '  PROGRAM',
+            '  MAP',
+            '  END',
+            'GlobalThing LONG',
+            '  CODE',
+            '  RETURN',
+        ].join('\n'),
+        'MemberA.clw': [
+            "  MEMBER('main.clw')",
+            'SharedValue LONG',
+            'ProcA PROCEDURE',
+            '  CODE',
+            '  GlobalThing = 2',
+            '  RETURN',
+        ].join('\n'),
+        'MemberB.clw': [
+            "  MEMBER('main.clw')",
+            'ProcB PROCEDURE',
+            '  CODE',
+            '  MissingValue = 1',
+            '  RETURN',
+        ].join('\n'),
+    };
+
+    const absPaths = () => Object.keys(filesMap).map(rel => path.join(dir, rel));
+
+    setup(async () => {
+        setServerInitialized(true);
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symfind319_'));
+        for (const [rel, content] of Object.entries(filesMap)) {
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        fixture = buildMultiFileFixture({
+            files: filesMap,
+            projectRoot: dir,
+            frg: { programFile: 'main.clw', memberFiles: ['MemberA.clw', 'MemberB.clw'] }
+        });
+        const tc = TokenCache.getInstance();
+        service319 = new SymbolFinderService(tc, new ScopeAnalyzer(tc, SolutionManager.getInstance()));
+
+        // Spy on the private loader — the walk's only file-materialization seam.
+        loadCalls = [];
+        const svc = service319 as unknown as { loadTokensForFile: (p: string) => unknown };
+        origLoad = svc.loadTokensForFile.bind(service319);
+        svc.loadTokensForFile = (p: string) => {
+            loadCalls.push(p.toLowerCase());
+            return origLoad(p);
+        };
+
+        ReferenceCountIndex.getInstance().reset();
+    });
+
+    teardown(() => {
+        ReferenceCountIndex.getInstance().reset();
+        teardownMultiFileFixture();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('indexed sibling provably lacking the word is pruned — no read, no tokenization', async () => {
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'MissingValue', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.strictEqual(result, null, 'MissingValue is undeclared — walk must miss');
+        assert.strictEqual(loadCalls.length, 0,
+            `siblings with zero occurrences of the word must not be loaded; loaded: [${loadCalls.join(', ')}]`);
+    });
+
+    test('#319 reopen: a sibling that merely USES the word (indented, no column-0 label) is not tokenized', async () => {
+        // WM_QUERYENDSESSION shape from the real app: a libsrc equate USED in
+        // ~143 member modules but declared in none of them — the walk tokenized
+        // every one (5.6s cold) to discover no module-scope declaration exists.
+        // A module declaration is a COLUMN-0 label by language rule; a cheap
+        // text probe must reject usage-only files without tokenizing them.
+        // MemberA uses GlobalThing (indented) but declares no such label.
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+        // The cost only exists for COLD files (cache-warm files scan cheaply and
+        // skip the probe) — evict MemberA to model the startup shape.
+        TokenCache.getInstance().clearTokens(fixture.uris['MemberA.clw']);
+
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'GlobalThing', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.strictEqual(result, null, 'GlobalThing has no module-scope declaration in any sibling');
+        assert.strictEqual(loadCalls.length, 0,
+            `usage-only siblings must not be tokenized; loaded: [${loadCalls.join(', ')}]`);
+    });
+
+    test('bidirectional pin: a declaration that DOES exist is still found with the index built', async () => {
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'SharedValue', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.ok(result, 'SharedValue is declared in MemberA — prune must not eat it');
+        assert.strictEqual(result?.location.uri.toLowerCase(), fixture.uris['MemberA.clw'].toLowerCase());
+        assert.strictEqual(result?.location.line, 1);
+    });
+
+    test('unbuilt index never prunes (conservative fallback)', async () => {
+        // No buildInBackground — index unbuilt; walk must behave exactly as before.
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'SharedValue', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.ok(result, 'walk must still resolve with the index unavailable');
+        assert.ok(loadCalls.length > 0, 'unbuilt index must not suppress loading');
+    });
+
+    test('#319 reopen: a parent-PROGRAM global resolves WITHOUT loading any sibling (global tier precedes the walk)', async () => {
+        // Mark's VM + local repro on the real app: GLOBALRESPONSE — declared in the
+        // PROGRAM's global data and USED in every member module — cost 8.9s of a
+        // 9.5s validation, because the sibling walk ran BEFORE the global tier and
+        // mayContain legitimately prunes nothing for a name that occurs everywhere.
+        // Clarion scope agrees with the reorder: global data IS visible in a member;
+        // a sibling's module data is NOT.
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+
+        const result = await service319.findSymbol(
+            'GlobalThing', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.strictEqual(result?.scope.type, 'global', 'must resolve as the PROGRAM global');
+        assert.strictEqual(loadCalls.length, 0,
+            `global resolution must not walk siblings; loaded: [${loadCalls.join(', ')}]`);
+    });
+
+    test('compound (colon) words never prune — the index scans bare identifiers only', async () => {
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+
+        await service319.findModuleVariableInSiblingMembers(
+            'BRW1::View:Browse', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.ok(loadCalls.length > 0,
+            'a compound word is never a single indexed name — pruning on it would drop real declarations');
+    });
+});

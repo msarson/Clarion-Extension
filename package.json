@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "0.9.9",
+  "version": "1.0.0",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -488,6 +488,18 @@
       {
         "command": "clarion.pasteAsString",
         "title": "Clarion: Paste as String"
+      },
+      {
+        "command": "clarion.surroundWith",
+        "title": "Clarion: Surround With…"
+      },
+      {
+        "command": "clarion.negateCondition",
+        "title": "Clarion: Negate Condition"
+      },
+      {
+        "command": "clarion.flipIfElse",
+        "title": "Clarion: Flip IF/ELSE"
       },
       {
         "command": "clarion.createClass",
@@ -1289,6 +1301,11 @@
           "default": true,
           "description": "Enabled by default. Shows a '… references' CodeLens above each procedure, method implementation, and CLASS, counting usages across the solution. Each lens runs a Find-All-References, which can make very large classes (e.g. StringTheory) sluggish — set to false to disable. Toggling requires reloading the VS Code window (issue #185)."
         },
+        "clarion.log.performance.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disabled by default. Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the 'Clarion Language Server' output channel. Enable when reporting a performance problem — these lines identify exactly which operation is slow — then attach the channel contents to your issue. Negligible overhead either way; the timers always run, only the output is gated. Toggling requires reloading the VS Code window (issue #297)."
+        },
         "clarion.activeVersion": {
           "type": "string",
           "default": "",
@@ -1350,11 +1367,12 @@
   },
   "dependencies": {
     "glob": "^12.0.0",
+    "iconv-lite": "^0.7.3",
     "minimatch": "^10.2.3",
     "minimist": "^1.2.6",
     "mkdirp": "^3.0.1",
-    "vscode-languageclient": "^7.0.0",
-    "vscode-languageserver": "^7.0.0",
+    "vscode-languageclient": "^8.1.0",
+    "vscode-languageserver": "^8.1.0",
     "vscode-languageserver-protocol": "^3.17.5",
     "vscode-languageserver-textdocument": "^1.0.12",
     "xml2js": "^0.6.2"

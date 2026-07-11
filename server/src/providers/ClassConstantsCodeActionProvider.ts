@@ -17,6 +17,7 @@ import * as path from 'path';
 
 const logger = LoggerManager.getLogger('ClassConstantsCodeActionProvider');
 logger.setLevel('error');
+const perfLogger = LoggerManager.getLogger('ClassConstantsCodeAction.Perf', 'perf');
 
 /**
  * Provides Code Actions (lightbulb) for adding missing class constants
@@ -30,13 +31,57 @@ export class ClassConstantsCodeActionProvider {
         this.includeVerifier = IncludeVerifier.getInstance();
     }
 
+    /**
+     * #317 — outer timing shell. The #312 chain instrumentation names this
+     * provider on slow requests (classConstants=3850/4349ms sighted on Mark's
+     * VM) but not WHICH step; this attributes the cost so the fix is aimed,
+     * not guessed. One perf line, only when the request is genuinely slow.
+     */
     async provideCodeActions(
         document: TextDocument,
         range: Range,
         context: CodeActionContext,
         token: CancellationToken
     ): Promise<CodeAction[]> {
+        const steps: Record<string, number> = {};
+        const t0 = Date.now();
+        try {
+            return await this.provideCodeActionsInner(document, range, context, token, steps);
+        } finally {
+            const total = Date.now() - t0;
+            // 300ms: Mark's 16:20 log showed a 944ms invocation slipping under a
+            // 1s gate — anything slower than the #312 chain threshold is worth a
+            // step breakdown.
+            if (total >= 300) {
+                perfLogger.perf('classConstants slow — step breakdown', {
+                    total_ms: total,
+                    ...steps,
+                    line: range.start.line,
+                    uri: document.uri
+                });
+            }
+        }
+    }
+
+    /** Times one awaited step into `steps`, accumulating across repeats. */
+    private static async timed<T>(steps: Record<string, number>, name: string, fn: () => Promise<T>): Promise<T> {
+        const t = Date.now();
+        try {
+            return await fn();
+        } finally {
+            steps[name] = (steps[name] ?? 0) + (Date.now() - t);
+        }
+    }
+
+    private async provideCodeActionsInner(
+        document: TextDocument,
+        range: Range,
+        context: CodeActionContext,
+        token: CancellationToken,
+        steps: Record<string, number>
+    ): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
+        const timed = ClassConstantsCodeActionProvider.timed;
 
         try {
             const text = document.getText();
@@ -56,7 +101,8 @@ export class ClassConstantsCodeActionProvider {
                     const data = diag.data as { typeName: string; incFileName: string } | undefined;
                     if (data?.typeName && data?.incFileName) {
                         logger.info(`[CodeAction] missing-include diag: typeName="${data.typeName}" incFile="${data.incFileName}"`);
-                        const diagActions = await this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath);
+                        const diagActions = await timed(steps, 'diag_missing_include_ms', () =>
+                            this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath));
                         actions.push(...diagActions);
                     }
                 }
@@ -102,7 +148,8 @@ export class ClassConstantsCodeActionProvider {
                 logger.info(`[CodeAction] INCLUDE line detected: ${includeFile}`);
                 
                 // Check if this is a class include file
-                const includeActions = await this.getActionsForInclude(includeFile, document);
+                const includeActions = await timed(steps, 'include_line_ms', () =>
+                    this.getActionsForInclude(includeFile, document));
                 actions.push(...includeActions);
                 
                 if (actions.length > 0) {
@@ -126,19 +173,26 @@ export class ClassConstantsCodeActionProvider {
 
             logger.info(`[CodeAction] word="${word}" file="${path.basename(document.uri)}"`);
 
+            // #312 part 2: the word path was the OTHER per-cursor-move cost (100-400ms
+            // measured) — its include-chain walk (isClassIncluded) and constant checks
+            // re-ran on every request. Same memo discipline as the INCLUDE path.
+            const wordMemoKey = `w|${document.uri}|${document.version}|${word.toLowerCase()}`;
+            const memoizedWord = ClassConstantsCodeActionProvider.includeActionsMemo.get(wordMemoKey);
+            if (memoizedWord) return memoizedWord;
+
             // Check if this is a class type with missing constants
             logger.info(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
-            
-            // Build or get index for this project
-            const index = await this.sdi.getOrBuildIndex(projectPath);
+
+            // Build or get index for this project (guarded above — already built here)
+            const index = await timed(steps, 'sdi_index_ms', () => this.sdi.getOrBuildIndex(projectPath));
             logger.info(`[CodeAction] SDI index has ${index.byName.size} entries`);
-            
+
             // Look up the class
             const definitions = this.sdi.find(word, projectPath);
             logger.info(`[CodeAction] found ${definitions.length} definitions for "${word}"`);
             
             if (definitions.length === 0) {
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             const def = definitions[0];
@@ -146,25 +200,28 @@ export class ClassConstantsCodeActionProvider {
             logger.info(`[CodeAction] class file="${fileName}" filePath="${def.filePath}"`);
 
             // Verify the class file is included
-            const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
+            const isIncluded = await timed(steps, 'is_class_included_ms', () =>
+                this.includeVerifier.isClassIncluded(fileName, document));
             logger.info(`[CodeAction] isIncluded=${isIncluded}`);
             if (!isIncluded) {
                 // Offer Code Action to add the missing INCLUDE
-                const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath);
+                const addIncludeActions = await timed(steps, 'missing_include_actions_ms', () =>
+                    this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath));
                 actions.push(...addIncludeActions);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             logger.info(`[CodeAction] checking constants for ${word}`);
 
             // Parse class constants
             const constantParser = new ClassConstantParser();
-            const classConstants = await constantParser.parseFile(def.filePath);
+            const classConstants = await timed(steps, 'parse_class_file_ms', () =>
+                constantParser.parseFile(def.filePath));
             const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.name.toLowerCase());
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
                 logger.info(`[CodeAction] no Link/DLL constants found in ${fileName} for class "${def.name}"`);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             // Check which constants are missing — use specific cwproj path to avoid wrong-project matches
@@ -172,7 +229,8 @@ export class ClassConstantsCodeActionProvider {
             const missingConstants = [];
 
             for (const constant of thisClassConstants.constants) {
-                const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
+                const isDefined = await timed(steps, 'constants_check_ms', () =>
+                    constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath));
                 logger.info(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);
@@ -181,7 +239,7 @@ export class ClassConstantsCodeActionProvider {
 
             if (missingConstants.length === 0) {
                 logger.info(`[CodeAction] all constants already defined — no action needed`);
-                return actions;
+                return this.memoizeIncludeActions(wordMemoKey, actions);
             }
 
             logger.info(`[CodeAction] offering action for ${missingConstants.length} missing constants`);
@@ -209,35 +267,55 @@ export class ClassConstantsCodeActionProvider {
 
             actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for ${word}`);
+            return this.memoizeIncludeActions(wordMemoKey, actions);
 
         } catch (error) {
             logger.error(`Error providing code actions: ${error instanceof Error ? error.message : String(error)}`);
         }
 
-        return actions;
+        return actions; // error path — not memoized, retried on the next request
     }
 
     /**
      * Gets Code Actions for an INCLUDE statement
      */
+    /**
+     * #312 — memo for INCLUDE-line actions. VS Code fires a code-action request on
+     * every cursor move; resting on an INCLUDE line re-parsed the class file and
+     * re-checked the cwproj constants each time (~150-270ms measured). Same
+     * (uri, version, includeFile) → same actions. Static because server.ts
+     * constructs a fresh provider per request. Bounded LRU-ish.
+     */
+    private static includeActionsMemo = new Map<string, CodeAction[]>();
+
     private async getActionsForInclude(includeFile: string, document: TextDocument): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
-        
+
+        const memoKey = `${document.uri}|${document.version}|${includeFile.toLowerCase()}`;
+        const memoized = ClassConstantsCodeActionProvider.includeActionsMemo.get(memoKey);
+        if (memoized) return memoized;
+
         try {
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
             const sm = SolutionManager.getInstance();
             const projectPath = sm?.getProjectPathForFile(fromPath) ?? path.dirname(fromPath);
             const cwprojPath = sm?.getProjectCwprojForFile(fromPath);
-            
-            // Build or get index for this project
-            await this.sdi.getOrBuildIndex(projectPath);
-            
+
+            // #312: same guard as the word-at-cursor path below — awaiting getOrBuildIndex
+            // here COALESCED every cursor-rest on an INCLUDE line onto the in-flight startup
+            // build (seven stacked requests at 2.9-5.7s each on Mark's trace). While the
+            // index is still building, offer no INCLUDE actions; VS Code re-requests on the
+            // next cursor move and they appear once the index is ready.
+            if (!this.sdi.isIndexed(projectPath)) {
+                return actions;
+            }
+
             // Find all classes in this include file
             const allClasses = this.sdi.findInFile(includeFile, projectPath);
             
             if (allClasses.length === 0) {
                 logger.info(`No classes found in ${includeFile}`);
-                return actions;
+                return this.memoizeIncludeActions(memoKey, actions);
             }
             
             logger.info(`Found ${allClasses.length} classes in ${includeFile}`);
@@ -268,7 +346,7 @@ export class ClassConstantsCodeActionProvider {
             
             if (allMissingConstants.length === 0) {
                 logger.info(`No missing constants for classes in ${includeFile}`);
-                return actions;
+                return this.memoizeIncludeActions(memoKey, actions);
             }
             
             logger.info(`Found ${allMissingConstants.length} missing constants for ${includeFile}`);
@@ -296,11 +374,23 @@ export class ClassConstantsCodeActionProvider {
 
             actions.push(addConstantsAction);
             logger.info(`Provided ${actions.length} code actions for INCLUDE ${includeFile}`);
-            
+
         } catch (error) {
             logger.error(`Error getting actions for INCLUDE: ${error instanceof Error ? error.message : String(error)}`);
+            return actions; // errors are not memoized — retry on the next request
         }
-        
+
+        return this.memoizeIncludeActions(memoKey, actions);
+    }
+
+    /** #312 — bounded insert into the static INCLUDE-actions memo. */
+    private memoizeIncludeActions(key: string, actions: CodeAction[]): CodeAction[] {
+        const memo = ClassConstantsCodeActionProvider.includeActionsMemo;
+        if (memo.size >= 100) {
+            const oldest = memo.keys().next().value;
+            if (oldest !== undefined) memo.delete(oldest);
+        }
+        memo.set(key, actions);
         return actions;
     }
 

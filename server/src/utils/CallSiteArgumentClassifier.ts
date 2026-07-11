@@ -1,4 +1,5 @@
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { ClarionTokenizer } from '../ClarionTokenizer';
 
 /**
  * Classification of a single call-site argument.
@@ -28,6 +29,11 @@ export interface ArgClassification {
     kind: ArgKind;
     /** Base Clarion type when known (e.g. 'STRING', 'LONG', 'MyClass'). Undefined for kinds that need external resolution and no resolver supplied. */
     inferredType?: string;
+    /** #243: structure KIND of the argument's type when it is a structure instance
+     *  (e.g. 'QUEUE', 'GROUP', 'FILE'). Lets a queue argument match a builtin parameter typed
+     *  by kind (`GET(QUEUE queue, …)`) in addition to matching a user parameter by type name
+     *  (`*MyQueueType`). Set by consumers that resolve types (e.g. SignatureHelpProvider). */
+    structureKind?: string;
     /** Text of the argument as written at the call site (whitespace-collapsed). For diagnostics. */
     rawText: string;
     /** 0-based line number of the first token in the argument. */
@@ -104,13 +110,19 @@ export class CallSiteArgumentClassifier {
         if (openParenIdx < 0) return null;
 
         // Step 2: collect argument slices via depth-aware comma split.
+        // #250: an OMITTED argument (`GET(Q,,3)`, `F(a,)`, `F(,a)`) produces an EMPTY slice
+        // that must still occupy its position — dropping it shifts every following argument
+        // and per-position overload type-checks compare the wrong pairs. So commas always
+        // push (even an empty slice), and the close-paren pushes the final slice whenever
+        // the list is non-empty (any content OR any prior comma). `Foo()` stays [].
         const argSlices: Token[][] = [];
         let current: Token[] = [];
         let depth = 1;
         let j = openParenIdx + 1;
         while (j < tokens.length && depth > 0) {
             const t = tokens[j];
-            if (t.type === TokenType.Comment) { j++; continue; }
+            // #250: `|` line-continuation tokens are pure syntax — never part of an argument.
+            if (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) { j++; continue; }
             if (t.type === TokenType.Delimiter) {
                 if (t.value === '(') {
                     depth++;
@@ -118,12 +130,12 @@ export class CallSiteArgumentClassifier {
                 } else if (t.value === ')') {
                     depth--;
                     if (depth === 0) {
-                        if (current.length > 0) argSlices.push(current);
+                        if (current.length > 0 || argSlices.length > 0) argSlices.push(current);
                         break;
                     }
                     current.push(t);
                 } else if (t.value === ',' && depth === 1) {
-                    if (current.length > 0) argSlices.push(current);
+                    argSlices.push(current); // even if empty — omitted arg keeps its position
                     current = [];
                 } else {
                     current.push(t);
@@ -135,13 +147,43 @@ export class CallSiteArgumentClassifier {
         }
 
         // Step 3: classify each slice.
-        return argSlices.map(slice => this.classifySlice(slice, ctx));
+        // #240: build a name→value map of EQUATE declarations once, so a bare EQUATE
+        // argument can be classified by its constant's literal shape without a resolver
+        // (the hover/def path calls us with no ctx).
+        const equates = this.buildEquateValueMap(tokens);
+        return argSlices.map(slice => this.classifySlice(slice, ctx, equates));
     }
 
-    private classifySlice(slice: Token[], ctx?: ClassifierContext): ArgClassification {
+    /**
+     * #242: classify a single argument given as RAW TEXT (e.g. a signature-help partial
+     * segment, which has no closed `(...)` for the token pipeline above). Tokenizes the text
+     * and runs the same per-argument classification, using `docTokens` for EQUATE resolution
+     * (#240) and an optional `ctx` resolver for typed variables. Lets signature help highlight
+     * the type-matching overload as the user types, identical to the hover/go-to-definition path.
+     */
+    public classifyArgumentText(
+        argText: string,
+        docTokens: Token[],
+        ctx?: ClassifierContext
+    ): ArgClassification {
+        const trimmed = argText.trim();
+        if (trimmed === '') return { kind: 'unknown', rawText: '', line: 0, character: 0 };
+        // Indent before tokenizing: a fragment at column 0 tokenizes in declaration mode
+        // (everything becomes a Label and the implicit-variable suffix is dropped). Two leading
+        // spaces put it in expression context so literals/variables/implicits classify correctly.
+        const significant = new ClarionTokenizer('  ' + argText).tokenize()
+            .filter(t => t.type !== TokenType.Comment &&
+                         t.type !== TokenType.LineContinuation && // #250
+                         t.value.trim() !== '');
+        if (significant.length === 0) return { kind: 'unknown', rawText: trimmed, line: 0, character: 0 };
+        return this.classifySlice(significant, ctx, this.buildEquateValueMap(docTokens));
+    }
+
+    private classifySlice(slice: Token[], ctx?: ClassifierContext, equates?: Map<string, string>): ArgClassification {
         // Trim purely-syntactic leading tokens (defensive; tokenizer normally produces clean slices).
         const significant = slice.filter(t =>
             t.type !== TokenType.Comment &&
+            t.type !== TokenType.LineContinuation && // #250: `|` is never part of an argument
             !(t.type === TokenType.Delimiter && (t.value === ' ' || t.value === '\t'))
         );
 
@@ -157,7 +199,7 @@ export class CallSiteArgumentClassifier {
 
         // Single-token slices: the simple buckets.
         if (significant.length === 1) {
-            return this.classifySingleToken(first, rawText, line, character, ctx);
+            return this.classifySingleToken(first, rawText, line, character, ctx, equates);
         }
 
         // Multi-token: distinguish dotted/prefixed/call-result/expression.
@@ -169,7 +211,8 @@ export class CallSiteArgumentClassifier {
         rawText: string,
         line: number,
         character: number,
-        ctx?: ClassifierContext
+        ctx?: ClassifierContext,
+        equates?: Map<string, string>
     ): ArgClassification {
         switch (first.type) {
             case TokenType.String:
@@ -200,11 +243,41 @@ export class CallSiteArgumentClassifier {
                     inferredType: ctx?.resolveSymbolType?.(first.value, line, character),
                     rawText, line, character
                 };
+            case TokenType.ImplicitVariable:
+                // #241: an undeclared implicit variable — the compiler infers its type from the
+                // label's trailing suffix (# → LONG, $ → REAL, " → STRING(32)). It is a real
+                // addressable variable, so it keeps the `variable` kind (can bind a base type or
+                // a `*TYPE` ref parameter), unlike an EQUATE constant (#240).
+                return {
+                    kind: 'variable',
+                    inferredType: this.implicitVariableType(first.value),
+                    rawText, line, character
+                };
+            case TokenType.Attribute:
+            case TokenType.Keyword:
+                // #252 — a keyword-colliding IDENTIFIER used as a bare argument (`ref`,
+                // `name`, `max`, …) tokenizes as Attribute/Keyword, not Variable — the
+                // single-token sibling of #250's PRE:Field finding. A genuine attribute/
+                // keyword cannot appear as a bare call argument, so a lone word-shaped
+                // token here IS a variable; fall through to the variable branch.
+                if (!/^[A-Za-z_]\w*$/.test(first.value)) {
+                    return { kind: 'unknown', rawText, line, character };
+                }
+            // eslint-disable-next-line no-fallthrough
             case TokenType.Variable:
             case TokenType.ReferenceVariable:
                 // Picture-format may slip through as Variable if tokenizer didn't tag it.
                 if (PICTURE_FORMAT_PATTERN.test(first.value)) {
                     return { kind: 'literal_picture', inferredType: 'STRING', rawText, line, character };
+                }
+                // #240: a bare identifier that names an EQUATE is a named constant. Classify it
+                // by the literal shape of its value (numeric / string / picture) so the overload
+                // resolver treats it like the underlying literal — a constant has no address, so
+                // this also correctly excludes reference-parameter (`*TYPE`) overloads.
+                if (equates) {
+                    const equateArg = this.classifyEquateArgument(
+                        this.stripRefSigil(first.value), rawText, line, character, equates);
+                    if (equateArg) return equateArg;
                 }
                 return {
                     kind: 'variable',
@@ -291,7 +364,9 @@ export class CallSiteArgumentClassifier {
         }
 
         // Prefix-namespace: identifier `:` identifier (Clarion's PRE convention).
-        if (first.type === TokenType.Variable &&
+        // #250: a keyword-colliding prefix (`PRE`, `NAME`, `MAX`, …) tokenizes as Attribute,
+        // not Variable (#193 asymmetry) — accept both, mirroring sliceAccess's 3-token head.
+        if ((first.type === TokenType.Variable || first.type === TokenType.Attribute) &&
             second && second.type === TokenType.Delimiter && second.value === ':' &&
             significant.length >= 3) {
             const name = significant.slice(0, 3).map(t => t.value).join('');
@@ -409,5 +484,91 @@ export class CallSiteArgumentClassifier {
 
     private numericBaseType(literal: string): string {
         return literal.includes('.') ? 'REAL' : 'LONG';
+    }
+
+    /** #241: implicit-variable type from its trailing suffix (# LONG, $ REAL, " STRING(32)). */
+    private implicitVariableType(name: string): string | undefined {
+        switch (name.charAt(name.length - 1)) {
+            case '#': return 'LONG';
+            case '$': return 'REAL';
+            case '"': return 'STRING';
+            default:  return undefined;
+        }
+    }
+
+    // ── #240: EQUATE argument type inference ────────────────────────────────────
+    // An EQUATE is a compile-time named constant (`Label EQUATE(value)`). When it is
+    // passed as a call argument, the compiler resolves overloads by the value's type.
+    // We derive that type from the raw value text captured on the declaration token
+    // (`Token.dataValue`), so it works purely from the token stream (no resolver).
+
+    /** name(upper) → raw parenthesised EQUATE value text (e.g. '100', "'hi'", '@P##'). */
+    private buildEquateValueMap(tokens: Token[]): Map<string, string> {
+        const map = new Map<string, string>();
+        for (const t of tokens) {
+            if (t.dataType === 'EQUATE' && t.dataValue !== undefined && t.value) {
+                const key = t.value.toUpperCase();
+                if (!map.has(key)) map.set(key, t.dataValue); // first declaration wins
+            }
+        }
+        return map;
+    }
+
+    /** Classify a bare identifier that names an EQUATE, or undefined if it isn't one
+     *  (or its value can't be resolved to a literal type — caller falls back to `variable`). */
+    private classifyEquateArgument(
+        name: string,
+        rawText: string,
+        line: number,
+        character: number,
+        equates: Map<string, string>
+    ): ArgClassification | undefined {
+        const inf = this.resolveEquateInferredType(name, equates, new Set<string>());
+        if (!inf) return undefined;
+        return { kind: inf.kind, inferredType: inf.inferredType, rawText, line, character };
+    }
+
+    /** Map an EQUATE's value to a literal kind/type, following alias chains (bounded). */
+    private resolveEquateInferredType(
+        name: string,
+        equates: Map<string, string>,
+        visited: Set<string>
+    ): { kind: ArgKind; inferredType: string } | undefined {
+        const key = name.toUpperCase();
+        if (visited.has(key)) return undefined; // cycle guard
+        const raw = equates.get(key);
+        if (raw === undefined) return undefined;
+        visited.add(key);
+
+        const t = raw.trim();
+        if (t.length === 0) return undefined;                                   // ITEMIZE auto-value etc.
+        if (t.startsWith("'") || t.startsWith('"')) {
+            return { kind: 'literal_string', inferredType: 'STRING' };
+        }
+        if (PICTURE_FORMAT_PATTERN.test(t)) {
+            return { kind: 'literal_picture', inferredType: 'STRING' };
+        }
+        const num = this.classifyNumericLiteral(t);
+        if (num) return num;
+        // Alias to another label, e.g. `Init EQUATE(SetUpProg)` — resolve transitively.
+        if (/^[A-Za-z_][A-Za-z0-9_:]*$/.test(t)) {
+            return this.resolveEquateInferredType(t, equates, visited);
+        }
+        // Constant expression (1+2, BOR(...)), a type keyword (SIGNED EQUATE(LONG)), or
+        // anything unrecognised → let the caller fall back to conservative match-all.
+        return undefined;
+    }
+
+    /** Numeric literal → { literal_numeric, LONG|REAL }, else undefined. Handles decimal,
+     *  scientific, and Clarion radix integers (1111b binary, 777o octal, 1AFh hex). */
+    private classifyNumericLiteral(t: string): { kind: ArgKind; inferredType: string } | undefined {
+        if (/^[+-]?(\d+\.\d+|\.\d+|\d+)([eE][+-]?\d+)?$/.test(t)) {
+            const isReal = t.includes('.') || /[eE]/.test(t);
+            return { kind: 'literal_numeric', inferredType: isReal ? 'REAL' : 'LONG' };
+        }
+        if (/^[+-]?[0-9][0-9a-fA-F]*[bBoOhH]$/.test(t)) {
+            return { kind: 'literal_numeric', inferredType: 'LONG' };
+        }
+        return undefined;
     }
 }

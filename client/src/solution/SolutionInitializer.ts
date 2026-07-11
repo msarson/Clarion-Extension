@@ -19,11 +19,18 @@ import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { readIdePreferences } from './ClarionIdePreferences';
 import LoggerManager from '../utils/LoggerManager';
+import { PathUtils } from '../PathUtils';
 import * as path from 'path';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SolutionInitializer");
-logger.setLevel("error");
+// #297 (revised): the ⏱️ [STARTUP] timeline follows the same opt-in as the perf
+// channels — info only when clarion.log.performance.enabled, errors otherwise.
+// (Was pinned to "info" for the #295 diagnosis campaign.)
+logger.setLevel(
+    workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false)
+        ? 'info' : 'error'
+);
 
 /**
  * Handles workspace trust and initial solution setup
@@ -295,6 +302,16 @@ export async function initializeSolution(
         updateConfigurationStatusBar(globalSettings.configuration);
         logger.info(`✅ Updated configuration: ${globalSettings.configuration}`);
     }
+    // #297 fix 2: shared between the solutionReady handler (registered inside the client block)
+    // and the eager path's completion check further down — must be function-scoped.
+    // `started` is flipped at handler ENTRY (the handler's refresh pass can take 15s+ on a busy
+    // server — Mark's VM run showed the 30s fallback firing MID-handler and running a competing
+    // document pass because only the end-of-handler flag existed). The fallback timer handle is
+    // kept so the handler can cancel it outright.
+    let startupRefreshDone = false;
+    let startupRefreshStarted = false;
+    let startupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
     // ✅ Wait for the language client to be ready before proceeding
     if (client) {
         if (!isClientReady()) {
@@ -317,10 +334,18 @@ export async function initializeSolution(
         // so we never miss the notification due to a race. The handler defers refreshOpenDocuments
         // until the server has real project data, avoiding thousands of clarion/findFile requests
         // flooding the LSP pipe when getSolutionTree returns 0 projects on startup.
+        // #297 fix 2 (audit H1): SINGLE startup pipeline. Previously the eager init path AND this
+        // handler both ran the full completion (two tree refreshes, two open-document passes, two
+        // cache clears) — all heavy work happened twice, exactly in the server's busiest window.
+        // The solutionReady handler is now the sole completion driver; the eager path defers to it
+        // (with a 30s fallback if the notification never arrives — see below).
         let solutionReadyDisposable: Disposable | null = null;
         solutionReadyDisposable = client.onNotification('clarion/solutionReady', async (params: { solutionFilePath: string, projectCount: number }) => {
-            // Ignore stale notifications from a previous solution load
-            if (params.solutionFilePath !== globalSolutionFile) {
+            // Ignore stale notifications from a previous solution load.
+            // #263: compare via PathUtils.equalPath (normalized, case-insensitive) — a strict
+            // !== here rejected every notification when the server echoed a differently-spelled
+            // path, permanently blocking the deferred-activation path below.
+            if (!PathUtils.equalPath(params.solutionFilePath, globalSolutionFile)) {
                 logger.warn(`⚠️ clarion/solutionReady ignored — path mismatch (got ${params.solutionFilePath}, expected ${globalSolutionFile})`);
                 return;
             }
@@ -332,18 +357,42 @@ export async function initializeSolution(
             solutionReadyDisposable?.dispose();
             solutionReadyDisposable = null;
 
+            // Claim the startup completion NOW and kill the fallback — this handler's refresh
+            // pass can run long, and the fallback must not start a competing pass mid-flight.
+            startupRefreshStarted = true;
+            if (startupFallbackTimer) {
+                clearTimeout(startupFallbackTimer);
+                startupFallbackTimer = null;
+            }
+
             logger.info(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
             updateInitializationStatusBar('indexing-solution', `${params.projectCount} projects`);
+
+            // The eager pipeline may still be creating the DocumentManager — wait briefly for it
+            // rather than silently running the document refresh as a no-op (previously
+            // refreshOpenDocuments(undefined) "completed" in ~25ms doing nothing).
+            for (let i = 0; i < 40 && !documentManager; i++) {
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+
             const solutionCache = SolutionCache.getInstance();
-            const refreshStart = Date.now();
-            await solutionCache.refresh(true);
-            logger.info(`⏱️ [STARTUP] solutionCache.refresh(true) in solutionReady handler done in ${Date.now() - refreshStart}ms (${solutionCache.getSolutionInfo()?.projects?.length ?? 0} projects)`);
-            await refreshSolutionTreeView();
-            const deferredRdStart = Date.now();
+            // #297 fix 3 (audit H1): arm the activation suppression BEFORE any cache clear or tree
+            // re-render. Previously refresh(true) cleared the findFile cache and the whole-tree
+            // re-render ran guard-off against the cold cache — a burst of per-node findFile
+            // requests at the server's busiest moment. try/finally guarantees the guard drops.
             solutionCache.beginActivationRefresh();
-            await refreshOpenDocuments(documentManager);
-            logger.info(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
-            SolutionCache.getInstance().markActivationComplete();
+            try {
+                const refreshStart = Date.now();
+                await solutionCache.refresh(true);
+                logger.info(`⏱️ [STARTUP] solutionCache.refresh(true) in solutionReady handler done in ${Date.now() - refreshStart}ms (${solutionCache.getSolutionInfo()?.projects?.length ?? 0} projects)`);
+                await refreshSolutionTreeView();
+                const deferredRdStart = Date.now();
+                await refreshOpenDocuments(documentManager);
+                logger.info(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
+            } finally {
+                solutionCache.markActivationComplete();
+            }
+            startupRefreshDone = true;
             logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
             completeInitializationStatusBar(solutionName);
         });
@@ -373,16 +422,20 @@ export async function initializeSolution(
             defaultLookupExtensions: globalSettings.defaultLookupExtensions, // Add default lookup extensions
             undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled, // #62 opt-in
             indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
-            referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled // #185 opt-out
+            referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled, // #185 opt-out
+            inlayHintsParameterNames: globalSettings.inlayHintsParameterNames,   // inlay opt-out
+            inlayHintsImplicitTypes: globalSettings.inlayHintsImplicitTypes      // inlay opt-out
         });
         logger.info(`⏱️ [STARTUP] clarion/updatePaths sent`);
         updateInitializationStatusBar('indexing-solution', solutionName);
         
-        // Wait a moment for the server to process the notification and initialize
-        // This prevents a race condition where we request the solution tree before it's built
-        logger.info("⏳ Waiting for server to initialize solution...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        logger.info(`⏱️ [STARTUP] 1s delay complete, calling reinitializeEnvironment`);
+        // #297 S1: the 1s sleep that lived here ("wait for the server to process updatePaths")
+        // is gone. The race it papered over is handled properly now: an early getSolutionTree
+        // just returns the empty/cached tree (the client keeps existing info on an empty
+        // response), and the clarion/solutionReady handler refreshes with the real tree. On the
+        // VM run 8, the server had the solution READY in 2.0s — this sleep was pure added
+        // latency on the eager path.
+        logger.info(`⏱️ [STARTUP] calling reinitializeEnvironment (no artificial delay)`);
     } else {
         logger.error("❌ Language client is not available.");
         failInitializationStatusBar('Language client is not available');
@@ -414,19 +467,30 @@ export async function initializeSolution(
     logger.info(`⏱️ [STARTUP] createSolutionFileWatchers complete in ${Date.now() - fwStart}ms`);
     logger.info("✅ File watchers created");
     
-    // Only call refreshOpenDocuments immediately if we already have project data.
-    // If the solution wasn't ready yet (0 projects), the clarion/solutionReady handler
-    // registered above will call it once the server finishes building the solution.
+    // #297 fix 2 (audit H1): the eager path no longer runs its own completion pass — the
+    // clarion/solutionReady handler is the single startup pipeline (it refreshes the cache, the
+    // tree, and the open documents under the activation guard, then marks completion). If the
+    // handler already ran, there is nothing left to do; otherwise arm a 30s fallback so a server
+    // that never sends solutionReady can't leave document links unrefreshed and findFile
+    // suppressed forever.
     const solutionCache = SolutionCache.getInstance();
-    if ((solutionCache.getSolutionInfo()?.projects?.length ?? 0) > 0) {
-        const rdStart = Date.now();
-        await refreshOpenDocuments(documentManager);
-        logger.info(`⏱️ [STARTUP] refreshOpenDocuments complete in ${Date.now() - rdStart}ms`);
-        solutionCache.markActivationComplete();
-        logger.info(`✅ [STARTUP] COMPLETE — extension ready for user interaction`);
-        completeInitializationStatusBar(solutionName);
+    if (startupRefreshDone) {
+        logger.info(`⏱️ [STARTUP] solutionReady handler already completed the startup refresh — no duplicate pass`);
     } else {
-        logger.info(`⏱️ [STARTUP] refreshOpenDocuments deferred — solution not ready yet (waiting for clarion/solutionReady)`);
+        logger.info(`⏱️ [STARTUP] startup completion deferred to the clarion/solutionReady handler (single pipeline)`);
+        const dm = documentManager;
+        startupFallbackTimer = setTimeout(async () => {
+            if (startupRefreshDone || startupRefreshStarted) return;
+            startupRefreshDone = true;
+            logger.warn(`⚠️ [STARTUP] clarion/solutionReady not received within 30s — running fallback completion`);
+            solutionCache.beginActivationRefresh();
+            try {
+                await refreshOpenDocuments(dm);
+            } finally {
+                solutionCache.markActivationComplete();
+            }
+            completeInitializationStatusBar(solutionName);
+        }, 30_000);
     }
     
     const endTime = performance.now();

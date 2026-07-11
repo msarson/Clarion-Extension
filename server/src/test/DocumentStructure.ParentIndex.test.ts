@@ -360,6 +360,49 @@ ProcB   PROCEDURE(STRING p1)
             );
         });
 
+        test('localClassTokens — no duplicate entries after repeated process() passes (#258)', () => {
+            // #258: linkLocalDerivedMethodsPass pushed onto owner.localClassTokens with
+            // no reset and no includes-guard (unlike `children`, which goes through
+            // addChildOnce, and `branches`, which is explicitly reset). Every extra
+            // process() pass on the same tokens appended the same CLASS token again —
+            // in production the diagnostics pipeline supplies 3 extra passes per
+            // validation cycle, compounding per keystroke.
+            const source =
+                '   PROGRAM\n' +
+                '   MAP\n' +
+                'MyProc   PROCEDURE()\n' +
+                '   END\n' +
+                '   CODE\n' +
+                '   RETURN\n' +
+                '\n' +
+                'MyProc   PROCEDURE()\n' +
+                'Helper     CLASS\n' +
+                'DoIt         PROCEDURE()\n' +
+                '           END\n' +
+                '   CODE\n' +
+                '   RETURN\n' +
+                '\n' +
+                'Helper.DoIt PROCEDURE()\n' +
+                '   CODE\n' +
+                '   RETURN\n';
+            const tokens = new ClarionTokenizer(source).tokenize();
+            // Two extra passes on the same array (mirrors the diagnostics pipeline).
+            new DocumentStructure(tokens).process();
+            new DocumentStructure(tokens).process();
+
+            const owners = tokens.filter(t => t.localClassTokens && t.localClassTokens.length > 0);
+            assert.ok(owners.length > 0,
+                'fixture precondition: at least one procedure owns a local CLASS');
+            for (const owner of owners) {
+                const unique = new Set(owner.localClassTokens);
+                assert.strictEqual(
+                    owner.localClassTokens!.length, unique.size,
+                    `owner '${owner.value}'(L${owner.line}) has ${owner.localClassTokens!.length} ` +
+                    `localClassTokens entries but only ${unique.size} unique — non-idempotent push`
+                );
+            }
+        });
+
         test('Three process() passes — duplication does not grow unbounded', () => {
             // Belt-and-braces: each pass on top of an already-double-processed
             // token array should still leave the children arrays at their

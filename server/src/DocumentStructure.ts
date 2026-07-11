@@ -6,6 +6,7 @@ import { isAttributeKeyword } from './utils/AttributeKeywords';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 import { ControlService } from './utils/ControlService';
+import { ScopeResolver } from './scope/ScopeResolver';
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
@@ -103,6 +104,12 @@ export class DocumentStructure {
     private tokensByLine: Map<number, Token[]> = new Map();
     private structuresByType: Map<string, Token[]> = new Map();
     private parentIndex: Map<Token, Token> = new Map(); // 🚀 PERFORMANCE: O(1) parent lookups
+    /** Issue #233 (Rule 4): declaring-procedure line -> its Local Derived Method impl tokens.
+     * Built by linkLocalDerivedMethodsPass(); read via getMethodsForDeclaringProcedure(). */
+    private methodsByDeclaringProcedureLine: Map<number, Token[]> = new Map();
+    /** Issue #233 (Stage 2): lazily-built canonical scope resolver over this structure's tokens.
+     * Cleared at the start of process() so a re-run doesn't serve a stale resolver. */
+    private _scopeResolver?: ScopeResolver;
     /**
      * Flat ?name → all matching FieldEquateLabel tokens across the document.
      * Used by `findControl(name)` (no scope) and `findControlAll(name)`.
@@ -339,6 +346,21 @@ export class DocumentStructure {
      */
     public getTokensByLine(line: number): Token[] | undefined {
         return this.tokensByLine.get(line);
+    }
+
+    /** All tokens backing this structure. Issue #233 — lets ScopeResolver operate over a
+     * cached structure without re-tokenizing. */
+    public getTokens(): Token[] {
+        return this.tokens;
+    }
+
+    /** Issue #233 (Stage 2): the canonical scope resolver for this structure, built once and
+     * cached. Use this instead of ad-hoc range scans for "what scope encloses this line?". */
+    public getScopeResolver(): ScopeResolver {
+        if (!this._scopeResolver) {
+            this._scopeResolver = new ScopeResolver(this.tokens);
+        }
+        return this._scopeResolver;
     }
 
     /**
@@ -590,6 +612,8 @@ export class DocumentStructure {
     }
 
     public process(): void {
+        // Issue #233: any cached scope resolver is stale once we re-derive structure.
+        this._scopeResolver = undefined;
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
 
@@ -690,6 +714,16 @@ export class DocumentStructure {
         // Build the reverse IMPLEMENTS index from each CLASS token's
         // `implementedInterfaces` array (set in handleStructureToken).
         this.linkImplementorsPass();
+
+        // Issue #233 (Rule 1): stamp each procedure/method-impl/routine with its executable
+        // extent end (`codeFinishesAt`). Runs after the parentIndex rebuild + closures so
+        // `children` and `finishesAt` are final. Additive — never mutates `finishesAt`.
+        this.computeCodeExtents();
+
+        // Issue #233 (Rule 4): link Local Derived Method implementations to the procedure
+        // whose LOCAL data declared their CLASS. Depends on structuresByType (CLASS) and the
+        // parentIndex, both final by now.
+        this.linkLocalDerivedMethodsPass();
 
         // Invalidate the lazy logical-line cache. process() can run more than
         // once on the same DS (e.g. TokenCache fallbacks), and stale chains
@@ -1133,6 +1167,141 @@ export class DocumentStructure {
     }
 
     /**
+     * Issue #233 (Rule 1). Stamps `codeFinishesAt` on every PROCEDURE / METHODIMPL / ROUTINE.
+     *
+     * Clarion rule: a procedure's executable code ends at the first of {its first ROUTINE,
+     * the next PROCEDURE, EOF}. `finishesAt` already handles "next PROCEDURE / EOF" (it is set
+     * only at those boundaries), but it deliberately spans PAST the procedure's own routines.
+     * So the only missing case is the first-ROUTINE truncation, derived here from the already
+     * populated `children`. For a routine (which cannot contain routines) and for a procedure
+     * with no routines, `codeFinishesAt` == `finishesAt`.
+     *
+     * Purely additive: `finishesAt` is never changed, so the ~30 existing consumers are untouched.
+     */
+    private computeCodeExtents(): void {
+        for (const token of this.tokens) {
+            const sub = token.subType;
+            const isProcedure =
+                sub === TokenType.Procedure ||
+                sub === TokenType.GlobalProcedure ||
+                sub === TokenType.MethodImplementation;
+            const isRoutine = sub === TokenType.Routine;
+            if (!isProcedure && !isRoutine) continue;
+            if (token.finishesAt === undefined) continue;
+
+            if (isRoutine) {
+                token.codeFinishesAt = token.finishesAt;
+                continue;
+            }
+
+            // Procedure / method-impl: pull back to the line before the first child ROUTINE.
+            let firstRoutineLine: number | undefined;
+            for (const child of token.children ?? []) {
+                if (child.subType === TokenType.Routine) {
+                    if (firstRoutineLine === undefined || child.line < firstRoutineLine) {
+                        firstRoutineLine = child.line;
+                    }
+                }
+            }
+            token.codeFinishesAt =
+                firstRoutineLine !== undefined
+                    ? Math.min(firstRoutineLine - 1, token.finishesAt)
+                    : token.finishesAt;
+        }
+    }
+
+    /**
+     * Issue #233 (Rule 4). Links "Local Derived Methods" to their declaring procedure.
+     *
+     * A CLASS declared in a procedure's LOCAL data section produces methods that share the
+     * declaring procedure's scope (its local data AND routines are visible inside them). The
+     * language requires such methods to be implemented in the same module, immediately after
+     * the declaring procedure. We therefore:
+     *   1. Collect every CLASS whose enclosing scope is a GlobalProcedure (a procedure-local
+     *      class) → record it on `procedure.localClassTokens` and index by class name.
+     *   2. For each MethodImplementation `Class.Method`, if `Class` names a procedure-local
+     *      class, bind it to the NEAREST PRECEDING such procedure (deterministic per the
+     *      "immediately after" placement rule) via `declaringProcedureLine`.
+     *
+     * This replaces the prior heuristic of broad-scanning ALL global procedures.
+     */
+    private linkLocalDerivedMethodsPass(): void {
+        this.methodsByDeclaringProcedureLine.clear();
+
+        // class-name (upper) -> declaring GlobalProcedure tokens, in source order
+        const localClassesByName: Map<string, Token[]> = new Map();
+
+        const classes = this.structuresByType.get('CLASS');
+        if (classes) {
+            // #258: process() runs more than once on shared tokens — a bare push is
+            // non-idempotent (each extra pass duplicated every entry). Reset owners
+            // before rebuilding, mirroring the `branches` reset in populateBranches.
+            for (const cls of classes) {
+                const owner = this.getParentScope(cls);
+                if (owner) owner.localClassTokens = undefined;
+            }
+            for (const cls of classes) {
+                const owner = this.getParentScope(cls);
+                if (!owner || owner.subType !== TokenType.GlobalProcedure) continue;
+
+                const className = this.getStructureLabelName(cls);
+                if (!className) continue;
+
+                (owner.localClassTokens ??= []).push(cls);
+                const key = className.toUpperCase();
+                const arr = localClassesByName.get(key);
+                if (arr) arr.push(owner); else localClassesByName.set(key, [owner]);
+            }
+        }
+
+        if (localClassesByName.size === 0) return;
+
+        for (const token of this.tokens) {
+            if (token.subType !== TokenType.MethodImplementation) continue;
+            const label = token.label;
+            if (!label || !label.includes('.')) continue;
+
+            const className = label.split('.')[0].toUpperCase();
+            const candidates = localClassesByName.get(className);
+            if (!candidates) continue;
+
+            // Nearest preceding declaring procedure (a local derived method is implemented
+            // immediately after the procedure that declares its class).
+            let best: Token | undefined;
+            for (const proc of candidates) {
+                if (proc.line <= token.line && (!best || proc.line > best.line)) {
+                    best = proc;
+                }
+            }
+            if (!best) continue;
+
+            token.declaringProcedureLine = best.line;
+            const arr = this.methodsByDeclaringProcedureLine.get(best.line);
+            if (arr) arr.push(token); else this.methodsByDeclaringProcedureLine.set(best.line, [token]);
+        }
+    }
+
+    /**
+     * Returns the column-0 label name declared on a structure token's own line
+     * (e.g. `MyClass` for `MyClass CLASS(Parent)`). Mirrors the topLabel lookup used
+     * by assignMaxLabelLengths. Undefined for anonymous / inline structures.
+     */
+    private getStructureLabelName(structureToken: Token): string | undefined {
+        const sameLine = this.tokensByLine.get(structureToken.line);
+        if (!sameLine) return undefined;
+        const topLabel = sameLine.find(t => t.type === TokenType.Label && t.start === 0);
+        return topLabel?.value;
+    }
+
+    /**
+     * Issue #233 (Rule 4): the Local Derived Method implementation tokens bound to the
+     * GlobalProcedure that begins on `procedureLine`. Empty when none.
+     */
+    public getMethodsForDeclaringProcedure(procedureLine: number): Token[] {
+        return this.methodsByDeclaringProcedureLine.get(procedureLine) ?? [];
+    }
+
+    /**
      * True iff a token on `line` after column `afterColumn` has value EQUATE.
      * Used by `linkEquatesPass` to recognise EQUATE Label declarations without
      * relying on Gap D's `dataType` (which is populated later in the tokenize
@@ -1205,69 +1374,14 @@ export class DocumentStructure {
                     }
                 }
 
-                if (this.structureStack.length > 0) {
-                    let parentStructure = this.structureStack[this.structureStack.length - 1];
-                    logger.info(`📌 Parent structure: '${parentStructure.value}' at line ${parentStructure.line}`);
-                    parentStructure.maxLabelLength = Math.max(parentStructure.maxLabelLength || 0, token.value.length);
-
-                    // ✅ If we're inside a structure that can have fields, mark this as a structure field
-                    // This includes RECORD, GROUP, QUEUE, FILE, etc.
-                    const structureTypes = ["RECORD", "GROUP", "QUEUE", "FILE", "VIEW", "WINDOW", "REPORT"];
-                    if (structureTypes.includes(parentStructure.value.toUpperCase())) {
-                        token.isStructureField = true;
-                        token.structureParent = parentStructure;
-
-                        // ✅ Add field as child of the parent structure
-                        this.addChildOnce(parentStructure, token);
-                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
-
-                        // Find the label of the parent structure (if any)
-                        // 🚀 PERFORMANCE: Use tokensByLine index instead of indexOf
-                        const lineTokens = this.tokensByLine.get(parentStructure.line);
-                        if (lineTokens) {
-                            const structIndex = lineTokens.indexOf(parentStructure);
-                            if (structIndex > 0) {
-                                // Check if the token before the structure is a label
-                                const prevToken = lineTokens[structIndex - 1];
-                                if (prevToken && prevToken.type === TokenType.Label) {
-                                    // Set the nestedLabel property to the parent structure's label
-                                    token.nestedLabel = prevToken.value;
-                                    logger.info(`📌 Field '${token.value}' has nested label '${prevToken.value}'`);
-                                }
-                            }
-                        }
-
-                        // Check for a prefix in the structure hierarchy
-                        let prefixFound = false;
-
-                        // First check the immediate parent structure
-                        if (parentStructure.structurePrefix) {
-                            // Set the structurePrefix property on the label token
-                            token.structurePrefix = parentStructure.structurePrefix;
-                            logger.info(`📌 Field '${token.value}' associated with prefix '${parentStructure.structurePrefix}'`);
-                            prefixFound = true;
-                        }
-
-                        // If no prefix found and we're in a nested structure, look up the structure stack
-                        if (!prefixFound && parentStructure.parent) {
-                            // Start from the parent's parent and go up the chain
-                            let currentParent: Token | undefined = parentStructure.parent;
-
-                            // Traverse up the parent chain
-                            while (currentParent) {
-                                if (currentParent.type === TokenType.Structure && currentParent.structurePrefix) {
-                                    // Found a prefix in an ancestor structure
-                                    token.structurePrefix = currentParent.structurePrefix;
-                                    logger.info(`📌 Field '${token.value}' inherited prefix '${currentParent.structurePrefix}' from ancestor structure`);
-                                    prefixFound = true;
-                                    break;
-                                }
-                                // Move to the next parent in the chain
-                                currentParent = currentParent.parent;
-                            }
-                        }
-                    }
-                }
+                // #262: a ~60-line "field-of-structure" branch gated on
+                // `this.structureStack.length > 0` was deleted here — provably dead:
+                // processLabels() runs ONLY from the constructor, before process() has
+                // ever pushed to structureStack, so the gate was always false. The live
+                // equivalent (isStructureField / structureParent / structurePrefix /
+                // addChildOnce) is process()'s field-of-structure block. The dead branch
+                // was also the only writer of the never-read `nestedLabel` field,
+                // removed from TokenTypes with it.
             }
         }
 
@@ -2415,7 +2529,7 @@ export class DocumentStructure {
         // Find first procedure declaration
         const firstProc = this.tokens.find(t =>
             t.subType === TokenType.GlobalProcedure ||
-            t.value.toUpperCase() === 'PROCEDURE'
+            ProcedureUtils.isProcedureKeyword(t.value) // #247: PROCEDURE ≡ FUNCTION
         );
         
         // If no procedure exists, everything is in global scope

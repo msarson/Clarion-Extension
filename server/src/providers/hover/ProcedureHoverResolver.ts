@@ -56,9 +56,37 @@ export class ProcedureHoverResolver {
         const tokens = this.tokenCache.getTokens(document);
         
         // Find MAP declaration first
-        const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+        let mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
         logger.info(`MAP declaration found: ${!!mapDecl}`);
-        
+
+        // #313: the declaration may live in an INC included inside a MAP (current
+        // file's or MEMBER parent's — the WinEvent pattern). findMapDeclaration only
+        // scans the current document, so hover at call sites of such procedures was
+        // dead. Locate the declaration via the shared walk and resolve the
+        // implementation from ITS document — the proven declaration-side path.
+        if (!mapDecl) {
+            const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens);
+            if (hit) {
+                const declLineText = hit.doc.getText({
+                    start: { line: hit.declLine, character: 0 },
+                    end: { line: hit.declLine, character: Number.MAX_SAFE_INTEGER }
+                });
+                mapDecl = {
+                    uri: hit.doc.uri,
+                    range: {
+                        start: { line: hit.declLine, character: 0 },
+                        end: { line: hit.declLine, character: declLineText.length }
+                    }
+                };
+                const includeImpl = await this.mapResolver.findProcedureImplementation(
+                    word, hit.tokens, hit.doc, { line: hit.declLine, character: 0 }, declLineText
+                );
+                if (mapDecl || includeImpl) {
+                    return this.formatter.formatProcedure(word, mapDecl, includeImpl, document, position);
+                }
+            }
+        }
+
         let procImpl = null;
         if (mapDecl) {
             // Check if MAP declaration is from an INCLUDE file
@@ -97,7 +125,8 @@ export class ProcedureHoverResolver {
                     tokens,
                     document,
                     mapPosition,
-                    line
+                    line,
+                    this.tokenCache.getStructure(document) // #258: reuse cached structure
                 );
                 logger.info(`Implementation found in current document: ${!!procImpl}`);
             }

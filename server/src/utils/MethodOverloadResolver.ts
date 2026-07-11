@@ -5,8 +5,10 @@ import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
 import { ArgClassification, CallSiteArgumentClassifier } from './CallSiteArgumentClassifier';
+import { ArgumentTypeResolver } from './ArgumentTypeResolver';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
@@ -27,7 +29,10 @@ export interface MethodDeclarationInfo {
  * Used by both HoverProvider and DefinitionProvider
  */
 export class MethodOverloadResolver {
-    
+
+    /** #252 — lazily constructed (import cycle with ClassMemberResolver via ArgumentTypeResolver). */
+    private argTypeResolver: ArgumentTypeResolver | null = null;
+
     /**
      * Finds the best matching method declaration for a method implementation or call
      * @param className The name of the class containing the method
@@ -115,14 +120,21 @@ export class MethodOverloadResolver {
      *   - fewer than 2 candidates (nothing to disambiguate, or cross-file miss),
      *   - the resolver reports `matchedAll` / no match (un-disambiguatable —
      *     conservative fallback preserves existing UX).
+     *
+     * #252 — this is the single enriched choke point for the Hover / Ctrl+F12
+     * overlays: classified args are typed through the same shared
+     * ArgumentTypeResolver sighelp and F12 use, so a typed argument (dotted
+     * member, reference, typed local) disambiguates the same overload in every
+     * consumer instead of hover falling to first-declared while F12 jumps to
+     * the type-matched one.
      */
-    public resolveOverloadDeclByArgs(
+    public async resolveOverloadDeclByArgs(
         className: string,
         methodName: string,
         document: TextDocument,
         tokens: Token[],
         callLine: number
-    ): MethodDeclarationInfo | null {
+    ): Promise<MethodDeclarationInfo | null> {
         const lowerMethod = methodName.toLowerCase();
         const callNameIdx = tokens.findIndex(t =>
             t.line === callLine && (
@@ -133,6 +145,11 @@ export class MethodOverloadResolver {
 
         const args = new CallSiteArgumentClassifier().classifyArguments(tokens, callNameIdx);
         if (!args) return null;
+
+        // #252 — type the args that need real resolution (lazily constructed:
+        // ArgumentTypeResolver ↔ this module sit in a benign import cycle).
+        if (!this.argTypeResolver) this.argTypeResolver = new ArgumentTypeResolver();
+        await this.argTypeResolver.enrichArgs(args, tokens, document, { line: callLine, character: 0 });
 
         const candidates = this.findAllMethodDeclarationsIncludingIncludes(className, methodName, document, tokens);
         if (candidates.length < 2) return null;
@@ -181,7 +198,11 @@ export class MethodOverloadResolver {
 
         scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
         if (scored.length >= 2 && scored[0].score === scored[1].score) {
-            return { activeIndex: 0, ambiguous: true };
+            // #243: ambiguous among the top scorers — highlight the FIRST of them (lowest index),
+            // not a global index 0. When the args narrow it to a family (e.g. the QUEUE overloads
+            // of GET), this keeps the highlight inside that family instead of falling back to an
+            // unrelated overload (the FILE-first GET signature at index 0).
+            return { activeIndex: scored[0].idx, ambiguous: true };
         }
         return { activeIndex: scored[0].idx, ambiguous: false };
     }
@@ -291,7 +312,7 @@ export class MethodOverloadResolver {
                 if (new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i').test(methodLine)) {
                     const signature = methodLine.trim();
                     const declParamCount = ClarionPatterns.countParameters(signature);
-                    const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
+                    const fileUri = pathToCanonicalUri(filePath); // #251
                     candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
                 }
             }
@@ -449,7 +470,7 @@ export class MethodOverloadResolver {
                     if (methodMatch) {
                         const signature = includeLines[k].trim();
                         const declParamCount = ClarionPatterns.countParameters(signature);
-                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        const fileUri = pathToCanonicalUri(resolvedPath); // #251
                         candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
                         logger.info(`Found interface method in INCLUDE at line ${k}`);
                     }
@@ -554,7 +575,7 @@ export class MethodOverloadResolver {
                     if (methodMatch) {
                         const signature = methodLine.trim();
                         const declParamCount = ClarionPatterns.countParameters(signature);
-                        const fileUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                        const fileUri = pathToCanonicalUri(resolvedPath); // #251
                         candidates.push({
                             signature,
                             file: fileUri,
@@ -955,30 +976,13 @@ export class MethodOverloadResolver {
             return { matchedIndex: -1, matchedAll: true };
         }
 
-        // Step 1: arity filter (default-aware — mirror selectBestOverload:367-372).
-        // Strict equality misses N-arg calls against (N+defaults)-param decls — #120 root cause.
-        const arityCompatible = candidateSignatures
-            .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
-            .filter(c => {
-                const defaults = ClarionPatterns.countDefaultParams(c.sig);
-                return argClassifications.length >= (c.paramTypes.length - defaults)
-                    && argClassifications.length <= c.paramTypes.length;
-            });
-
-        if (arityCompatible.length === 0) {
-            return { matchedIndex: -1, matchedAll: true };
-        }
-
-        // Step 2: per-position type compatibility filter (Mark's locked rule + strict mode).
-        // Iterate over argClassifications (not paramTypes) — trailing default-omitted positions
-        // are unconstrained when defaults take effect.
-        const typeCompatible = arityCompatible.filter(c =>
-            argClassifications.every((argClass, i) =>
-                this.argMatchesParam(argClass, c.paramTypes[i], strict))
-        );
+        // Steps 1–2 (arity + per-position type compatibility) — shared with
+        // `filterOverloadsByArgClassifications` so both the unique-pick and the
+        // family-narrowing consumers apply identical rules.
+        const typeCompatible = this.computeTypeCompatible(argClassifications, candidateSignatures, strict);
 
         if (typeCompatible.length === 0) {
-            // All candidates dropped by type filter → match-all fallback (Mark pick (b)).
+            // Zero compatible after arity+type filtering → match-all fallback (Mark pick (b)).
             return { matchedIndex: -1, matchedAll: true };
         }
         if (typeCompatible.length === 1) {
@@ -999,6 +1003,62 @@ export class MethodOverloadResolver {
             return { matchedIndex: -1, matchedAll: true };
         }
         return { matchedIndex: scored[0].idx, matchedAll: false };
+    }
+
+    /**
+     * #272 — return the indices of every candidate that is arity- AND type-compatible
+     * with the classified call-site arguments (steps 1–2 of
+     * `findOverloadByArgClassifications`, without the specificity ranking). Where that
+     * method collapses to a single most-specific pick, this exposes the whole
+     * compatible FAMILY — used by built-in hover to narrow the displayed overloads to
+     * the ones the argument types permit (e.g. the QUEUE overloads of `GET`), while
+     * still showing more than one when the arguments can't uniquely disambiguate.
+     *
+     * Returns `[]` when no candidate is compatible (caller keeps its own fallback).
+     * Shares `computeTypeCompatible` with the unique-pick path so both honour the same
+     * locked overload-resolution rule (project_clarion_overload_resolution_rule).
+     */
+    public filterOverloadsByArgClassifications(
+        argClassifications: ArgClassification[],
+        candidateSignatures: string[],
+        options?: { strictRefMatching?: boolean }
+    ): number[] {
+        if (candidateSignatures.length === 0) return [];
+        return this
+            .computeTypeCompatible(argClassifications, candidateSignatures, options?.strictRefMatching ?? false)
+            .map(c => c.idx);
+    }
+
+    /**
+     * Steps 1–2 of overload resolution: filter candidates to those whose arity is
+     * default-aware compatible with the argument count AND whose every parameter is
+     * per-position type-compatible with the classified argument. Returns the surviving
+     * candidates with their extracted parameter types (for downstream specificity
+     * scoring). Shared by `findOverloadByArgClassifications` and
+     * `filterOverloadsByArgClassifications`.
+     */
+    private computeTypeCompatible(
+        argClassifications: ArgClassification[],
+        candidateSignatures: string[],
+        strict: boolean
+    ): { idx: number; paramTypes: string[] }[] {
+        // Arity filter (default-aware — mirror selectBestOverload:367-372). Strict
+        // equality misses N-arg calls against (N+defaults)-param decls — #120 root cause.
+        const arityCompatible = candidateSignatures
+            .map((sig, idx) => ({ idx, sig, paramTypes: this.extractParameterTypes(sig) }))
+            .filter(c => {
+                const defaults = ClarionPatterns.countDefaultParams(c.sig);
+                return argClassifications.length >= (c.paramTypes.length - defaults)
+                    && argClassifications.length <= c.paramTypes.length;
+            });
+
+        // Per-position type compatibility (Mark's locked rule + strict mode). Iterate over
+        // argClassifications (not paramTypes) — trailing default-omitted positions are
+        // unconstrained when defaults take effect.
+        return arityCompatible
+            .filter(c => argClassifications.every((argClass, i) =>
+                this.argMatchesParam(argClass, c.paramTypes[i], strict)))
+            .map(c => ({ idx: c.idx, paramTypes: c.paramTypes }));
     }
 
     /**
@@ -1026,13 +1086,19 @@ export class MethodOverloadResolver {
             case 'dotted_var':
             case 'prefixed_var':
             case 'control_equate': {
-                if (!arg.inferredType) {
+                if (!arg.inferredType && !arg.structureKind) {
                     // Type unknown — default match-all; strict drops `*TYPE`.
                     return strict ? !paramIsRef : true;
                 }
-                const argBase = this.normalizeBaseType(arg.inferredType);
-                // Variable can match either base or ref form of the same type.
-                return this.typesMatch(argBase, paramBase);
+                // #243: match by type NAME (user param `*MyQueueType`) OR by structure KIND
+                // (builtin param typed `QUEUE`/`GROUP`/`FILE`). Either is a valid match.
+                if (arg.inferredType && this.typesMatch(this.normalizeBaseType(arg.inferredType), paramBase)) {
+                    return true;
+                }
+                if (arg.structureKind && this.normalizeBaseType(arg.structureKind) === paramBase) {
+                    return true;
+                }
+                return false;
             }
 
             case 'call_result':
@@ -1080,11 +1146,18 @@ export class MethodOverloadResolver {
             case 'dotted_var':
             case 'prefixed_var':
             case 'control_equate': {
-                if (!arg.inferredType) return 1;
-                const argBase = this.normalizeBaseType(arg.inferredType);
-                const exactMatch = argBase === this.normalizeBaseType(paramBase);
-                if (exactMatch) return paramIsRef ? 2 : 3;
-                if (this.typesMatch(argBase, paramBase)) return paramIsRef ? 0 : 1;
+                if (!arg.inferredType && !arg.structureKind) return 1;
+                if (arg.inferredType) {
+                    const argBase = this.normalizeBaseType(arg.inferredType);
+                    const exactMatch = argBase === this.normalizeBaseType(paramBase);
+                    if (exactMatch) return paramIsRef ? 2 : 3;
+                    if (this.typesMatch(argBase, paramBase)) return paramIsRef ? 0 : 1;
+                }
+                // #243: structure-kind match (e.g. QUEUE arg → `QUEUE` param) — as specific as an
+                // exact type-name match.
+                if (arg.structureKind && this.normalizeBaseType(arg.structureKind) === paramBase) {
+                    return paramIsRef ? 2 : 3;
+                }
                 return 0;
             }
 
