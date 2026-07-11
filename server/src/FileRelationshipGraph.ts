@@ -799,6 +799,18 @@ export class FileRelationshipGraph {
             ?.filter(e => e.type === 'MODULE') ?? [];
     }
 
+    /**
+     * #322 — all files that INCLUDE the given file (reverse INCLUDE edges).
+     * A module-callout INC (MODULE + prototype, INCLUDE'd into many modules'
+     * MAPs) is visible in exactly these files — FAR's candidate set for the
+     * procedures it declares.
+     */
+    public getIncludingFiles(filePath: string): string[] {
+        return this.reverseEdges.get(this.normalizePath(filePath))
+            ?.filter(e => e.type === 'INCLUDE')
+            .map(e => e.fromFile) ?? [];
+    }
+
     /** Returns the PROGRAM file path that a MEMBER file belongs to. */
     public getProgramFile(memberFilePath: string): string | undefined {
         return this.forwardEdges.get(this.normalizePath(memberFilePath))

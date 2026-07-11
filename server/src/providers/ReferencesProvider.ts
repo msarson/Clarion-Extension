@@ -168,7 +168,12 @@ export class ReferencesProvider {
         };
         let resultCount = -1; // -1 = null result
         try {
-            const locations = await this.provideReferencesUnfiltered(document, position, context, token);
+            const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token);
+            // #322: dedup by NORMALIZED path — the cursor document's URI casing can
+            // differ from the file-walk casing (CloneScript.clw:196 AND
+            // clonescript.clw:196 in the same result set). Same discipline as the
+            // #196/#252 rename-edit dedup: the key is the decoded lowercased path.
+            const locations = rawLocations && this.dedupeByNormalizedLocation(rawLocations);
             if (!locations || opts?.includeOmitted) {
                 resultCount = locations?.length ?? -1;
                 return locations;
@@ -186,6 +191,23 @@ export class ReferencesProvider {
             });
             this.farTrace = null;
         }
+    }
+
+    /**
+     * #322 — collapse locations that name the same physical spot through
+     * case- or encoding-variant URIs. First occurrence wins (keeps the cursor
+     * document's own casing for its hits, which sort first in scan order).
+     */
+    private dedupeByNormalizedLocation(locations: Location[]): Location[] {
+        const seen = new Set<string>();
+        const out: Location[] = [];
+        for (const loc of locations) {
+            const key = `${decodeURIComponent(loc.uri).toLowerCase()}:${loc.range.start.line}:${loc.range.start.character}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(loc);
+        }
+        return out;
     }
 
     /** #315 — per-invocation FAR trace fields, merged by pipeline stages. */
@@ -2487,9 +2509,37 @@ export class ReferencesProvider {
                             implFiles.push(implUri);
                         }
                     }
+                    // #322: a module-callout INC (MODULE + prototype) is INCLUDE'd
+                    // into MANY modules' MAPs ("Req'd for module callout resolution"
+                    // in generated code) — the procedure is callable from every
+                    // including module, so they all belong in the candidate set.
+                    // A literal in-file module MAP has no reverse INCLUDE edges and
+                    // keeps the old declaring+targets behavior.
+                    const pushUnique = (fsPath: string) => {
+                        const uri = `file:///${fsPath}`;
+                        if (!implFiles.includes(uri)) implFiles.push(uri);
+                    };
+                    // Case A — the declaration resolved to the callout INC itself.
+                    for (const includer of graph.getIncludingFiles(declaringFilePath)) {
+                        pushUnique(includer);
+                    }
+                    // Case B — the declaration resolved to the IMPLEMENTATION module
+                    // (its label is in-file). Its callout INC is an INCLUDE'd file
+                    // whose MODULE edge points back at this module; widen through
+                    // that INC's includers. Ordinary INCLUDEs (equates etc.) have no
+                    // MODULE-back edge and are skipped.
+                    for (const incEdge of graph.getForwardEdges(declaringFilePath).filter(e => e.type === 'INCLUDE')) {
+                        const moduleBack = graph.getForwardEdges(incEdge.toFile)
+                            .some(e => e.type === 'MODULE' && e.toFile === declaringFilePath);
+                        if (!moduleBack) continue;
+                        pushUnique(incEdge.toFile);
+                        for (const includer of graph.getIncludingFiles(incEdge.toFile)) {
+                            pushUnique(includer);
+                        }
+                    }
                 }
 
-                logger.test(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets`);
+                logger.test(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets + including modules`);
                 return implFiles;
             }
             const isMember = this.isMemberFile(symbolInfo.location.uri);
