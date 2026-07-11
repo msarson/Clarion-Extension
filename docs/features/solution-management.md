@@ -175,11 +175,14 @@ The active build configuration is now **auto-detected from the `.sln.cache` file
 
 ```json
 {
-  "clarion.clarionPath": "C:\\Clarion11\\Bin",
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties",
-  "clarion.configuration": "Release|Win32"
+  "clarion.solutionFile": "C:\\MyProject\\MySolution.sln",
+  "clarion.propertiesFile": "C:\\Clarion11\\bin\\ClarionProperties.xml",
+  "clarion.version": "Clarion 11.1",
+  "clarion.configuration": "Release"
 }
 ```
+
+These are written automatically when you open a solution and pick a Clarion version.
 
 **Benefits:**
 - Persists when reopening solution
@@ -307,15 +310,17 @@ Clarion uses `.clarion.properties` files to map logical paths to physical paths.
 
 ### Configuring Redirection
 
-**Set properties file path:**
-1. `Ctrl+Shift+P` → "Clarion: Set Clarion Properties"
-2. Browse to `.clarion.properties` file
-3. Saved in `.vscode/settings.json`
+Redirection comes from the selected **Clarion version** — its `ClarionProperties.xml` names the redirection file (e.g. `Clarion110.red`), and the extension parses it (including per-configuration sections and included `.red` files) exactly as the Clarion IDE does.
+
+**Set the version:**
+1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"**
+2. Pick the installed version — the extension reads its `ClarionProperties.xml`
 
 **Manual configuration:**
 ```json
 {
-  "clarion.propertiesPath": "C:\\MyProject\\.clarion.properties"
+  "clarion.propertiesFile": "C:\\Clarion11\\bin\\ClarionProperties.xml",
+  "clarion.version": "Clarion 11.1"
 }
 ```
 

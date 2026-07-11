@@ -292,20 +292,37 @@ INCLUDE('MyFile.inc', 'MySection')  ! Hover shows MySection content
 
 ## CodeLens — Inline Reference Counts
 
-A `N references` count appears above every procedure and CLASS declaration.
-- Shows how many times the symbol is referenced across the solution
-- Click the lens to open the References panel with all locations
+A `N references` count appears above every procedure, method, CLASS declaration, and ROUTINE label.
+- Counts are **exact** — each lens runs a real scoped Find-All-References in the background. On very large solutions a lens may briefly show a `~` estimate (word-occurrence based) until the exact count replaces it automatically.
+- Click the lens to open the References panel — results come straight from the same cache, so they appear instantly
 - Dead code (0 references) is immediately visible
+- Routine lenses are exact from the first paint (a routine's references are procedure-scoped and same-file)
 - Requires solution to be open for cross-file counts
+- Disable with `clarion.referencesCodeLens.enabled` if you prefer no lenses
 
 ---
 
 ## Find All References (Shift+F12)
 
 - Press **Shift+F12** on any symbol to find all usages
-- Scope-aware: searches across all project files in the solution
+- Scope-aware: the candidate file set derives from where the symbol is *visible* — a procedure-local stays in its file, a MEMBER-module symbol in its module, an app-global across that app's MEMBER family — rather than blind whole-solution scans
+- **Overload-aware**: on an overloaded procedure/method, only the matching overload's declaration, implementation, and call sites are returned (calls are classified by argument types; ambiguous calls stay included for rename safety)
+- **Routines**: works from a `ROUTINE` label or any `DO` site — returns the label plus every `DO` in the owning procedure, including generated `::` names (`Menu::MENUBAR1`); same-named routines in other procedures are excluded
+- **Module-callout procedures**: from the implementation of a procedure declared via a `MODULE('impl.clw')` INC that consumer modules INCLUDE into their MAPs, references reach every including module
+- Occurrences inside unconditional `OMIT` blocks are excluded (they're not in the active build)
 - Works for procedures, classes, variables, methods, type names in declarations
 - Results grouped by file with line previews
+
+---
+
+## Routines
+
+Routines are first-class navigation symbols:
+- **Hover** a `DO` site or the `ROUTINE` label — shows the full routine name (including `::` names) with a source preview
+- **F12** from a `DO` site jumps to the `ROUTINE` label
+- **Ctrl+F12** works from `DO` sites *and* on the label itself (a routine's declaration is its implementation)
+- **Shift+F12 / CodeLens** list the label + every `DO` site in the owning procedure
+- Scoping follows the language: routine labels are procedure-local and legally repeat across procedures — navigation never crosses into another procedure's same-named routine, and a `DO` inside a local derived method resolves through its declaring procedure's routines
 
 ---
 
@@ -313,6 +330,8 @@ A `N references` count appears above every procedure and CLASS declaration.
 
 - Press **F2** on any user-defined symbol to rename it across the whole workspace
 - Scope-aware: only renames symbols in the correct scope
+- Overload-aware: renaming one overload leaves the others' call sites untouched
+- Occurrences inside `OMIT` blocks **are** renamed — other build configurations may compile that code
 - Protects library/read-only `.inc` files from modification
 - Validates cursor position before opening the rename dialog
 

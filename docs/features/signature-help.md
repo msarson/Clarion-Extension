@@ -129,7 +129,17 @@ Process(<STRING optional>)
 
 ### Overload Narrowing by Argument Type
 
-When calling a function like `OPEN(Window)`, hover shows only the overloads relevant to a WINDOW argument — not all 8 signatures. The extension infers the structureType (FILE, VIEW, WINDOW, REPORT, etc.) from the argument label and filters signatures accordingly.
+When calling a function like `OPEN(Window)`, hover and signature help show only the overloads relevant to a WINDOW argument — not all 8 signatures.
+
+As of v1.0, argument types are resolved through the same shared type-inference stack that F12 and Find-All-References use, so all the surfaces agree. Recognized argument shapes include:
+- **Typed variables** and **reference variables** (`x &SomeType`)
+- **Dotted members** (`Self.Probs` — resolves the member's declared type)
+- **EQUATE constants** (type inferred from the value; correctly excluded from `*TYPE` reference parameters)
+- **Implicit variables** (`Counter#` → LONG, `Percent$` → REAL, `Name"` → STRING)
+- **`PRE:Field` arguments** (resolved through the scope-tier index)
+- **Inline structure instances** (`Window WINDOW('t')` passed as `Window` resolves to the WINDOW kind)
+
+**As you type**, the active signature highlights the overload whose parameter types actually match the arguments entered so far — not just the arity.
 
 ---
 
@@ -259,27 +269,15 @@ INCLUDE('MyFile.inc', 'MySection')  ! ← Hover shows only MySection
 
 ---
 
-## What This Extension Does NOT Have
+## IntelliSense Completions
 
-### ❌ No Auto-Complete Dropdown
+Signature help pairs with full completion support:
 
-**This extension does NOT show:**
-- Dropdown list as you type
-- Function/variable suggestions while typing
-- Auto-complete for half-typed words
-
-**Why:** The extension doesn't have a CompletionProvider. It only provides documentation for functions you're already calling.
-
----
-
-### ✅ What You DO Get Instead
-
-**Snippets for code structures:**
-- Type `IF` then `Tab` → Full IF/THEN/END structure
-- Type `VS` then `Tab` → String variable declaration
-- 50+ code snippets available
-
-**[See Snippets →](code-editing.md#code-snippets)**
+- **Dot completion** — type `SELF.`, `PARENT.`, `MyVar.`, or `ClassName.` for context-aware member suggestions with a full inheritance walk, access-control filtering (`PRIVATE`/`PROTECTED`), and inline type info
+- **Chained expressions** — `SELF.Order.` resolves intermediate types
+- **`PROP:` / `PROPPRINT:` completions** — documented runtime property equates with read-only badges
+- **`EVENT:` completions** — all event equates with category labels
+- **50+ snippets** — type `IF` then `Tab` for a full IF/THEN/END structure — **[see Snippets →](code-editing.md#code-snippets)**
 
 ---
 
