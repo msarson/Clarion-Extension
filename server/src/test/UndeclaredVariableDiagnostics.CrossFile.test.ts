@@ -386,3 +386,69 @@ suite('UndeclaredVariableDiagnostics — cross-file scope (6b40d7da, #115)', () 
         );
     });
 });
+
+/**
+ * #319 (reopen) — structural words must never become cross-file candidates.
+ *
+ * The tokenizer emits `DO` as a TokenType.Variable at every DO site, and `DO`
+ * is absent from KeywordService's hover-keyword list — so the augment pass
+ * treated it as an undeclared-candidate and cross-file-resolved it. On the
+ * real app that ONE word cost 6.9s of a 7.7s validation: `do` sits in the
+ * reference index's stoplist, so `mayContain` answers true conservatively and
+ * the sibling walk loaded all 160 family modules for it.
+ */
+suite('UndeclaredVariableDiagnostics — structural words are never candidates (#319)', () => {
+
+    let savedUndeclaredEnabled = false;
+
+    setup(() => {
+        savedUndeclaredEnabled = serverSettings.undeclaredVariablesEnabled;
+        serverSettings.undeclaredVariablesEnabled = true;
+    });
+
+    teardown(() => {
+        serverSettings.undeclaredVariablesEnabled = savedUndeclaredEnabled;
+        teardownMultiFileFixture();
+    });
+
+    test('DO / structural words never reach symbolFinder.findSymbol', async () => {
+        const fixture = buildMultiFileFixture({
+            files: {
+                'main.clw': [
+                    '  PROGRAM',
+                    '  MAP',
+                    '  END',
+                    '  CODE',
+                    '  RETURN',
+                ].join('\n'),
+                'MemberA.clw': [
+                    "  MEMBER('main.clw')",
+                    'ProcA PROCEDURE',
+                    '  CODE',
+                    '  DO SomeRoutine',
+                    '  UnknownName = 1',
+                    '  RETURN',
+                    'SomeRoutine ROUTINE',
+                    '  CODE',
+                    '  EXIT',
+                ].join('\n'),
+            },
+            frg: { programFile: 'main.clw', memberFiles: ['MemberA.clw'] }
+        });
+
+        const memberDoc = fixture.documents['MemberA.clw'];
+        const memberTokens = new ClarionTokenizer(memberDoc.getText()).tokenize();
+
+        const queried: string[] = [];
+        const stubFinder = {
+            findSymbol: async (name: string) => { queried.push(name.toUpperCase()); return null; }
+        } as unknown as SymbolFinderService;
+
+        await validateUndeclaredVariablesAsync(memberTokens, memberDoc, stubFinder);
+
+        assert.ok(!queried.includes('DO'),
+            `'DO' must never be a cross-file candidate; queried: [${queried.join(', ')}]`);
+        assert.ok(queried.includes('UNKNOWNNAME'),
+            'genuine unknown names must still be resolved cross-file');
+    });
+});

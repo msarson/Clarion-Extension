@@ -49,7 +49,10 @@ export class ClassConstantsCodeActionProvider {
             return await this.provideCodeActionsInner(document, range, context, token, steps);
         } finally {
             const total = Date.now() - t0;
-            if (total >= 1000) {
+            // 300ms: Mark's 16:20 log showed a 944ms invocation slipping under a
+            // 1s gate — anything slower than the #312 chain threshold is worth a
+            // step breakdown.
+            if (total >= 300) {
                 perfLogger.perf('classConstants slow — step breakdown', {
                     total_ms: total,
                     ...steps,

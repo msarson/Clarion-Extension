@@ -555,6 +555,7 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
             '  PROGRAM',
             '  MAP',
             '  END',
+            'GlobalThing LONG',
             '  CODE',
             '  RETURN',
         ].join('\n'),
@@ -563,6 +564,7 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
             'SharedValue LONG',
             'ProcA PROCEDURE',
             '  CODE',
+            '  GlobalThing = 2',
             '  RETURN',
         ].join('\n'),
         'MemberB.clw': [
@@ -619,6 +621,26 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
             `siblings with zero occurrences of the word must not be loaded; loaded: [${loadCalls.join(', ')}]`);
     });
 
+    test('#319 reopen: a sibling that merely USES the word (indented, no column-0 label) is not tokenized', async () => {
+        // WM_QUERYENDSESSION shape from the real app: a libsrc equate USED in
+        // ~143 member modules but declared in none of them — the walk tokenized
+        // every one (5.6s cold) to discover no module-scope declaration exists.
+        // A module declaration is a COLUMN-0 label by language rule; a cheap
+        // text probe must reject usage-only files without tokenizing them.
+        // MemberA uses GlobalThing (indented) but declares no such label.
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+        // The cost only exists for COLD files (cache-warm files scan cheaply and
+        // skip the probe) — evict MemberA to model the startup shape.
+        TokenCache.getInstance().clearTokens(fixture.uris['MemberA.clw']);
+
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'GlobalThing', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.strictEqual(result, null, 'GlobalThing has no module-scope declaration in any sibling');
+        assert.strictEqual(loadCalls.length, 0,
+            `usage-only siblings must not be tokenized; loaded: [${loadCalls.join(', ')}]`);
+    });
+
     test('bidirectional pin: a declaration that DOES exist is still found with the index built', async () => {
         await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
 
@@ -637,6 +659,23 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
 
         assert.ok(result, 'walk must still resolve with the index unavailable');
         assert.ok(loadCalls.length > 0, 'unbuilt index must not suppress loading');
+    });
+
+    test('#319 reopen: a parent-PROGRAM global resolves WITHOUT loading any sibling (global tier precedes the walk)', async () => {
+        // Mark's VM + local repro on the real app: GLOBALRESPONSE — declared in the
+        // PROGRAM's global data and USED in every member module — cost 8.9s of a
+        // 9.5s validation, because the sibling walk ran BEFORE the global tier and
+        // mayContain legitimately prunes nothing for a name that occurs everywhere.
+        // Clarion scope agrees with the reorder: global data IS visible in a member;
+        // a sibling's module data is NOT.
+        await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
+
+        const result = await service319.findSymbol(
+            'GlobalThing', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+
+        assert.strictEqual(result?.scope.type, 'global', 'must resolve as the PROGRAM global');
+        assert.strictEqual(loadCalls.length, 0,
+            `global resolution must not walk siblings; loaded: [${loadCalls.join(', ')}]`);
     });
 
     test('compound (colon) words never prune — the index scans bare identifiers only', async () => {

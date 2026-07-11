@@ -41,7 +41,10 @@ export interface RefIndexBuildStats { files: number; scanned: number; reusedFrom
 // Structural keywords that can never be a lens symbol — skipping them keeps the
 // map (and its disk cache) small. Conservative: only unambiguous structure /
 // flow words; data types are NOT excluded (a class could shadow one in theory).
-const STOPLIST = new Set([
+// #319: exported — the undeclared-variable validator filters its cross-file
+// candidates against the same list (the tokenizer emits e.g. DO as a Variable
+// token, and hover's KeywordService doesn't carry every structural word).
+export const CLARION_STRUCTURAL_WORDS = new Set([
     'if', 'then', 'else', 'elsif', 'end', 'of', 'do', 'loop', 'while', 'until', 'times',
     'case', 'orof', 'to', 'by', 'cycle', 'break', 'return', 'exit', 'goto', 'execute',
     'accept', 'begin', 'code', 'data', 'map', 'module', 'member', 'program', 'include',
@@ -173,7 +176,7 @@ export class ReferenceCountIndex {
     public mayContain(fsPathOrUri: string, name: string): boolean {
         if (!this._built) return true;
         const nameLower = name.toLowerCase();
-        if (STOPLIST.has(nameLower)) return true;
+        if (CLARION_STRUCTURAL_WORDS.has(nameLower)) return true;
         const filePath = this.toIndexPath(fsPathOrUri);
         const counts = this.perFile.get(filePath);
         if (!counts) return true;
@@ -355,7 +358,7 @@ export class ReferenceCountIndex {
             let m: RegExpExecArray | null;
             while ((m = WORD_RE.exec(line)) !== null) {
                 const word = m[0].toLowerCase();
-                if (STOPLIST.has(word)) continue;
+                if (CLARION_STRUCTURAL_WORDS.has(word)) continue;
                 counts.set(word, (counts.get(word) ?? 0) + 1);
             }
         }

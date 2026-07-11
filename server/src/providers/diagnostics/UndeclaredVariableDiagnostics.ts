@@ -5,6 +5,7 @@ import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import LoggerManager from '../../logger';
 
@@ -368,6 +369,11 @@ function detectCheckableName(token: Token): CheckableName | null {
             // tokenize as TokenType.Variable. Suppress them here so the walker doesn't
             // false-positive on `IF a AND b` or `a = b TO 10`.
             if (KeywordService.getInstance().isKeyword(token.value)) return null;
+            // #319 — structural words KeywordService doesn't carry (DO, GOTO, …) also
+            // tokenize as Variable. `DO` alone cost 6.9s of a 7.7s validation on the
+            // real app: it's stoplisted in the reference index, so mayContain answers
+            // true conservatively and the sibling walk loaded the whole family for it.
+            if (CLARION_STRUCTURAL_WORDS.has(token.value.toLowerCase())) return null;
             return { name: token.value, length: token.value.length };
         }
     }

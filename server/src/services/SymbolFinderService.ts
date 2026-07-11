@@ -664,6 +664,21 @@ export class SymbolFinderService {
             // a cold family walk never holds the LSP loop (#319/#295).
             await timeSlice();
 
+            // #319 (reopen): a module-scope declaration is a COLUMN-0 label by
+            // language rule. A file that merely USES the word (every generated
+            // module mentions globals/equates like WM_QUERYENDSESSION) passes
+            // mayContain but can never declare it — probe the raw text for a
+            // column-0 occurrence before paying tokenization (a read is ~40x
+            // cheaper than tokenizing a generated module). Files already in the
+            // token cache skip the probe — their scan is cheap anyway.
+            if (canPrune && !this.tokenCache.getTokensByUriCaseInsensitive(`file:///${memberPath.replace(/\\/g, '/')}`)) {
+                try {
+                    const raw = fs.readFileSync(memberPath, 'utf-8');
+                    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    if (!new RegExp(`^${esc}(?![A-Za-z0-9_:])`, 'im').test(raw)) continue;
+                } catch { /* unreadable — let loadTokensForFile handle/report it */ }
+            }
+
             const sibling = this.loadTokensForFile(memberPath);
             if (!sibling) continue;
 
@@ -1136,12 +1151,16 @@ export class SymbolFinderService {
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
 
-            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
-            if (siblingModuleResult) return siblingModuleResult;
-            
-            // Try global variable
+            // #319 (reopen): global BEFORE the sibling walk. Globals like
+            // GlobalResponse occur in EVERY member module, so the index prune
+            // can't help the walk — and the parent lookup is one file. Clarion
+            // visibility agrees: global data IS in scope here; a sibling's
+            // module data is not (the walk stays as a last-resort finder).
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
+
+            const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
+            if (siblingModuleResult) return siblingModuleResult;
 
             // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
             const fieldResult = this.findStructureField(word, tokens, position.line, document);
@@ -1182,16 +1201,20 @@ export class SymbolFinderService {
             return result;
         }
 
-        result = await this.findModuleVariableInSiblingMembers(word, document, position);
-        if (result) {
-            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
-            return result;
-        }
-        
-        // 4. Try as global variable
+        // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
+        // Globals like GlobalResponse occur in EVERY member module (the index
+        // prune can't help), and the parent lookup is one file vs a 161-file
+        // family tokenization. Clarion visibility agrees: global data IS in
+        // scope in a member; a sibling's module data is not.
         result = await this.findGlobalVariable(word, tokens, document);
         if (result) {
             logger.info(`✅ Found as global variable: ${word}`);
+            return result;
+        }
+
+        result = await this.findModuleVariableInSiblingMembers(word, document, position);
+        if (result) {
+            logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
             return result;
         }
         
@@ -1244,17 +1267,18 @@ export class SymbolFinderService {
                 return result;
             }
 
-            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
-            if (result) {
-                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
-                result.originalWord = word;
-                return result;
-            }
-            
-            // Try global variable with stripped word
+            // Try global variable with stripped word — #319: global before the
+            // sibling walk (same rationale as tier 4).
             result = await this.findGlobalVariable(searchWord, tokens, document);
             if (result) {
                 logger.info(`✅ Found as global variable (stripped): ${searchWord}`);
+                result.originalWord = word;
+                return result;
+            }
+
+            result = await this.findModuleVariableInSiblingMembers(searchWord, document, position);
+            if (result) {
+                logger.info(`✅ Found as sibling MEMBER module variable (stripped): ${searchWord}`);
                 result.originalWord = word;
                 return result;
             }
