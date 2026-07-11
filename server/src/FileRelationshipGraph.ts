@@ -133,6 +133,7 @@ export class FileRelationshipGraph {
         this._noSolutionSourceUri = undefined;
 
         const buildStart = Date.now();
+        this.buildOwnerProjectIndex(); // #315: O(1) owner lookups during resolveFile
         const visited = new Set<string>();
         const queue: string[] = projectFiles.map(f => this.normalizePath(f));
         const totalSeeds = queue.length;
@@ -374,6 +375,7 @@ export class FileRelationshipGraph {
      * Clear the graph. Called when the solution/project changes so it can be rebuilt.
      */
     public reset(): void {
+        this.ownerProjectByFile = null;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
         this.classModuleIndex.clear();
@@ -943,6 +945,28 @@ export class FileRelationshipGraph {
      * `fromFile` is preserved on the signature for the 6 token-walk callers
      * but is no longer threaded into the parser call.
      */
+    /**
+     * #315 — normalized seed path → owning project. Built ONCE per graph build.
+     * The first cut called `findProjectForFile` per resolution, which scans
+     * every project's source-file list per call — that turned the cold build
+     * from seconds into 16.7 MINUTES on Mark's VM (3,016 files × ~6 references
+     * × a 3,016-entry scan each). This index makes owner lookup O(1).
+     */
+    private ownerProjectByFile: Map<string, { getRedirectionParser(): { findFile(filename: string): { path: string } | null | undefined } }> | null = null;
+
+    private buildOwnerProjectIndex(): void {
+        this.ownerProjectByFile = new Map();
+        const sm = SolutionManager.getInstance();
+        if (!sm?.solution) return;
+        for (const project of sm.solution.projects) {
+            if (typeof (project as { getRedirectionParser?: unknown }).getRedirectionParser !== 'function') continue;
+            for (const sf of project.sourceFiles ?? []) {
+                const abs = sf.getAbsolutePath?.();
+                if (abs) this.ownerProjectByFile.set(this.normalizePath(abs), project);
+            }
+        }
+    }
+
     private resolveFile(filename: string, _fromFile: string): string | null {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
@@ -953,7 +977,7 @@ export class FileRelationshipGraph {
             // solution-order walk below can resolve an ambiguous basename (each
             // app has generated modules with common names) through the WRONG
             // project's redirection, mis-targeting the edge.
-            const owner = solutionManager.findProjectForFile?.(path.basename(_fromFile));
+            const owner = this.ownerProjectByFile?.get(this.normalizePath(_fromFile));
             if (owner) {
                 const ownResolved = owner.getRedirectionParser().findFile(filename);
                 if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
