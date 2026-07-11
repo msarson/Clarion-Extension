@@ -50,13 +50,27 @@ export class RoutineHoverResolver {
         const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
         if (routineToken) {
             logger.info(`✅ Found routine at line ${routineToken.line}`);
+            // #320: source preview — up to 10 lines from the label, stopping before
+            // the next column-0 label (the next routine/procedure). Replaces the
+            // preview the legacy client-side routine hover used to add (that hover
+            // split `Menu::MENUBAR1` at the colons and doubled the tooltip).
+            const allLines = document.getText().split(/\r?\n/);
+            const start = routineToken.line;
+            let end = Math.min(allLines.length, start + 10);
+            for (let i = start + 1; i < end; i++) {
+                if (/^[A-Za-z_]/.test(allLines[i])) { end = i; break; }
+            }
             return {
                 contents: {
                     kind: 'markdown',
                     value: [
                         `**Routine:** \`${routineName}\``,
                         '',
-                        `📍 Line ${routineToken.line + 1}`
+                        `📍 Line ${routineToken.line + 1}`,
+                        '',
+                        '```clarion',
+                        ...allLines.slice(start, end),
+                        '```'
                     ].join('\n')
                 }
             };
