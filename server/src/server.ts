@@ -1005,8 +1005,35 @@ connection.onCodeLens((params) => {
 // the server asks the client to refresh its lenses (workspace/codeLens/refresh) — the
 // re-resolve then answers instantly from the cache with the REAL count. One in-flight scan per
 // lens, so refresh-triggered re-resolves never duplicate work.
+//
+// #318 exact-lazy: the approximate index count (word occurrences, no receiver resolution —
+// measured ~195 shown vs 3 real on common method names) is demoted from final answer to
+// PLACEHOLDER. Every uncached resolve now also starts the exact scoped scan in the background;
+// the estimate shows immediately and the exact count replaces it via the refresh. This is
+// affordable because the #315 arc made an app-scoped FAR ~100ms — the model TS/rust-analyzer
+// use (exact per visible lens), with clangd's persisted-ref index tracked on #316 as endgame.
 const CODELENS_RESOLVE_BUDGET_MS = 500;
 const inflightLensScans = new Map<string, Promise<Location[]>>();
+
+// #318: a screenful of lenses (~10-30) resolves at once; each exact scan is fast but dozens
+// launched together would still contend the single LSP thread. Scans run at most N-wide;
+// queued scans keep their inflight entry (no duplicate work on refresh re-resolves) and the
+// #303 ceiling clock starts only when a scan leaves the queue.
+const MAX_CONCURRENT_LENS_SCANS = 3;
+let activeLensScans = 0;
+const lensScanQueue: Array<() => void> = [];
+function acquireLensScanSlot(): Promise<void> {
+    if (activeLensScans < MAX_CONCURRENT_LENS_SCANS) {
+        activeLensScans++;
+        return Promise.resolve();
+    }
+    return new Promise(resolve => lensScanQueue.push(resolve));
+}
+function releaseLensScanSlot(): void {
+    const next = lensScanQueue.shift();
+    if (next) next();
+    else activeLensScans--;
+}
 let lensRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleLensRefresh() {
     if (lensRefreshTimer) return;
@@ -1032,12 +1059,11 @@ connection.onCodeLensResolve(async (lens) => {
         const cacheKey = `${data.uri}:${data.line}:${data.character}`;
         const cached = codeLensRefCache.get(cacheKey);
 
-        // #294: once the reference-count index is built, answer the count in O(1)
-        // instead of scheduling a scan. The count is APPROXIMATE (comment/string-
-        // stripped identifier occurrences by name); clicking the lens runs the real
-        // scoped Find-All-References (empty args → client falls back to the live
-        // reference provider). An exact cached result (from an earlier real scan)
-        // still wins above.
+        // #294: once the reference-count index is built, it answers a count in O(1).
+        // The count is APPROXIMATE (comment/string-stripped identifier occurrences by
+        // name, no receiver resolution) — #318: it is now only the placeholder shown
+        // while the exact scoped scan below runs; the refresh swaps in the real count.
+        let placeholderTitle: string | undefined;
         if (!cached) {
             const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
             const refIndex = ReferenceCountIndex.getInstance();
@@ -1068,24 +1094,18 @@ connection.onCodeLensResolve(async (lens) => {
                 idxCount = refIndex.getCount(data.symbolName ?? '');
             }
             if (idxCount !== undefined) {
-                lens.command = {
-                    // #315: the '~' marks the count as an estimate — the exact
-                    // count replaces it (via the cache + refresh) after a click.
-                    title: formatApproximateReferenceCount(idxCount),
-                    command: 'clarion.showReferences',
-                    arguments: [data.uri, { line: data.line, character: data.character }, []],
-                };
-                return lens;
-            }
-
-            // #294 follow-up: while the index is still building (solution mode), do NOT
-            // fall back to the scan path — that path is exactly the 106s/114s/110s block
-            // family (a lens resolve at +6s cold-tokenized the whole solution inside
-            // buildInheritanceMap before any checkpoint could land). Show the honest
-            // placeholder; the index-built refresh repaints every visible lens with real
-            // counts moments later. No-solution mode (index never builds) keeps the scan
-            // path — its search space is a single file + directory.
-            if (solutionAnnounced || SolutionManager.getInstance()?.solution) {
+                // #315: the '~' marks the count as an estimate — #318: it shows only
+                // until the background exact scan lands and the refresh replaces it.
+                placeholderTitle = formatApproximateReferenceCount(idxCount);
+            } else if (solutionAnnounced || SolutionManager.getInstance()?.solution) {
+                // #294 follow-up: while the index is still building (solution mode), do NOT
+                // fall back to the scan path — that path is exactly the 106s/114s/110s block
+                // family (a lens resolve at +6s cold-tokenized the whole solution inside
+                // buildInheritanceMap before any checkpoint could land). Show the honest
+                // placeholder; the index-built refresh repaints every visible lens moments
+                // later (#318: exact scans only start once the index — and its mayContain
+                // pruning — is warm). No-solution mode (index never builds) keeps the scan
+                // path — its search space is a single file + directory.
                 lens.command = {
                     title: 'counting…',
                     command: 'clarion.showReferences',
@@ -1101,50 +1121,55 @@ connection.onCodeLensResolve(async (lens) => {
         } else {
             let scan = inflightLensScans.get(cacheKey);
             if (!scan) {
-                // #303: hard ceiling on the background scan. The refresh design wants scans to
-                // complete, but unbounded they can run away (a libsrc-INC scan held the loop
-                // 106s). 15s is far above any healthy scan; the cancellation lands at the
-                // scan's cooperative checkpoints. (A scan path with NO checkpoints can still
-                // block — that yield audit is tracked on #294/#295; the libsrc lens gate above
-                // removes the known pathological emitter.)
-                const ceiling = new CancellationTokenSource();
-                const ceilingTimer = setTimeout(() => ceiling.cancel(), 15_000);
-                const scanStart = Date.now();
-                scan = referencesProvider.provideReferences(
-                    document,
-                    { line: data.line, character: data.character },
-                    { includeDeclaration: true },
-                    ceiling.token
-                ).then(found => {
-                    // #309: name the symbol on slow scans — "a lens was slow" is
-                    // undiagnosable from user logs without knowing WHICH lens.
-                    const scanMs = Date.now() - scanStart;
-                    if (scanMs >= 1_000) {
-                        perfLogger.perf("CodeLens reference scan slow", {
-                            ms: scanMs,
+                const queuedAt = Date.now();
+                scan = acquireLensScanSlot().then(async () => {
+                    // #303: hard ceiling on the background scan. The refresh design wants scans
+                    // to complete, but unbounded they can run away (a libsrc-INC scan held the
+                    // loop 106s). 15s is far above any healthy scan; the cancellation lands at
+                    // the scan's cooperative checkpoints. The clock starts when the scan leaves
+                    // the #318 queue, not when it enters it.
+                    const ceiling = new CancellationTokenSource();
+                    const ceilingTimer = setTimeout(() => ceiling.cancel(), 15_000);
+                    const scanStart = Date.now();
+                    try {
+                        const found = await referencesProvider.provideReferences(
+                            document,
+                            { line: data.line, character: data.character },
+                            { includeDeclaration: true },
+                            ceiling.token
+                        );
+                        // #318 experiment: one perf line per exact lens count — this is the
+                        // measurement that decides whether exact-lazy stays. (#309: always
+                        // name the symbol so slow scans are diagnosable from user logs.)
+                        perfLogger.perf("CodeLens exact count", {
+                            ms: Date.now() - scanStart,
+                            queued_ms: scanStart - queuedAt,
                             symbol: data.symbolName,
+                            results: found?.length ?? 0,
                             cancelled: String(ceiling.token.isCancellationRequested),
                             uri: data.uri
                         });
+                        const resolved = found ?? [];
+                        // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
+                        // name-based invalidation when an edit adds a new reference (#189 Phase 2).
+                        const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
+                        codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
+                        // Track which files this symbol's references live in, so a later edit to one
+                        // of those files evicts this count (and only the affected counts).
+                        codeLensRefIndex.removeSymbol(cacheKey);
+                        for (const loc of resolved) {
+                            codeLensRefIndex.add(cacheKey, {
+                                uri: loc.uri,
+                                line: loc.range.start.line,
+                                character: loc.range.start.character,
+                            });
+                        }
+                        return resolved;
+                    } finally {
+                        clearTimeout(ceilingTimer);
+                        releaseLensScanSlot();
                     }
-                    const resolved = found ?? [];
-                    // last dotted segment, e.g. "StringTheory.AddLine" -> "addline"; used for
-                    // name-based invalidation when an edit adds a new reference (#189 Phase 2).
-                    const shortName = (data.symbolName ?? '').split('.').pop()?.toLowerCase() ?? '';
-                    codeLensRefCache.set(cacheKey, { refs: resolved, shortName });
-                    // Track which files this symbol's references live in, so a later edit to one
-                    // of those files evicts this count (and only the affected counts).
-                    codeLensRefIndex.removeSymbol(cacheKey);
-                    for (const loc of resolved) {
-                        codeLensRefIndex.add(cacheKey, {
-                            uri: loc.uri,
-                            line: loc.range.start.line,
-                            character: loc.range.start.character,
-                        });
-                    }
-                    return resolved;
                 }).finally(() => {
-                    clearTimeout(ceilingTimer);
                     inflightLensScans.delete(cacheKey);
                 });
                 inflightLensScans.set(cacheKey, scan);
@@ -1156,15 +1181,12 @@ connection.onCodeLensResolve(async (lens) => {
                     setTimeout(() => resolve('budget'), CODELENS_RESOLVE_BUDGET_MS))
             ]);
             if (raced === 'budget') {
-                perfLogger.perf("CodeLens resolve budget hit — continuing in background", {
-                    budget_ms: CODELENS_RESOLVE_BUDGET_MS,
-                    symbol: data.symbolName, // #309: identify the slow lens
-                    uri: data.uri
-                });
-                // Real count arrives via the refresh once the background scan lands.
+                // Real count arrives via the refresh once the background scan lands. #318:
+                // the approximate index count is the interim answer when available — far
+                // more useful than "counting…", and visibly marked '~' until the flip.
                 scan.then(() => scheduleLensRefresh()).catch(() => { /* logged at source */ });
                 lens.command = {
-                    title: 'counting…',
+                    title: placeholderTitle ?? 'counting…',
                     command: 'clarion.showReferences',
                     arguments: [data.uri, { line: data.line, character: data.character }, []],
                 };
