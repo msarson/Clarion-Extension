@@ -191,3 +191,34 @@ suite('ClarionCodeLensProvider — provideCodeLenses', () => {
         assert.ok(lenses.every(l => l.range.start.line >= 0));
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+suite('ClarionCodeLensProvider — routine lenses (#320)', () => {
+
+    test('ROUTINE labels (:: and simple) get lenses with routine flag and column-0 anchor', () => {
+        const code = [
+            'MyProc  PROCEDURE()',        // 0
+            '  CODE',                     // 1
+            '  DO Menu::MENUBAR1',        // 2
+            '  DO ShowShortCuts',         // 3
+            '  RETURN',                   // 4
+            'Menu::MENUBAR1 ROUTINE',     // 5
+            '  CODE',                     // 6
+            '  EXIT',                     // 7
+            'ShowShortCuts Routine',      // 8 — lowercase keyword, real-app shape
+            '  CODE',                     // 9
+            '  EXIT',                     // 10
+        ].join('\n');
+        const tokens = tokenize(code);
+        const lenses = buildCodeLenses('file:///test.clw', tokens);
+
+        const routineLenses = lenses.filter(l => (l.data as { routine?: boolean }).routine === true);
+        assert.strictEqual(routineLenses.length, 2,
+            `expected lenses on both ROUTINE labels; lens lines=[${lenses.map(l => l.range.start.line).join(',')}]`);
+
+        const byLine = new Map(routineLenses.map(l => [l.range.start.line, l.data as { symbolName: string; character: number }]));
+        assert.strictEqual(byLine.get(5)?.symbolName, 'Menu::MENUBAR1', ':: name carried whole');
+        assert.strictEqual(byLine.get(5)?.character, 0, 'anchor at column 0 — the label, not a dotted segment');
+        assert.strictEqual(byLine.get(8)?.symbolName, 'ShowShortCuts');
+    });
+});

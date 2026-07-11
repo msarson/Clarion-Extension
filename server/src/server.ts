@@ -1047,7 +1047,7 @@ function scheduleLensRefresh() {
 }
 connection.onCodeLensResolve(async (lens) => {
     try {
-        const data = lens.data as { uri: string; line: number; character: number; symbolName: string; fileScoped?: boolean } | undefined;
+        const data = lens.data as { uri: string; line: number; character: number; symbolName: string; fileScoped?: boolean; routine?: boolean } | undefined;
         if (!data) return lens;
 
         // #315 belt-and-braces on the #303 gate: a lens emitted for a libsrc doc
@@ -1065,7 +1065,10 @@ connection.onCodeLensResolve(async (lens) => {
         // name, no receiver resolution) — #318: it is now only the placeholder shown
         // while the exact scoped scan below runs; the refresh swaps in the real count.
         let placeholderTitle: string | undefined;
-        if (!cached) {
+        // #320: routine lenses skip the approximate index AND the index-building
+        // gate — their exact count is a same-file procedure-scoped scan (Route R),
+        // fast at any startup phase. Straight to the scan path below.
+        if (!cached && !data.routine) {
             const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
             const refIndex = ReferenceCountIndex.getInstance();
             // #315 follow-up: a lens on a class DECLARED in this CLW (e.g.

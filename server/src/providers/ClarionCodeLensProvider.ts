@@ -12,6 +12,10 @@ const LENS_SUBTYPES = new Set([
     TokenType.GlobalProcedure,
     TokenType.MethodImplementation,
     TokenType.Class,
+    // #320 — routines are first-class navigation symbols; their reference count
+    // is procedure-scoped and same-file (label + DO sites), so the lens resolve
+    // runs the exact scan directly (no approximate index involved).
+    TokenType.Routine,
 ]);
 
 /** Data stored on an unresolved CodeLens so the resolve phase can count references. */
@@ -27,6 +31,12 @@ export interface CodeLensData {
      * when this CLW is a PROGRAM file (global-scope classes are app-visible).
      */
     fileScoped?: boolean;
+    /**
+     * #320 — true for a lens on a ROUTINE label. Resolve skips the approximate
+     * index AND the index-building gate entirely: the exact count is a
+     * same-file procedure-scoped scan (Route R), always fast, always exact.
+     */
+    routine?: boolean;
 }
 
 /**
@@ -82,7 +92,8 @@ export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
         // For dotted labels (e.g. "Kanban.Init"), position on the method name part
         // so getWordRangeAtPosition returns "Init" and the dot-chain reconstruction
         // in ReferencesProvider reconstructs the full "Kanban.Init" expression.
-        // For plain labels there is no dot so we use column 0.
+        // For plain labels there is no dot so we use column 0. Routine labels may
+        // contain '::' but never '.', so they anchor at column 0 — on the label.
         const dotIndex = symbolName.lastIndexOf('.');
         const character = dotIndex >= 0 ? dotIndex + 1 : 0;
 
@@ -92,6 +103,8 @@ export function buildCodeLenses(uri: string, tokens: Token[]): CodeLens[] {
         // scope by the dotted qualifier. Procedure lenses are never file-scoped.
         if (token.subType === TokenType.Class) {
             if (isClw) data.fileScoped = true;
+        } else if (token.subType === TokenType.Routine) {
+            data.routine = true;
         } else if (dotIndex >= 0 && localClasses.has(symbolName.slice(0, dotIndex).toLowerCase())) {
             data.fileScoped = true;
         }
