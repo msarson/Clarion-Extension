@@ -24,7 +24,8 @@ import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
-import { cooperativeCheckpoint } from '../utils/cooperativeScan';
+import { cooperativeCheckpoint, makeTimeSlicer } from '../utils/cooperativeScan';
+import { ReferenceCountIndex } from './ReferenceCountIndex';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
@@ -631,14 +632,37 @@ export class SymbolFinderService {
             return null;
         }
 
+        const memberFiles = graph.getMemberFiles(programFile);
+
+        // #319: this walk read + fully tokenized EVERY member module of the program
+        // on a lookup miss — 161 files cold on Mark's VM = one 8.2s synchronous
+        // event-loop block (the undeclaredVar validator probes misses by definition).
+        // Prune with the reference index, the #315 FAR pattern: a module-scope
+        // declaration of `word` requires `word` to OCCUR in the file, so an indexed
+        // file with zero occurrences is skipped without touching disk. One batched
+        // freshness pass up front keeps mayContain stat-free (no per-file sync stat
+        // storm); compound words (BRW1::View:Browse) are never a single indexed
+        // name, so only bare identifiers prune; unknown files always load.
+        const refIdx = ReferenceCountIndex.getInstance();
+        const canPrune = refIdx.isBuilt && /^[A-Za-z_][A-Za-z0-9_]*$/.test(word);
+        if (canPrune) {
+            await refIdx.verifyFilesFresh(memberFiles);
+        }
+        const timeSlice = makeTimeSlicer();
+
         const visited = new Set<string>();
-        for (const memberFile of graph.getMemberFiles(programFile)) {
+        for (const memberFile of memberFiles) {
             const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
             if (visited.has(normMember)) continue;
             visited.add(normMember);
 
             const memberPath = memberFile.replace(/\//g, '\\');
             if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
+
+            if (canPrune && !refIdx.mayContain(memberPath, word)) continue;
+            // Un-pruned files still tokenize synchronously — yield between them so
+            // a cold family walk never holds the LSP loop (#319/#295).
+            await timeSlice();
 
             const sibling = this.loadTokensForFile(memberPath);
             if (!sibling) continue;

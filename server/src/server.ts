@@ -2144,27 +2144,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // → revalidation ONE DOC AT A TIME, each pass benefiting from the built graph.
                 await new Promise<void>(resolve => setTimeout(resolve, 2000));
                 await buildFileRelationshipGraph();
-                const revalStart = Date.now();
-                let revalCount = 0;
-                for (const doc of documents.all()) {
-                    try {
-                        await validateTextDocument(doc, 'sdiReady');
-                    } catch { /* validator errors are logged at source */ }
-                    revalCount++;
-                }
-                perfLogger.perf("Phase: sdiReady revalidation pass complete", {
-                    ms: Date.now() - revalStart,
-                    doc_count: revalCount,
-                    since_module_load_ms: Date.now() - serverModuleLoadedAt
-                });
-                // #301: end of the startup background chain - hover drops the "still indexing"
-                // fallback from here on.
-                startupBackgroundActive = false;
 
-                // #294: LAST and lowest priority — the reference-count index (one regex
-                // pass over the solution, per-file mtime-persisted). Deliberately after
-                // the flag drop so it never extends the "still indexing" hover window;
-                // lens resolves fall back to the scan path until it lands.
+                // #319: the reference-count index builds BEFORE the revalidation pass.
+                // The undeclaredVar validator's cross-file miss path (the sibling-MEMBER
+                // walk in SymbolFinderService) prunes through this index; under the old
+                // #294 "last and lowest priority" order the first revalidation ran with
+                // the index unbuilt and cold-tokenized the whole program family per miss
+                // (8.2s sync block on Mark's VM). Warm start is stat-only (~0.5s); the
+                // batched build yields, and moving it up also gets lens estimates + the
+                // exact-scan gate (#318) live sooner. Net: the flag-drop below happens
+                // EARLIER because the revalidation stops paying the un-pruned walk.
                 const { ReferenceCountIndex } = await import('./services/ReferenceCountIndex');
                 const refIdxFiles: string[] = [];
                 const smForIdx = SolutionManager.getInstance();
@@ -2181,6 +2170,23 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 );
                 // Counts are now O(1) — repaint visible lenses with real numbers.
                 scheduleLensRefresh();
+
+                const revalStart = Date.now();
+                let revalCount = 0;
+                for (const doc of documents.all()) {
+                    try {
+                        await validateTextDocument(doc, 'sdiReady');
+                    } catch { /* validator errors are logged at source */ }
+                    revalCount++;
+                }
+                perfLogger.perf("Phase: sdiReady revalidation pass complete", {
+                    ms: Date.now() - revalStart,
+                    doc_count: revalCount,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+                // #301: end of the startup background chain - hover drops the "still indexing"
+                // fallback from here on.
+                startupBackgroundActive = false;
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
