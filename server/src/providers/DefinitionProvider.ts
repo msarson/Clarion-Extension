@@ -318,7 +318,10 @@ export class DefinitionProvider {
             }
 
             // ✅ #211 DO routine reference: F12 on routine name in `DO RoutineName` → ROUTINE label
-            const doRoutineMatch = line.match(/\bDO\s+(\w+)/i);
+            // #320: shared DO_ROUTINE pattern — the old inline \w+ stopped at ':' so
+            // `DO Menu::MENUBAR1` captured only "Menu", silently skipping this route
+            // (a fallback happened to resolve it; hover/impl/F12 now converge on one pattern).
+            const doRoutineMatch = line.match(ClarionPatterns.DO_ROUTINE);
             if (doRoutineMatch) {
                 const routineName = doRoutineMatch[1];
                 if (routineName.toLowerCase() === word.toLowerCase()) {

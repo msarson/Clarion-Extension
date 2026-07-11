@@ -324,6 +324,26 @@ export class ImplementationProvider {
         position: Position,
         line: string
     ): Location | null {
+        // #320: cursor ON the ROUTINE label itself — a routine's declaration IS
+        // its implementation, so Go-to-Implementation resolves to the label
+        // (parity with F12; previously answered nothing).
+        const tokens = this.tokenCache.getTokens(document);
+        const isRoutineDeclLine = tokens.some(t => t.line === position.line && t.subType === TokenType.Routine);
+        if (isRoutineDeclLine) {
+            const labelTok = tokens.find(t =>
+                t.type === TokenType.Label &&
+                t.line === position.line &&
+                position.character >= t.start &&
+                position.character <= t.start + t.value.length
+            );
+            if (labelTok) {
+                return Location.create(document.uri, {
+                    start: { line: labelTok.line, character: labelTok.start },
+                    end: { line: labelTok.line, character: labelTok.start + labelTok.value.length }
+                });
+            }
+        }
+
         // Check if cursor is on a word after DO keyword (supports namespace prefixes with : or ::)
         const wordMatch = line.match(ClarionPatterns.DO_ROUTINE);
         if (!wordMatch) {

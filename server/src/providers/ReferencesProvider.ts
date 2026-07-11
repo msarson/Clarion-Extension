@@ -337,6 +337,30 @@ export class ReferencesProvider {
             }
         }
 
+        // ── Route R (#320): routine label / DO site ──
+        // Routine labels are procedure-local (#211/#264) and may contain '::'
+        // (Menu::MENUBAR1). The DO site tokenizes as SEVERAL tokens (Menu : :
+        // MENUBAR1), so token-value scans can never find it — resolve through
+        // the same scoped resolver hover/F12 use, and gather DO sites by line
+        // scan. Fires ONLY when the word names a routine visible at the cursor
+        // AND the cursor sits on the label or a DO targeting it — single-colon
+        // prefixed words (LOC:MyVar) keep their extensive prefix machinery.
+        if (!word.includes('.')) {
+            const routineStructure = TokenCache.getInstance().getStructure(document);
+            const routineToken = routineStructure
+                ? TokenHelper.findScopedRoutineToken(routineStructure, word, position.line)
+                : undefined;
+            if (routineToken) {
+                const onLabel = routineToken.line === position.line;
+                const doMatch = fullLine.match(ClarionPatterns.DO_ROUTINE);
+                const onDoSite = !!doMatch && doMatch[1].toLowerCase() === word.toLowerCase();
+                if (onLabel || onDoSite) {
+                    this.trace({ route: 'routine', word });
+                    return this.provideRoutineReferences(word, routineToken, routineStructure!, document, context.includeDeclaration);
+                }
+            }
+        }
+
         // Route to member-access path when word contains a dot
         if (word.includes('.')) {
             this.trace({ route: 'member', word });
@@ -1725,6 +1749,57 @@ export class ReferencesProvider {
      * behavior. Yields between files and honors cancellation (returning the
      * partial family — the caller's own checkpointed loop bails right after).
      */
+    /**
+     * #320 — references for a ROUTINE label: the label (once) + every DO site
+     * that RESOLVES to this routine. Every `DO <name>` occurrence in the file
+     * is re-resolved through `TokenHelper.findScopedRoutineToken` at ITS line,
+     * which buys procedure-locality and the Rule-4 method chain (#285) for
+     * free: a same-named routine in another procedure resolves to its own
+     * token and is excluded. Routines and all their DO sites live in one
+     * source file by language rule, so no cross-file scan exists.
+     */
+    private provideRoutineReferences(
+        word: string,
+        routineToken: Token,
+        structure: DocumentStructure,
+        document: TextDocument,
+        includeDeclaration: boolean
+    ): Location[] {
+        const locations: Location[] = [];
+        if (includeDeclaration) {
+            locations.push(Location.create(document.uri, {
+                start: { line: routineToken.line, character: routineToken.start },
+                end: { line: routineToken.line, character: routineToken.start + routineToken.value.length }
+            }));
+        }
+
+        const wordLower = word.toLowerCase();
+        const doRe = /\bDO\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
+        for (let ln = 0; ln < document.lineCount; ln++) {
+            let text = document.getText({
+                start: { line: ln, character: 0 },
+                end: { line: ln, character: Number.MAX_VALUE }
+            });
+            // Blank out string literals (preserving columns), then ignore
+            // matches at or beyond a line comment.
+            text = text.replace(/'(?:[^']|'')*'/g, s => ' '.repeat(s.length));
+            const bang = text.indexOf('!');
+            doRe.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = doRe.exec(text)) !== null) {
+                if (bang !== -1 && m.index >= bang) break;
+                if (m[1].toLowerCase() !== wordLower) continue;
+                if (TokenHelper.findScopedRoutineToken(structure, m[1], ln) !== routineToken) continue;
+                const nameStart = m.index + m[0].length - m[1].length;
+                locations.push(Location.create(document.uri, {
+                    start: { line: ln, character: nameStart },
+                    end: { line: ln, character: nameStart + m[1].length }
+                }));
+            }
+        }
+        return locations;
+    }
+
     private async buildClassFamily(declaringClass: string, fileUris: string[], token?: CancellationToken): Promise<Set<string>> {
         const refIdx = ReferenceCountIndex.getInstance();
         const family = new Set<string>([declaringClass.toLowerCase()]);
