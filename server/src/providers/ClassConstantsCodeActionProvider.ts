@@ -17,6 +17,7 @@ import * as path from 'path';
 
 const logger = LoggerManager.getLogger('ClassConstantsCodeActionProvider');
 logger.setLevel('error');
+const perfLogger = LoggerManager.getLogger('ClassConstantsCodeAction.Perf', 'perf');
 
 /**
  * Provides Code Actions (lightbulb) for adding missing class constants
@@ -30,13 +31,54 @@ export class ClassConstantsCodeActionProvider {
         this.includeVerifier = IncludeVerifier.getInstance();
     }
 
+    /**
+     * #317 — outer timing shell. The #312 chain instrumentation names this
+     * provider on slow requests (classConstants=3850/4349ms sighted on Mark's
+     * VM) but not WHICH step; this attributes the cost so the fix is aimed,
+     * not guessed. One perf line, only when the request is genuinely slow.
+     */
     async provideCodeActions(
         document: TextDocument,
         range: Range,
         context: CodeActionContext,
         token: CancellationToken
     ): Promise<CodeAction[]> {
+        const steps: Record<string, number> = {};
+        const t0 = Date.now();
+        try {
+            return await this.provideCodeActionsInner(document, range, context, token, steps);
+        } finally {
+            const total = Date.now() - t0;
+            if (total >= 1000) {
+                perfLogger.perf('classConstants slow — step breakdown', {
+                    total_ms: total,
+                    ...steps,
+                    line: range.start.line,
+                    uri: document.uri
+                });
+            }
+        }
+    }
+
+    /** Times one awaited step into `steps`, accumulating across repeats. */
+    private static async timed<T>(steps: Record<string, number>, name: string, fn: () => Promise<T>): Promise<T> {
+        const t = Date.now();
+        try {
+            return await fn();
+        } finally {
+            steps[name] = (steps[name] ?? 0) + (Date.now() - t);
+        }
+    }
+
+    private async provideCodeActionsInner(
+        document: TextDocument,
+        range: Range,
+        context: CodeActionContext,
+        token: CancellationToken,
+        steps: Record<string, number>
+    ): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
+        const timed = ClassConstantsCodeActionProvider.timed;
 
         try {
             const text = document.getText();
@@ -56,7 +98,8 @@ export class ClassConstantsCodeActionProvider {
                     const data = diag.data as { typeName: string; incFileName: string } | undefined;
                     if (data?.typeName && data?.incFileName) {
                         logger.info(`[CodeAction] missing-include diag: typeName="${data.typeName}" incFile="${data.incFileName}"`);
-                        const diagActions = await this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath);
+                        const diagActions = await timed(steps, 'diag_missing_include_ms', () =>
+                            this.getActionsForMissingInclude(data.typeName, data.incFileName, document, projectPath, cwprojPath));
                         actions.push(...diagActions);
                     }
                 }
@@ -102,7 +145,8 @@ export class ClassConstantsCodeActionProvider {
                 logger.info(`[CodeAction] INCLUDE line detected: ${includeFile}`);
                 
                 // Check if this is a class include file
-                const includeActions = await this.getActionsForInclude(includeFile, document);
+                const includeActions = await timed(steps, 'include_line_ms', () =>
+                    this.getActionsForInclude(includeFile, document));
                 actions.push(...includeActions);
                 
                 if (actions.length > 0) {
@@ -137,7 +181,7 @@ export class ClassConstantsCodeActionProvider {
             logger.info(`[CodeAction] projectPath="${projectPath}" cwprojPath="${cwprojPath ?? '(none)'}"`);
 
             // Build or get index for this project (guarded above — already built here)
-            const index = await this.sdi.getOrBuildIndex(projectPath);
+            const index = await timed(steps, 'sdi_index_ms', () => this.sdi.getOrBuildIndex(projectPath));
             logger.info(`[CodeAction] SDI index has ${index.byName.size} entries`);
 
             // Look up the class
@@ -153,11 +197,13 @@ export class ClassConstantsCodeActionProvider {
             logger.info(`[CodeAction] class file="${fileName}" filePath="${def.filePath}"`);
 
             // Verify the class file is included
-            const isIncluded = await this.includeVerifier.isClassIncluded(fileName, document);
+            const isIncluded = await timed(steps, 'is_class_included_ms', () =>
+                this.includeVerifier.isClassIncluded(fileName, document));
             logger.info(`[CodeAction] isIncluded=${isIncluded}`);
             if (!isIncluded) {
                 // Offer Code Action to add the missing INCLUDE
-                const addIncludeActions = await this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath);
+                const addIncludeActions = await timed(steps, 'missing_include_actions_ms', () =>
+                    this.getActionsForMissingInclude(word, fileName, document, projectPath, cwprojPath));
                 actions.push(...addIncludeActions);
                 return this.memoizeIncludeActions(wordMemoKey, actions);
             }
@@ -166,7 +212,8 @@ export class ClassConstantsCodeActionProvider {
 
             // Parse class constants
             const constantParser = new ClassConstantParser();
-            const classConstants = await constantParser.parseFile(def.filePath);
+            const classConstants = await timed(steps, 'parse_class_file_ms', () =>
+                constantParser.parseFile(def.filePath));
             const thisClassConstants = classConstants.find(c => c.className.toLowerCase() === def.name.toLowerCase());
 
             if (!thisClassConstants || thisClassConstants.constants.length === 0) {
@@ -179,7 +226,8 @@ export class ClassConstantsCodeActionProvider {
             const missingConstants = [];
 
             for (const constant of thisClassConstants.constants) {
-                const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
+                const isDefined = await timed(steps, 'constants_check_ms', () =>
+                    constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath));
                 logger.info(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);

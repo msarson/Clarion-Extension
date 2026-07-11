@@ -58,6 +58,7 @@ import ClarionFormatter from './ClarionFormatter';
 import { ClarionColorResolver } from './ClarionColorResolver';
 import ClarionFoldingProvider from './ClarionFoldingProvider';
 import { serverSettings } from './serverSettings';
+import { TrailingCoalescer } from './utils/TrailingCoalescer';
 
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
@@ -2291,20 +2292,58 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
 // Re-validate all open documents when a .cwproj changes (e.g. after addClassConstants).
 // The source .clw hasn't changed so the LSP wouldn't otherwise re-run diagnostics.
-connection.onNotification('clarion/projectConstantsChanged', () => {
-    logger.test('📥 clarion/projectConstantsChanged — re-validating all open documents');
+//
+// #317: the client fires this once PER PROJECT (40x on a real solution) — the old
+// handler re-validated every open document and reset the file-relationship graph
+// per notification (~25 revalidations of the same unchanged file in one burst;
+// one missingConstants pass measured 44s during the concurrent FRG cold-rescan
+// window it caused itself). Coalesced: a burst costs ONE pass. The FRG is also
+// REBUILT, not just reset — a bare reset left it dead until the next restart,
+// degrading every family-scoped consumer (FAR scope, sibling-walk prune, hover).
+const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
+    const passStart = Date.now();
     // Clear the version-skip cache so validateTextDocument doesn't skip documents
     // whose source hasn't changed but whose cwproj has.
     lastValidatedVersions.clear();
-    for (const document of documents.all()) {
-        validateTextDocument(document).catch(err =>
-            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`)
-        );
+
+    // Rebuild the file relationship graph — the project file list may have changed.
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const graph = FileRelationshipGraph.getInstance();
+    graph.reset();
+    const smForGraph = SolutionManager.getInstance();
+    const graphFiles: string[] = [];
+    if (smForGraph?.solution) {
+        for (const project of smForGraph.solution.projects) {
+            for (const sourceFile of project.sourceFiles) {
+                const absPath = sourceFile.getAbsolutePath();
+                if (absPath) graphFiles.push(absPath);
+            }
+        }
     }
-    // Reset file relationship graph — project file list may have changed
-    import('./FileRelationshipGraph').then(({ FileRelationshipGraph }) => {
-        FileRelationshipGraph.getInstance().reset();
+    if (graphFiles.length) {
+        await graph.buildInBackground(graphFiles).catch(err =>
+            logger.error(`❌ [FRG] constants-change rebuild failed: ${err}`));
+    }
+
+    // One doc at a time — same discipline as the startup revalidation chain.
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'constantsChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    perfLogger.perf("projectConstantsChanged coalesced pass complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        frg_files: graphFiles.length
     });
+});
+connection.onNotification('clarion/projectConstantsChanged', () => {
+    logger.test('📥 clarion/projectConstantsChanged — coalescing (#317)');
+    projectConstantsCoalescer.trigger();
 });
 
 
