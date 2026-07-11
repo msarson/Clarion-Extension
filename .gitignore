@@ -5,7 +5,7 @@ server/out
 out/
 Logs/
 temp-help-downloads/
-docs/ai-prompts/
+dev/docs-internal/ai-prompts/
 ClarionDocs/
 # Exclude commercial/copyrighted third-party code
 StringTheory.inc

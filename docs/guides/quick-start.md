@@ -192,7 +192,7 @@ Now that you're set up, learn how to do everyday tasks:
 
 ### Need Help?
 - **[Common Tasks](common-tasks.md)** - Cookbook-style recipes
-- **[Full Documentation](../GETTING_STARTED.md)** - Detailed setup guide
+- **[Installation Guide](installation.md)** - Detailed setup
 - **[GitHub Issues](https://github.com/msarson/Clarion-Extension/issues)** - Report problems
 
 ---

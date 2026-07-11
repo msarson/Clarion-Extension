@@ -736,7 +736,7 @@ The following would typically be checked:
   - commands.md - All extension commands
   - settings.md - Configuration options
   - snippets.md - Code snippet reference
-  - CLARION_LANGUAGE_REFERENCE.md - Language syntax
+  - Clarion Language Reference (wiki: https://github.com/msarson/Clarion-Extension/wiki/Clarion-Language-Reference)
 
 - **Developer Docs** (\dev/\ subfolder):
   - Bug fix analyses and refactoring plans

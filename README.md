@@ -168,7 +168,7 @@ Productivity features to write code faster.
 - **[All Commands](docs/reference/commands.md)** - Complete command reference
 - **[All Settings](docs/reference/settings.md)** - Configuration options
 - **[Snippet Reference](docs/reference/snippets.md)** - Code snippet cheat sheet
-- **[Clarion Language Reference](docs/CLARION_LANGUAGE_REFERENCE.md)** - Language syntax
+- **[Clarion Language Reference](https://github.com/msarson/Clarion-Extension/wiki/Clarion-Language-Reference)** - Language syntax (wiki)
 
 ---
 

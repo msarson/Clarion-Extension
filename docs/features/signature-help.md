@@ -98,7 +98,7 @@ Parameters:
 - `ERRORCODE()` - Detailed error code
 - `CONTENTS(variable)` - Variable address
 
-**[See complete function list →](../CLARION_LANGUAGE_REFERENCE.md)**
+**[See complete function list →](https://github.com/msarson/Clarion-Extension/wiki/Clarion-Language-Reference)**
 
 ---
 
