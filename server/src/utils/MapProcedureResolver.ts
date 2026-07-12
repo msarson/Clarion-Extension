@@ -17,6 +17,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
+import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { cooperativeCheckpoint } from './cooperativeScan';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
@@ -61,7 +62,7 @@ export class MapProcedureResolver {
         const memberToken = tokens.find(t =>
             t.line < 5 && t.value.toUpperCase() === 'MEMBER' && t.referencedFile);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, pathUtil.dirname(currentPath));
+            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, currentPath);
             if (parentPath) startPaths.push(parentPath);
         }
 
@@ -73,18 +74,11 @@ export class MapProcedureResolver {
         return null;
     }
 
-    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename. */
-    private resolveIncludeTarget(fileName: string, fromDir: string): string | null {
-        const sameDir = pathUtil.join(fromDir, fileName);
+    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
+    private resolveIncludeTarget(fileName: string, fromPath: string): string | null {
+        const sameDir = pathUtil.join(pathUtil.dirname(fromPath), fileName);
         if (fsSync.existsSync(sameDir)) return sameDir;
-        const sm = SolutionManager.getInstance();
-        if (sm?.solution) {
-            for (const project of sm.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(fileName);
-                if (resolved?.path && fsSync.existsSync(resolved.path)) return resolved.path;
-            }
-        }
-        return null;
+        return resolveViaProjectRedirection(fileName, fromPath);
     }
 
     /** Load a file's document + tokens, via CrossFileCache when available. */
@@ -160,7 +154,7 @@ export class MapProcedureResolver {
                 const matchLine = offsetToLine(match.index);
                 if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
             }
-            const incPath = this.resolveIncludeTarget(match[1], pathUtil.dirname(fromPath));
+            const incPath = this.resolveIncludeTarget(match[1], fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
 
             const inc = await this.loadDocForWalk(incPath);
@@ -910,6 +904,8 @@ export class MapProcedureResolver {
             const solutionManager = SolutionManager.getInstance();
             
             let resolvedPath: string | null = null;
+            // #328: owner-first base for every redirection lookup in this walk
+            const fromFsPath328 = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
 
             // #299: MODULE('X.DLL') / MODULE('X.LIB') is an external-library identifier (docs:
             // "may contain any unique identifier"), typically another project in this solution.
@@ -931,13 +927,7 @@ export class MapProcedureResolver {
             let isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
             if (moduleExt === '') {
                 const clwCandidate = `${moduleFile}.clw`;
-                let clwResolved = false;
-                if (solutionManager?.solution) {
-                    for (const project of solutionManager.solution.projects) {
-                        const resolved = project.getRedirectionParser().findFile(clwCandidate);
-                        if (resolved?.path && fs.existsSync(resolved.path)) { clwResolved = true; break; }
-                    }
-                }
+                let clwResolved = resolveViaProjectRedirection(clwCandidate, fromFsPath328) !== null; // #328 owner-first
                 if (!clwResolved) {
                     const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
                     clwResolved = fs.existsSync(path.join(currentDir, clwCandidate));
@@ -970,12 +960,12 @@ export class MapProcedureResolver {
 
             // Try solution-wide redirection first
             if (!resolvedPath && solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
+                for (const project of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(effectiveModuleFile);
                     logger.info(`RedirectionParser.findFile('${effectiveModuleFile}') returned:`, resolved);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
+                    if (resolved && typeof resolved.path === 'string' && fs.existsSync(resolved.path)) {
+                        resolvedPath = String(resolved.path);
                         logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
                         
                         // Check immediately if this is a DLL/LIB (before any file operations)
@@ -1076,7 +1066,7 @@ export class MapProcedureResolver {
                     
                     const solutionManager = SolutionManager.getInstance();
                     if (solutionManager && solutionManager.solution) {
-                        for (const proj of solutionManager.solution.projects) {
+                        for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                             const redirectionParser = proj.getRedirectionParser();
                             const resolved = redirectionParser.findFile(clwFile);
                             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
@@ -1160,7 +1150,7 @@ export class MapProcedureResolver {
                             // Resolve the CLW file
                             const solutionManager = SolutionManager.getInstance();
                             if (solutionManager && solutionManager.solution) {
-                                for (const proj of solutionManager.solution.projects) {
+                                for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                                     const redirectionParser = proj.getRedirectionParser();
                                     const resolved = redirectionParser.findFile(moduleTokenInMap.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
@@ -1307,7 +1297,7 @@ export class MapProcedureResolver {
                             
                             // Resolve the CLW file path using solutionManager
                             if (solutionManager && solutionManager.solution) {
-                                for (const proj of solutionManager.solution.projects) {
+                                for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                                     const redirectionParser = proj.getRedirectionParser();
                                     const resolved = redirectionParser.findFile(moduleToken.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {

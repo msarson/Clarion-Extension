@@ -9,6 +9,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import * as path from 'path';
 import * as fs from 'fs';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
+import { resolveViaProjectRedirection } from './RedirectionResolution';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("FileDefinitionResolver");
@@ -105,33 +106,12 @@ export class FileDefinitionResolver {
     }
 
     /**
-     * #328 — resolve a filename through project redirection, OWNER-project
-     * first (mirrors FileRelationshipGraph.resolveFile's #315 fix): in a
-     * multi-project solution, several projects can redirect the same
-     * filename to different physical copies, and the compiler building the
-     * FROM file's project uses THAT project's redirection. The solution-order
-     * walk remains as the fallback for files no project owns.
+     * #328 — owner-project-first redirection; shared implementation lives in
+     * RedirectionResolution.ts (this class was the first adopter, the #328
+     * audit rolled it out to every filename-resolving loop).
      */
     private resolveViaProjectRedirection(fileName: string, fromFsPath: string): string | null {
-        const SolutionManager = require('../solution/solutionManager').SolutionManager;
-        const solutionManager = SolutionManager.getInstance();
-        if (!solutionManager?.solution) return null;
-
-        const owner = solutionManager.findProjectForFile?.(fromFsPath);
-        if (owner) {
-            const resolved = owner.getRedirectionParser().findFile(fileName);
-            if (resolved?.path && fs.existsSync(resolved.path)) {
-                return resolved.path;
-            }
-        }
-
-        for (const project of solutionManager.solution.projects) {
-            const resolved = project.getRedirectionParser().findFile(fileName);
-            if (resolved?.path && fs.existsSync(resolved.path)) {
-                return resolved.path;
-            }
-        }
-        return null;
+        return resolveViaProjectRedirection(fileName, fromFsPath);
     }
 
     /**

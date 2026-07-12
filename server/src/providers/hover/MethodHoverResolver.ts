@@ -7,6 +7,7 @@ import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
+import { projectsOwnerFirst } from '../../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../../solution/findFileNoSolution';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureUtils } from '../../utils/ProcedureUtils';
@@ -557,7 +558,7 @@ export class MethodHoverResolver {
             
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
+                for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {

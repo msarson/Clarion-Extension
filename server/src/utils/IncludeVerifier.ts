@@ -2,6 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
@@ -437,16 +438,8 @@ export class IncludeVerifier {
             const currentFileDir = path.dirname(currentFilePath);
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(memberToken.referencedFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(memberToken.referencedFile, currentFilePath);
             if (!resolvedPath) {
                 const candidate = path.resolve(currentFileDir, memberToken.referencedFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;

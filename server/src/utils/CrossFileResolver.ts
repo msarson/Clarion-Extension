@@ -110,9 +110,14 @@ export class CrossFileResolver {
     public async resolveFile(filename: string, currentDocumentUri: string): Promise<string | null> {
         logger.info(`Resolving file: ${filename}`);
 
-        // Try solution-wide redirection first
+        // Try solution-wide redirection first - owner project first (#328).
+        // Local reorder (not the shared util) to honour the injected manager.
         if (this.solutionManager && this.solutionManager.solution) {
-            for (const project of this.solutionManager.solution.projects) {
+            const fromFsPath = decodeURIComponent(currentDocumentUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const list = [...this.solutionManager.solution.projects];
+            const owner = this.solutionManager.findProjectForFile?.(fromFsPath);
+            const orderedProjects = owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
+            for (const project of orderedProjects) {
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename);
                 if (resolved && resolved.path && fs.existsSync(resolved.path)) {

@@ -1,6 +1,7 @@
 import { TextDocument, Range, CodeAction, CodeActionKind } from 'vscode-languageserver/node';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { TokenCache } from '../TokenCache';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { ScopeKind } from '../scope/ScopeTypes';
@@ -189,13 +190,9 @@ export class IntroduceEquateCodeActionProvider {
      */
     private resolveProgramFile(programName: string, currentPath: string): string | null {
         const candidate = /\.clw$/i.test(programName) ? programName : `${programName}.clw`;
-        const sm = SolutionManager.getInstance();
-        if (sm?.solution) {
-            for (const proj of sm.solution.projects) {
-                const resolved = proj.getRedirectionParser().findFile(candidate);
-                if (resolved?.path && fs.existsSync(resolved.path)) return resolved.path;
-            }
-        }
+        // #328: owner-project-first redirection
+        const viaRedirection = resolveViaProjectRedirection(candidate, currentPath);
+        if (viaRedirection) return viaRedirection;
         const sibling = path.join(path.dirname(currentPath), candidate);
         return fs.existsSync(sibling) ? sibling : null;
     }

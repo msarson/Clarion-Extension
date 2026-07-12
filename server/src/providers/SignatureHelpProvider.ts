@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { DocumentStructure } from '../DocumentStructure';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
@@ -566,19 +567,8 @@ export class SignatureHelpProvider {
             const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             let resolvedPath: string | null = null;
             
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        logger.info(`Resolved via solution: ${resolvedPath}`);
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
             
             // Fallback to relative path
             if (!resolvedPath) {

@@ -190,6 +190,20 @@ suite('F12 INCLUDE resolution is owner-project-first (#328)', () => {
             "must resolve through the OWNING project's (ProjB) redirection");
     });
 
+    test('projectsOwnerFirst puts the owning project first and tolerates ownerless paths', () => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { projectsOwnerFirst } = require('../utils/RedirectionResolution');
+
+        const ordered = projectsOwnerFirst(path.join(projB, 'Main.clw'));
+        assert.strictEqual(ordered.length, 2, 'both projects present');
+        assert.strictEqual(ordered[0].name, 'ProjB', 'owning project must come first');
+        assert.strictEqual(ordered[1].name, 'ProjA', 'other projects follow');
+
+        const unowned = projectsOwnerFirst(path.join(tmpRoot, 'Loose.clw'));
+        assert.deepStrictEqual(unowned.map((p: { name: string }) => p.name), ['ProjA', 'ProjB'],
+            'ownerless path keeps solution order');
+    });
+
     test("F12 from a file outside every project still resolves via the solution-order fallback", async () => {
         const looseFile = path.join(tmpRoot, 'Loose.clw');
         fs.writeFileSync(looseFile, SOURCE_CONTENT.replace('MyClass.inc', 'Shared.inc'));

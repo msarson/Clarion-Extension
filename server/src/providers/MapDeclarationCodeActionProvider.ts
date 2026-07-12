@@ -9,6 +9,7 @@ import {
     CodeActionContext
 } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
@@ -83,12 +84,10 @@ function resolveClwPath(bareOrAbsolute: string, siblingFilePath?: string): strin
     // Try redirection parser first (same as compiler)
     const solutionManager = SolutionManager.getInstance();
     if (solutionManager?.solution) {
-        for (const proj of solutionManager.solution.projects) {
-            const resolved = proj.getRedirectionParser().findFile(bareOrAbsolute);
-            logger.debug(`🔍 [resolveClwPath] resolved=${JSON.stringify(resolved)}`);
-            if (resolved?.path && fs.existsSync(resolved.path)) {
-                return resolved.path;
-            }
+        // #328: owner-first relative to the requesting document when provided
+        const viaRedirection = resolveViaProjectRedirection(bareOrAbsolute, siblingFilePath ?? null);
+        if (viaRedirection) {
+            return viaRedirection;
         }
     } else {
         logger.debug(`⚠️ [resolveClwPath] SolutionManager has no solution loaded`);

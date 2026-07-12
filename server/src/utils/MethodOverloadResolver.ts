@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
@@ -426,16 +427,8 @@ export class MethodOverloadResolver {
             const includeFileName = m[1];
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFileName);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, fromPath);
 
             if (!resolvedPath) {
                 const currentDir = path.dirname(fromPath);
@@ -531,18 +524,8 @@ export class MethodOverloadResolver {
             const includeFileName = includeMatch[1];
             let resolvedPath: string | null = null;
 
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
 
             // Fallback to relative path
             if (!resolvedPath) {

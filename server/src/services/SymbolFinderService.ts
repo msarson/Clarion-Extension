@@ -27,6 +27,7 @@ import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclar
 import { cooperativeCheckpoint, makeTimeSlicer } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from './ReferenceCountIndex';
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import { resolveViaProjectRedirection as resolveViaProjectRedirection328 } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1493,13 +1494,10 @@ export class SymbolFinderService {
         while ((m = includeRe.exec(source)) !== null) {
             await cooperativeCheckpoint(scanned++);
             const includeFile = m[1];
-            let resolved: string | null = null;
-            if (sm?.solution) {
-                for (const project of sm.solution.projects) {
-                    const r = project.getRedirectionParser().findFile(includeFile);
-                    if (r?.path && fs.existsSync(r.path)) { resolved = r.path; break; }
-                }
-            }
+            // #328: owner-project-first redirection
+            let resolved: string | null = sm?.solution
+                ? resolveViaProjectRedirection328(includeFile, fromPath)
+                : null;
             if (!resolved) {
                 const candidate = path.join(fromDir, includeFile);
                 if (fs.existsSync(candidate)) resolved = candidate;

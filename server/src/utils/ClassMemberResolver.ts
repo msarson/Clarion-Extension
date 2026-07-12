@@ -4,6 +4,7 @@ import { CancellationToken } from 'vscode-languageserver';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
@@ -416,19 +417,8 @@ export class ClassMemberResolver {
             const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             let resolvedPath: string | null = null;
             
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    if (!redirectionParser) continue; // #233 Stage 2: project may have no redirection parser
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
             
             // Fallback to relative path
             if (!resolvedPath) {
@@ -741,17 +731,8 @@ export class ClassMemberResolver {
             const includeMatch = lines[i].match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (!includeMatch) continue;
 
-            let resolvedPath: string | null = null;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeMatch[1]);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            let resolvedPath: string | null = resolveViaProjectRedirection(includeMatch[1], filePath);
             if (!resolvedPath) {
                 const rel = path.join(path.dirname(filePath), includeMatch[1]);
                 if (fs.existsSync(rel)) resolvedPath = rel;
@@ -1047,7 +1028,7 @@ export class ClassMemberResolver {
             const implFileName = path.basename(declPath, path.extname(declPath)) + '.clw';
 
             if (sm?.solution) {
-                for (const project of sm.solution.projects) {
+                for (const project of projectsOwnerFirst(declPath)) { // #328 owner-first
                     const resolved = project.getRedirectionParser().findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         const loc = this.findImplementationInFile(resolved.path, className, methodName, declarationSig);

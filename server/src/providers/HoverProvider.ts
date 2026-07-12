@@ -6,6 +6,7 @@ import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
@@ -1005,16 +1006,8 @@ export class HoverProvider {
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 
-            const sm = SolutionManager.getInstance();
-            if (sm?.solution) {
-                for (const project of sm.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;

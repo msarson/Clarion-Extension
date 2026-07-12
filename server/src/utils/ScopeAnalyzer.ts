@@ -525,8 +525,15 @@ export class ScopeAnalyzer {
         
         // Initialize redirection parser with project path if available
         if (solutionManager && solutionManager.solution) {
-            // Try each project's redirection parser (like other resolvers do)
-            for (const project of solutionManager.solution.projects) {
+            // Try each project's redirection parser — owner project first (#328).
+            // Local reorder (not the shared util) to honour this class's injected
+            // solutionManager instance.
+            const orderedProjects = (() => {
+                const list = [...solutionManager.solution.projects];
+                const owner = solutionManager.findProjectForFile?.(sourceFilePath);
+                return owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
+            })();
+            for (const project of orderedProjects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename);
@@ -579,8 +586,15 @@ export class ScopeAnalyzer {
         
         // Initialize redirection parser with project path if available
         if (solutionManager && solutionManager.solution) {
-            // Try each project's redirection parser (like other resolvers do)
-            for (const project of solutionManager.solution.projects) {
+            // Try each project's redirection parser — owner project first (#328).
+            // Local reorder (not the shared util) to honour this class's injected
+            // solutionManager instance.
+            const orderedProjects = (() => {
+                const list = [...solutionManager.solution.projects];
+                const owner = solutionManager.findProjectForFile?.(sourceFilePath);
+                return owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
+            })();
+            for (const project of orderedProjects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename);

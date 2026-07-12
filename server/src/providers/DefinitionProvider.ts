@@ -23,6 +23,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
+import { resolveViaProjectRedirection, resolveViaProjectRedirectionFromUri } from '../utils/RedirectionResolution';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
@@ -1338,17 +1339,8 @@ export class DefinitionProvider {
             t.referencedFile
         );
         if (memberToken?.referencedFile) {
-            const solutionManager = SolutionManager.getInstance();
-            let parentPath: string | null = null;
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(memberToken.referencedFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        parentPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            let parentPath: string | null = resolveViaProjectRedirectionFromUri(memberToken.referencedFile, document.uri);
             if (!parentPath) {
                 const candidate = path.join(path.dirname(fromPath), memberToken.referencedFile);
                 if (fs.existsSync(candidate)) parentPath = candidate;
@@ -1388,16 +1380,8 @@ export class DefinitionProvider {
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;

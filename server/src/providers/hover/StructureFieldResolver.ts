@@ -11,6 +11,7 @@ import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../../utils/RedirectionResolution';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -402,16 +403,8 @@ export class StructureFieldResolver {
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;
@@ -492,16 +485,8 @@ export class StructureFieldResolver {
             const includeFile = match[1];
 
             let resolvedPath: string | null = null;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;

@@ -20,6 +20,7 @@ import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -315,7 +316,7 @@ export class MemberLocatorService {
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
         const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath));
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -870,7 +871,7 @@ export class MemberLocatorService {
         document: TextDocument
     ): Promise<Set<string> | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const resolved = this.resolveFilePath(moduleFile, path.dirname(docPath));
+        const resolved = this.resolveFilePath(moduleFile, path.dirname(docPath), docPath);
         if (!resolved) return null;
         const data = await this.loadDocument(resolved);
         if (!data) return null;
@@ -975,7 +976,7 @@ export class MemberLocatorService {
     ): Promise<Set<string> | null> {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         if (info.moduleName) {
-            const resolved = this.resolveFilePath(info.moduleName, path.dirname(info.filePath));
+            const resolved = this.resolveFilePath(info.moduleName, path.dirname(info.filePath), info.filePath);
             if (!resolved) return null;
             const data = await this.loadDocument(resolved);
             if (!data) return null;
@@ -1544,13 +1545,13 @@ export class MemberLocatorService {
      * ImplementationProvider / MethodHoverResolver already do via their
      * direct-fix-sites.
      */
-    private resolveFilePath(filename: string, fromDir: string): string | null {
+    private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
-            for (const project of sm.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(filename);
-                if (resolved?.path && fs.existsSync(resolved.path)) return resolved.path;
-            }
+            // #328: owner-project-first when the caller knows the from FILE
+            // (a bare directory cannot identify the owning project).
+            const viaRedirection = resolveViaProjectRedirection(filename, fromFile ?? null);
+            if (viaRedirection) return viaRedirection;
             const relative = path.join(fromDir, filename);
             return fs.existsSync(relative) ? relative : null;
         }

@@ -5,6 +5,7 @@ import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { TokenCache } from '../../TokenCache';
+import { projectsOwnerFirst } from '../../utils/RedirectionResolution';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
@@ -19,10 +20,10 @@ logger.setLevel('error');
 /** Resolve a bare CLW filename (as stored in MODULE token.referencedFile) to an
  *  absolute path using the solution's redirection parser.  Returns null if it
  *  cannot be resolved or does not exist on disk. */
-function resolveClwPath(bareFilename: string): string | null {
+function resolveClwPath(bareFilename: string, fromFsPath: string | null = null): string | null {
     const solutionManager = SolutionManager.getInstance();
     if (solutionManager?.solution) {
-        for (const proj of solutionManager.solution.projects) {
+        for (const proj of projectsOwnerFirst(fromFsPath)) { // #328 owner-first
             // Try redirection parser first
             const resolved = proj.getRedirectionParser().findFile(bareFilename);
             if (resolved?.path && fs.existsSync(resolved.path)) {
@@ -154,7 +155,7 @@ export async function validateMissingMapDeclarations(
             const sameDirPath = nodePath.join(currentClwDir, inclToken.referencedFile!);
             const incPath = fs.existsSync(sameDirPath)
                 ? sameDirPath
-                : resolveClwPath(inclToken.referencedFile!);
+                : resolveClwPath(inclToken.referencedFile!, nodePath.join(currentClwDir, currentClwBasename));
             if (!incPath) continue;
             try {
                 const incUri = pathToCanonicalUri(incPath);
@@ -264,7 +265,7 @@ export async function validateMissingMapDeclarations(
             };
 
             if (!result) {
-                const resolvedParent = resolveClwPath(memberToken.referencedFile!);
+                const resolvedParent = resolveClwPath(memberToken.referencedFile!, decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')));
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range,
@@ -400,7 +401,7 @@ export async function validateMissingImplementations(
         // INCLUDE handler at line 145-148.
         const bareName = moduleToken.referencedFile!;
         const sameDirPath = nodePath.join(currentClwDir, bareName);
-        const clwPath = fs.existsSync(sameDirPath) ? sameDirPath : resolveClwPath(bareName);
+        const clwPath = fs.existsSync(sameDirPath) ? sameDirPath : resolveClwPath(bareName, decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')));
         if (!clwPath) {
             continue;
         }

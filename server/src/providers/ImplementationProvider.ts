@@ -18,6 +18,7 @@ import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../solution/solutionManager';
+import { projectsOwnerFirst } from '../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -878,7 +879,7 @@ export class ImplementationProvider {
             // Use redirection parser to resolve the module file
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
+                for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
@@ -1019,7 +1020,7 @@ export class ImplementationProvider {
 
             const sm = SolutionManager.getInstance();
             if (sm?.solution) {
-                for (const project of sm.solution.projects) {
+                for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
