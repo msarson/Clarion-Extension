@@ -64,7 +64,8 @@ export interface RedirectionEntry {
  */
 export function matchesActiveConfiguration(
   entry: RedirectionEntry,
-  configuration: string
+  configuration: string,
+  projectPath?: string
 ): boolean {
   const sectionLower = entry.section.toLowerCase();
   if (sectionLower === 'common') return true;
@@ -76,7 +77,102 @@ export function matchesActiveConfiguration(
   // paths to [Common]-only — on a real 40-project solution that left ~99% of source files
   // unresolvable at load (generated sources live under [Debug]/[Release] paths).
   const configSegment = configLower.split('|')[0].trim();
-  return configSegment.length > 0 && sectionLower === configSegment;
+  if (configSegment.length > 0 && sectionLower === configSegment) return true;
+
+  // #331 — the docs (redirection_file.htm) activate [DEBUG]/[RELEASE] by the
+  // Project System's Debug/Release MODE switch, not by configuration NAME. A
+  // custom-named build configuration (e.g. "Test") therefore still drives one
+  // of the two sections through its debug-mode property. Name matching above
+  // stays as tier 1 (it also serves custom [Test]-style sections, which the
+  // docs don't define but real .red files use); this tier maps an
+  // unrecognized configuration name onto its mode via the owning project's
+  // cwproj (DebugSymbols/DebugType in the config-conditioned PropertyGroup).
+  // When the mode cannot be determined at all, BOTH sections are treated as
+  // active for lookup resilience — the compiler always has a definite mode,
+  // so "unknown" means WE lack the information, and silently losing
+  // [Debug]/[Release] entries kills generated-source resolution (verified
+  // against a real generated .red where `*.clw = genfiles\src` lives only in
+  // those sections). A one-time warning flags the state.
+  // Degenerate configurations ('' / '|Win32') are uninitialized states, not
+  // real configs — they get no mode mapping and no union (#293 pin).
+  if (configSegment.length > 0 && (sectionLower === 'debug' || sectionLower === 'release')) {
+    const mode = resolveConfigurationMode(configuration, projectPath);
+    if (mode === sectionLower) return true;
+    if (mode === 'unknown') {
+      warnUnknownConfigurationOnce(configuration, projectPath);
+      return true;
+    }
+  }
+  return false;
+}
+
+const configModeCache = new Map<string, 'debug' | 'release' | 'unknown'>();
+const warnedUnknownConfigs = new Set<string>();
+
+function warnUnknownConfigurationOnce(configuration: string, projectPath?: string): void {
+  const key = configuration.toLowerCase();
+  if (warnedUnknownConfigs.has(key)) return;
+  warnedUnknownConfigs.add(key);
+  logger.warn(
+    `⚠️ [#331] Build configuration "${configuration}" is neither Debug/Release nor mappable to a mode` +
+    `${projectPath ? ` via a cwproj in ${projectPath}` : ''} — treating BOTH [Debug] and [Release] ` +
+    `sections as active for lookups so redirection entries are not silently lost.`
+  );
+}
+
+/**
+ * #331 — resolve a build configuration to its Debug/Release MODE.
+ *
+ * "Debug"/"Release" (with or without the "|Platform" suffix) map directly.
+ * Any other name is looked up in the owning project's .cwproj: the
+ * config-conditioned `<PropertyGroup Condition=" '$(Configuration)…' ==
+ * 'Name…' ">` block's `DebugSymbols` (or `DebugType`) property decides the
+ * mode — the same switch the docs say drives section activation. Results are
+ * cached per (projectPath, configuration): cwproj configuration blocks are
+ * effectively static for a session.
+ */
+export function resolveConfigurationMode(
+  configuration: string,
+  projectPath?: string
+): 'debug' | 'release' | 'unknown' {
+  const segment = configuration.toLowerCase().split('|')[0].trim();
+  if (segment === 'debug') return 'debug';
+  if (segment === 'release') return 'release';
+  if (!projectPath) return 'unknown';
+
+  const cacheKey = `${projectPath.toLowerCase()}|${segment}`;
+  const cached = configModeCache.get(cacheKey);
+  if (cached) return cached;
+
+  let mode: 'debug' | 'release' | 'unknown' = 'unknown';
+  try {
+    const cwproj = fs.readdirSync(projectPath).find(f => f.toLowerCase().endsWith('.cwproj'));
+    if (cwproj) {
+      const content = fs.readFileSync(path.join(projectPath, cwproj), 'utf-8');
+      // Config-conditioned PropertyGroup blocks: Condition=" '$(Configuration)' == 'Name' "
+      // (real generated cwprojs; also tolerate the '$(Configuration)|$(Platform)' form).
+      const groupRe = /<PropertyGroup[^>]*Condition\s*=\s*"[^"]*\$\(Configuration\)[^"]*==\s*'([^'|]+)(?:\|[^']*)?'\s*"[^>]*>([\s\S]*?)<\/PropertyGroup>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = groupRe.exec(content)) !== null) {
+        if (m[1].trim().toLowerCase() !== segment) continue;
+        const body = m[2];
+        const symbols = body.match(/<DebugSymbols>\s*(true|false)\s*<\/DebugSymbols>/i);
+        if (symbols) {
+          mode = symbols[1].toLowerCase() === 'true' ? 'debug' : 'release';
+          break;
+        }
+        const debugType = body.match(/<DebugType>\s*([A-Za-z]+)\s*<\/DebugType>/i);
+        if (debugType) {
+          mode = debugType[1].toLowerCase() === 'none' ? 'release' : 'debug';
+          break;
+        }
+      }
+    }
+  } catch {
+    // unreadable dir/cwproj — stay unknown
+  }
+  configModeCache.set(cacheKey, mode);
+  return mode;
 }
 
 export class RedirectionFileParserServer {
@@ -625,7 +721,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (!matchesActiveConfiguration(entry, serverSettings.configuration)) {
+        if (!matchesActiveConfiguration(entry, serverSettings.configuration, this.projectPath)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {
@@ -778,7 +874,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (!matchesActiveConfiguration(entry, serverSettings.configuration)) {
+        if (!matchesActiveConfiguration(entry, serverSettings.configuration, this.projectPath)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {
