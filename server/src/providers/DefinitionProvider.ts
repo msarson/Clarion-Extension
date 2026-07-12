@@ -740,8 +740,14 @@ export class DefinitionProvider {
         
         // CRITICAL FIX: Check if this is a standalone word without prefix or structure notation
         // If it's a standalone word, we should not match structure fields
-        const isStandaloneWord = !line.includes(':' + word) && !line.includes('.' + word);
-        
+        // #327: a word that itself carries the qualifier (fused token shapes like
+        // "LOC:Counter") is qualified by definition — the old line-text probe
+        // looked for ':LOC:Counter' in the line and wrongly bailed on every
+        // fused reference, making the prefix branch below unreachable.
+        const wordIsQualified = word.includes(':') || word.includes('.');
+        const isStandaloneWord = !wordIsQualified &&
+            !line.includes(':' + word) && !line.includes('.' + word);
+
         // If this is a standalone word and not part of a qualified reference, skip structure field matching
         if (isStandaloneWord) {
             logger.info(`Skipping structure field matching for standalone word: ${word}`);
@@ -818,48 +824,18 @@ export class DefinitionProvider {
             }
         }
 
-        // Check if this is a prefix notation reference (PREFIX:Field or Complex:Prefix:Field)
-        const colonIndex = line.lastIndexOf(':', position.character - 1);
-        if (colonIndex > 0) {
-            // Get everything before the last colon as the prefix
-            const prefixPart = line.substring(0, colonIndex).trim();
-            const fieldPart = line.substring(colonIndex + 1).trim();
-
-            // Extract just the field name without any trailing characters
-            const fieldMatch = fieldPart.match(/^(\w+)/);
-            if (fieldMatch && fieldMatch[1].toLowerCase() === word.toLowerCase()) {
-                const fieldName = fieldMatch[1];
-                logger.info(`Detected prefix notation: ${prefixPart}:${fieldName}`);
-
-                // Try to find structures with this exact prefix first
-                let structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, prefixPart);
-
-                // If no exact match, try to find structures where the prefix is part of a complex name
-                // For example, if prefixPart is "Queue:Browse:1", look for structures with prefix "Queue"
-                if (structuresWithPrefix.length === 0 && prefixPart.includes(':')) {
-                    const simplePrefixPart = prefixPart.split(':')[0];
-                    structuresWithPrefix = TokenHelper.findStructuresWithPrefix(tokens, simplePrefixPart);
-                }
-
-                if (structuresWithPrefix.length > 0) {
-                    // For each structure with this prefix, look for the field
-                    for (const structureToken of structuresWithPrefix) {
-                        // Find the label for this structure
-                        const structureLabel = tokens.find(t =>
-                            t.type === TokenType.Label &&
-                            t.line === structureToken.line &&
-                            t.start === 0
-                        );
-
-                        if (structureLabel) {
-                            const result = await this.findFieldInStructure(tokens, structureLabel, fieldName, document, position);
-                            if (result) return result;
-                        }
-                    }
-                }
-            }
-        }
-
+        // #327: the former PREFIX:Field branch here was deleted as provably-dead
+        // code. It extracted the qualifier from LINE TEXT (substring before the
+        // last colon — a mid-line `X = LOC:Counter` yielded "X = LOC"), and its
+        // terminal `findFieldInStructure` call could never return a field under
+        // any shape: tier 1 compares `structureParent.parent.value` (the
+        // ENCLOSING SCOPE token, e.g. PROCEDURE) against the structure label,
+        // and tier 2 requires `start > 0` — but labels sit at column 0 by
+        // language rule. PREFIX:Field references resolve downstream instead:
+        // SymbolDefinitionResolver.findAllLabelCandidates (qualifier-validated,
+        // #265) and SymbolFinderService.findPrefixedField — pinned by the
+        // qualified-access tests in HoverF12.VariableAgreement.test.ts and
+        // DefinitionProvider.QualifiedShapes327.test.ts.
         return null;
     }
 
