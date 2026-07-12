@@ -116,3 +116,88 @@ suite('DocumentLink vs F12 INCLUDE same-target under redirection (#327)', () => 
             'F12 must resolve to the redirected incdir copy');
     });
 });
+
+/**
+ * #328 — owner-project-first redirection for F12/hover filename resolution.
+ *
+ * Two projects each redirect `*.inc` to their own local dir and BOTH carry
+ * `Shared.inc`. A ProjB source INCLUDEs it: the compiler building ProjB uses
+ * ProjB's redirection, so F12 must return ProjB's copy. The pre-#328 loop
+ * walked `solution.projects` in solution order and returned ProjA's copy —
+ * the same wrong-copy bug the #315 review fixed on the FRG side.
+ */
+suite('F12 INCLUDE resolution is owner-project-first (#328)', () => {
+
+    let tmpRoot: string;
+    let projA: string;
+    let projB: string;
+    let savedSmInstance: SolutionManager | null;
+    let savedRedirectionFile: string;
+    let savedLibsrcPaths: string[];
+
+    setup(() => {
+        savedSmInstance = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;
+        savedRedirectionFile = serverSettings.redirectionFile;
+        savedLibsrcPaths = serverSettings.libsrcPaths;
+        serverSettings.redirectionFile = 'Clarion110.red';
+        serverSettings.libsrcPaths = [];
+
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-first-328-'));
+        projA = path.join(tmpRoot, 'ProjA');
+        projB = path.join(tmpRoot, 'ProjB');
+        for (const p of [projA, projB]) {
+            fs.mkdirSync(path.join(p, 'inc'), { recursive: true });
+            fs.writeFileSync(path.join(p, 'Clarion110.red'), '[Common]\n*.inc = inc\n*.clw = .\n');
+            fs.writeFileSync(path.join(p, 'inc', 'Shared.inc'), `! ${path.basename(p)} copy\n`);
+        }
+        fs.writeFileSync(path.join(projB, 'Main.clw'), SOURCE_CONTENT.replace('MyClass.inc', 'Shared.inc'));
+
+        const pA = new ClarionProjectServer('ProjA', 'app', projA, '{A-328}');
+        const pB = new ClarionProjectServer('ProjB', 'app', projB, '{B-328}');
+        const projects = [pA, pB];
+        const fakeSm = {
+            solution: { projects },
+            // Real SolutionManager matches against project source-file lists;
+            // path-prefix is the test-shim equivalent for on-disk fixtures.
+            findProjectForFile: (fp: string) => {
+                const norm = path.normalize(fp).toLowerCase();
+                return projects.find(p =>
+                    norm.startsWith(path.normalize(p.path).toLowerCase() + path.sep));
+            }
+        } as unknown as SolutionManager;
+        (SolutionManager as unknown as { instance: SolutionManager | null }).instance = fakeSm;
+    });
+
+    teardown(() => {
+        (SolutionManager as unknown as { instance: SolutionManager | null }).instance = savedSmInstance;
+        serverSettings.redirectionFile = savedRedirectionFile;
+        serverSettings.libsrcPaths = savedLibsrcPaths;
+        try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test("F12 from a ProjB source resolves ProjB's redirected copy, not ProjA's", async () => {
+        const sourceUri = toUri(path.join(projB, 'Main.clw'));
+        const location = await new FileDefinitionResolver().findFileDefinition('Shared.inc', sourceUri);
+        assert.ok(location, 'F12 must resolve Shared.inc');
+
+        const resultNorm = uriToNormPath(location!.uri);
+        const wrongNorm = path.normalize(path.join(projA, 'inc', 'Shared.inc')).toLowerCase();
+        const rightNorm = path.normalize(path.join(projB, 'inc', 'Shared.inc')).toLowerCase();
+
+        assert.notStrictEqual(resultNorm, wrongNorm,
+            "must NOT resolve through ProjA's redirection (solution-order walk)");
+        assert.strictEqual(resultNorm, rightNorm,
+            "must resolve through the OWNING project's (ProjB) redirection");
+    });
+
+    test("F12 from a file outside every project still resolves via the solution-order fallback", async () => {
+        const looseFile = path.join(tmpRoot, 'Loose.clw');
+        fs.writeFileSync(looseFile, SOURCE_CONTENT.replace('MyClass.inc', 'Shared.inc'));
+
+        const location = await new FileDefinitionResolver().findFileDefinition('Shared.inc', toUri(looseFile));
+        assert.ok(location, 'ownerless file must still resolve via the project-loop fallback');
+        const resultNorm = uriToNormPath(location!.uri);
+        assert.ok(resultNorm.endsWith(path.normalize('inc\\shared.inc').toLowerCase()),
+            `fallback must still find a redirected copy; got ${resultNorm}`);
+    });
+});

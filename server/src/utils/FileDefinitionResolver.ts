@@ -105,6 +105,36 @@ export class FileDefinitionResolver {
     }
 
     /**
+     * #328 — resolve a filename through project redirection, OWNER-project
+     * first (mirrors FileRelationshipGraph.resolveFile's #315 fix): in a
+     * multi-project solution, several projects can redirect the same
+     * filename to different physical copies, and the compiler building the
+     * FROM file's project uses THAT project's redirection. The solution-order
+     * walk remains as the fallback for files no project owns.
+     */
+    private resolveViaProjectRedirection(fileName: string, fromFsPath: string): string | null {
+        const SolutionManager = require('../solution/solutionManager').SolutionManager;
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution) return null;
+
+        const owner = solutionManager.findProjectForFile?.(fromFsPath);
+        if (owner) {
+            const resolved = owner.getRedirectionParser().findFile(fileName);
+            if (resolved?.path && fs.existsSync(resolved.path)) {
+                return resolved.path;
+            }
+        }
+
+        for (const project of solutionManager.solution.projects) {
+            const resolved = project.getRedirectionParser().findFile(fileName);
+            if (resolved?.path && fs.existsSync(resolved.path)) {
+                return resolved.path;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Finds the definition file for a given filename reference
      */
     public async findFileDefinition(fileName: string, documentUri: string): Promise<Location | null> {
@@ -113,22 +143,17 @@ export class FileDefinitionResolver {
         const currentFilePath = decodeURIComponent(documentUri.replace('file:///', '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
 
-        // Try solution-wide redirection first
+        // Try redirection first — owner project, then solution order (#328)
         const SolutionManager = require('../solution/solutionManager').SolutionManager;
         const solutionManager = SolutionManager.getInstance();
-        
-        if (solutionManager && solutionManager.solution) {
-            for (const project of solutionManager.solution.projects) {
-                const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(fileName);
-                if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                    logger.info(`Found file via redirection: ${resolved.path}`);
-                    return Location.create(
-                        `file:///${resolved.path.replace(/\\/g, '/')}`,
-                        { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
-                    );
-                }
-            }
+
+        const viaRedirection = this.resolveViaProjectRedirection(fileName, currentFilePath);
+        if (viaRedirection) {
+            logger.info(`Found file via redirection: ${viaRedirection}`);
+            return Location.create(
+                `file:///${viaRedirection.replace(/\\/g, '/')}`,
+                { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+            );
         }
 
         // Fallback to relative path
@@ -190,22 +215,10 @@ export class FileDefinitionResolver {
             const includeFileName = includeMatch[1];
             logger.info(`Found INCLUDE: ${includeFileName}`);
 
-            // Resolve the include file path
-            let resolvedPath: string | null = null;
-
-            // Try solution-wide redirection
+            // Resolve the include file path — owner project first (#328)
             const SolutionManager = require('../solution/solutionManager').SolutionManager;
             const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            let resolvedPath: string | null = this.resolveViaProjectRedirection(includeFileName, fromPath);
 
             // Fallback to relative path
             if (!resolvedPath) {
@@ -261,20 +274,10 @@ export class FileDefinitionResolver {
             const memberFileName = memberMatch[1];
             logger.info(`Found MEMBER: ${memberFileName}`);
 
-            // Similar logic as INCLUDE
-            let resolvedPath: string | null = null;
+            // Similar logic as INCLUDE — owner project first (#328)
             const SolutionManager = require('../solution/solutionManager').SolutionManager;
             const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(memberFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            let resolvedPath: string | null = this.resolveViaProjectRedirection(memberFileName, fromPath);
 
             if (!resolvedPath) {
                 const currentDir = path.dirname(fromPath);
