@@ -878,65 +878,13 @@ export class SymbolFinderService {
      */
     async findGlobalVariable(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
         logger.info(`🔍 findGlobalVariable: searching for "${word}"`);
-        
+
         // Step 1: Search current file for global variable (before first CODE/PROCEDURE)
-        const firstCodeToken = tokens.find(t => 
-            t.type === TokenType.Keyword && 
-            t.value.toUpperCase() === 'CODE'
-        );
-        
-        // If no CODE found, look for first PROCEDURE as the boundary
-        const firstProcedure = tokens.find(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.GlobalProcedure
-        );
-        
-        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
-        let globalScopeEndLine: number;
-        if (firstCodeToken) {
-            globalScopeEndLine = firstCodeToken.line;
-            logger.info(`First CODE token at line: ${globalScopeEndLine}`);
-        } else if (firstProcedure) {
-            globalScopeEndLine = firstProcedure.line;
-            logger.info(`No CODE token, using first PROCEDURE at line: ${globalScopeEndLine}`);
-        } else {
-            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
-            logger.info(`No CODE or PROCEDURE tokens, treating entire file as global scope`);
+        const currentFileResult = this.findGlobalVariableInCurrentFile(word, tokens, document);
+        if (currentFileResult) {
+            return currentFileResult;
         }
-        
-        const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.parent === undefined &&
-            t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === word.toLowerCase()
-        );
-        
-        if (globalVar) {
-            logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
-            
-            const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
-            const lineTokens = tokens.filter(t => t.line === globalVar.line);
-            const declaration = lineTokens.map(t => t.value).join(' ');
-            
-            return {
-                token: globalVar,
-                type: typeInfo,
-                scope: {
-                    token: globalVar,
-                    type: 'global'
-                },
-                location: {
-                    uri: document.uri,
-                    line: globalVar.line,
-                    character: globalVar.start
-                },
-                declaration: declaration,
-                originalWord: word,
-                searchWord: word
-            };
-        }
-        
+
         // Step 2: If not found and current file has MEMBER token, search parent file
         const memberToken = tokens.find(t => 
             t.value && t.value.toUpperCase() === 'MEMBER' && 
@@ -987,8 +935,75 @@ export class SymbolFinderService {
     }
     
     /**
+     * Current-file half of the global lookup: a column-0 Label with no parent
+     * token (structure fields never qualify — they need their PRE()/dot
+     * qualifier) declared before the first CODE, or before the first
+     * PROCEDURE when the file has no CODE marker.
+     *
+     * #265: public so VariableHoverResolver.findGlobalVariableHover shares
+     * this exact decision with F12 instead of running its own scan.
+     */
+    public findGlobalVariableInCurrentFile(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
+        const firstCodeToken = tokens.find(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === 'CODE'
+        );
+
+        // If no CODE found, look for first PROCEDURE as the boundary
+        const firstProcedure = tokens.find(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure
+        );
+
+        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
+        let globalScopeEndLine: number;
+        if (firstCodeToken) {
+            globalScopeEndLine = firstCodeToken.line;
+        } else if (firstProcedure) {
+            globalScopeEndLine = firstProcedure.line;
+        } else {
+            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
+        }
+
+        const globalVar = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.parent === undefined &&
+            t.line < globalScopeEndLine &&
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+
+        if (!globalVar) {
+            return null;
+        }
+
+        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
+
+        const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
+        const lineTokens = tokens.filter(t => t.line === globalVar.line);
+        const declaration = lineTokens.map(t => t.value).join(' ');
+
+        return {
+            token: globalVar,
+            type: typeInfo,
+            scope: {
+                token: globalVar,
+                type: 'global'
+            },
+            location: {
+                uri: document.uri,
+                line: globalVar.line,
+                character: globalVar.start
+            },
+            declaration: declaration,
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
      * Helper: Find global variable in MEMBER parent file
-     * 
+     *
      * @param word - Variable name to find
      * @param parentFile - Relative path to parent file (from MEMBER token)
      * @param currentDocument - Current document (to resolve relative path)

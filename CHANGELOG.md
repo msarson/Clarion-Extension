@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 **Fixes**
 
 - 🐛 **Bare names no longer resolve to fields of `PRE()`'d structures** (#265): hover, F12, and the shared symbol finder previously let an unqualified name bind to a same-named field inside a `QUEUE`/`GROUP`/`FILE` carrying `PRE()` — shadowing the global/module declaration the language actually binds to. Fields now require their `Pre:Field` or `Structure.Field` qualifier, matching the Clarion Language Reference.
+- 🔧 **Global-variable hover shares F12's current-file decision** (#265): `findGlobalVariableHover` no longer runs its own scan for plain labels — it delegates to the same `SymbolFinderService` lookup F12 uses (fixing a leak where a global `PRE()`'d structure's field declared before the real global won the hover), keeping its structure/procedure-label extras on top.
 - 🔧 **F12 variable resolution converged onto the shared symbol finder** (#265): the definition provider's ~600-line hand-rolled variable walk (predating `SymbolFinderService`, with pre-Rule-4 scope logic) is replaced by the same tier walk hover uses, so the two surfaces can no longer disagree on which declaration a variable resolves to. F12 also gains the sibling-MEMBER and `equates.clw` tiers hover already had.
 
 ---

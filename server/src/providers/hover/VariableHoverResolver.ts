@@ -132,25 +132,36 @@ export class VariableHoverResolver {
      * Find and format hover for a global variable (in current or parent file)
      */
     async findGlobalVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number, shallowOnly = false): Promise<Hover | null> {
-        // First, check for global variable in CURRENT file (PROGRAM)
-        const firstCodeToken = tokens.find(t => 
-            t.type === TokenType.Keyword && 
+        // #265: the plain-label decision is SymbolFinderService's — the exact
+        // same call F12 uses, so the two surfaces cannot disagree. It excludes
+        // parent-linked tokens: a field of a PRE()'d structure never satisfies
+        // a bare lookup (previously this scan matched such fields when they
+        // appeared before the real global).
+        const labelHit = this.symbolFinder.findGlobalVariableInCurrentFile(searchWord, tokens, document);
+        if (labelHit) {
+            logger.info(`✅ Found global variable in current file: ${labelHit.token.value} at line ${labelHit.location.line}`);
+            return this.buildGlobalVariableHover(labelHit.token, tokens, document, hoverLine);
+        }
+
+        // Hover-only extras beyond the shared decision: global STRUCTURE labels
+        // (QUEUE/GROUP/CLASS declared with the name in `label`) and
+        // procedure/function labels, which render as structure/procedure cards.
+        const firstCodeToken = tokens.find(t =>
+            t.type === TokenType.Keyword &&
             t.value.toUpperCase() === 'CODE'
         );
         const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-        
-        const globalVar = tokens.find(t =>
+
+        const structOrProc = tokens.find(t =>
             t.start === 0 &&
             t.line < globalScopeEndLine &&
-            (t.type === TokenType.Label
-                ? t.value.toLowerCase() === searchWord.toLowerCase()
-                : (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) && t.label?.toLowerCase() === searchWord.toLowerCase()
-            )
+            (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) &&
+            t.label?.toLowerCase() === searchWord.toLowerCase()
         );
-        
-        if (globalVar) {
-            logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
-            return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine);
+
+        if (structOrProc) {
+            logger.info(`✅ Found global structure/procedure label in current file: ${structOrProc.value} at line ${structOrProc.line}`);
+            return this.buildGlobalVariableHover(structOrProc, tokens, document, hoverLine);
         }
 
         // When shallowOnly=true (e.g. checking a MEMBER parent doc), skip the recursive

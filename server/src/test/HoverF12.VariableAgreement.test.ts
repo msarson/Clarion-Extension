@@ -169,4 +169,53 @@ suite('Hover/F12 variable agreement (#265 item 1)', () => {
         assert.ok(text.includes(`:${globalLineDisplay}`),
             `hover must show the global declaration (line ${globalLineDisplay}); got:\n${text}`);
     });
+
+    // Same prefix rule at GLOBAL scope: a global PRE()'d QUEUE's field declared
+    // BEFORE the same-named global variable. The no-scope hover path scans the
+    // global region linearly, so without the guard the field (earlier line) wins.
+    const globalFieldSource =
+        "  PROGRAM\n" +
+        "GloQ     QUEUE,PRE(GLO)\n" +
+        "Counter    LONG\n" +
+        "         END\n" +
+        "Counter  LONG\n" +
+        "  MAP\n" +
+        "  END\n" +
+        "  CODE\n" +
+        "  Counter += 1\n" +
+        "  RETURN\n";
+
+    const globalFieldUri = 'file:///f%3A/inmem/globalfield265.clw';
+
+    test('no-scope hover on bare name shows the global, never the global PRE()d queue field', async () => {
+        const doc = TextDocument.create(globalFieldUri, 'clarion', 1, globalFieldSource);
+        const provider = new HoverProvider();
+
+        const hover = await provider.provideHover(doc, cursorOn(globalFieldSource, 'Counter += 1'));
+        const text = hoverText(hover);
+
+        const globalLineDisplay = lineOf(globalFieldSource, 'Counter  LONG') + 1;
+        const fieldLineDisplay = lineOf(globalFieldSource, 'Counter    LONG') + 1;
+
+        assert.ok(!text.includes(`:${fieldLineDisplay}`),
+            `hover must NOT show the global PRE()d queue field (line ${fieldLineDisplay}); got:\n${text}`);
+        assert.ok(text.includes(`:${globalLineDisplay}`),
+            `hover must show the global declaration (line ${globalLineDisplay}); got:\n${text}`);
+    });
+
+    test('no-scope F12 on bare name agrees: global, never the global PRE()d queue field', async () => {
+        const doc = TextDocument.create(globalFieldUri, 'clarion', 1, globalFieldSource);
+        const provider = new DefinitionProvider();
+
+        const result = await provider.provideDefinition(doc, cursorOn(globalFieldSource, 'Counter += 1'));
+        const loc = asLocation(result);
+
+        const globalLine = lineOf(globalFieldSource, 'Counter  LONG');
+        const fieldLine = lineOf(globalFieldSource, 'Counter    LONG');
+
+        assert.notStrictEqual(loc.range.start.line, fieldLine,
+            'F12 must NOT resolve a bare name to a global PRE()d structure field');
+        assert.strictEqual(loc.range.start.line, globalLine,
+            `F12 must resolve the bare name to the global at line ${globalLine}, got line ${loc.range.start.line}`);
+    });
 });
