@@ -1,8 +1,8 @@
 import { languages, ExtensionContext, Disposable } from 'vscode';
 import { DocumentManager } from '../documentManager';
 import { ClarionHoverProvider } from './hoverProvider';
-// Implementation provider moved to server-side
-// import { ClarionImplementationProvider } from './implementationProvider';
+// Implementation provider lives server-side (server/src/providers/ImplementationProvider.ts);
+// its dead client copy was deleted under #326.
 import { ClarionDecorator } from '../ClarionDecorator';
 import { UnreachableCodeDecorator } from '../UnreachableCodeDecorator';
 import { LanguageClientManager } from '../LanguageClientManager';
@@ -14,8 +14,6 @@ logger.setLevel("error");
 
 // Track disposables to ensure only one instance of each provider
 let hoverProviderDisposable: Disposable | null = null;
-// Implementation provider now handled by language server
-// let implementationProviderDisposable: Disposable | null = null;
 let semanticTokensProviderDisposable: Disposable | null = null;
 let unreachableCodeDecoratorDisposable: Disposable | null = null;
 
