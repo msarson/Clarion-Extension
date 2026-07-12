@@ -67,6 +67,11 @@ export class HoverRouter {
         const routineHover = await this.routineResolver.resolveRoutineReference(document, position, line);
         if (routineHover) return routineHover;
 
+        // 2.1 Handle GOTO statement-label references (#321) — before the variable
+        // tiers, which would otherwise present the label as an UNKNOWN-typed local.
+        const gotoHover = this.routineResolver.resolveGotoLabelReference(document, position, line);
+        if (gotoHover) return gotoHover;
+
         // 3. Handle procedure calls
         const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
         if (procedureCallHover) return procedureCallHover;

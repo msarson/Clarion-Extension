@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.1] - Unreleased
 
+**New Features**
+
+- ✨ **GOTO statement labels are navigation symbols** (#321): Find All References, F12, and hover now work from both a `GOTO Target` site and the `Target` statement label, scoped exactly per the language rules — one ROUTINE-or-PROCEDURE unit, so same-named labels in other procedures (or in a routine of the same procedure) never bleed in. Rounds out #320's routine-label work.
+
 **Fixes**
 
 - 🐛 **Bare names no longer resolve to fields of `PRE()`'d structures** (#265): hover, F12, and the shared symbol finder previously let an unqualified name bind to a same-named field inside a `QUEUE`/`GROUP`/`FILE` carrying `PRE()` — shadowing the global/module declaration the language actually binds to. Fields now require their `Pre:Field` or `Structure.Field` qualifier, matching the Clarion Language Reference.

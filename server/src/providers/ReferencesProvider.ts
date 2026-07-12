@@ -381,6 +381,27 @@ export class ReferencesProvider {
                     return this.provideRoutineReferences(word, routineToken, routineStructure!, document, context.includeDeclaration);
                 }
             }
+
+            // ── Route G (#321): GOTO statement label ──
+            // Same shape as Route R with GOTO's tighter scope: exactly the
+            // current ROUTINE-or-PROCEDURE unit (Language Reference). Per-hit
+            // re-resolution excludes same-name labels in other units AND keeps
+            // procedure code and routine bodies apart — the generic symbol
+            // path treated the whole procedure (routines included) as one
+            // 'local' scope and bled across the unit boundary.
+            const gotoStructure = TokenCache.getInstance().getStructure(document);
+            const gotoLabelToken = gotoStructure
+                ? TokenHelper.findScopedStatementLabelToken(gotoStructure, tokens, word, position.line)
+                : undefined;
+            if (gotoLabelToken) {
+                const onLabel = gotoLabelToken.line === position.line;
+                const gotoMatch = fullLine.match(ClarionPatterns.GOTO_LABEL);
+                const onGotoSite = !!gotoMatch && gotoMatch[1].toLowerCase() === word.toLowerCase();
+                if (onLabel || onGotoSite) {
+                    this.trace({ route: 'gotoLabel', word });
+                    return this.provideGotoLabelReferences(word, gotoLabelToken, gotoStructure!, tokens, document, context.includeDeclaration);
+                }
+            }
         }
 
         // Route to member-access path when word contains a dot
@@ -1812,6 +1833,58 @@ export class ReferencesProvider {
                 if (bang !== -1 && m.index >= bang) break;
                 if (m[1].toLowerCase() !== wordLower) continue;
                 if (TokenHelper.findScopedRoutineToken(structure, m[1], ln) !== routineToken) continue;
+                const nameStart = m.index + m[0].length - m[1].length;
+                locations.push(Location.create(document.uri, {
+                    start: { line: ln, character: nameStart },
+                    end: { line: ln, character: nameStart + m[1].length }
+                }));
+            }
+        }
+        return locations;
+    }
+
+    /**
+     * #321 — references for a GOTO statement label: the label (once) + every
+     * GOTO site that RESOLVES to it. Each `GOTO <name>` occurrence is
+     * re-resolved through `TokenHelper.findScopedStatementLabelToken` at ITS
+     * line, which enforces GOTO's one-unit scope for free: a same-name label
+     * in another procedure — or in a routine of the SAME procedure — resolves
+     * to its own token and is excluded. GOTO cannot cross files by language
+     * rule, so no cross-file scan exists.
+     */
+    private provideGotoLabelReferences(
+        word: string,
+        labelToken: Token,
+        structure: DocumentStructure,
+        tokens: Token[],
+        document: TextDocument,
+        includeDeclaration: boolean
+    ): Location[] {
+        const locations: Location[] = [];
+        if (includeDeclaration) {
+            locations.push(Location.create(document.uri, {
+                start: { line: labelToken.line, character: labelToken.start },
+                end: { line: labelToken.line, character: labelToken.start + labelToken.value.length }
+            }));
+        }
+
+        const wordLower = word.toLowerCase();
+        const gotoRe = /\bGOTO\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
+        for (let ln = 0; ln < document.lineCount; ln++) {
+            let text = document.getText({
+                start: { line: ln, character: 0 },
+                end: { line: ln, character: Number.MAX_VALUE }
+            });
+            // Blank out string literals (preserving columns), then ignore
+            // matches at or beyond a line comment.
+            text = text.replace(/'(?:[^']|'')*'/g, s => ' '.repeat(s.length));
+            const bang = text.indexOf('!');
+            gotoRe.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = gotoRe.exec(text)) !== null) {
+                if (bang !== -1 && m.index >= bang) break;
+                if (m[1].toLowerCase() !== wordLower) continue;
+                if (TokenHelper.findScopedStatementLabelToken(structure, tokens, m[1], ln) !== labelToken) continue;
                 const nameStart = m.index + m[0].length - m[1].length;
                 locations.push(Location.create(document.uri, {
                     start: { line: ln, character: nameStart },

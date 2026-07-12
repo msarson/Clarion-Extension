@@ -117,6 +117,55 @@ export class TokenHelper {
     }
 
     /**
+     * #321 — resolve a GOTO target: a statement label visible from `cursorLine`
+     * under GOTO's scope rule (Language Reference): the target must be the
+     * label of another EXECUTABLE statement inside the currently executing
+     * ROUTINE or PROCEDURE — exactly one unit, no chain, and never a ROUTINE
+     * or PROCEDURE label. For a procedure unit the executable region ends
+     * where its first ROUTINE begins (routine bodies are separate GOTO units).
+     */
+    public static findScopedStatementLabelToken(
+        structure: DocumentStructure,
+        tokens: Token[],
+        labelName: string,
+        cursorLine: number
+    ): Token | undefined {
+        const node = structure.getScopeResolver().resolveScopeAt(cursorLine);
+        const unit = (node.kind === ScopeKind.Routine ||
+                      node.kind === ScopeKind.Procedure ||
+                      node.kind === ScopeKind.Method)
+            ? node.token : null;
+        if (!unit) return undefined;
+
+        // Executable region: after the unit's CODE marker (a routine without a
+        // DATA/CODE split starts at its header line).
+        const execStart = unit.executionMarker?.line ?? unit.line;
+        let execEnd = unit.finishesAt ?? Number.MAX_SAFE_INTEGER;
+        if (node.kind !== ScopeKind.Routine) {
+            const firstRoutine = tokens.find(t =>
+                t.subType === TokenType.Routine &&
+                t.line > unit.line &&
+                t.line <= execEnd);
+            if (firstRoutine) execEnd = firstRoutine.line - 1;
+        }
+
+        const nameLower = labelName.toLowerCase();
+        return tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line > execStart &&
+            t.line <= execEnd &&
+            t.value.toLowerCase() === nameLower &&
+            // statement label only — never a ROUTINE/PROCEDURE label
+            !tokens.some(s =>
+                s.line === t.line &&
+                (s.subType === TokenType.Routine ||
+                 s.type === TokenType.Procedure ||
+                 s.type === TokenType.Function))
+        );
+    }
+
+    /**
      * The chain of PROCEDURE / METHOD scopes that can host a ROUTINE visible from `line`, innermost
      * first. A ROUTINE cannot itself host a routine (routines don't nest), so a routine-body line
      * starts from its owning scope. A local derived METHOD's visible chain climbs through its
