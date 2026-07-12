@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.1] - Unreleased
 
+**Fixes**
+
+- 🐛 **Bare names no longer resolve to fields of `PRE()`'d structures** (#265): hover, F12, and the shared symbol finder previously let an unqualified name bind to a same-named field inside a `QUEUE`/`GROUP`/`FILE` carrying `PRE()` — shadowing the global/module declaration the language actually binds to. Fields now require their `Pre:Field` or `Structure.Field` qualifier, matching the Clarion Language Reference.
+
 ---
 
 ### [1.0.0] - 2026-07-11

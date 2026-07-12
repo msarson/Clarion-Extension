@@ -65,6 +65,28 @@ export class SymbolDefinitionResolver {
 
         // Check each label token for prefix validation
         for (const token of labelTokens) {
+            // #265: fields declared inside a structure carrying PRE() are only
+            // addressable as Pre:Field or Structure.Field (Language Reference,
+            // PRE attribute) — a bare word must never bind to them. The tokenizer
+            // stamps `structurePrefix` on member tokens of PRE()'d structures, so
+            // this check works even when the symbol-tree _possibleReferences
+            // fallback below has nothing attached (procedure-local structures).
+            if (token.structurePrefix) {
+                if (!hasPrefix) {
+                    logger.info(`❌ PREFIX-REJECT (token): "${token.value}" is a field of a PRE(${token.structurePrefix}) structure — bare reference is invalid`);
+                    continue;
+                }
+                const qualifier = word.substring(0, colonIndex > 0 ? colonIndex : dotIndex);
+                const structureLabel = token.parent?.label ?? token.parent?.value ?? '';
+                const qualifierOk = colonIndex > 0
+                    ? qualifier.toUpperCase() === token.structurePrefix.toUpperCase()
+                    : qualifier.toUpperCase() === structureLabel.toUpperCase();
+                if (!qualifierOk) {
+                    logger.info(`❌ PREFIX-REJECT (token): qualifier "${qualifier}" does not match PRE(${token.structurePrefix}) / structure "${structureLabel}"`);
+                    continue;
+                }
+            }
+
             // Check if this is a structure field that requires a prefix
             const symbol = this.findSymbolAtLine(symbols, token.line, searchWord);
             

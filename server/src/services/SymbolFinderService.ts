@@ -282,6 +282,11 @@ export class SymbolFinderService {
         
         // Search for the variable in the symbol tree (if we have a procedure symbol)
         const searchText = originalWord || word;
+        // #265: a bare search word must never bind to a field of a PRE()'d
+        // structure — those are only addressable as Pre:Field or Structure.Field
+        // (Language Reference, PRE attribute). Qualified searches resolve via
+        // findPrefixedField / StructureFieldResolver instead.
+        const bareSearch = !searchText.includes(':') && !searchText.includes('.');
         const varSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
         
         if (!varSymbol) {
@@ -299,7 +304,8 @@ export class SymbolFinderService {
                 t.line >= scopeStart && t.line <= scopeEnd &&
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value.toLowerCase() === wordLower
+                t.value.toLowerCase() === wordLower &&
+                !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
             );
             if (labelToken) {
                 // Skip MAP/global procedure declarations — these are handled by
@@ -340,7 +346,8 @@ export class SymbolFinderService {
                         t.line > parentProc.line && t.line <= dataEnd &&
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value.toLowerCase() === wordLower
+                        t.value.toLowerCase() === wordLower &&
+                        !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
                     );
                     if (found) {
                         const isProcDecl = tokens.some(t =>
@@ -388,7 +395,8 @@ export class SymbolFinderService {
                         t.line >= gpStart && t.line <= gpEnd &&
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value.toLowerCase() === wordLower
+                        t.value.toLowerCase() === wordLower &&
+                        !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
                     );
                     if (found) {
                         // Skip MAP/global procedure declarations — they are not local variables
@@ -446,6 +454,14 @@ export class SymbolFinderService {
             logger.warn(`⚠️ Found symbol but couldn't locate token for ${varName} at line ${varSymbol.range.start.line}`);
             return null;
         }
+
+        // #265: the symbol-tree recursion descends into structure children, so a
+        // bare word can land on a PRE()'d structure's field here. Reject it — the
+        // module/global tiers are the legal binding for the bare name.
+        if (bareSearch && variableToken.structurePrefix) {
+            logger.info(`⏭️ "${searchText}" is a field of a PRE(${variableToken.structurePrefix}) structure — bare reference is invalid, deferring to outer scopes`);
+            return null;
+        }
         
         // If the current scope is a ROUTINE but the found variable is in the parent
         // procedure's data section (before the ROUTINE), use the parent procedure as
@@ -497,6 +513,7 @@ export class SymbolFinderService {
 
         const searchText = originalWord || word;
         const searchLower = searchText.toLowerCase();
+        const bareSearch = !searchText.includes(':') && !searchText.includes('.');
         const routineDataEnd = routineToken.executionMarker?.line ?? routineToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
 
         const routineVar = tokens.find(t =>
@@ -504,7 +521,8 @@ export class SymbolFinderService {
             t.line < routineDataEnd &&
             t.start === 0 &&
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-            t.value.toLowerCase() === searchLower
+            t.value.toLowerCase() === searchLower &&
+            !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
         );
 
         if (!routineVar) {
