@@ -170,6 +170,58 @@ suite('Hover/F12 variable agreement (#265 item 1)', () => {
             `hover must show the global declaration (line ${globalLineDisplay}); got:\n${text}`);
     });
 
+    // Flip side of the sentinel (#265 item 4 audit): QUALIFIED access must
+    // resolve the field — on both surfaces — never the same-named global.
+    const qualifiedSource =
+        "  PROGRAM\n" +
+        "Counter  LONG\n" +
+        "  MAP\n" +
+        "  END\n" +
+        "  CODE\n" +
+        "  RETURN\n" +
+        "\n" +
+        "MyProc  PROCEDURE\n" +
+        "LocQ     QUEUE,PRE(LOC)\n" +
+        "Counter    LONG\n" +
+        "         END\n" +
+        "  CODE\n" +
+        "  LOC:Counter += 1\n" +
+        "  RETURN\n";
+
+    const qualifiedUri = 'file:///f%3A/inmem/qualified265.clw';
+
+    test('F12 on LOC:Counter resolves the queue field, not the global', async () => {
+        const doc = TextDocument.create(qualifiedUri, 'clarion', 1, qualifiedSource);
+        const provider = new DefinitionProvider();
+
+        const result = await provider.provideDefinition(doc, cursorOn(qualifiedSource, 'LOC:Counter += 1'));
+        const loc = asLocation(result);
+
+        const fieldLine = lineOf(qualifiedSource, 'Counter    LONG');
+        const globalLine = lineOf(qualifiedSource, 'Counter  LONG');
+
+        assert.notStrictEqual(loc.range.start.line, globalLine,
+            'F12 on a qualified reference must NOT resolve to the global');
+        assert.strictEqual(loc.range.start.line, fieldLine,
+            `F12 on LOC:Counter must resolve to the queue field at line ${fieldLine}, got line ${loc.range.start.line}`);
+    });
+
+    test('hover on LOC:Counter shows the queue field, not the global', async () => {
+        const doc = TextDocument.create(qualifiedUri, 'clarion', 1, qualifiedSource);
+        const provider = new HoverProvider();
+
+        const hover = await provider.provideHover(doc, cursorOn(qualifiedSource, 'LOC:Counter += 1'));
+        const text = hoverText(hover);
+
+        const fieldLineDisplay = lineOf(qualifiedSource, 'Counter    LONG') + 1;
+        const globalLineDisplay = lineOf(qualifiedSource, 'Counter  LONG') + 1;
+
+        assert.ok(!text.includes(`:${globalLineDisplay}`),
+            `hover on a qualified reference must NOT show the global (line ${globalLineDisplay}); got:\n${text}`);
+        assert.ok(text.includes(`:${fieldLineDisplay}`),
+            `hover on LOC:Counter must show the queue field (line ${fieldLineDisplay}); got:\n${text}`);
+    });
+
     // Same prefix rule at GLOBAL scope: a global PRE()'d QUEUE's field declared
     // BEFORE the same-named global variable. The no-scope hover path scans the
     // global region linearly, so without the guard the field (earlier line) wins.
