@@ -611,13 +611,23 @@ export class DefinitionProvider {
                 // Filter candidates by scope accessibility
                 const accessibleLabels: Location[] = [];
                 for (const candidate of labelCandidates) {
+                    // Self-exclusion (#330): the label under the cursor is not a
+                    // navigation target — skipping it lets the later tiers run,
+                    // most importantly MAP declaration → implementation (incl.
+                    // MODULE('x.dll') re-declarations hopping cross-project).
+                    if (candidate.range.start.line === position.line &&
+                        position.character >= candidate.range.start.character &&
+                        position.character <= candidate.range.end.character) {
+                        logger.info(`⏭️ Label at line ${candidate.range.start.line} is the cursor's own token — deferring to later tiers`);
+                        continue;
+                    }
                     const canAccess = this.scopeAnalyzer.canAccess(
                         position,
                         candidate.range.start,
                         document,
                         document  // Same document
                     );
-                    
+
                     if (canAccess) {
                         accessibleLabels.push(candidate);
                         logger.info(`✅ Label at line ${candidate.range.start.line} is accessible`);
@@ -1049,6 +1059,19 @@ export class DefinitionProvider {
         // GlobalProcedure scan, its own prefix-validation variants).
         const symbolInfo = await this.symbolFinder.findSymbol(word, document, position, currentScope);
         if (symbolInfo) {
+            // Self-exclusion (#330 regression fix, parity with the pre-#265
+            // hand-rolled walk): a result that IS the token under the cursor is
+            // not a navigation. Return null so the later tiers get their turn —
+            // most importantly MAP-declaration → implementation, which is how
+            // F12 on a MAP declaration (including MODULE('x.dll') DLL
+            // re-declarations) hops to the implementing module. Hover keeps
+            // identity results by design; only F12 excludes them.
+            if (symbolInfo.location.uri === document.uri &&
+                symbolInfo.location.line === position.line &&
+                position.character >= symbolInfo.location.character &&
+                position.character <= symbolInfo.location.character + symbolInfo.token.value.length) {
+                logger.info(`⏭️ findSymbol resolved the cursor's own token — deferring to later tiers`);
+            } else {
             const location = Location.create(symbolInfo.location.uri, {
                 start: { line: symbolInfo.location.line, character: symbolInfo.location.character },
                 end: { line: symbolInfo.location.line, character: symbolInfo.location.character + symbolInfo.token.value.length }
@@ -1073,6 +1096,7 @@ export class DefinitionProvider {
                 }
             }
             return location;
+            }
         }
 
         // MEMBER parent chain (including the parent's INCLUDE chain) — reaches

@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 **New Features**
 
 - ✨ **GOTO statement labels are navigation symbols** (#321): Find All References, F12, and hover now work from both a `GOTO Target` site and the `Target` statement label, scoped exactly per the language rules — one ROUTINE-or-PROCEDURE unit, so same-named labels in other procedures (or in a routine of the same procedure) never bleed in. Rounds out #320's routine-label work.
+- ✨ **F12 on a MAP declaration now navigates to the implementation** (#330): F12 on a procedure's MAP declaration — including a multi-DLL `MODULE('MyApp.dll')` re-declaration, which hops into the defining project's member module — previously returned the declaration itself, so the declaration→implementation tier never ran. F12 now self-excludes the token under the cursor and defers to the deeper tiers (hover keeps identity results by design). Multi-DLL call-site → implementation and re-declaration → implementation navigation verified against the real generated multi-DLL shape and pinned.
 
 **Fixes**
 

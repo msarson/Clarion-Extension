@@ -497,12 +497,17 @@ LocalToRoutine LONG
   END`.trim();
             
             const document = createDocument(code);
-            const position: Position = { line: 2, character: 5 }; // On ROUTINE line
-            
+            const position: Position = { line: 2, character: 5 }; // On LocalToRoutine's own declaration label
+
             const result = await definitionProvider.provideDefinition(document, position);
-            
-            assert.ok(result, 'Should handle routine scope');
-            // This test just verifies no crash - routine is its own definition
+
+            // #330 contract update: F12 on a token's OWN declaration label is
+            // self-excluded (no identity result) so later tiers — MAP
+            // declaration → implementation, DLL re-declaration hops — get their
+            // turn. With nothing further to resolve here, null is the correct
+            // answer (previously this pinned the identity-location behavior).
+            assert.strictEqual(result, null,
+                'F12 on the declaration label itself defers (self-exclusion), yielding null when no deeper tier resolves');
         });
     });
 
