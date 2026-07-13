@@ -194,6 +194,21 @@ function buildScopeContext(tokens: Token[], document: TextDocument): ScopeContex
  * procedure's CODE marker. Resolved names are added back to declaredNames
  * (memoization: at most one async lookup per unique name per cycle).
  */
+/**
+ * #351 — true when the token textually touches a ':' on either side: it is a
+ * fragment of a compound reference the tokenizer split (double-colon labels,
+ * prefix chains), never a standalone name.
+ */
+function isColonAdjacentFragment(t: Token, document: TextDocument): boolean {
+    const lineText = document.getText({
+        start: { line: t.line, character: 0 },
+        end: { line: t.line + 1, character: 0 }
+    });
+    const before = t.start > 0 ? lineText[t.start - 1] : '';
+    const after = lineText[t.start + t.value.length] ?? '';
+    return before === ':' || after === ':';
+}
+
 async function augmentDeclaredViaSymbolFinder(
     ctx: ScopeContext,
     document: TextDocument,
@@ -220,6 +235,13 @@ async function augmentDeclaredViaSymbolFinder(
         // the 40-entry keyword list — 'OPEN' alone triggered the full include-
         // chain cold build (32s measured) hunting a declaration that can't exist.
         if (BuiltinFunctionService.getInstance().isBuiltin(candidate.name)) continue;
+        // #351: colon-adjacent tokens are FRAGMENTS of a compound reference
+        // (BRW1::SortHeader.Init → 'SortHeader'; ScrollSort:AllowAlpha →
+        // 'ScrollSort' when the tokenizer splits). The whole compound is the
+        // real name; the fragment can never resolve — 7 such ghosts exhausted
+        // every tier per pass and the first paid the 23s chain cold build.
+        // Fused single-token compounds (JCA:StartedDate) are unaffected.
+        if (isColonAdjacentFragment(t, document)) continue;
         candidateNames.add(upper);
     }
     if (candidateNames.size === 0) return;
