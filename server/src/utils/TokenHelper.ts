@@ -195,6 +195,29 @@ export class TokenHelper {
     }
 
     /**
+     * #321 stretch — resolve a BREAK/CYCLE label: the label of the INNERMOST
+     * enclosing labelled LOOP or ACCEPT structure with that name (BREAK/CYCLE
+     * docs: the label must name an enclosing loop — lexical nesting, so the
+     * range check alone excludes same-name labels in other procedures).
+     * Returns the column-0 Label token on the loop line (the navigation
+     * target — the same token the statement-label lookup returns for it).
+     */
+    public static findEnclosingLoopLabelToken(tokens: Token[], labelName: string, line: number): Token | undefined {
+        const lower = labelName.toLowerCase();
+        let best: Token | undefined;
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure) continue;
+            const v = t.value.toUpperCase();
+            if (v !== 'LOOP' && v !== 'ACCEPT') continue;
+            if (!t.label || t.label.toLowerCase() !== lower) continue;
+            if (t.finishesAt === undefined || line < t.line || line > t.finishesAt) continue;
+            if (!best || t.line > best.line) best = t;
+        }
+        if (!best) return undefined;
+        return tokens.find(s => s.line === best!.line && s.type === TokenType.Label && s.start === 0) ?? best;
+    }
+
+    /**
      * The chain of PROCEDURE / METHOD scopes that can host a ROUTINE visible from `line`, innermost
      * first. A ROUTINE cannot itself host a routine (routines don't nest), so a routine-body line
      * starts from its owning scope. A local derived METHOD's visible chain climbs through its

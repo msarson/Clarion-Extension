@@ -1870,6 +1870,11 @@ export class ReferencesProvider {
 
         const wordLower = word.toLowerCase();
         const gotoRe = /\bGOTO\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
+        // #321 stretch: BREAK/CYCLE sites are the loop-label reference family —
+        // when the label names a labelled LOOP/ACCEPT, its BREAK/CYCLE sites
+        // re-resolve via the enclosing-loop rule (which excludes same-name
+        // labels in other procedures by range alone) and join the set.
+        const breakCycleRe = /\b(?:BREAK|CYCLE)\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
         for (let ln = 0; ln < document.lineCount; ln++) {
             let text = document.getText({
                 start: { line: ln, character: 0 },
@@ -1885,6 +1890,17 @@ export class ReferencesProvider {
                 if (bang !== -1 && m.index >= bang) break;
                 if (m[1].toLowerCase() !== wordLower) continue;
                 if (TokenHelper.findScopedStatementLabelToken(structure, tokens, m[1], ln) !== labelToken) continue;
+                const nameStart = m.index + m[0].length - m[1].length;
+                locations.push(Location.create(document.uri, {
+                    start: { line: ln, character: nameStart },
+                    end: { line: ln, character: nameStart + m[1].length }
+                }));
+            }
+            breakCycleRe.lastIndex = 0;
+            while ((m = breakCycleRe.exec(text)) !== null) {
+                if (bang !== -1 && m.index >= bang) break;
+                if (m[1].toLowerCase() !== wordLower) continue;
+                if (TokenHelper.findEnclosingLoopLabelToken(tokens, m[1], ln) !== labelToken) continue;
                 const nameStart = m.index + m[0].length - m[1].length;
                 locations.push(Location.create(document.uri, {
                     start: { line: ln, character: nameStart },
