@@ -811,8 +811,8 @@ export class SymbolFinderService {
         if (memberToken?.referencedFile) {
             try {
                 const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
-                const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
-                const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
                 // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
                 // the parent PROGRAM may be open in the editor (unsaved edits) or seeded by
@@ -827,7 +827,30 @@ export class SymbolFinderService {
                     }
                 }
                 if (!parentTokens || !parentDoc) {
-                    if (!fs.existsSync(resolvedPath)) return null;
+                    if (!fs.existsSync(resolvedPath)) {
+                        // #348: MEMBER targets aren't necessarily same-dir (#300 parity —
+                        // generated multi-DLL apps put member modules in genfiles\src while
+                        // the app main resolves via the RED). Redirection is the last tier;
+                        // without it, prefixed fields of parent-inline FILEs dead-end here.
+                        const solutionManager = SolutionManager.getInstance();
+                        const viaRedirection = solutionManager
+                            ? await solutionManager.findFileWithExtension(memberToken.referencedFile, currentFilePath)
+                            : null;
+                        if (!viaRedirection?.path || !fs.existsSync(viaRedirection.path)) {
+                            return null;
+                        }
+                        resolvedPath = viaRedirection.path;
+                        parentUri = pathToCanonicalUri(resolvedPath);
+                        parentTokens = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                        if (parentTokens) {
+                            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                            if (cachedText !== null) {
+                                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                            }
+                        }
+                    }
+                }
+                if (!parentTokens || !parentDoc) {
                     const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
                     parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                     parentTokens = this.tokenCache.getTokens(parentDoc);

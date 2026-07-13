@@ -238,8 +238,9 @@ async function augmentDeclaredViaSymbolFinder(
     // and within findSymbol the global-include vs sibling-member tiers.
     const augmentT0 = Date.now();
     resetSymbolFinderPerfStats();
-    let sdiHits = 0, resolvedCount = 0, unresolvedCount = 0, findSymbolMs = 0;
+    let sdiHits = 0, resolvedCount = 0, errorCount = 0, findSymbolMs = 0;
     const slowest: Array<{ name: string; ms: number }> = [];
+    const unresolvedNames: string[] = [];
     for (const upperName of candidateNames) {
         await timeSlice();
         try {
@@ -254,8 +255,10 @@ async function augmentDeclaredViaSymbolFinder(
             findSymbolMs += nameMs;
             slowest.push({ name: upperName, ms: nameMs });
             if (resolved) { ctx.declaredNames.add(upperName); resolvedCount++; }
-            else { unresolvedCount++; }
+            else { unresolvedNames.push(upperName); }
         } catch (err) {
+            errorCount++;
+            unresolvedNames.push(`${upperName}(ERR)`);
             logger.info(`[#115] symbolFinder.findSymbol error for "${upperName}": ${err instanceof Error ? err.message : String(err)}`);
         }
     }
@@ -270,13 +273,15 @@ async function augmentDeclaredViaSymbolFinder(
             candidates: candidateNames.size,
             sdi_hits: sdiHits,
             resolved: resolvedCount,
-            unresolved: unresolvedCount,
+            unresolved: unresolvedNames.length,
+            errors: errorCount,
             findSymbol_ms: findSymbolMs,
             global_tier_ms: sf.globalMs,
             global_tier_calls: sf.globalCalls,
             sibling_tier_ms: sf.siblingMs,
             sibling_tier_calls: sf.siblingCalls,
             top,
+            unresolved_names: unresolvedNames.slice(0, 10).join(', '),
             uri: document.uri
         });
     }
