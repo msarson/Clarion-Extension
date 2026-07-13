@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
 import { SolutionManager } from '../../solution/solutionManager';
 import { FileRelationshipGraph } from '../../FileRelationshipGraph';
+import { evictIncludeChainIndexes } from '../../services/SymbolFinderService';
 
 /**
  * Multi-file FAR test scaffolding for the FAR family follow-ups
@@ -178,6 +179,10 @@ export function teardownMultiFileFixture(): void {
     (SolutionManager as unknown as { instance: SolutionManager | null }).instance = _savedSmInstance;
     _savedSmInstance = null;
     TokenCache.getInstance().clearAllTokens();
+    // #344/#345: the chain/sibling indexes key by fs path — fixtures reuse the
+    // same synthetic paths with different content across suites, so a stale
+    // index poisons later suites (caught live twice). Evict wholesale.
+    evictIncludeChainIndexes();
     if (_frgSeeded) {
         FileRelationshipGraph.getInstance().reset();
         _frgSeeded = false;

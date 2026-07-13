@@ -41,6 +41,8 @@ const logger = LoggerManager.getLogger("SymbolFinderService");
 interface ChainDeclInfo { uri: string; line: number; character: number; }
 interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string, ChainDeclInfo>; }
 const includeChainIndexCache = new Map<string, ChainIndexEntry>();
+interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
+const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
 const CHAIN_INDEX_TTL_MS = 30_000;
 let chainIndexBuildCount = 0;
 
@@ -52,6 +54,7 @@ export function getChainIndexBuildCount(): number {
 /** #340/#344 — external file changes can invalidate any chain; evict wholesale. */
 export function evictIncludeChainIndexes(): void {
     includeChainIndexCache.clear();
+    siblingLabelIndexCache.clear(); // #345 phase 3
 }
 logger.setLevel("error");
 
@@ -673,50 +676,22 @@ export class SymbolFinderService {
 
         const memberFiles = graph.getMemberFiles(programFile);
 
-        // #319: this walk read + fully tokenized EVERY member module of the program
-        // on a lookup miss — 161 files cold on Mark's VM = one 8.2s synchronous
-        // event-loop block (the undeclaredVar validator probes misses by definition).
-        // Prune with the reference index, the #315 FAR pattern: a module-scope
-        // declaration of `word` requires `word` to OCCUR in the file, so an indexed
-        // file with zero occurrences is skipped without touching disk. One batched
-        // freshness pass up front keeps mayContain stat-free (no per-file sync stat
-        // storm); compound words (BRW1::View:Browse) are never a single indexed
-        // name, so only bare identifiers prune; unknown files always load.
-        const refIdx = ReferenceCountIndex.getInstance();
-        const canPrune = refIdx.isBuilt && /^[A-Za-z_][A-Za-z0-9_]*$/.test(word);
-        if (canPrune) {
-            await refIdx.verifyFilesFresh(memberFiles);
+        // #319 → #345 phase 3: the walk previously probed EVERY member module
+        // PER LOOKUP (mayContain + a raw column-0 regex read per file) — the
+        // undeclared-variable augment probes misses by definition, so N
+        // candidates × M member files of repeated raw reads cost 23s on the
+        // real 40-project solution. One column-0 label index per program
+        // FAMILY (yielded build, TTL + watcher-evicted) now answers which
+        // files can possibly declare the word; only those are tokenized, and
+        // findModuleVariable stays the authoritative scope check.
+        const familyIndex = await this.getSiblingLabelIndex(programFile, memberFiles);
+        const candidateFiles = familyIndex.names.get(word.toLowerCase());
+        if (!candidateFiles || candidateFiles.length === 0) {
+            return null;
         }
-        const timeSlice = makeTimeSlicer();
 
-        const visited = new Set<string>();
-        for (const memberFile of memberFiles) {
-            const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
-            if (visited.has(normMember)) continue;
-            visited.add(normMember);
-
-            const memberPath = memberFile.replace(/\//g, '\\');
+        for (const memberPath of candidateFiles) {
             if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
-
-            if (canPrune && !refIdx.mayContain(memberPath, word)) continue;
-            // Un-pruned files still tokenize synchronously — yield between them so
-            // a cold family walk never holds the LSP loop (#319/#295).
-            await timeSlice();
-
-            // #319 (reopen): a module-scope declaration is a COLUMN-0 label by
-            // language rule. A file that merely USES the word (every generated
-            // module mentions globals/equates like WM_QUERYENDSESSION) passes
-            // mayContain but can never declare it — probe the raw text for a
-            // column-0 occurrence before paying tokenization (a read is ~40x
-            // cheaper than tokenizing a generated module). Files already in the
-            // token cache skip the probe — their scan is cheap anyway.
-            if (canPrune && !this.tokenCache.getTokensByUriCaseInsensitive(`file:///${memberPath.replace(/\\/g, '/')}`)) {
-                try {
-                    const raw = fs.readFileSync(memberPath, 'utf-8');
-                    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    if (!new RegExp(`^${esc}(?![A-Za-z0-9_:])`, 'im').test(raw)) continue;
-                } catch { /* unreadable — let loadTokensForFile handle/report it */ }
-            }
 
             const sibling = this.loadTokensForFile(memberPath);
             if (!sibling) continue;
@@ -728,6 +703,61 @@ export class SymbolFinderService {
         }
 
         return null;
+    }
+
+    /**
+     * #345 phase 3 — one raw-text pass over a program family's member modules,
+     * indexing every column-0 identifier (a module-scope declaration is a
+     * column-0 label by language rule; over-approximation is safe because
+     * findModuleVariable re-verifies scope on the shortlisted files).
+     */
+    private async getSiblingLabelIndex(programFile: string, memberFiles: string[]): Promise<SiblingIndexEntry> {
+        const key = programFile.toLowerCase();
+        // Identity = the member LIST (the #340/#344 discipline); member CONTENT
+        // changes are covered by the TTL and the #340 watcher eviction.
+        const fingerprint = [...memberFiles].map(m => m.toLowerCase()).sort().join(';');
+        const cached = siblingLabelIndexCache.get(key);
+        if (cached && cached.fingerprint === fingerprint &&
+            Date.now() - cached.builtAt < CHAIN_INDEX_TTL_MS) {
+            return cached;
+        }
+
+        const entry: SiblingIndexEntry = { builtAt: Date.now(), fingerprint, names: new Map() };
+        const timeSlice = makeTimeSlicer();
+        const labelRe = /^([A-Za-z_][A-Za-z0-9_:]*)/;
+        const seenFiles = new Set<string>();
+
+        for (const memberFile of memberFiles) {
+            const memberPath = memberFile.replace(/\//g, '\\');
+            const norm = memberPath.toLowerCase();
+            if (seenFiles.has(norm)) continue;
+            seenFiles.add(norm);
+            await timeSlice();
+
+            // Cache-first (same discipline as loadTokensForFile): the member may
+            // be open in the editor or seeded by an in-memory fixture.
+            let raw = this.tokenCache.getDocumentTextByUriCaseInsensitive(
+                `file:///${memberPath.replace(/\\/g, '/')}`);
+            if (raw === null || raw === undefined) {
+                try {
+                    raw = fs.readFileSync(memberPath, 'utf-8');
+                } catch {
+                    continue;
+                }
+            }
+            for (const line of raw.split(/\r?\n/)) {
+                const m = labelRe.exec(line);
+                if (!m) continue;
+                const k = m[1].toLowerCase();
+                let arr = entry.names.get(k);
+                if (!arr) { arr = []; entry.names.set(k, arr); }
+                if (!arr.includes(memberPath)) arr.push(memberPath);
+            }
+        }
+
+        siblingLabelIndexCache.set(key, entry);
+        logger.info(`📇 [#345] sibling label index for ${path.basename(programFile)}: ${entry.names.size} name(s) across ${seenFiles.size} member(s)`);
+        return entry;
     }
     
     /**
@@ -1227,10 +1257,15 @@ export class SymbolFinderService {
         const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
         const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
         const hostDir = path.dirname(hostPath);
+        // #345 phase 3: the cold build tokenizes each chain file synchronously —
+        // on a generated app the chain is the whole ABC/libsrc universe, and the
+        // unyielded loop showed up as a 20s+ event-loop block. Yield per include.
+        const timeSlice = makeTimeSlicer();
 
         for (const t of hostTokens) {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
             if (t.line >= boundary) continue;
+            await timeSlice();
 
             // Only follow DATA-scope includes — an INCLUDE inside a structure
             // (MAP/MODULE prototype pull, #322 shape) brings in prototypes.

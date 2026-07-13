@@ -562,6 +562,7 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
         'MemberA.clw': [
             "  MEMBER('main.clw')",
             'SharedValue LONG',
+            'Glo:Compound LONG',
             'ProcA PROCEDURE',
             '  CODE',
             '  GlobalThing = 2',
@@ -678,13 +679,18 @@ suite('SymbolFinderService #319 — sibling MEMBER walk prunes via reference ind
             `global resolution must not walk siblings; loaded: [${loadCalls.join(', ')}]`);
     });
 
-    test('compound (colon) words never prune — the index scans bare identifiers only', async () => {
+    test('compound (colon) labels resolve via the sibling label index (pin-flex, #345 phase 3)', async () => {
+        // Pin FLEXED: the old contract ("compounds never prune, always scan")
+        // guarded the ReferenceCountIndex mechanism, which indexes bare
+        // identifiers only. The #345 sibling LABEL index captures compound
+        // column-0 labels directly, so the durable contract is the positive
+        // one: a compound declared in a sibling must resolve.
         await ReferenceCountIndex.getInstance().buildInBackground(absPaths());
 
-        await service319.findModuleVariableInSiblingMembers(
-            'BRW1::View:Browse', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
+        const result = await service319.findModuleVariableInSiblingMembers(
+            'Glo:Compound', fixture.documents['MemberB.clw'], { line: 3, character: 3 });
 
-        assert.ok(loadCalls.length > 0,
-            'a compound word is never a single indexed name — pruning on it would drop real declarations');
+        assert.ok(result, 'a compound column-0 declaration in a sibling must resolve');
+        assert.strictEqual(result?.location.line, 2);
     });
 });
