@@ -140,8 +140,13 @@ export class TokenCache {
             const currentText = document.getText();
             
             // 🚀 PERFORMANCE: Check if we can use incremental update
-            if (cached && cached.version === document.version) {
-                const cacheTime = performance.now() - perfStart;
+            // #340: version alone is NOT identity — synthetic documents (cross-file
+            // loaders create them at version 1) collide with cached entries for a
+            // file whose content changed OUTSIDE the editor (appgen regeneration,
+            // git, scripted edits), pairing STALE tokens with FRESH content. The
+            // entry already carries documentText; a content mismatch falls through
+            // to the incremental/full paths below, which handle it correctly.
+            if (cached && cached.version === document.version && cached.documentText === currentText) {
                 logger.info(`🟢 [TC] Cache HIT v${document.version} tokens=${cached.tokens.length} uri=${document.uri}`);
                 return cached.tokens;
             }

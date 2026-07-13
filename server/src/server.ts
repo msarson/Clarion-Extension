@@ -1329,6 +1329,39 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
     }
 }
 
+// #340: the client already forwards workspace file events for all lookup
+// extensions (synchronize.fileEvents in LanguageServerManager) — but no server
+// handler existed, so changes made OUTSIDE the editor (appgen regeneration,
+// git checkout/pull, external editors) never evicted the caches: cross-file
+// consumers kept serving stale tokens/text until a window reload. Evict per
+// changed file immediately; revalidate open documents once, debounced (a
+// regeneration touches hundreds of files — one sweep, not one per event).
+let watchedFilesRevalidateTimer: ReturnType<typeof setTimeout> | undefined;
+connection.onDidChangeWatchedFiles(params => {
+    try {
+        let evicted = 0;
+        for (const change of params.changes) {
+            // Open documents are authoritative via their live buffer/version —
+            // evicting them just forces one cheap re-tokenize; closed files are
+            // the actual stale-cache hazard.
+            tokenCache.clearTokens(change.uri);
+            evicted++;
+        }
+        if (evicted > 0) {
+            logger.info(`🔄 [#340] Watched-file change: evicted ${evicted} cache entr${evicted === 1 ? 'y' : 'ies'}`);
+            if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
+            watchedFilesRevalidateTimer = setTimeout(() => {
+                watchedFilesRevalidateTimer = undefined;
+                for (const openDoc of documents.all()) {
+                    validateTextDocument(openDoc, 'watchedFilesChanged');
+                }
+            }, 500);
+        }
+    } catch (err) {
+        logger.error(`[#340] onDidChangeWatchedFiles: ${err instanceof Error ? err.message : String(err)}`);
+    }
+});
+
 /**
  * #189 Phase 2 — evict only the CodeLens reference counts that an edit to `document`
  * can affect, instead of the old blunt "invalidate everything on any change". The
