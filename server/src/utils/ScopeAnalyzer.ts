@@ -243,7 +243,18 @@ export class ScopeAnalyzer {
             if (declScope.type === 'global' && declScope.isProgramFile) {
                 return true;
             }
-            
+
+            // Rule 1b (#339): a global-scope declaration in a HEADER-LESS file
+            // (no PROGRAM, no MEMBER — a pure data include like Globals.inc, or
+            // equates.clw-style implicit-global files) takes the scope of its
+            // inclusion site. Resolvers only reach such declarations through a
+            // legal data-scope include chain (#334), so the reachability is
+            // already established — and hover surfaces them, so F12/FAR must
+            // agree (#319 rule).
+            if (declScope.type === 'global' && !declScope.isProgramFile && !declScope.memberModuleName) {
+                return true;
+            }
+
             // Rule 2: Module-local symbols are NOT visible cross-file
             if (declScope.type === 'module') {
                 return false;
