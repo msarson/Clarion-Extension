@@ -886,16 +886,26 @@ export class SymbolFinderService {
             return currentFileResult;
         }
 
+        // #334: declarations pulled in via `INCLUDE(...)` at module/global scope
+        // (Clarion shops routinely declare solution-wide globals in .inc files
+        // included from every main module). Shared visited set — ONCE semantics
+        // and cycle guard across the current-file and parent-file walks.
+        const includeVisited = new Set<string>();
+        const currentIncludeResult = await this.findGlobalVariableInIncludes(word, tokens, document, includeVisited);
+        if (currentIncludeResult) {
+            return currentIncludeResult;
+        }
+
         // Step 2: If not found and current file has MEMBER token, search parent file
-        const memberToken = tokens.find(t => 
-            t.value && t.value.toUpperCase() === 'MEMBER' && 
-            t.line < 5 && 
+        const memberToken = tokens.find(t =>
+            t.value && t.value.toUpperCase() === 'MEMBER' &&
+            t.line < 5 &&
             t.referencedFile
         );
-        
+
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document, includeVisited);
             if (parentResult) return parentResult;
             // Fall through to equates.clw check
         }
@@ -1010,7 +1020,7 @@ export class SymbolFinderService {
      * @param currentDocument - Current document (to resolve relative path)
      * @returns SymbolInfo if found, null otherwise
      */
-    private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument): Promise<SymbolInfo | null> {
+    private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument, includeVisited?: Set<string>): Promise<SymbolInfo | null> {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
         let resolvedPath = path.resolve(currentFileDir, parentFile);
@@ -1118,13 +1128,146 @@ export class SymbolFinderService {
                 };
             }
             
+            // #334: not among the parent's own labels — follow the parent's
+            // global-scope INCLUDE chain (main modules declare shared globals
+            // via `INCLUDE('Globals.inc'),ONCE`-style pulls).
+            const includeResult = await this.findGlobalVariableInIncludes(
+                word, parentTokens, parentDoc, includeVisited ?? new Set<string>());
+            if (includeResult) return includeResult;
+
             logger.info(`❌ Global variable "${word}" not found in parent file`);
             return null;
-            
+
         } catch (err) {
             logger.error(`Error reading MEMBER parent file: ${err}`);
             return null;
         }
+    }
+
+    /**
+     * #334 — search files pulled in via `INCLUDE('x.inc')` at the host file's
+     * module/global scope (declarations before the first CODE/PROCEDURE) for a
+     * column-0 declaration label. Recurses through nested INCLUDEs; `visited`
+     * carries ONCE semantics and guards cycles across the whole walk (shared
+     * between the current-file and MEMBER-parent call sites).
+     *
+     * Include targets resolve cache-first relative to the host file's
+     * directory, then via solution redirection — the same shape as the #300
+     * MEMBER-parent resolution above.
+     */
+    private async findGlobalVariableInIncludes(
+        word: string,
+        hostTokens: Token[],
+        hostDoc: TextDocument,
+        visited: Set<string>
+    ): Promise<SymbolInfo | null> {
+        const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
+        const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
+        const hostDir = path.dirname(hostPath);
+
+        for (const t of hostTokens) {
+            if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (t.line >= boundary) continue;
+
+            // Only follow DATA-scope includes. An INCLUDE inside a structure —
+            // typically a MAP/MODULE prototype pull (`MAP INCLUDE('callout.inc')`,
+            // the #322 module-callout pattern) — brings in prototypes, not data
+            // declarations; following it would misreport procedure labels as
+            // globals and widen FAR onto unrelated same-name symbols.
+            const insideStructure = hostTokens.some(s =>
+                s.type === TokenType.Structure &&
+                s.finishesAt !== undefined &&
+                s.line <= t.line && s.finishesAt >= t.line);
+            if (insideStructure) continue;
+
+            // First string literal after the directive on the same line is the
+            // filename; `INCLUDE('file','section')` section args come later and
+            // are not resolved here.
+            const fileToken = hostTokens.find(s =>
+                s.line === t.line && s.start > t.start && s.type === TokenType.String);
+            if (!fileToken) continue;
+            const includeName = fileToken.value.replace(/^'|'$/g, '').replace(/''/g, "'").trim();
+            if (!includeName) continue;
+
+            const visitKey = includeName.toLowerCase();
+            if (visited.has(visitKey)) continue;
+            visited.add(visitKey);
+
+            // Resolve: host-relative (cache-first via loadTokensForFile), then redirection.
+            let loaded = this.loadTokensForFile(path.resolve(hostDir, includeName));
+            if (!loaded) {
+                const solutionManager = SolutionManager.getInstance();
+                const viaRedirection = solutionManager
+                    ? await solutionManager.findFileWithExtension(includeName)
+                    : null;
+                if (viaRedirection?.path) {
+                    loaded = this.loadTokensForFile(viaRedirection.path);
+                }
+            }
+            if (!loaded) {
+                logger.info(`[#334] INCLUDE target not resolvable: ${includeName} (from ${hostDoc.uri})`);
+                continue;
+            }
+            const included = loaded;
+
+            const includedBoundary = SymbolFinderService.globalScopeEndLine(included.tokens);
+            const declared = included.tokens.find(tok =>
+                tok.type === TokenType.Label &&
+                tok.start === 0 &&
+                tok.parent === undefined &&
+                tok.line < includedBoundary &&
+                tok.value.toLowerCase() === word.toLowerCase() &&
+                // Prototype / implementation labels (`X PROCEDURE(...)`) are not
+                // data declarations — never report them as globals from here.
+                !included.tokens.some(sib =>
+                    sib.line === tok.line && sib.start > tok.start &&
+                    (sib.value.toUpperCase() === 'PROCEDURE' || sib.value.toUpperCase() === 'FUNCTION'))
+            );
+
+            if (declared) {
+                logger.info(`✅ #334: found "${word}" in INCLUDE'd file ${includeName} at line ${declared.line}`);
+                const typeInfo = SymbolFinderService.extractTypeInfo(declared, included.tokens);
+                const lineTokens = included.tokens.filter(tok => tok.line === declared.line);
+                return {
+                    token: declared,
+                    type: typeInfo,
+                    scope: { token: declared, type: 'global' },
+                    location: {
+                        uri: included.document.uri,
+                        line: declared.line,
+                        character: declared.start
+                    },
+                    declaration: lineTokens.map(tok => tok.value).join(' '),
+                    originalWord: word,
+                    searchWord: word
+                };
+            }
+
+            // Nested includes (e.g. Globals.inc itself INCLUDEs deeper files).
+            const nested = await this.findGlobalVariableInIncludes(word, included.tokens, included.document, visited);
+            if (nested) return nested;
+        }
+
+        return null;
+    }
+
+    /**
+     * Global scope ends at the first CODE keyword, else the first PROCEDURE,
+     * else never (pure declaration files like .inc). Same convention as
+     * `findGlobalVariableInCurrentFile` / the MEMBER-parent walk.
+     */
+    private static globalScopeEndLine(tokens: Token[]): number {
+        const firstCodeToken = tokens.find(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === 'CODE'
+        );
+        if (firstCodeToken) return firstCodeToken.line;
+
+        const firstProcedure = tokens.find(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure
+        );
+        return firstProcedure ? firstProcedure.line : Number.MAX_SAFE_INTEGER;
     }
 
     private loadTokensForFile(filePath: string): { document: TextDocument; tokens: Token[] } | null {
