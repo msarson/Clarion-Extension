@@ -521,13 +521,32 @@ function collectFieldNames(fileToken: Token): Set<string> {
     const validFields = new Set<string>();
     const record = fileToken.children?.find(c => c.isFileRecord === true);
     if (!record) return validFields;
-    for (const child of record.children ?? []) {
-        if (child.type !== TokenType.Label) continue;
-        validFields.add(child.value.toUpperCase());
-        if (child.structurePrefix) {
-            validFields.add(`${child.structurePrefix.toUpperCase()}:${child.value.toUpperCase()}`);
+
+    // #349: dictionary-generated MS-SQL date/time splits nest fields in
+    // GROUP,OVER(...) overlays inside the RECORD — those fields (and the
+    // overlay's own label) are addressable as PRE:Name and valid PROJECT
+    // targets. Recurse into nested structures; a nested group without its
+    // own PRE() inherits the enclosing prefix.
+    const walk = (parent: Token, prefixForChildren: string | undefined): void => {
+        for (const child of parent.children ?? []) {
+            if (child.type === TokenType.Label) {
+                validFields.add(child.value.toUpperCase());
+                const p = child.structurePrefix?.toUpperCase() ?? prefixForChildren;
+                if (p) {
+                    validFields.add(`${p}:${child.value.toUpperCase()}`);
+                }
+            } else if (child.type === TokenType.Structure) {
+                if (child.label) {
+                    validFields.add(child.label.toUpperCase());
+                    if (prefixForChildren) {
+                        validFields.add(`${prefixForChildren}:${child.label.toUpperCase()}`);
+                    }
+                }
+                walk(child, child.structurePrefix?.toUpperCase() ?? prefixForChildren);
+            }
         }
-    }
+    };
+    walk(record, fileToken.structurePrefix?.toUpperCase());
     return validFields;
 }
 

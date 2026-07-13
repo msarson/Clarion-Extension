@@ -2362,6 +2362,53 @@ MyView VIEW(Customer)
         assert.strictEqual(viewProjectDiags(code).length, 0);
     });
 
+    test('BUG PIN #349 — fields nested in overlay GROUPs are valid PROJECT targets (JCA:StartedDate shape)', () => {
+        // Mark's IBSWorking: the dictionary generates MS-SQL date/time splits
+        // as GROUP,OVER overlays inside the RECORD. collectFieldNames only
+        // walked the RECORD's DIRECT Label children, so overlay-nested fields
+        // (and the overlay's own label) were flagged 'not a field on FILE'.
+        const code = `JCMaster FILE,DRIVER('MSSQL'),PRE(JCA),BINDABLE,CREATE,THREAD
+Record RECORD
+JobNumber      LONG
+StartedDateTime STRING(8)
+StartedDateTimeOverlay GROUP,OVER(StartedDateTime)
+StartedDate      DATE
+StartedTime      TIME
+               END
+       END
+       END
+
+MyView VIEW(JCMaster)
+       PROJECT(JCA:JobNumber)
+       PROJECT(JCA:StartedDate)
+       PROJECT(JCA:StartedDateTimeOverlay)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 0,
+            'overlay-GROUP-nested fields and the overlay label itself must be accepted; got: ' +
+            diags.map(d => d.message).join(' | '));
+    });
+
+    test('#349 REGRESSION GUARD — bogus name still flagged with nested groups present', () => {
+        const code = `JCMaster FILE,DRIVER('MSSQL'),PRE(JCA)
+Record RECORD
+StartedDateTime STRING(8)
+Overlay GROUP,OVER(StartedDateTime)
+StartedDate      DATE
+        END
+       END
+       END
+
+MyView VIEW(JCMaster)
+       PROJECT(JCA:StartedDate, JCA:Bogus)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 1, 'exactly the bogus name must be flagged');
+        assert.ok(diags[0].message.includes("'JCA:Bogus'"));
+    });
+
     test('FROM file declared in another doc — skipped silently (no false positive)', () => {
         // No FILE structure in this document — simulates the cross-file case.
         const code = `MyView VIEW(Customer)
