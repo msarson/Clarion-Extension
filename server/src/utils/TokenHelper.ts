@@ -411,6 +411,37 @@ export class TokenHelper {
     }
 
     /**
+     * #343 — the SECTION argument of `INCLUDE('file','section')`: the SECOND
+     * string after an INCLUDE file-ref token on the line, with the cursor
+     * inside it. Only INCLUDE carries a section argument (LINK's second arg
+     * is a flag, MODULE/MEMBER are single-arg), so this is INCLUDE-scoped.
+     * Returns the section string token plus the include's filename.
+     */
+    public static getIncludeSectionArgStringToken(
+        tokens: Token[],
+        line: number,
+        character: number
+    ): { section: Token; includeFile: string } | null {
+        const includeTokens = tokens.filter(t =>
+            t.line === line &&
+            t.value?.toUpperCase() === 'INCLUDE' &&
+            t.referencedFile !== undefined &&
+            t.referencedFile.length > 0
+        );
+        for (const inc of includeTokens) {
+            const strings = tokens
+                .filter(t => t.line === line && t.type === TokenType.String && t.start > inc.start)
+                .sort((a, b) => a.start - b.start);
+            if (strings.length < 2) continue;
+            const second = strings[1];
+            if (second.start <= character && character <= second.start + second.value.length) {
+                return { section: second, includeFile: inc.referencedFile! };
+            }
+        }
+        return null;
+    }
+
+    /**
      * Boolean wrapper over `getFileRefArgStringToken` — same contract, returns
      * just whether the cursor is in a file-ref filename position. Use when the
      * caller doesn't need the matched token (e.g. tests, guard checks).

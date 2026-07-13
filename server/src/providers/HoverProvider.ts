@@ -7,6 +7,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
+import { findSectionLocation } from '../utils/SectionLocator';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { MapProcedureResolver } from '../utils/MapProcedureResolver';
@@ -165,6 +166,13 @@ export class HoverProvider {
                 mark('tokenize+fileRef');
                 if (fileRefStr) {
                     return this.buildFileRefHover(fileRefStr, preTokens, document);
+                }
+                // #343 — the SECTION argument of INCLUDE('file','section'):
+                // card names the resolved file + section line (same locator
+                // F12 uses, so both surfaces agree).
+                const sectionArg = TokenHelper.getIncludeSectionArgStringToken(preTokens, position.line, position.character);
+                if (sectionArg) {
+                    return this.buildSectionRefHover(sectionArg.section, sectionArg.includeFile, document);
                 }
             }
 
@@ -888,6 +896,30 @@ export class HoverProvider {
             range: Range.create(
                 fileRefStr.line, fileRefStr.start,
                 fileRefStr.line, fileRefStr.start + fileRefStr.value.length)
+        };
+    }
+
+    /**
+     * #343 — hover card for the SECTION argument of INCLUDE('file','section'):
+     * the resolved file + the SECTION line, via the same SectionLocator F12
+     * uses so the surfaces agree.
+     */
+    private buildSectionRefHover(sectionStr: Token, includeFile: string, document: TextDocument): Hover | null {
+        const sectionName = sectionStr.value.replace(/^'|'$/g, '').replace(/''/g, "'");
+        if (!sectionName) return null;
+
+        const loc = findSectionLocation(includeFile, sectionName, document.uri);
+        const lines: string[] = [`**SECTION** \`'${sectionName}'\` — \`${includeFile}\``];
+        if (loc) {
+            lines.push(`Resolves to: \`${loc.path}:${loc.line + 1}\``);
+        } else {
+            lines.push(`⚠️ Section not found in the resolved include`);
+        }
+        return {
+            contents: { kind: 'markdown', value: lines.join('\n\n') },
+            range: Range.create(
+                sectionStr.line, sectionStr.start,
+                sectionStr.line, sectionStr.start + sectionStr.value.length)
         };
     }
 

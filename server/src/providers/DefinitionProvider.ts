@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import { findSectionLocation } from '../utils/SectionLocator';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../utils/CallSiteArgumentClassifier';
@@ -88,6 +89,21 @@ export class DefinitionProvider {
             if (fileRefStr) {
                 const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
                 return await this.fileResolver.findFileDefinition(filename, document.uri);
+            }
+
+            // #343 — the SECTION argument of INCLUDE('file','section'): F12
+            // lands on the SECTION('name') line inside the resolved include.
+            const sectionArg = TokenHelper.getIncludeSectionArgStringToken(tokens, position.line, position.character);
+            if (sectionArg) {
+                const sectionName = sectionArg.section.value.replace(/^'|'$/g, '').replace(/''/g, "'");
+                const sectionLoc = findSectionLocation(sectionArg.includeFile, sectionName, document.uri);
+                if (sectionLoc) {
+                    return Location.create(pathToCanonicalUri(sectionLoc.path), {
+                        start: { line: sectionLoc.line, character: Math.max(0, sectionLoc.character) },
+                        end: { line: sectionLoc.line, character: Math.max(0, sectionLoc.character) + 'SECTION'.length }
+                    });
+                }
+                return null;
             }
 
             // Don't navigate on words inside string literals (the file-ref
