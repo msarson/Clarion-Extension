@@ -10,6 +10,14 @@ import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
 import { SolutionManager } from '../../solution/solutionManager';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { getCrossFileEpoch } from '../../utils/crossFileEpoch';
+
+// #345 phase 4 — cross-pass RVD memos (see the per-pass → module-level note
+// inside validateDiscardedReturnValues). Keys carry (docUri, docVersion);
+// the epoch guard clears them on any watched cross-file change.
+const rvdTypeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
+const rvdClassMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+let rvdMemoEpoch = -1;
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -752,8 +760,36 @@ export async function validateDiscardedReturnValues(
     // findMemberInClass, which never filtered. A class that can't be enumerated
     // (interface receivers, GROUP/QUEUE types, unresolvable) falls back to the
     // #158 per-site path so decisions never regress.
-    const typeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
-    const classMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+    //
+    // #345 phase 4: the memos were per-PASS — GlobalErrors re-resolved (2.5s)
+    // and ErrorClass re-enumerated (184 members) on every one of the 4 startup
+    // passes (cache_hits=0 measured on every pass). Module-level now, keyed by
+    // (docUri, docVersion) with the #340 watcher epoch clearing everything on
+    // any cross-file change.
+    const rvdEpochNow = getCrossFileEpoch();
+    if (rvdEpochNow !== rvdMemoEpoch || rvdTypeMemo.size > 500 || rvdClassMembersMemo.size > 500) {
+        rvdTypeMemo.clear();
+        rvdClassMembersMemo.clear();
+        rvdMemoEpoch = rvdEpochNow;
+    }
+    // Content is part of the identity (the #340/#344 lesson) — same uri+version
+    // with different text (test fixtures, unsaved flows) must never share memos.
+    const rvdText = document.getText();
+    let rvdHash = 5381;
+    for (let i = 0; i < rvdText.length; i += 127) {
+        rvdHash = ((rvdHash * 33) ^ rvdText.charCodeAt(i)) >>> 0;
+    }
+    const rvdDocKey = `${document.uri.toLowerCase()}|${document.version}|${rvdText.length}|${rvdHash}`;
+    const typeMemo = {
+        get: (k: string) => rvdTypeMemo.get(`${rvdDocKey}|${k}`),
+        set: (k: string, v: Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>) =>
+            rvdTypeMemo.set(`${rvdDocKey}|${k}`, v),
+    };
+    const classMembersMemo = {
+        get: (k: string) => rvdClassMembersMemo.get(`${rvdDocKey}|${k}`),
+        set: (k: string, v: Promise<Map<string, OverloadCandidate[]> | null>) =>
+            rvdClassMembersMemo.set(`${rvdDocKey}|${k}`, v),
+    };
     let enumResolvedSites = 0;
     let fallbackSites = 0;
 
@@ -962,7 +998,7 @@ export async function validateDiscardedReturnValues(
         crossfile_ms: crossFileMs,
         crossfile_files_scanned: lastCrossFileFilesScanned,
         dotcall_sites: dotCallSites,
-        enum_classes: classMembersMemo.size,
+        enum_classes: rvdClassMembersMemo.size,
         enum_resolved_sites: enumResolvedSites,
         fallback_sites: fallbackSites,
         cache_hits: cacheHits,

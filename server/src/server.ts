@@ -100,6 +100,8 @@ import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
 import { TokenHelper } from './utils/TokenHelper';
 import { evictIncludeChainIndexes } from './services/SymbolFinderService';
+import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
+import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1351,6 +1353,12 @@ connection.onDidChangeWatchedFiles(params => {
         if (evicted > 0) {
             // #344: any changed file can invalidate any include-chain index.
             evictIncludeChainIndexes();
+            // #345 phase 4: invalidate every cross-file result memo
+            // (viewProjectFields, RVD receiver types/enumerations) and the
+            // include verifier's in-memory caches (disk entries stay —
+            // they're mtime-guarded).
+            bumpCrossFileEpoch();
+            IncludeVerifier.getInstance().clearCache();
             logger.info(`🔄 [#340] Watched-file change: evicted ${evicted} cache entr${evicted === 1 ? 'y' : 'ies'}`);
             if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
             watchedFilesRevalidateTimer = setTimeout(() => {
@@ -3333,8 +3341,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [351 BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [351 BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [P4 BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [P4 BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

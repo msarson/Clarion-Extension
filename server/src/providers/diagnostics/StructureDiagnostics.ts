@@ -6,6 +6,7 @@ import { ClarionTokenizer, Token, TokenType } from '../../ClarionTokenizer';
 import { ViewDescriptorParser } from '../../tokenizer/ViewDescriptorParser';
 import { TokenCache } from '../../TokenCache';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { getCrossFileEpoch } from '../../utils/crossFileEpoch';
 
 interface StructureStackItem {
     token: Token;
@@ -423,6 +424,23 @@ export function validateExecuteStructures(tokens: Token[], document: TextDocumen
  * marker (Gap M). Gap L follow-up; closes the validation half of issue
  * `7dedd7c8`.
  */
+// #345 phase 4 — the validator runs SYNC on every validation pass (open /
+// change / sdiReady / crossFileUpdate: 4 passes at startup) and its FROM
+// resolution re-tokenized the MEMBER parent each time (4.3s × 4 measured on
+// IBSWorking). Result memo: same doc version + same cross-file epoch → same
+// diagnostics. The #340 watcher bumps the epoch on any workspace change.
+// NB: content is part of the identity (the #340/#344 lesson — same uri+version
+// with different text must never serve a stale result; test fixtures and
+// unsaved-buffer flows both hit this).
+const viewDiagsMemo = new Map<string, { version: number; epoch: number; text: string; diags: Diagnostic[] }>();
+let viewMemoEpoch = -1;
+let viewComputeCount = 0;
+
+/** Test observability — number of full (non-memoized) validator computations. */
+export function getViewProjectFieldsComputeCount(): number {
+    return viewComputeCount;
+}
+
 export function validateViewProjectFields(
     tokens: Token[],
     document: TextDocument,
@@ -436,6 +454,20 @@ export function validateViewProjectFields(
         t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW'
     );
     if (!hasView) return diagnostics;
+
+    const epoch = getCrossFileEpoch();
+    if (epoch !== viewMemoEpoch) {
+        viewDiagsMemo.clear();
+        crossTokensMemo.clear();
+        viewMemoEpoch = epoch;
+    }
+    const memoKey = document.uri.toLowerCase();
+    const memoHit = viewDiagsMemo.get(memoKey);
+    if (memoHit && memoHit.version === document.version && memoHit.epoch === epoch &&
+        memoHit.text === document.getText()) {
+        return memoHit.diags;
+    }
+    viewComputeCount++;
 
     const fileResolver = new FileResolver(tokens, document, getOpenDocumentContent);
 
@@ -509,6 +541,7 @@ export function validateViewProjectFields(
         }
     }
 
+    viewDiagsMemo.set(memoKey, { version: document.version, epoch, text: document.getText(), diags: diagnostics });
     return diagnostics;
 }
 
@@ -676,13 +709,27 @@ class FileResolver {
             this.getOpenDocumentContent ?? undefined
         );
         if (content === undefined) return undefined;
+        // #345 phase 4: this ran a FRESH tokenize of the MEMBER parent (68k
+        // tokens, ~2.5s) on EVERY validation pass. Content-compared memo —
+        // identical text is identical tokens; a changed file mismatches and
+        // re-tokenizes naturally. Cleared on cross-file epoch bumps.
+        const memo = crossTokensMemo.get(uri.toLowerCase());
+        if (memo && memo.content === content) return memo.tokens;
         try {
-            return new ClarionTokenizer(content).tokenize();
+            const fresh = new ClarionTokenizer(content).tokenize();
+            if (crossTokensMemo.size > 200) crossTokensMemo.clear();
+            crossTokensMemo.set(uri.toLowerCase(), { content, tokens: fresh });
+            return fresh;
         } catch {
             return undefined;
         }
     }
 }
+
+// #345 phase 4 — cross-file tokenize memo for the FileResolver (see
+// loadTokensForFile). Module-level so it survives across validation passes;
+// cleared alongside viewDiagsMemo on epoch bumps.
+const crossTokensMemo = new Map<string, { content: string; tokens: Token[] }>();
 
 /**
  * Walks the body of a VIEW structure and returns every JOIN clause — the

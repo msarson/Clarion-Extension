@@ -8,6 +8,7 @@ import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');
@@ -50,7 +51,16 @@ export class IncludeVerifier {
     // #345: reachable-include-name set per host file (fingerprint-verified + TTL).
     private reachableSetCache = new Map<string, { at: number; fingerprint: string; set: Set<string> }>();
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
-    private static readonly CACHE_DURATION = 60000; // 60 seconds
+    // #345 phase 4: 60s expired between validation passes on a slow pass — the
+    // reachable-set BFS (reads hundreds of libsrc files) rebuilt per restart
+    // AND per minute. The #340 watcher clears these caches on any workspace
+    // change; the TTL only backstops out-of-workspace libsrc edits.
+    private static readonly CACHE_DURATION = 600000; // 10 minutes
+    // #345 phase 4: disk-persisted per-file include lists (mtime-guarded) so a
+    // restart's first BFS reads one JSON instead of the include universe.
+    private diskIncludeLists: Map<string, { mtime: number; includes: IncludeStatement[] }> | null = null;
+    private diskListsDirty = false;
+    private diskSaveTimer: ReturnType<typeof setTimeout> | undefined;
 
     private constructor() {}
 
@@ -305,8 +315,29 @@ export class IncludeVerifier {
             return cached.includes;
         }
 
+        // #345 phase 4: disk-persisted include lists — an mtime-matched entry
+        // answers without reading the file. On a restart this collapses the
+        // reachable-set BFS from "read the include universe" to one JSON load.
+        const pathKey = path.normalize(filePath).toLowerCase();
+        let mtime: number | null = null;
+        try {
+            mtime = (await fs.promises.stat(filePath)).mtimeMs;
+        } catch {
+            // stat failure — fall through to the read (which will also fail
+            // and cache the empty list)
+        }
+        if (mtime !== null) {
+            const diskLists = await this.loadDiskIncludeLists();
+            const diskEntry = diskLists.get(pathKey);
+            if (diskEntry && diskEntry.mtime === mtime) {
+                this.includeCache.set(cacheKey, { includes: diskEntry.includes, timestamp: now });
+                return diskEntry.includes;
+            }
+        }
+
         const includes: IncludeStatement[] = [];
         try {
+            IncludeVerifier.fileParseCount++;
             const contents = await fs.promises.readFile(filePath, 'utf-8');
             const lines = contents.split('\n');
             for (let i = 0; i < lines.length; i++) {
@@ -322,7 +353,71 @@ export class IncludeVerifier {
         }
 
         this.includeCache.set(cacheKey, { includes, timestamp: now });
+        if (mtime !== null) {
+            const diskLists = await this.loadDiskIncludeLists();
+            diskLists.set(pathKey, { mtime, includes });
+            this.scheduleDiskListsSave();
+        }
         return includes;
+    }
+
+    /** #345 phase 4 — lazy one-time load of the persisted include lists. */
+    private async loadDiskIncludeLists(): Promise<Map<string, { mtime: number; includes: IncludeStatement[] }>> {
+        if (this.diskIncludeLists) return this.diskIncludeLists;
+        this.diskIncludeLists = new Map();
+        try {
+            const raw = await fs.promises.readFile(IncludeVerifier.diskListsPath(), 'utf8');
+            const parsed = JSON.parse(raw) as { version: number; entries: Record<string, { mtime: number; includes: IncludeStatement[] }> };
+            if (parsed?.version === 1 && parsed.entries) {
+                for (const [k, v] of Object.entries(parsed.entries)) {
+                    this.diskIncludeLists.set(k, v);
+                }
+            }
+        } catch {
+            // No cache yet / unreadable — start empty
+        }
+        return this.diskIncludeLists;
+    }
+
+    private scheduleDiskListsSave(): void {
+        this.diskListsDirty = true;
+        if (this.diskSaveTimer !== undefined) return;
+        this.diskSaveTimer = setTimeout(() => {
+            this.diskSaveTimer = undefined;
+            if (!this.diskListsDirty || !this.diskIncludeLists) return;
+            this.diskListsDirty = false;
+            const entries: Record<string, { mtime: number; includes: IncludeStatement[] }> = {};
+            for (const [k, v] of this.diskIncludeLists) entries[k] = v;
+            const payload = JSON.stringify({ version: 1, entries });
+            const target = IncludeVerifier.diskListsPath();
+            fs.promises.mkdir(path.dirname(target), { recursive: true })
+                .then(() => fs.promises.writeFile(target, payload, 'utf8'))
+                .catch(() => { /* best effort — rebuilt next session */ });
+        }, 2000);
+    }
+
+    /** OS temp dir — same convention as the SDI disk cache (never pollutes the solution). */
+    private static diskListsPath(): string {
+        return path.join(os.tmpdir(), 'clarion-extension-iv', 'iv-includes.json');
+    }
+
+    // ── Test observability (#345 phase 4) ────────────────────────────────────
+    private static fileParseCount = 0;
+    /** Number of full file read+parse operations since process start. */
+    public static getFileParseCount(): number { return IncludeVerifier.fileParseCount; }
+    /** Force the debounced disk-list save to run now (tests). */
+    public async flushDiskIncludeListsForTest(): Promise<void> {
+        if (this.diskSaveTimer !== undefined) {
+            clearTimeout(this.diskSaveTimer);
+            this.diskSaveTimer = undefined;
+        }
+        if (!this.diskIncludeLists) return;
+        this.diskListsDirty = false;
+        const entries: Record<string, { mtime: number; includes: IncludeStatement[] }> = {};
+        for (const [k, v] of this.diskIncludeLists) entries[k] = v;
+        const target = IncludeVerifier.diskListsPath();
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.writeFile(target, JSON.stringify({ version: 1, entries }), 'utf8');
     }
 
     /**
