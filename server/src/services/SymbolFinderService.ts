@@ -33,6 +33,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
+
+// ─── #344: include-chain global-name index ──────────────────────────────
+// One walk per host file instead of one walk per unresolved name (#334's
+// original shape cost 74s on a real 43-project solution's undeclared-variable
+// pass). TTL-bounded; evicted wholesale by the #340 watched-files handler.
+interface ChainDeclInfo { uri: string; line: number; character: number; }
+interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string, ChainDeclInfo>; }
+const includeChainIndexCache = new Map<string, ChainIndexEntry>();
+const CHAIN_INDEX_TTL_MS = 30_000;
+let chainIndexBuildCount = 0;
+
+/** Test observability — number of chain-index builds since process start. */
+export function getChainIndexBuildCount(): number {
+    return chainIndexBuildCount;
+}
+
+/** #340/#344 — external file changes can invalidate any chain; evict wholesale. */
+export function evictIncludeChainIndexes(): void {
+    includeChainIndexCache.clear();
+}
 logger.setLevel("error");
 
 /**
@@ -884,10 +904,8 @@ export class SymbolFinderService {
 
         // #334: declarations pulled in via `INCLUDE(...)` at module/global scope
         // (Clarion shops routinely declare solution-wide globals in .inc files
-        // included from every main module). Shared visited set — ONCE semantics
-        // and cycle guard across the current-file and parent-file walks.
-        const includeVisited = new Set<string>();
-        const currentIncludeResult = await this.findGlobalVariableInIncludes(word, tokens, document, includeVisited);
+        // included from every main module). #344: chain indexed once per host.
+        const currentIncludeResult = await this.findGlobalVariableInIncludes(word, tokens, document);
         if (currentIncludeResult) {
             return currentIncludeResult;
         }
@@ -897,7 +915,7 @@ export class SymbolFinderService {
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document, includeVisited);
+            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
             if (parentResult) return parentResult;
             // Fall through to equates.clw check
         }
@@ -1012,7 +1030,7 @@ export class SymbolFinderService {
      * @param currentDocument - Current document (to resolve relative path)
      * @returns SymbolInfo if found, null otherwise
      */
-    private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument, includeVisited?: Set<string>): Promise<SymbolInfo | null> {
+    private async findGlobalVariableInParentFile(word: string, parentFile: string, currentDocument: TextDocument): Promise<SymbolInfo | null> {
         const currentFilePath = decodeURIComponent(currentDocument.uri.replace('file:///', ''));
         const currentFileDir = path.dirname(currentFilePath);
         let resolvedPath = path.resolve(currentFileDir, parentFile);
@@ -1122,9 +1140,8 @@ export class SymbolFinderService {
             
             // #334: not among the parent's own labels — follow the parent's
             // global-scope INCLUDE chain (main modules declare shared globals
-            // via `INCLUDE('Globals.inc'),ONCE`-style pulls).
-            const includeResult = await this.findGlobalVariableInIncludes(
-                word, parentTokens, parentDoc, includeVisited ?? new Set<string>());
+            // via `INCLUDE('Globals.inc'),ONCE`-style pulls; #344: indexed once).
+            const includeResult = await this.findGlobalVariableInIncludes(word, parentTokens, parentDoc);
             if (includeResult) return includeResult;
 
             logger.info(`❌ Global variable "${word}" not found in parent file`);
@@ -1137,22 +1154,76 @@ export class SymbolFinderService {
     }
 
     /**
-     * #334 — search files pulled in via `INCLUDE('x.inc')` at the host file's
-     * module/global scope (declarations before the first CODE/PROCEDURE) for a
-     * column-0 declaration label. Recurses through nested INCLUDEs; `visited`
-     * carries ONCE semantics and guards cycles across the whole walk (shared
-     * between the current-file and MEMBER-parent call sites).
-     *
-     * Include targets resolve cache-first relative to the host file's
-     * directory, then via solution redirection — the same shape as the #300
-     * MEMBER-parent resolution above.
+     * #334/#344 — resolve a global declared in the host's data-scope INCLUDE
+     * chain. #334's original walk exhausted the ENTIRE chain per unresolved
+     * name — on a real generated app the parent's chain is the whole
+     * ABC/libsrc universe and the undeclared-variable augment feeds it dozens
+     * of names (74s measured). The chain is now indexed ONCE per host
+     * (name → declaration site), TTL-bounded and evicted wholesale by the
+     * #340 watched-files handler; lookups are O(1).
      */
     private async findGlobalVariableInIncludes(
         word: string,
         hostTokens: Token[],
-        hostDoc: TextDocument,
-        visited: Set<string>
+        hostDoc: TextDocument
     ): Promise<SymbolInfo | null> {
+        const key = decodeURIComponent(hostDoc.uri.replace(/^file:\/\/\/?/i, '')).toLowerCase();
+        // #340 lesson: the path alone is not identity — a host whose CONTENT
+        // changed (live edits, or a reused synthetic path in tests) must not
+        // serve the old chain. Chain-FILE changes are covered by the TTL and
+        // the #340 watcher eviction.
+        const hostText = hostDoc.getText();
+        let entry = includeChainIndexCache.get(key);
+        if (!entry || Date.now() - entry.builtAt > CHAIN_INDEX_TTL_MS || entry.hostText !== hostText) {
+            entry = { builtAt: Date.now(), hostText, names: new Map() };
+            await this.buildIncludeChainIndex(hostTokens, hostDoc, new Set<string>(), entry.names);
+            includeChainIndexCache.set(key, entry);
+            chainIndexBuildCount++;
+            logger.info(`📇 [#344] include-chain index for ${path.basename(key)}: ${entry.names.size} global name(s)`);
+        }
+
+        const decl = entry.names.get(word.toLowerCase());
+        if (!decl) return null;
+
+        const declPath = decodeURIComponent(decl.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const loaded = this.loadTokensForFile(declPath);
+        if (!loaded) return null;
+        const declared = loaded.tokens.find(tok =>
+            tok.type === TokenType.Label &&
+            tok.line === decl.line &&
+            tok.start === decl.character);
+        if (!declared) return null;
+
+        const typeInfo = SymbolFinderService.extractTypeInfo(declared, loaded.tokens);
+        const lineTokens = loaded.tokens.filter(tok => tok.line === declared.line);
+        return {
+            token: declared,
+            type: typeInfo,
+            scope: { token: declared, type: 'global' },
+            location: {
+                uri: loaded.document.uri,
+                line: declared.line,
+                character: declared.start
+            },
+            declaration: lineTokens.map(tok => tok.value).join(' '),
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
+     * #344 — one recursive walk of the host's data-scope include chain,
+     * collecting every qualifying column-0 declaration label (same guards as
+     * #334: data-scope includes only — MAP/MODULE prototype pulls excluded —
+     * and `X PROCEDURE(...)` labels never count as globals). First
+     * declaration wins on name collisions (Clarion include order).
+     */
+    private async buildIncludeChainIndex(
+        hostTokens: Token[],
+        hostDoc: TextDocument,
+        visited: Set<string>,
+        names: Map<string, ChainDeclInfo>
+    ): Promise<void> {
         const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
         const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
         const hostDir = path.dirname(hostPath);
@@ -1161,20 +1232,14 @@ export class SymbolFinderService {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
             if (t.line >= boundary) continue;
 
-            // Only follow DATA-scope includes. An INCLUDE inside a structure —
-            // typically a MAP/MODULE prototype pull (`MAP INCLUDE('callout.inc')`,
-            // the #322 module-callout pattern) — brings in prototypes, not data
-            // declarations; following it would misreport procedure labels as
-            // globals and widen FAR onto unrelated same-name symbols.
+            // Only follow DATA-scope includes — an INCLUDE inside a structure
+            // (MAP/MODULE prototype pull, #322 shape) brings in prototypes.
             const insideStructure = hostTokens.some(s =>
                 s.type === TokenType.Structure &&
                 s.finishesAt !== undefined &&
                 s.line <= t.line && s.finishesAt >= t.line);
             if (insideStructure) continue;
 
-            // First string literal after the directive on the same line is the
-            // filename; `INCLUDE('file','section')` section args come later and
-            // are not resolved here.
             const fileToken = hostTokens.find(s =>
                 s.line === t.line && s.start > t.start && s.type === TokenType.String);
             if (!fileToken) continue;
@@ -1185,7 +1250,6 @@ export class SymbolFinderService {
             if (visited.has(visitKey)) continue;
             visited.add(visitKey);
 
-            // Resolve: host-relative (cache-first via loadTokensForFile), then redirection.
             let loaded = this.loadTokensForFile(path.resolve(hostDir, includeName));
             if (!loaded) {
                 const solutionManager = SolutionManager.getInstance();
@@ -1203,44 +1267,29 @@ export class SymbolFinderService {
             const included = loaded;
 
             const includedBoundary = SymbolFinderService.globalScopeEndLine(included.tokens);
-            const declared = included.tokens.find(tok =>
-                tok.type === TokenType.Label &&
-                tok.start === 0 &&
-                tok.parent === undefined &&
-                tok.line < includedBoundary &&
-                tok.value.toLowerCase() === word.toLowerCase() &&
-                // Prototype / implementation labels (`X PROCEDURE(...)`) are not
-                // data declarations — never report them as globals from here.
-                !included.tokens.some(sib =>
-                    sib.line === tok.line && sib.start > tok.start &&
-                    (sib.value.toUpperCase() === 'PROCEDURE' || sib.value.toUpperCase() === 'FUNCTION'))
-            );
-
-            if (declared) {
-                logger.info(`✅ #334: found "${word}" in INCLUDE'd file ${includeName} at line ${declared.line}`);
-                const typeInfo = SymbolFinderService.extractTypeInfo(declared, included.tokens);
-                const lineTokens = included.tokens.filter(tok => tok.line === declared.line);
-                return {
-                    token: declared,
-                    type: typeInfo,
-                    scope: { token: declared, type: 'global' },
-                    location: {
-                        uri: included.document.uri,
-                        line: declared.line,
-                        character: declared.start
-                    },
-                    declaration: lineTokens.map(tok => tok.value).join(' '),
-                    originalWord: word,
-                    searchWord: word
-                };
+            // One pass for the prototype/impl-label exclusion: lines carrying a
+            // PROCEDURE/FUNCTION token after column 0.
+            const procedureLines = new Set<number>();
+            for (const tok of included.tokens) {
+                if (tok.start > 0 &&
+                    (tok.value.toUpperCase() === 'PROCEDURE' || tok.value.toUpperCase() === 'FUNCTION')) {
+                    procedureLines.add(tok.line);
+                }
+            }
+            for (const tok of included.tokens) {
+                if (tok.type !== TokenType.Label || tok.start !== 0) continue;
+                if (tok.parent !== undefined) continue;
+                if (tok.line >= includedBoundary) continue;
+                if (procedureLines.has(tok.line)) continue;
+                const k = tok.value.toLowerCase();
+                if (!names.has(k)) {
+                    names.set(k, { uri: included.document.uri, line: tok.line, character: tok.start });
+                }
             }
 
             // Nested includes (e.g. Globals.inc itself INCLUDEs deeper files).
-            const nested = await this.findGlobalVariableInIncludes(word, included.tokens, included.document, visited);
-            if (nested) return nested;
+            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names);
         }
-
-        return null;
     }
 
     /**

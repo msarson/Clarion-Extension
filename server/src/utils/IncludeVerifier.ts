@@ -44,6 +44,9 @@ interface PathCache {
 export class IncludeVerifier {
     private static instance: IncludeVerifier | undefined;
     private includeCache = new Map<string, IncludeCache>(); // URI -> IncludeCache
+    // #344: memoized owner-project key per from-file (findProjectForFile walks
+    // projects x sourceFiles - too hot to run per resolveIncludePath call).
+    private ownerKeyCache = new Map<string, { key: string; at: number }>();
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     private static readonly CACHE_DURATION = 60000; // 60 seconds
 
@@ -213,12 +216,17 @@ export class IncludeVerifier {
      * Resolves an include filename to an absolute path using redirection or local directory.
      *
      * #329: `fromFsPath` is the source file whose include chain is being walked
-     * (the compile unit) — its owning project's redirection answers FIRST, and
-     * the cache is keyed by (filename, from-file) so one project's answer can't
-     * poison another's (same-named per-app includes, Edin's `w_[name]_rc.inc`).
+     * (the compile unit) — its owning project's redirection answers FIRST, so
+     * one project's answer can't poison another's (same-named per-app
+     * includes, Edin's `w_[name]_rc.inc`).
+     *
+     * #344: the cache partition is the OWNER PROJECT, not the from-file —
+     * redirection varies by project, and #329's per-file keying made every
+     * document re-resolve the entire include universe from scratch
+     * (include_check_avg_ms=12,888 measured on the real 43-project solution).
      */
     private async resolveIncludePath(fileName: string, baseDir: string, fromFsPath: string | null): Promise<string | null> {
-        const cacheKey = `${fileName.toLowerCase()}|${fromFsPath?.toLowerCase() ?? baseDir.toLowerCase()}`;
+        const cacheKey = `${fileName.toLowerCase()}|${this.ownerKeyFor(fromFsPath, baseDir)}`;
         const cached = this.pathCache.get(cacheKey);
         const now = Date.now();
         if (cached && (now - cached.timestamp) < IncludeVerifier.CACHE_DURATION) {
@@ -234,6 +242,27 @@ export class IncludeVerifier {
 
         this.pathCache.set(cacheKey, { resolvedPath: resolved, timestamp: now });
         return resolved;
+    }
+
+    /**
+     * #344 — the owning project's path for a from-file (memoized; the
+     * underlying findProjectForFile walks projects × sourceFiles). Falls back
+     * to the from-file's directory when no project owns it, preserving the
+     * per-copy isolation the #329 pins require in no-solution layouts.
+     */
+    private ownerKeyFor(fromFsPath: string | null, baseDir: string): string {
+        const probe = (fromFsPath ?? baseDir).toLowerCase();
+        const cached = this.ownerKeyCache.get(probe);
+        const now = Date.now();
+        if (cached && now - cached.at < IncludeVerifier.CACHE_DURATION) return cached.key;
+
+        const solutionManager = SolutionManager.getInstance();
+        const owner = fromFsPath ? solutionManager?.findProjectForFile?.(fromFsPath) : undefined;
+        const key = owner?.path
+            ? path.normalize(owner.path).toLowerCase()
+            : path.normalize(fromFsPath ? path.dirname(fromFsPath) : baseDir).toLowerCase();
+        this.ownerKeyCache.set(probe, { key, at: now });
+        return key;
     }
 
     /**
@@ -491,6 +520,7 @@ export class IncludeVerifier {
             // #329: path resolutions are redirection-dependent — drop them on a
             // full clear (solution reload) alongside the include cache.
             this.pathCache.clear();
+            this.ownerKeyCache.clear(); // #344
             logger.info('Cleared all include caches');
         }
     }

@@ -99,6 +99,7 @@ import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
 import { TokenHelper } from './utils/TokenHelper';
+import { evictIncludeChainIndexes } from './services/SymbolFinderService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1348,6 +1349,8 @@ connection.onDidChangeWatchedFiles(params => {
             evicted++;
         }
         if (evicted > 0) {
+            // #344: any changed file can invalidate any include-chain index.
+            evictIncludeChainIndexes();
             logger.info(`🔄 [#340] Watched-file change: evicted ${evicted} cache entr${evicted === 1 ? 'y' : 'ies'}`);
             if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
             watchedFilesRevalidateTimer = setTimeout(() => {
