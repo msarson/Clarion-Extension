@@ -333,6 +333,85 @@ MyProc PROCEDURE()
         });
     });
 
+    suite('#350 — PRE-less structure fields require dot qualification', () => {
+        // Language Reference, Field Qualification: "You must use this Field
+        // Qualification syntax to reference any field in a complex structure
+        // that does not have a PRE attribute." The generated browse queue has
+        // no PRE() and its field LABELS textually contain 'JCA:...' — an
+        // unqualified JCA:StartedDate must bind to the FILE,PRE(JCA) field,
+        // never the queue field (Mark's IBSWorking, follow-on from #349).
+
+        test('BUG PIN #350 — unqualified JCA:StartedDate binds to the FILE field, not the shadowing queue compound label', async () => {
+            const fixture = buildMultiFileFixture({
+                files: {
+                    'prog.clw': [
+                        '   PROGRAM',
+                        '   MAP',
+                        '   END',
+                        "JCMaster             FILE,DRIVER('MSSQL'),PRE(JCA),CREATE,THREAD",  // line 3
+                        'Record                   RECORD,PRE()',
+                        'StartedDateTime             STRING(8)',
+                        'StartedDateTimeOverlay      GROUP,OVER(StartedDateTime)',
+                        'StartedDate                   DATE',                                 // line 7 — the REAL field
+                        '                            END',
+                        '                         END',
+                        '                     END',
+                        '   CODE',
+                        '   RETURN',
+                    ].join('\n'),
+                    'win.clw': [
+                        "  MEMBER('prog.clw')",                              // 0
+                        '  MAP',                                             // 1
+                        '  END',                                             // 2
+                        'SelectJob PROCEDURE',                               // 3
+                        'Queue:Browse:1       QUEUE',                        // 4 — no PRE()
+                        'JCA:StartedDate        LIKE(JCA:StartedDate)',      // 5 — compound label, shadows textually
+                        'Mark                   BYTE',                       // 6
+                        '                     END',                          // 7
+                        '  CODE',                                            // 8
+                        '  IF JCA:StartedDate > 0',                          // 9
+                        '  END',                                             // 10
+                        '  RETURN',                                          // 11
+                    ].join('\n'),
+                },
+                frg: { programFile: 'prog.clw', memberFiles: ['win.clw'] }
+            });
+
+            const winDoc = fixture.documents['win.clw'];
+            const result = await service.findSymbol('JCA:STARTEDDATE', winDoc, { line: 9, character: 6 });
+
+            assert.ok(result, 'JCA:StartedDate must resolve (the FILE field exists in the parent program)');
+            const boundToQueueField =
+                result!.location.uri.toLowerCase() === winDoc.uri.toLowerCase() &&
+                result!.location.line === 5;
+            assert.ok(!boundToQueueField,
+                'must NOT bind to the PRE-less queue field at win.clw:5 — that field is only addressable as ' +
+                'Queue:Browse:1.JCA:StartedDate (Field Qualification rule); got ' +
+                `${result!.location.uri}:${result!.location.line}`);
+        });
+
+        test('#350 REGRESSION GUARD — queue with PRE keeps resolving its fields via the prefix', async () => {
+            const code = [
+                "  MEMBER('other.clw')",
+                '  MAP',
+                '  END',
+                'P PROCEDURE',
+                'SaveQueue            QUEUE,PRE(Sav)',
+                'AcctNumber             LONG',           // line 5
+                '                     END',
+                '  CODE',
+                '  Sav:AcctNumber = 1',                  // line 8
+                '  RETURN',
+            ].join('\n');
+            const doc = createDocument(code, 'test://symbol350b.clw');
+            tokenCache.getTokens(doc);
+
+            const result = await service.findSymbol('SAV:ACCTNUMBER', doc, { line: 8, character: 2 });
+            assert.ok(result, 'Sav:AcctNumber (PRE(Sav) queue field) must still resolve');
+            tokenCache.clearTokens('test://symbol350b.clw');
+        });
+    });
+
     suite('findModuleVariableInSiblingMembers', () => {
         test('Should find module-scope declaration in sibling MEMBER file', async () => {
             const fixture = buildMultiFileFixture({

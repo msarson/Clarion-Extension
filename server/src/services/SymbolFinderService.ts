@@ -344,7 +344,8 @@ export class SymbolFinderService {
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === wordLower &&
-                !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
+                !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
             );
             if (labelToken) {
                 // Skip MAP/global procedure declarations — these are handled by
@@ -386,7 +387,8 @@ export class SymbolFinderService {
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                         t.value.toLowerCase() === wordLower &&
-                        !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
+                        !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
                     );
                     if (found) {
                         const isProcDecl = tokens.some(t =>
@@ -435,7 +437,8 @@ export class SymbolFinderService {
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                         t.value.toLowerCase() === wordLower &&
-                        !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
+                        !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
                     );
                     if (found) {
                         // Skip MAP/global procedure declarations — they are not local variables
@@ -501,6 +504,12 @@ export class SymbolFinderService {
             logger.info(`⏭️ "${searchText}" is a field of a PRE(${variableToken.structurePrefix}) structure — bare reference is invalid, deferring to outer scopes`);
             return null;
         }
+        // #350: same for fields of PRE-LESS data structures — only
+        // Structure.Field can reach them (Field Qualification rule).
+        if (SymbolFinderService.requiresDotQualification(variableToken)) {
+            logger.info(`⏭️ "${searchText}" is a field of a PRE-less structure — dot qualification required, deferring to outer scopes`);
+            return null;
+        }
         
         // If the current scope is a ROUTINE but the found variable is in the parent
         // procedure's data section (before the ROUTINE), use the parent procedure as
@@ -561,7 +570,8 @@ export class SymbolFinderService {
             t.start === 0 &&
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
             t.value.toLowerCase() === searchLower &&
-            !(bareSearch && t.structurePrefix) // #265: PRE()'d fields need a qualifier
+            !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+            !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
         );
 
         if (!routineVar) {
@@ -605,6 +615,32 @@ export class SymbolFinderService {
     /**
      * Find a module-level variable (declared before first PROCEDURE)
      */
+    /**
+     * #350 — Language Reference, Field Qualification: "You must use this Field
+     * Qualification syntax to reference any field in a complex structure that
+     * does not have a PRE attribute." A Label inside a data-structure chain
+     * (QUEUE/GROUP/FILE/RECORD/VIEW/REPORT) with NO prefixed ancestor is only
+     * addressable as Structure.Field — no unqualified word may bind to it,
+     * even one textually equal to a compound label (the generated browse
+     * queue's 'JCA:StartedDate LIKE(...)' shadowing the FILE,PRE(JCA) field).
+     * CLASS/INTERFACE/MAP members are excluded (their scoping is separate).
+     */
+    private static readonly DOT_ONLY_STRUCTURES = new Set(['QUEUE', 'GROUP', 'FILE', 'RECORD', 'VIEW', 'REPORT']);
+    static requiresDotQualification(t: Token): boolean {
+        let anc = t.parent;
+        let sawDataStructure = false;
+        while (anc) {
+            if (anc.structurePrefix) return false;
+            if (anc.type === TokenType.Structure) {
+                const v = anc.value.toUpperCase();
+                if (v === 'CLASS' || v === 'INTERFACE' || v === 'MAP' || v === 'MODULE') return false;
+                if (SymbolFinderService.DOT_ONLY_STRUCTURES.has(v)) sawDataStructure = true;
+            }
+            anc = anc.parent;
+        }
+        return sawDataStructure;
+    }
+
     findModuleVariable(
         word: string,
         tokens: Token[],
