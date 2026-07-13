@@ -108,10 +108,27 @@ export async function validateUndeclaredVariablesAsync(
     document: TextDocument,
     symbolFinder: SymbolFinderService
 ): Promise<Diagnostic[]> {
+    const t0 = Date.now();
     const ctx = buildScopeContext(tokens, document);
     if (!ctx) return [];
+    const ctxMs = Date.now() - t0;
     await augmentDeclaredViaSymbolFinder(ctx, document, symbolFinder);
-    return collectUndeclaredDiagnostics(ctx, document);
+    const augmentDoneMs = Date.now() - t0;
+    const result = collectUndeclaredDiagnostics(ctx, document);
+    const totalMs = Date.now() - t0;
+    if (totalMs > 1000) {
+        // Stage split so the augment-detail line can't hide sync stages
+        // (#345 attribution — the wrapper's 'Validator undeclaredVar' total
+        // additionally includes DiagnosticProvider.filterOmitted).
+        perfLogger.perf('undeclaredVar stage split', {
+            total_ms: totalMs,
+            ctx_ms: ctxMs,
+            augment_ms: augmentDoneMs - ctxMs,
+            collect_ms: totalMs - augmentDoneMs,
+            uri: document.uri
+        });
+    }
+    return result;
 }
 
 interface ScopeContext {
@@ -247,7 +264,21 @@ async function augmentDeclaredViaSymbolFinder(
         const sf = readSymbolFinderPerfStats();
         const top = slowest.sort((a, b) => b.ms - a.ms).slice(0, 5)
             .map(s => `${s.name}=${s.ms}`).join(', ');
-        perfLogger.info(`📊 PERF: undeclaredVar augment detail | total_ms=${augmentMs}, candidates=${candidateNames.size}, sdi_hits=${sdiHits}, resolved=${resolvedCount}, unresolved=${unresolvedCount}, findSymbol_ms=${findSymbolMs}, global_tier=${sf.globalMs}ms/${sf.globalCalls}calls, sibling_tier=${sf.siblingMs}ms/${sf.siblingCalls}calls, top=[${top}], uri=${document.uri}`);
+        // NB: perf-channel loggers silence info(); only perf() emits.
+        perfLogger.perf('undeclaredVar augment detail', {
+            total_ms: augmentMs,
+            candidates: candidateNames.size,
+            sdi_hits: sdiHits,
+            resolved: resolvedCount,
+            unresolved: unresolvedCount,
+            findSymbol_ms: findSymbolMs,
+            global_tier_ms: sf.globalMs,
+            global_tier_calls: sf.globalCalls,
+            sibling_tier_ms: sf.siblingMs,
+            sibling_tier_calls: sf.siblingCalls,
+            top,
+            uri: document.uri
+        });
     }
 }
 
