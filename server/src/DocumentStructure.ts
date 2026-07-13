@@ -2164,26 +2164,29 @@ export class DocumentStructure {
      * @returns The filename string or null
      */
     private extractFilenameAfterKeyword(keywordIndex: number): string | null {
-        // Expected pattern: KEYWORD ( 'filename' ) [,num]
+        // Expected pattern: KEYWORD ( 'filename' [, more-args] )
         // tokens[i] = KEYWORD
         // tokens[i+1] = (
         // tokens[i+2] = 'filename'
-        // tokens[i+3] = )
-        
+        // tokens[i+3] = ) or , — #342: multi-argument forms are legal Clarion
+        //   (INCLUDE('file','section'), LINK('file',flag)) and were silently
+        //   dropped here, which killed the FRG edge, the document link, and
+        //   the file-link hover for those lines.
+
         if (keywordIndex + 3 >= this.tokens.length) return null;
-        
+
         const openParen = this.tokens[keywordIndex + 1];
         const filenameToken = this.tokens[keywordIndex + 2];
-        const closeParen = this.tokens[keywordIndex + 3];
-        
-        if (openParen?.value === '(' && 
+        const afterFilename = this.tokens[keywordIndex + 3];
+
+        if (openParen?.value === '(' &&
             filenameToken?.value &&
             filenameToken.value.startsWith("'") &&
-            closeParen?.value === ')') {
+            (afterFilename?.value === ')' || afterFilename?.value === ',')) {
             // Remove quotes from filename
             return filenameToken.value.replace(/^'|'$/g, '');
         }
-        
+
         return null;
     }
 
