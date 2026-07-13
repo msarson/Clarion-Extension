@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { MapProcedureResolver } from '../../utils/MapProcedureResolver';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
@@ -181,11 +182,7 @@ export class ProcedureHoverResolver {
         if (!mapLocation) {
             // Not found in current file, check for MEMBER
             logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
-            const memberToken = tokens.find(t => 
-                t.line < 5 && 
-                t.value.toUpperCase() === 'MEMBER' &&
-                t.referencedFile
-            );
+            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
             
             if (memberToken?.referencedFile) {
                 logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);

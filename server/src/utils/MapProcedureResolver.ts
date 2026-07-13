@@ -59,8 +59,7 @@ export class MapProcedureResolver {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
-        const memberToken = tokens.find(t =>
-            t.line < 5 && t.value.toUpperCase() === 'MEMBER' && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, currentPath);
             if (parentPath) startPaths.push(parentPath);

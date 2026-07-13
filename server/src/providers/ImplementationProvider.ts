@@ -162,11 +162,7 @@ export class ImplementationProvider {
                 // If no MAP declaration found in current file, check if this file has MEMBER
                 // and search the parent file
                 logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
-                const memberToken = tokens.find(t => 
-                    t.line < 5 && // MEMBER should be at top of file
-                    t.value.toUpperCase() === 'MEMBER' &&
-                    t.referencedFile
-                );
+                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
                 
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);

@@ -728,11 +728,7 @@ export class SymbolFinderService {
         if (result) return result;
 
         // If MEMBER file, search the parent PROGRAM file
-        const memberToken = tokens.find(t =>
-            t.value && t.value.toUpperCase() === 'MEMBER' &&
-            t.line < 5 &&
-            t.referencedFile
-        );
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             try {
                 const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
@@ -897,11 +893,7 @@ export class SymbolFinderService {
         }
 
         // Step 2: If not found and current file has MEMBER token, search parent file
-        const memberToken = tokens.find(t =>
-            t.value && t.value.toUpperCase() === 'MEMBER' &&
-            t.line < 5 &&
-            t.referencedFile
-        );
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);

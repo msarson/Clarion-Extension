@@ -11,6 +11,35 @@ import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
  */
 export class TokenHelper {
     /**
+     * #337 — module-header lookup: the file's `MEMBER('parent.clw')` token.
+     * No line cap: comment banners above the header are legal Clarion (license
+     * headers, file docs) and the previous hardcoded `t.line < 5` guards
+     * silently disabled every MEMBER-parent tier for such files. The tokenizer
+     * only sets `referencedFile` on the real header form, so the first match
+     * is the header.
+     */
+    public static findMemberHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.value !== undefined &&
+            t.value.toUpperCase() === 'MEMBER' &&
+            t.referencedFile !== undefined);
+    }
+
+    /** #337 — PROGRAM header lookup (ClarionDocument-typed, no line cap). */
+    public static findProgramHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument &&
+            t.value.toUpperCase() === 'PROGRAM');
+    }
+
+    /** #337 — either module header (PROGRAM or MEMBER), no line cap. */
+    public static findDocumentHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument &&
+            (t.value.toUpperCase() === 'PROGRAM' || t.value.toUpperCase() === 'MEMBER'));
+    }
+
+    /**
      * Gets the innermost scope at a line (optimized version using DocumentStructure)
      * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
      * @param structure DocumentStructure instance

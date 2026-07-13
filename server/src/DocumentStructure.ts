@@ -2212,12 +2212,13 @@ export class DocumentStructure {
      * @returns Unresolved filename or null
      */
     public getMemberParentFile(): string | null {
-        // MEMBER should be in first 10 lines of file
-        const memberToken = this.tokens.find(t => 
-            t.line < 10 &&
-            t.value && 
+        // #337: no line cap — comment banners above MEMBER are legal. Inline
+        // (not TokenHelper.findMemberHeaderToken) because TokenHelper imports
+        // DocumentStructure; same semantics, keep in unison.
+        const memberToken = this.tokens.find(t =>
+            t.value !== undefined &&
             t.value.toUpperCase() === 'MEMBER' &&
-            t.referencedFile
+            t.referencedFile !== undefined
         );
         
         return memberToken?.referencedFile || null;

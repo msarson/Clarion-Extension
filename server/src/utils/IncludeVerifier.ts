@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
+import { TokenHelper } from './TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { pathToCanonicalUri } from './UriUtils';
@@ -416,13 +417,8 @@ export class IncludeVerifier {
         try {
             const tokens = this.tokenCache.getTokens(document);
             
-            // Look for MEMBER statement in first 5 lines
-            const memberToken = tokens.find(t =>
-                t.value && 
-                t.value.toUpperCase() === 'MEMBER' &&
-                t.line < 5 &&
-                t.referencedFile
-            );
+            // #337: module header lookup — no line cap (comment banners are legal)
+            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
 
             if (!memberToken || !memberToken.referencedFile) {
                 logger.debug(`⏱️ [IV] getMemberParentDocument: no MEMBER token in ${document.uri.split('/').pop()}`);

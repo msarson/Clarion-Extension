@@ -422,11 +422,7 @@ export class DefinitionProvider {
                 }
                 
                 // If not found locally and file has MEMBER, check parent file's MAP
-                const memberToken = tokens.find(t => 
-                    t.line < 5 && // MEMBER should be at top of file
-                    t.value.toUpperCase() === 'MEMBER' &&
-                    t.referencedFile
-                );
+                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
                 
                 if (memberToken?.referencedFile) {
                     logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
@@ -524,13 +520,8 @@ export class DefinitionProvider {
                 } else {
                     logger.info(`❌ MAP declaration not found in current file for ${tokenAtPosition.label}`);
                     
-                    // Check if this file has MEMBER at top, indicating it's part of another file
-                    logger.info(`Checking for MEMBER token in first 5 lines...`);
-                    const memberToken = tokens.find(t => 
-                        t.line < 5 && // MEMBER should be at top of file
-                        t.value.toUpperCase() === 'MEMBER' &&
-                        t.referencedFile
-                    );
+                    // Check if this file has a MEMBER header, indicating it's part of another file
+                    const memberToken = TokenHelper.findMemberHeaderToken(tokens);
                     
                     if (memberToken) {
                         logger.info(`✅ Found MEMBER token at line ${memberToken.line}: value="${memberToken.value}", referencedFile="${memberToken.referencedFile}"`);
@@ -1357,11 +1348,7 @@ export class DefinitionProvider {
         // Types like base classes (e.g. Class(ce_MetroWizardForm)) may only be included
         // in the parent PROGRAM file, not in the MEMBER module.
         const tokens = this.tokenCache.getTokensByUri(document.uri);
-        const memberToken = tokens?.find(t =>
-            t.line < 10 &&
-            t.value?.toUpperCase() === 'MEMBER' &&
-            t.referencedFile
-        );
+        const memberToken = tokens ? TokenHelper.findMemberHeaderToken(tokens) : undefined;
         if (memberToken?.referencedFile) {
             // #328: owner-project-first redirection
             let parentPath: string | null = resolveViaProjectRedirectionFromUri(memberToken.referencedFile, document.uri);

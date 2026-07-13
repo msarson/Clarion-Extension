@@ -98,6 +98,7 @@ import { pathToCanonicalUri } from './utils/UriUtils';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
+import { TokenHelper } from './utils/TokenHelper';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1288,12 +1289,8 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
  */
 function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
     try {
-        const isProgramFile = tokens.some(t =>
-            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM' && t.line < 5
-        );
-        const memberToken = tokens.find(t =>
-            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile
-        );
+        const isProgramFile = TokenHelper.findProgramHeaderToken(tokens) !== undefined;
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
 
         if (isProgramFile) {
             // Re-validate any open MEMBER files that reference this PROGRAM file

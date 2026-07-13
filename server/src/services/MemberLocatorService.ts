@@ -86,7 +86,7 @@ export class MemberLocatorService {
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
 
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -314,7 +314,7 @@ export class MemberLocatorService {
         }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
             if (parentPath) {
@@ -527,7 +527,7 @@ export class MemberLocatorService {
         const currentDir = path.dirname(currentFilePath);
 
         // 2. MEMBER parent file (and its INCLUDE chain)
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -624,7 +624,7 @@ export class MemberLocatorService {
         if (found) return { token: found, tokens, doc: document };
 
         // 2. MEMBER parent + its include chain
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {

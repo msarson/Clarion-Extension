@@ -54,12 +54,7 @@ export async function validateMissingMapDeclarations(
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Only relevant for MEMBER files
-    const memberToken = tokens.find(t =>
-        t.type === TokenType.ClarionDocument &&
-        t.value.toUpperCase() === 'MEMBER' &&
-        t.line < 5 &&
-        t.referencedFile
-    );
+    const memberToken = TokenHelper.findMemberHeaderToken(tokens);
 
     if (!memberToken?.referencedFile) {
         return [];
@@ -342,11 +337,7 @@ export async function validateMissingImplementations(
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Must be a Clarion source file (PROGRAM or MEMBER)
-    const clarionDoc = tokens.find(t =>
-        t.type === TokenType.ClarionDocument &&
-        (t.value.toUpperCase() === 'PROGRAM' || t.value.toUpperCase() === 'MEMBER') &&
-        t.line < 5
-    );
+    const clarionDoc = TokenHelper.findDocumentHeaderToken(tokens);
 
     if (!clarionDoc) {
         return [];

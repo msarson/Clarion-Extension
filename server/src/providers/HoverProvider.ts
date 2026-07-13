@@ -292,11 +292,7 @@ export class HoverProvider {
             
             // 🔗 Check if MEMBER file exists
             const mapTokens = this.tokenCache.getTokens(document);
-            const memberToken = mapTokens.find(t =>
-                t.value && t.value.toUpperCase() === 'MEMBER' && 
-                t.line < 5 && 
-                t.referencedFile
-            );
+            const memberToken = TokenHelper.findMemberHeaderToken(mapTokens);
             
             if (memberToken && memberToken.referencedFile) {
                 logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
