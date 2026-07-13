@@ -56,6 +56,21 @@ export function evictIncludeChainIndexes(): void {
     includeChainIndexCache.clear();
     siblingLabelIndexCache.clear(); // #345 phase 3
 }
+
+// #345 — per-tier cost attribution for callers that run many findSymbol walks
+// (undeclaredVar augment). Read+reset around a batch to see where time went.
+export interface SymbolFinderPerfStats {
+    globalCalls: number; globalMs: number;
+    siblingCalls: number; siblingMs: number;
+}
+const sfPerfStats: SymbolFinderPerfStats = { globalCalls: 0, globalMs: 0, siblingCalls: 0, siblingMs: 0 };
+export function resetSymbolFinderPerfStats(): void {
+    sfPerfStats.globalCalls = 0; sfPerfStats.globalMs = 0;
+    sfPerfStats.siblingCalls = 0; sfPerfStats.siblingMs = 0;
+}
+export function readSymbolFinderPerfStats(): SymbolFinderPerfStats {
+    return { ...sfPerfStats };
+}
 logger.setLevel("error");
 
 /**
@@ -661,6 +676,20 @@ export class SymbolFinderService {
         document: TextDocument,
         _position: { line: number; character: number }
     ): Promise<SymbolInfo | null> {
+        sfPerfStats.siblingCalls++;
+        const perfT0 = Date.now();
+        try {
+            return await this.findModuleVariableInSiblingMembersInner(word, document, _position);
+        } finally {
+            sfPerfStats.siblingMs += Date.now() - perfT0;
+        }
+    }
+
+    private async findModuleVariableInSiblingMembersInner(
+        word: string,
+        document: TextDocument,
+        _position: { line: number; character: number }
+    ): Promise<SymbolInfo | null> {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
 
@@ -924,6 +953,16 @@ export class SymbolFinderService {
      * @returns SymbolInfo if found, null otherwise
      */
     async findGlobalVariable(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
+        sfPerfStats.globalCalls++;
+        const perfT0 = Date.now();
+        try {
+            return await this.findGlobalVariableInner(word, tokens, document);
+        } finally {
+            sfPerfStats.globalMs += Date.now() - perfT0;
+        }
+    }
+
+    private async findGlobalVariableInner(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
         logger.info(`🔍 findGlobalVariable: searching for "${word}"`);
 
         // Step 1: Search current file for global variable (before first CODE/PROCEDURE)

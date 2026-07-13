@@ -3,7 +3,7 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { SymbolFinderService, resetSymbolFinderPerfStats, readSymbolFinderPerfStats } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
@@ -15,6 +15,7 @@ import LoggerManager from '../../logger';
 // output channel; release users won't see them (no extra noise). Promote to
 // error level temporarily when chasing a regression on the validator path.
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
+const perfLogger = LoggerManager.getLogger('UndeclaredVariableDiagnostics.Perf', 'perf');
 
 /**
  * Issue #62 — opt-in diagnostic for identifiers used in code that don't
@@ -216,18 +217,37 @@ async function augmentDeclaredViaSymbolFinder(
     // knows the name, don't flag it. The SDI lookup is an in-memory map hit, so it runs
     // FIRST — sparing the (more expensive) findSymbol scope walk for genuine variables.
     const sdi = StructureDeclarationIndexer.getInstance();
+    // #345 — attribute where the augment loop's time goes: SDI vs findSymbol,
+    // and within findSymbol the global-include vs sibling-member tiers.
+    const augmentT0 = Date.now();
+    resetSymbolFinderPerfStats();
+    let sdiHits = 0, resolvedCount = 0, unresolvedCount = 0, findSymbolMs = 0;
+    const slowest: Array<{ name: string; ms: number }> = [];
     for (const upperName of candidateNames) {
         await timeSlice();
         try {
             if (sdi.find(upperName).length > 0) {
                 ctx.declaredNames.add(upperName);
+                sdiHits++;
                 continue;
             }
+            const nameT0 = Date.now();
             const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
-            if (resolved) ctx.declaredNames.add(upperName);
+            const nameMs = Date.now() - nameT0;
+            findSymbolMs += nameMs;
+            slowest.push({ name: upperName, ms: nameMs });
+            if (resolved) { ctx.declaredNames.add(upperName); resolvedCount++; }
+            else { unresolvedCount++; }
         } catch (err) {
             logger.info(`[#115] symbolFinder.findSymbol error for "${upperName}": ${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+    const augmentMs = Date.now() - augmentT0;
+    if (augmentMs > 1000) {
+        const sf = readSymbolFinderPerfStats();
+        const top = slowest.sort((a, b) => b.ms - a.ms).slice(0, 5)
+            .map(s => `${s.name}=${s.ms}`).join(', ');
+        perfLogger.info(`📊 PERF: undeclaredVar augment detail | total_ms=${augmentMs}, candidates=${candidateNames.size}, sdi_hits=${sdiHits}, resolved=${resolvedCount}, unresolved=${unresolvedCount}, findSymbol_ms=${findSymbolMs}, global_tier=${sf.globalMs}ms/${sf.globalCalls}calls, sibling_tier=${sf.siblingMs}ms/${sf.siblingCalls}calls, top=[${top}], uri=${document.uri}`);
     }
 }
 
