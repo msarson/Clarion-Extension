@@ -73,6 +73,27 @@ function expectFires(diags: Diagnostic[], name: string, msg?: string): void {
 
 suite('UndeclaredVariableDiagnostics — keyword filter (#124 Phase A)', () => {
 
+    // ─── #345: built-in statements/functions must NOT fire (nor cost lookups) ─
+
+    suite('Built-in statements/functions (#345)', () => {
+
+        test("'OPEN', 'GET', 'CLEAR' are NOT flagged (runtime-provided; 'OPEN' alone cost a 32s chain build)", () => {
+            const diags = runDiagnostic([
+                "TestProc PROCEDURE()",
+                "W WINDOW",
+                "  END",
+                "  CODE",
+                "  OPEN(W)",
+                "  CLEAR(W)",
+                "  GET(W, 1)",
+                "  END",
+            ].join('\n'));
+            expectNoFire(diags, 'OPEN');
+            expectNoFire(diags, 'CLEAR');
+            expectNoFire(diags, 'GET');
+        });
+    });
+
     // ─── RED pins: operator keywords must NOT fire ──────────────────────────
 
     suite('Operator keywords in IF conditions', () => {

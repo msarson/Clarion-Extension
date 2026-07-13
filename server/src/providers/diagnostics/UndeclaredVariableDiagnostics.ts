@@ -3,6 +3,7 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
+import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { SymbolFinderService, resetSymbolFinderPerfStats, readSymbolFinderPerfStats } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
@@ -215,6 +216,10 @@ async function augmentDeclaredViaSymbolFinder(
         // tokenizer emits these as TokenType.Variable; without this filter they trip
         // the SymbolFinder cross-file lookup AND fire false-positive diagnostics.
         if (KeywordService.getInstance().isKeyword(candidate.name)) continue;
+        // #345: built-in statements/functions (OPEN, GET, CLEAR, ...) are not in
+        // the 40-entry keyword list — 'OPEN' alone triggered the full include-
+        // chain cold build (32s measured) hunting a declaration that can't exist.
+        if (BuiltinFunctionService.getInstance().isBuiltin(candidate.name)) continue;
         candidateNames.add(upper);
     }
     if (candidateNames.size === 0) return;
@@ -430,6 +435,9 @@ function detectCheckableName(token: Token): CheckableName | null {
             // real app: it's stoplisted in the reference index, so mayContain answers
             // true conservatively and the sibling walk loaded the whole family for it.
             if (CLARION_STRUCTURAL_WORDS.has(token.value.toLowerCase())) return null;
+            // #345 — built-in statements/functions (OPEN, GET, CLEAR, ...) are
+            // runtime-provided; never flag and never spend lookups on them.
+            if (BuiltinFunctionService.getInstance().isBuiltin(token.value)) return null;
             return { name: token.value, length: token.value.length };
         }
     }
