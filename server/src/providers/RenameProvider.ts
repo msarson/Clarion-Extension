@@ -86,7 +86,7 @@ export class RenameProvider {
             // not be stricter than the operation it gates.
             const locations = await this.referencesProvider.provideReferences(
                 document, position, { includeDeclaration: true },
-                undefined, { includeOmitted: true } // #255 — pre-flight must match provideRename's scope
+                undefined, { includeOmitted: true, crossProjectDll: false } // #255 pre-flight matches provideRename; #330: rename never touches generated consumer MAPs
             );
             if (!locations || locations.length === 0) {
                 throw new ResponseError(
@@ -142,7 +142,10 @@ export class RenameProvider {
             position,
             { includeDeclaration: true },
             undefined,
-            { includeOmitted: true }
+            // #330 tier 2: crossProjectDll OFF — consumer MAP re-declarations are
+            // GENERATED; the durable edit belongs in the .app (see #325). FAR
+            // shows them; rename must not rewrite them.
+            { includeOmitted: true, crossProjectDll: false }
         );
 
         if (!locations || locations.length === 0) {
