@@ -175,7 +175,13 @@
     {
       "name": "CENTER",
       "applicableTo": [
-        "WINDOW"
+        "WINDOW",
+        "ENTRY",
+        "TEXT",
+        "LIST",
+        "COMBO",
+        "PROMPT",
+        "SPIN"
       ],
       "description": "Sets the window to be centered on screen when first opened. The window is positioned at the center of the screen or MDI parent window client area.",
       "propertyEquate": "PROP:Center",
@@ -249,7 +255,11 @@
       "applicableTo": [
         "WINDOW",
         "APPLICATION",
-        "BUTTON"
+        "BUTTON",
+        "CHECK",
+        "RADIO",
+        "ITEM",
+        "MENU"
       ],
       "description": "Sets the icon for the window, application, or button. The filename parameter specifies the .ICO file to use.",
       "propertyEquate": "PROP:Icon",
@@ -370,7 +380,8 @@
       "name": "FROM",
       "applicableTo": [
         "LIST",
-        "COMBO"
+        "COMBO",
+        "SPIN"
       ],
       "description": "Sets the data source for a LIST or COMBO control. The queue parameter specifies the QUEUE structure containing the data to display.",
       "propertyEquate": "PROP:From",
@@ -482,7 +493,8 @@
     {
       "name": "RESIZE",
       "applicableTo": [
-        "WINDOW"
+        "WINDOW",
+        "TEXT"
       ],
       "description": "Sets the window border to allow resizing. The user can drag the window edges to change the window size.",
       "propertyEquate": "PROP:Resize",
@@ -605,7 +617,15 @@
     {
       "name": "ALRT",
       "applicableTo": [
-        "WINDOW"
+        "WINDOW",
+        "BUTTON",
+        "ENTRY",
+        "TEXT",
+        "LIST",
+        "COMBO",
+        "CHECK",
+        "RADIO",
+        "SPIN"
       ],
       "description": "Sets window 'hot' keys. Defines keys that generate an alert when pressed in the window.",
       "propertyEquate": "PROP:Alrt",
@@ -623,7 +643,8 @@
       "applicableTo": [
         "BOX",
         "ELLIPSE",
-        "REGION"
+        "REGION",
+        "PANEL"
       ],
       "description": "Sets the fill color for BOX, ELLIPSE, or REGION controls. The color parameter specifies the interior fill color.",
       "propertyEquate": "PROP:Fill",
@@ -671,7 +692,9 @@
     {
       "name": "BOXED",
       "applicableTo": [
-        "GROUP"
+        "GROUP",
+        "TEXT",
+        "OPTION"
       ],
       "description": "Sets a border around a GROUP of controls. Draws a rectangular border encompassing all controls in the group.",
       "propertyEquate": "PROP:Boxed",
@@ -800,7 +823,14 @@
       "name": "FLAT",
       "applicableTo": [
         "BUTTON",
-        "TOOLBAR"
+        "TOOLBAR",
+        "ENTRY",
+        "TEXT",
+        "LIST",
+        "COMBO",
+        "CHECK",
+        "RADIO",
+        "SPIN"
       ],
       "description": "Sets buttons to have a flat appearance. Buttons appear flat until the mouse hovers over them.",
       "propertyEquate": "PROP:Flat",
@@ -814,7 +844,8 @@
     {
       "name": "MARK",
       "applicableTo": [
-        "LIST"
+        "LIST",
+        "COMBO"
       ],
       "description": "Enables multiple selection mode for LIST controls. Allows the user to select multiple items.",
       "propertyEquate": "PROP:Mark",
@@ -843,7 +874,8 @@
     {
       "name": "COLUMN",
       "applicableTo": [
-        "LIST"
+        "LIST",
+        "COMBO"
       ],
       "description": "Sets list box to use column-based highlighting. The highlight bar extends across all columns.",
       "propertyEquate": "PROP:Column",
@@ -857,7 +889,8 @@
     {
       "name": "GRID",
       "applicableTo": [
-        "LIST"
+        "LIST",
+        "COMBO"
       ],
       "description": "Sets grid line display and color for LIST controls. Shows lines between rows and columns.",
       "propertyEquate": "PROP:Grid",
@@ -873,7 +906,8 @@
     {
       "name": "NOBAR",
       "applicableTo": [
-        "LIST"
+        "LIST",
+        "COMBO"
       ],
       "description": "Removes the highlight bar from LIST controls. Items can be selected but no visual highlight appears.",
       "propertyEquate": "PROP:NoBar",
@@ -887,7 +921,10 @@
     {
       "name": "MASK",
       "applicableTo": [
-        "ENTRY"
+        "ENTRY",
+        "COMBO",
+        "SPIN",
+        "WINDOW"
       ],
       "description": "Sets pattern editing for data entry. The pattern parameter defines input format mask.",
       "propertyEquate": "PROP:Mask",
@@ -931,7 +968,22 @@
     {
       "name": "SCROLL",
       "applicableTo": [
-        "TEXT"
+        "TEXT",
+        "BUTTON",
+        "ENTRY",
+        "LIST",
+        "COMBO",
+        "CHECK",
+        "RADIO",
+        "IMAGE",
+        "LINE",
+        "BOX",
+        "ELLIPSE",
+        "PANEL",
+        "PROGRESS",
+        "REGION",
+        "PROMPT",
+        "SPIN"
       ],
       "description": "Enables scrolling for TEXT control. Allows vertical scrolling through text content.",
       "propertyEquate": "PROP:Scroll",
@@ -973,7 +1025,23 @@
     {
       "name": "FULL",
       "applicableTo": [
-        "WINDOW"
+        "WINDOW",
+        "BUTTON",
+        "ENTRY",
+        "TEXT",
+        "LIST",
+        "COMBO",
+        "CHECK",
+        "RADIO",
+        "IMAGE",
+        "LINE",
+        "BOX",
+        "ELLIPSE",
+        "PANEL",
+        "PROGRESS",
+        "REGION",
+        "PROMPT",
+        "SPIN"
       ],
       "description": "Sets window to full-screen mode. Window occupies the entire display with no borders.",
       "propertyEquate": "PROP:Full",
@@ -1865,7 +1933,9 @@
     {
       "name": "INS",
       "applicableTo": [
-        "ENTRY"
+        "ENTRY",
+        "COMBO",
+        "SPIN"
       ],
       "signatures": [
         {
@@ -1879,7 +1949,9 @@
     {
       "name": "OVR",
       "applicableTo": [
-        "ENTRY"
+        "ENTRY",
+        "COMBO",
+        "SPIN"
       ],
       "signatures": [
         {
@@ -2301,7 +2373,8 @@
       "name": "STD",
       "applicableTo": [
         "BUTTON",
-        "ITEM"
+        "ITEM",
+        "MENU"
       ],
       "signatures": [
         {
@@ -2619,7 +2692,14 @@
         "REPORT",
         "DETAIL",
         "HEADER",
-        "FOOTER"
+        "FOOTER",
+        "TEXT",
+        "CHECK",
+        "RADIO",
+        "IMAGE",
+        "LINE",
+        "BOX",
+        "ELLIPSE"
       ],
       "description": "Specifies attributes for a particular document output type (HTML, XML, TXT, PDF, ALL). A multi-purpose storage tag for information embedded in the generated report WMF file, later parsed and passed to appropriate processing code.",
       "propertyEquate": "PROP:EXTEND",
@@ -2636,7 +2716,23 @@
       "name": "LAYOUT",
       "applicableTo": [
         "WINDOW",
-        "APPLICATION"
+        "APPLICATION",
+        "BUTTON",
+        "ENTRY",
+        "TEXT",
+        "LIST",
+        "COMBO",
+        "CHECK",
+        "RADIO",
+        "IMAGE",
+        "LINE",
+        "BOX",
+        "ELLIPSE",
+        "PANEL",
+        "PROGRESS",
+        "REGION",
+        "PROMPT",
+        "SPIN"
       ],
       "description": "Sets the orientation of window controls and field sequence. Style 1 mirrors the layout (right-to-left). Style 0 maintains left-to-right. Setting LAYOUT on APPLICATION cascades to child windows.",
       "propertyEquate": "PROP:LAYOUT",
