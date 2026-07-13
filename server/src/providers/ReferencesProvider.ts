@@ -1026,13 +1026,29 @@ export class ReferencesProvider {
         // when FRG is empty (test fixtures without graph setup).
         const isLocalClass = !effectiveModuleFile && !!className &&
             this.isClassDeclaredInDocument(className, document);
+
+        // #346: a class declared inside a procedure's DATA section is invisible
+        // outside its file — and sibling members each carry their OWN same-named
+        // class (every generated window has a BRW1), so family scanning returns
+        // other procedures' unrelated instances. Restrict to the current doc.
+        // Module-level local classes keep the family widening (3be2b68d Eve pin:
+        // sibling members hold real instance callers of module-data TYPE classes).
+        const isProcedureLocalClass = isLocalClass &&
+            this.isClassProcedureLocal(className!, document);
         if (isLocalClass) {
-            logger.test(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
+            logger.test(`📌 [FAR] "${className}" is a local class — ${isProcedureLocalClass
+                ? 'procedure-local, restricting to current document'
+                : 'widening search to MEMBER siblings + reverse-includes'}`);
         }
 
-        const filesToSearch = isLocalClass
-            ? this.getLocalClassSearchFiles(document)
-            : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        const filesToSearch = isProcedureLocalClass
+            ? [document.uri]
+            : isLocalClass
+                ? this.getLocalClassSearchFiles(document)
+                : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        if (isProcedureLocalClass) {
+            this.trace({ files_source: 'proc-local-current-doc' });
+        }
 
         this.trace({
             member: memberName,
@@ -2004,6 +2020,25 @@ export class ReferencesProvider {
             t.subType === TokenType.Class &&
             (t.label ?? '').toLowerCase() === nameLower
         );
+    }
+
+    /**
+     * True when the class's declaration in this document sits inside a
+     * procedure's DATA section (between a procedure/method label and its CODE
+     * marker) — procedure-local scope, unreferenceable from other files (#346).
+     */
+    private isClassProcedureLocal(className: string, document: TextDocument): boolean {
+        const tokens = this.tokenCache.getTokens(document);
+        const nameLower = className.toLowerCase();
+        const decl = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            (t.label ?? '').toLowerCase() === nameLower);
+        if (!decl) { return false; }
+        return tokens.some(t =>
+            TokenHelper.isProcedureOrFunction(t) &&
+            t.line < decl.line &&
+            (t.executionMarker?.line ?? t.finishesAt ?? -1) > decl.line);
     }
 
     /**

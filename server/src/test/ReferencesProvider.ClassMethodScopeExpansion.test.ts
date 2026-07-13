@@ -177,6 +177,78 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
         );
     });
 
+    // ─── (2b) BUG PIN #346 — procedure-local class must NOT bleed cross-file ───
+
+    /**
+     * A CLASS declared inside a procedure's DATA section (between the
+     * procedure label and CODE) is invisible outside its file — but every
+     * generated window declares its own `BRW1`, so family-wide scanning
+     * textually matches OTHER procedures' unrelated instances.
+     *
+     * Mark's IBSWorking repro: lens on `BRW1.SetQueueRecord PROCEDURE` in
+     * SelectJobNumber_IBSCommon.clw → is_local_class=true, files=262
+     * (frg-family), results=114 phantom refs, 11.6s.
+     *
+     * Pre-fix: isLocalClass widens to getLocalClassSearchFiles for ALL
+     * local classes; the procedure-local scope discriminator is missing.
+     */
+    test('BUG PIN #346 — procedure-local class method — sibling member instances NOT matched', async () => {
+        const winShape = (procName: string) => [
+            "  MEMBER('main.clw')",                    // line 0
+            '  MAP',                                    // line 1
+            '  END',                                    // line 2
+            `${procName} PROCEDURE`,                    // line 3
+            'BRW1       CLASS(BrowseClass)',            // line 4 — procedure-LOCAL class
+            'Init         PROCEDURE(),VIRTUAL',         // line 5
+            '           END',                           // line 6
+            '  CODE',                                   // line 7
+            '  BRW1.Init()',                            // line 8 — caller (this file's BRW1)
+            '  RETURN',                                 // line 9
+            'BRW1.Init PROCEDURE()',                    // line 10 — impl (lens anchors here)
+            '  CODE',
+            '  RETURN',
+        ].join('\n');
+
+        const fixture = buildMultiFileFixture({
+            files: {
+                'main.clw': '  PROGRAM\n  MAP\n  END\n  CODE\n  RETURN\n',
+                'winA.clw': winShape('ProcA'),
+                'winB.clw': winShape('ProcB'),   // its OWN unrelated BRW1
+            },
+            frg: { programFile: 'main.clw', memberFiles: ['winA.clw', 'winB.clw'] },
+        });
+
+        const docA = fixture.documents['winA.clw'];
+        const winBUri = fixture.uris['winB.clw'].toLowerCase();
+        const winAUri = fixture.uris['winA.clw'].toLowerCase();
+
+        // Cursor on "Init" in winA's impl label (line 10, character 5) — the
+        // lens count path.
+        const refs = await provider.provideReferences(docA, { line: 10, character: 5 },
+            { includeDeclaration: true });
+
+        assert.ok(refs, 'FAR should return references');
+        const uris = refs!.map(r => r.uri.toLowerCase());
+        const lines = refs!.filter(r => r.uri.toLowerCase() === winAUri)
+            .map(r => r.range.start.line).sort((a, b) => a - b);
+
+        // Negative: winB's unrelated BRW1 must NOT appear.
+        assert.ok(
+            !uris.some(u => u === winBUri),
+            'expected NO references in winB.clw (its BRW1 is a DIFFERENT procedure-local class); ' +
+            'got URIs=[' + [...new Set(uris)].join(', ') + '] — procedure-local class bled across the family (#346)'
+        );
+        // Positive: winA's own caller + impl still found.
+        assert.ok(
+            lines.includes(8),
+            'expected line 8 (winA BRW1.Init() caller) IN result; got winA lines=[' + lines.join(',') + ']'
+        );
+        assert.ok(
+            lines.includes(10),
+            'expected line 10 (winA impl) IN result; got winA lines=[' + lines.join(',') + ']'
+        );
+    });
+
     // ─── (3) REGRESSION GUARD — procedure-local variable scope intact ──────
 
     /**
