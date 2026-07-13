@@ -229,8 +229,9 @@ export class ClassConstantsCodeActionProvider {
             const missingConstants = [];
 
             for (const constant of thisClassConstants.constants) {
+                // #335: EQUATEs in INCLUDEd source satisfy compile conditions too
                 const isDefined = await timed(steps, 'constants_check_ms', () =>
-                    constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath));
+                    constantsChecker.isConstantSatisfied(constant.name, cwprojPath ?? projectPath, projectPath));
                 logger.info(`[CodeAction] constant "${constant.name}" defined=${isDefined}`);
                 if (!isDefined) {
                     missingConstants.push(constant);
@@ -333,7 +334,8 @@ export class ClassConstantsCodeActionProvider {
                 
                 if (thisClassConstants && thisClassConstants.constants.length > 0) {
                     for (const constant of thisClassConstants.constants) {
-                        const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
+                        // #335: EQUATEs in INCLUDEd source satisfy compile conditions too
+                        const isDefined = await constantsChecker.isConstantSatisfied(constant.name, cwprojPath ?? projectPath, projectPath);
                         if (!isDefined) {
                             // Avoid duplicates
                             if (!allMissingConstants.find(c => c.name === constant.name)) {
@@ -459,7 +461,8 @@ export class ClassConstantsCodeActionProvider {
                     const missingConstants: Array<{name: string, type: string, relatedFile?: string}> = [];
                     
                     for (const constant of thisClassConstants.constants) {
-                        const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath ?? projectPath);
+                        // #335: EQUATEs in INCLUDEd source satisfy compile conditions too
+                        const isDefined = await constantsChecker.isConstantSatisfied(constant.name, cwprojPath ?? projectPath, projectPath);
                         if (!isDefined) {
                             missingConstants.push(constant);
                         }

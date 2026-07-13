@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as xml2js from 'xml2js';
+import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('ProjectConstantsChecker');
@@ -29,6 +30,28 @@ export class ProjectConstantsChecker {
     async isConstantDefined(constantName: string, projectPath: string): Promise<boolean> {
         const constants = await this.getProjectConstants(projectPath);
         return constants.has(constantName.toLowerCase());
+    }
+
+    /**
+     * #335 — a compile-condition constant is satisfied by EITHER a cwproj
+     * `DefineConstants` entry OR an `EQUATE` declared in source on the
+     * project's include/search paths: shops declare `_ABCDllMode_`-style
+     * constants in `.inc` files INCLUDEd from every main module, and the
+     * compiler accepts both forms for OMIT/COMPILE evaluation. The EQUATE
+     * tier reads the structure declaration index (in-memory hit); when the
+     * index isn't built yet this degrades to the cwproj-only answer.
+     *
+     * @param cwprojPath Path to the .cwproj (or project directory) for the DefineConstants tier
+     * @param projectPath Optional project key for the structure-index lookup
+     */
+    async isConstantSatisfied(constantName: string, cwprojPath: string, projectPath?: string): Promise<boolean> {
+        if (await this.isConstantDefined(constantName, cwprojPath)) return true;
+
+        const sdi = StructureDeclarationIndexer.getInstance();
+        const hits = projectPath && sdi.find(constantName, projectPath).length > 0
+            ? sdi.find(constantName, projectPath)
+            : sdi.find(constantName);
+        return hits.some(d => d.structureType === 'EQUATE' || d.structureType === 'ITEMIZE_EQUATE');
     }
 
     /**
