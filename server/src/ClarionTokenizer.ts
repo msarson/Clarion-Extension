@@ -179,7 +179,8 @@ export class ClarionTokenizer {
             }
             
             // 🚀 PERF: Check if this line enters CODE section (structures are declarations, not execution)
-            if (line.match(/^\s*code\s*$/i)) {
+            // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
+            if (line.match(/^\s*code\s*(!.*)?$/i)) {
                 inCodeSection = true;
             } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
                 inCodeSection = false; // DATA/ROUTINE sections can have structures
@@ -610,14 +611,14 @@ export class ClarionTokenizer {
                 const line = this.lines[lineNum];
                 if (!line) continue;
                 
-                // Check for DATA keyword
-                if (line.match(/^\s*data\s*$/i)) {
+                // Check for DATA keyword (#333: tolerate trailing ! comment)
+                if (line.match(/^\s*data\s*(!.*)?$/i)) {
                     inDataSection = true;
                     continue;
                 }
-                
+
                 // Check for CODE keyword (ends DATA section)
-                if (line.match(/^\s*code\s*$/i)) {
+                if (line.match(/^\s*code\s*(!.*)?$/i)) {
                     inDataSection = false;
                     break;
                 }
@@ -772,7 +773,7 @@ export class ClarionTokenizer {
             // 🚀 PERF: Early exit if procedure has no local data section
             // Procedures without local variables have CODE on the next non-blank line
             const nextLine = this.lines[proc.line + 1]?.trim();
-            if (nextLine && nextLine.match(/^code\s*$/i)) {
+            if (nextLine && nextLine.match(/^code\s*(!.*)?$/i)) {
                 proc.localVariablesAnalyzed = true;
                 continue; // No local variables, skip this procedure
             }
@@ -782,8 +783,8 @@ export class ClarionTokenizer {
                 const line = this.lines[lineNum];
                 if (!line) continue;
                 
-                // Stop at CODE keyword
-                if (line.match(/^\s*code\s*$/i)) {
+                // Stop at CODE keyword (#333: tolerate trailing ! comment)
+                if (line.match(/^\s*code\s*(!.*)?$/i)) {
                     break;
                 }
                 
