@@ -163,14 +163,14 @@ export class IncludeVerifier {
             if (t.referencedFile &&
                 t.value?.toUpperCase() === 'MODULE' &&
                 /\.clw$/i.test(t.referencedFile)) {
-                const resolved = await this.resolveIncludePath(t.referencedFile, baseDir);
+                const resolved = await this.resolveIncludePath(t.referencedFile, baseDir, fromPath);
                 if (resolved && resolved.toLowerCase() !== fromLower) paths.add(resolved);
             }
         }
 
         // 2. Same-basename .clw fallback (e.g. StringTheory.inc -> StringTheory.clw).
         const sameBaseName = path.basename(fromPath).replace(/\.inc$/i, '.clw');
-        const resolvedSame = await this.resolveIncludePath(sameBaseName, baseDir);
+        const resolvedSame = await this.resolveIncludePath(sameBaseName, baseDir, fromPath);
         if (resolvedSame && resolvedSame.toLowerCase() !== fromLower) paths.add(resolvedSame);
 
         return [...paths];
@@ -190,7 +190,9 @@ export class IncludeVerifier {
             if (visited.has(key)) continue;
             visited.add(key);
 
-            const incPath = await this.resolveIncludePath(fileName, dir);
+            // #329: the whole chain resolves through the ROOT file's project —
+            // redirection follows the compile unit, not each intermediate file.
+            const incPath = await this.resolveIncludePath(fileName, dir, baseFilePath);
             if (!incPath) continue;
 
             const subIncludes = await this.parseIncludesFromFilePath(incPath);
@@ -208,26 +210,22 @@ export class IncludeVerifier {
 
     /**
      * Resolves an include filename to an absolute path using redirection or local directory.
+     *
+     * #329: `fromFsPath` is the source file whose include chain is being walked
+     * (the compile unit) — its owning project's redirection answers FIRST, and
+     * the cache is keyed by (filename, from-file) so one project's answer can't
+     * poison another's (same-named per-app includes, Edin's `w_[name]_rc.inc`).
      */
-    private async resolveIncludePath(fileName: string, baseDir: string): Promise<string | null> {
-        const cacheKey = fileName.toLowerCase();
+    private async resolveIncludePath(fileName: string, baseDir: string, fromFsPath: string | null): Promise<string | null> {
+        const cacheKey = `${fileName.toLowerCase()}|${fromFsPath?.toLowerCase() ?? baseDir.toLowerCase()}`;
         const cached = this.pathCache.get(cacheKey);
         const now = Date.now();
         if (cached && (now - cached.timestamp) < IncludeVerifier.CACHE_DURATION) {
             return cached.resolvedPath;
         }
 
-        let resolved: string | null = null;
-        const solutionManager = SolutionManager.getInstance();
-        if (solutionManager?.solution) {
-            for (const project of solutionManager.solution.projects) {
-                const found = project.getRedirectionParser().findFile(fileName);
-                if (found?.path && fs.existsSync(found.path)) {
-                    resolved = found.path;
-                    break;
-                }
-            }
-        }
+        // Owner-project-first, solution-order fallback (#328 shared util).
+        let resolved: string | null = resolveViaProjectRedirection(fileName, fromFsPath);
         if (!resolved) {
             const candidate = path.resolve(baseDir, fileName);
             if (fs.existsSync(candidate)) resolved = candidate;
@@ -494,6 +492,9 @@ export class IncludeVerifier {
             logger.info(`Cleared include cache for ${uri}`);
         } else {
             this.includeCache.clear();
+            // #329: path resolutions are redirection-dependent — drop them on a
+            // full clear (solution reload) alongside the include cache.
+            this.pathCache.clear();
             logger.info('Cleared all include caches');
         }
     }

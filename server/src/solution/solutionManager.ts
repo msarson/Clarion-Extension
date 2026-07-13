@@ -448,20 +448,29 @@ export class SolutionManager {
     private negativeFindCache: Map<string, number> = new Map();
     private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
 
-    public async findFileWithExtension(filename: string): Promise<{ path: string, source: string }> {
+    /**
+     * #329: `fromFsPath` is the source file this lookup acts on behalf of. When
+     * present, the owning project's answer is tried before the solution-order
+     * walk (same rule as #328/#315), and all three caches (positive, negative,
+     * in-flight) are PARTITIONED by owning project — a filename-alone key would
+     * let the first caller's project poison the answer for every other
+     * project's callers (Edin's same-named per-app `w_[name]_rc.inc` layout).
+     */
+    public async findFileWithExtension(filename: string, fromFsPath?: string): Promise<{ path: string, source: string }> {
         if (!filename) {
             logger.warn(`⚠️ Filename is undefined or null`);
             return { path: '', source: "" };
         }
-        const key = filename.toLowerCase();
+        const owner = fromFsPath ? this.findProjectForFile(fromFsPath) : undefined;
+        const key = `${filename.toLowerCase()}|${owner?.path?.toLowerCase() ?? ''}`;
 
         // Positive cache (existence revalidated via the runtime index — cheap)
-        if (this.fileCache.has(filename)) {
-            const cachedPath = this.fileCache.get(filename)!;
+        if (this.fileCache.has(key)) {
+            const cachedPath = this.fileCache.get(key)!;
             if (DirectoryFileIndex.getRuntime().existsPath(cachedPath)) {
                 return { path: cachedPath, source: "cache" };
             }
-            this.fileCache.delete(filename);
+            this.fileCache.delete(key);
         }
 
         // Negative cache — a name that just missed will miss again; don't re-run the search
@@ -475,7 +484,7 @@ export class SolutionManager {
         if (inflight) {
             return inflight;
         }
-        const search = this.findFileWithExtensionInner(filename, key);
+        const search = this.findFileWithExtensionInner(filename, key, owner);
         this.inflightFinds.set(key, search);
         try {
             return await search;
@@ -484,21 +493,26 @@ export class SolutionManager {
         }
     }
 
-    private async findFileWithExtensionInner(filename: string, key: string): Promise<{ path: string, source: string }> {
+    private async findFileWithExtensionInner(filename: string, key: string, owner?: ClarionProjectServer): Promise<{ path: string, source: string }> {
         try {
-            logger.info(`🔍 Searching for file: ${filename}`);
+            logger.info(`🔍 Searching for file: ${filename}${owner ? ` (owner-first: ${owner.name})` : ''}`);
             const ext = path.extname(filename).toLowerCase();
             const runtimeIndex = DirectoryFileIndex.getRuntime();
             const baseNameLower = path.basename(filename).toLowerCase();
 
+            // #329: owner project first in every tier; solution order as fallback.
+            const projects = owner
+                ? [owner, ...this.solution.projects.filter(p => p !== owner)]
+                : this.solution.projects;
+
             // 1. Project source-file lists (authoritative post-#293) — first hit wins.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 if (!project.sourceFiles || project.sourceFiles.length === 0) continue;
                 const sourceFile = project.sourceFiles.find(sf => sf?.name && sf.name.toLowerCase() === baseNameLower);
                 if (sourceFile?.relativePath) {
                     const fullPath = path.join(project.path, sourceFile.relativePath);
                     if (runtimeIndex.existsPath(fullPath)) {
-                        this.fileCache.set(filename, fullPath);
+                        this.fileCache.set(key, fullPath);
                         return { path: fullPath, source: "project" };
                     }
                 }
@@ -506,20 +520,20 @@ export class SolutionManager {
 
             // 2. Redirection resolution per project — findFile already answers existence from the
             //    runtime index, so this is a memory walk; first hit wins.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 const redResult = project.getRedirectionParser().findFile(filename);
                 if (redResult?.path && runtimeIndex.existsPath(redResult.path)) {
-                    this.fileCache.set(filename, redResult.path);
+                    this.fileCache.set(key, redResult.path);
                     return { path: redResult.path, source: "redirected" };
                 }
             }
 
             // 3. Raw search-path joins as the last tier — memory lookups via the index.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 for (const searchPath of project.getSearchPaths(ext)) {
                     const fullPath = path.join(searchPath, filename);
                     if (runtimeIndex.existsPath(fullPath)) {
-                        this.fileCache.set(filename, fullPath);
+                        this.fileCache.set(key, fullPath);
                         return { path: fullPath, source: "project-search-path" };
                     }
                 }

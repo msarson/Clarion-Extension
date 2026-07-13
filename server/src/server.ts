@@ -2421,7 +2421,11 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
-            const result = await solutionManager.findFileWithExtension(params.filename);
+            // #329: resolve owner-project-first on behalf of the requesting source file.
+            const fromFsPath = params.sourceUri
+                ? decodeURIComponent(params.sourceUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\')
+                : undefined;
+            const result = await solutionManager.findFileWithExtension(params.filename, fromFsPath);
             if (result && result.path) {
                 logger.info(`✅ Found file: ${result.path} (source: ${result.source})`);
                 return result;
@@ -2430,7 +2434,7 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
                 if (!path.extname(params.filename)) {
                     for (const ext of serverSettings.defaultLookupExtensions) {
                         const filenameWithExt = `${params.filename}${ext}`;
-                        const resultWithExt = await solutionManager.findFileWithExtension(filenameWithExt);
+                        const resultWithExt = await solutionManager.findFileWithExtension(filenameWithExt, fromFsPath);
                         if (resultWithExt && resultWithExt.path) {
                             logger.info(`✅ Found file with added extension: ${resultWithExt.path} (source: ${resultWithExt.source})`);
                             return resultWithExt;
@@ -2698,7 +2702,9 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager) {
                 const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
-                const result = await solutionManager.findFileWithExtension(fileName);
+                // #329: the sought file's own path is the owner anchor here.
+                const fromFsPath = decodeURIComponent(params.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+                const result = await solutionManager.findFileWithExtension(fileName, fromFsPath);
 
                 if (result.path && fs.existsSync(result.path)) {
                     const fileContent = fs.readFileSync(result.path, 'utf8');

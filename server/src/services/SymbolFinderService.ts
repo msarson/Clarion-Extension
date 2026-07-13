@@ -1054,7 +1054,7 @@ export class SymbolFinderService {
                     // cache-identity bugs.
                     const solutionManager = SolutionManager.getInstance();
                     const viaRedirection = solutionManager
-                        ? await solutionManager.findFileWithExtension(parentFile)
+                        ? await solutionManager.findFileWithExtension(parentFile, currentFilePath)
                         : null;
                     if (viaRedirection?.path && fs.existsSync(viaRedirection.path)) {
                         logger.info(`✅ #300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
@@ -1198,7 +1198,7 @@ export class SymbolFinderService {
             if (!loaded) {
                 const solutionManager = SolutionManager.getInstance();
                 const viaRedirection = solutionManager
-                    ? await solutionManager.findFileWithExtension(includeName)
+                    ? await solutionManager.findFileWithExtension(includeName, hostPath)
                     : null;
                 if (viaRedirection?.path) {
                     loaded = this.loadTokensForFile(viaRedirection.path);
