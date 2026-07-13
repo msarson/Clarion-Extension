@@ -2,7 +2,6 @@ import { workspace, window as vscodeWindow, ExtensionContext, Disposable, comman
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { SolutionCache } from '../SolutionCache';
-import { DocumentManager } from '../documentManager';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
 import {
     completeInitializationStatusBar,
@@ -15,7 +14,6 @@ import { refreshSolutionTreeView, setToolbarGraphStatus } from '../views/ViewMan
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
-import { refreshOpenDocuments } from '../document/DocumentRefreshManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { readIdePreferences } from './ClarionIdePreferences';
 import LoggerManager from '../utils/LoggerManager';
@@ -37,13 +35,11 @@ logger.setLevel(
  * @param context - Extension context
  * @param disposables - Array of disposables to clean up
  * @param initializeSolution - Function to initialize the solution
- * @param documentManager - Document manager instance
  */
 export async function workspaceHasBeenTrusted(
     context: ExtensionContext,
     disposables: Disposable[],
-    initializeSolution: (context: ExtensionContext, refreshDocs?: boolean) => Promise<void>,
-    documentManager: DocumentManager | undefined
+    initializeSolution: (context: ExtensionContext, refreshDocs?: boolean) => Promise<void>
 ): Promise<void> {
     logger.info("✅ Workspace has been trusted or refreshed. Initializing...");
 
@@ -179,7 +175,7 @@ export async function workspaceHasBeenTrusted(
             }
             
             // ✅ Register language features NOW
-            registerLanguageFeatures(context, documentManager);
+            registerLanguageFeatures(context);
 
             // After initialization, check if redirection path was resolved.
             // If empty, settings are incomplete — prompt the user to configure.
@@ -216,14 +212,12 @@ export async function workspaceHasBeenTrusted(
  * @param refreshDocs - Whether to refresh open documents
  * @param client - Language client instance
  * @param reinitializeEnvironment - Function to reinitialize environment
- * @param documentManager - Document manager instance
  */
 export async function initializeSolution(
     context: ExtensionContext,
     refreshDocs: boolean = false,
     client: LanguageClient | undefined,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<void>
 ): Promise<void> {
     const solutionName = globalSolutionFile ? path.basename(globalSolutionFile) : undefined;
     updateInitializationStatusBar('loading-solution', solutionName);
@@ -368,13 +362,6 @@ export async function initializeSolution(
             logger.info(`⏱️ [STARTUP] clarion/solutionReady received: ${params.projectCount} projects — refreshing solution tree and open documents`);
             updateInitializationStatusBar('indexing-solution', `${params.projectCount} projects`);
 
-            // The eager pipeline may still be creating the DocumentManager — wait briefly for it
-            // rather than silently running the document refresh as a no-op (previously
-            // refreshOpenDocuments(undefined) "completed" in ~25ms doing nothing).
-            for (let i = 0; i < 40 && !documentManager; i++) {
-                await new Promise(resolve => setTimeout(resolve, 250));
-            }
-
             const solutionCache = SolutionCache.getInstance();
             // #297 fix 3 (audit H1): arm the activation suppression BEFORE any cache clear or tree
             // re-render. Previously refresh(true) cleared the findFile cache and the whole-tree
@@ -386,9 +373,6 @@ export async function initializeSolution(
                 await solutionCache.refresh(true);
                 logger.info(`⏱️ [STARTUP] solutionCache.refresh(true) in solutionReady handler done in ${Date.now() - refreshStart}ms (${solutionCache.getSolutionInfo()?.projects?.length ?? 0} projects)`);
                 await refreshSolutionTreeView();
-                const deferredRdStart = Date.now();
-                await refreshOpenDocuments(documentManager);
-                logger.info(`⏱️ [STARTUP] deferred refreshOpenDocuments complete in ${Date.now() - deferredRdStart}ms`);
             } finally {
                 solutionCache.markActivationComplete();
             }
@@ -446,7 +430,7 @@ export async function initializeSolution(
     logger.info("🔄 Initializing solution environment...");
     
     // ✅ Continue initializing the solution cache and document manager
-    documentManager = await reinitializeEnvironment(refreshDocs);
+    await reinitializeEnvironment(refreshDocs);
     logger.info(`⏱️ [STARTUP] reinitializeEnvironment complete`);
     logger.info("✅ Environment initialized");
     
@@ -454,7 +438,7 @@ export async function initializeSolution(
     logger.info(`⏱️ [STARTUP] refreshSolutionTreeView complete`);
     logger.info("✅ Solution tree view refreshed");
     
-    registerLanguageFeatures(context, documentManager);
+    registerLanguageFeatures(context);
     logger.info("✅ Language features registered");
     
     await commands.executeCommand("setContext", "clarion.solutionOpen", true);
@@ -463,7 +447,7 @@ export async function initializeSolution(
     
     // Create file watchers for the solution, project, and redirection files
     const fwStart = Date.now();
-    await createSolutionFileWatchers(context, reinitializeEnvironment, documentManager);
+    await createSolutionFileWatchers(context, reinitializeEnvironment);
     logger.info(`⏱️ [STARTUP] createSolutionFileWatchers complete in ${Date.now() - fwStart}ms`);
     logger.info("✅ File watchers created");
     
@@ -478,17 +462,12 @@ export async function initializeSolution(
         logger.info(`⏱️ [STARTUP] solutionReady handler already completed the startup refresh — no duplicate pass`);
     } else {
         logger.info(`⏱️ [STARTUP] startup completion deferred to the clarion/solutionReady handler (single pipeline)`);
-        const dm = documentManager;
         startupFallbackTimer = setTimeout(async () => {
             if (startupRefreshDone || startupRefreshStarted) return;
             startupRefreshDone = true;
             logger.warn(`⚠️ [STARTUP] clarion/solutionReady not received within 30s — running fallback completion`);
             solutionCache.beginActivationRefresh();
-            try {
-                await refreshOpenDocuments(dm);
-            } finally {
-                solutionCache.markActivationComplete();
-            }
+            solutionCache.markActivationComplete();
             completeInitializationStatusBar(solutionName);
         }, 30_000);
     }
@@ -503,16 +482,13 @@ export async function initializeSolution(
  * Reinitializes the solution environment (cache and document manager)
  * @param refreshDocs - Whether to refresh open documents
  * @param client - Language client instance
- * @param documentManager - Current document manager instance
- * @returns New document manager instance
  */
 export async function reinitializeEnvironment(
     refreshDocs: boolean = false,
-    client: LanguageClient | undefined,
-    documentManager: DocumentManager | undefined
-): Promise<DocumentManager> {
+    client: LanguageClient | undefined
+): Promise<void> {
     const startTime = performance.now();
-    logger.info("🔄 Initializing SolutionCache and DocumentManager...");
+    logger.info("🔄 Initializing SolutionCache...");
 
     // Get the SolutionCache singleton
     const solutionCache = SolutionCache.getInstance();
@@ -551,32 +527,6 @@ export async function reinitializeEnvironment(
         logger.warn("⚠️ No solution file path available. SolutionCache will not be initialized.");
     }
     
-    // Mark activation as complete AFTER document refresh so that clarion/findFile
-    // server calls are suppressed during refreshOpenDocuments (prevents 100+ queued
-    // requests from blocking the LSP pipe for 5+ seconds after startup).
-    // markActivationComplete() is called by the caller after refreshOpenDocuments returns.
-
-    if (documentManager) {
-        logger.info("🔄 Disposing of existing DocumentManager instance...");
-        documentManager.dispose();
-        documentManager = undefined;
-    }
-
-    // Create a new DocumentManager (no longer needs SolutionParser)
-    const dmStartTime = performance.now();
-    logger.info(`⏱️ [STARTUP] DocumentManager.create starting`);
-    documentManager = await DocumentManager.create();
-    const dmEndTime = performance.now();
-    logger.info(`⏱️ [STARTUP] DocumentManager.create done in ${(dmEndTime - dmStartTime).toFixed(0)}ms`);
-    logger.info(`✅ DocumentManager created in ${(dmEndTime - dmStartTime).toFixed(2)}ms`);
-
-    if (refreshDocs) {
-        logger.info("🔄 Refreshing open documents...");
-        await refreshOpenDocuments(documentManager);
-    }
-
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
-    
-    return documentManager;
 }

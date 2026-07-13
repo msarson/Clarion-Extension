@@ -1,6 +1,5 @@
 import { window, workspace, ConfigurationTarget, Uri, commands } from 'vscode';
 import * as path from 'path';
-import { DocumentManager } from './documentManager';
 import { ClarionInstallationDetector, ClarionCompilerVersion } from './utils/ClarionInstallationDetector';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './utils/LoggerManager';
@@ -530,18 +529,6 @@ export class ClarionExtensionCommands {
 
 
 
-  static async followLink(documentManager: DocumentManager) {
-    const editor = window.activeTextEditor;
-    if (editor) {
-      const position = editor.selection.active;
-      const linkUri = documentManager.getLinkUri(editor.document.uri, position);
-      if (linkUri) {
-        commands.executeCommand('vscode.open', linkUri);
-      } else {
-        window.showInformationMessage('No link found at the cursor position.');
-      }
-    }
-  }
-
-
+  // followLink deleted under #341 — it was never registered as a command, and
+  // link navigation is served by the language server's document links.
 }

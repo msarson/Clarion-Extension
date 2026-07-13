@@ -1,9 +1,9 @@
 import { ExtensionContext, Disposable } from 'vscode';
-import { DocumentManager } from '../documentManager';
 // Implementation provider, document links AND hover all live server-side now;
-// the dead client copies were deleted under #326. Hover retirement (the last
-// piece) landed after Mark's IDE smoke confirmed the server's INCLUDE/MODULE/
-// SECTION file-link hovers cover everything the client card showed.
+// the dead client copies were deleted under #326, and the DocumentManager that
+// fed them went in the #341 sweep. Hover retirement (the last surface) landed
+// after Mark's IDE smoke confirmed the server's INCLUDE/MODULE/SECTION
+// file-link hovers cover everything the client card showed.
 import { ClarionDecorator } from '../ClarionDecorator';
 import { UnreachableCodeDecorator } from '../UnreachableCodeDecorator';
 import { LanguageClientManager } from '../LanguageClientManager';
@@ -20,16 +20,11 @@ let unreachableCodeDecoratorDisposable: Disposable | null = null;
 /**
  * Registers all language feature providers
  * @param context - Extension context
- * @param documentManager - Document manager instance
  */
-export function registerLanguageFeatures(context: ExtensionContext, documentManager: DocumentManager | undefined) {
+export function registerLanguageFeatures(context: ExtensionContext) {
     logger.info("registerLanguageFeatures called");
-    
-    if (!documentManager) {
-        logger.warn("⚠️ Cannot register language features: documentManager is undefined!");
-        return;
-    }
-    
+
+
     // Document links are now served by the language server (DocumentLinkProvider.ts)
     // which uses the FileRelationshipGraph — no client-side registration needed.
 
