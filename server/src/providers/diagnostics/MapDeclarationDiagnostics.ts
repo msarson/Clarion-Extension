@@ -114,6 +114,29 @@ export async function validateMissingMapDeclarations(
             .map(t => [t.label!.toUpperCase(), t] as [string, Token])
     );
 
+    // Case 2c (#338): BARE prototypes in this file's MODULE-LEVEL MAP. The
+    // Language Reference's own MAP example is exactly this shape — a MEMBER
+    // module declaring `ComputeIt PROCEDURE` bare in its MAP and implementing
+    // it in the same file — so a bare entry with a same-file implementation is
+    // a self-declaration (the canonical hand-written member-module pattern),
+    // not merely a forward declaration for an external procedure. Signatures
+    // still compared. Bare entries WITHOUT a same-file implementation keep
+    // their forward-declaration role — nothing else changes for them.
+    const bareModuleMapDeclaredTokens = new Map<string, Token>(
+        tokens
+            .filter(t => {
+                if (t.subType !== TokenType.MapProcedure || !t.label) return false;
+                const parent = t.parent;
+                if (!parent || parent.type !== TokenType.Structure) return false;
+                if (parent.value.toUpperCase() !== 'MAP') return false;
+                const grandParent = parent.parent;
+                return grandParent === undefined ||
+                    (grandParent.subType !== TokenType.GlobalProcedure &&
+                     grandParent.subType !== TokenType.MethodImplementation);
+            })
+            .map(t => [t.label!.toUpperCase(), t] as [string, Token])
+    );
+
     // Case 1b: MAP contains INCLUDE directives — collect procedure declarations
     // from included INC files (app-generated code puts declarations in _GL1.INC etc.).
     // Clarion's preprocessor inlines INC content at the INCLUDE position, so a
@@ -231,6 +254,34 @@ export async function validateMissingMapDeclarations(
                         procName,
                         parentFileUri: document.uri,
                         declLine: procLevelDecl.line,
+                        implLine: proc.line,
+                        currentFileUri: document.uri
+                    }
+                });
+            }
+            continue;
+        }
+
+        // Case 2c (#338): bare prototype in this file's own module-level MAP —
+        // self-declaration per the Language Reference's MAP example; compare
+        // signatures locally like Cases 1/2.
+        const bareModuleDecl = bareModuleMapDeclaredTokens.get(procName.toUpperCase());
+        if (bareModuleDecl) {
+            const declLine = docLines[bareModuleDecl.line] ?? '';
+            const implLine = docLines[proc.line] ?? '';
+            const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
+            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
+                diagnostics.push({
+                    severity: DiagnosticSeverity.Warning,
+                    range: { start: { line: proc.line, character: 0 }, end: { line: proc.line, character: procName.length } },
+                    message: `Procedure '${procName}' signature does not match its local MAP declaration.`,
+                    source: 'clarion',
+                    code: 'map-signature-mismatch',
+                    data: {
+                        procName,
+                        parentFileUri: document.uri,
+                        declLine: bareModuleDecl.line,
                         implLine: proc.line,
                         currentFileUri: document.uri
                     }
