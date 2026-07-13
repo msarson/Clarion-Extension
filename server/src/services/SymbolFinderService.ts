@@ -43,7 +43,12 @@ interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string
 const includeChainIndexCache = new Map<string, ChainIndexEntry>();
 interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
 const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
-const CHAIN_INDEX_TTL_MS = 30_000;
+// #345: the cold build tokenizes the ABC/libsrc universe (17-32s measured on
+// IBSWorking) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
+// run. The #340 watcher eviction is the primary invalidation (workspace file
+// changes); the TTL only backstops edits the watcher can't see (libsrc edited
+// outside the workspace), so it can be generous.
+const CHAIN_INDEX_TTL_MS = 600_000;
 let chainIndexBuildCount = 0;
 
 /** Test observability — number of chain-index builds since process start. */
@@ -616,29 +621,11 @@ export class SymbolFinderService {
      * Find a module-level variable (declared before first PROCEDURE)
      */
     /**
-     * #350 — Language Reference, Field Qualification: "You must use this Field
-     * Qualification syntax to reference any field in a complex structure that
-     * does not have a PRE attribute." A Label inside a data-structure chain
-     * (QUEUE/GROUP/FILE/RECORD/VIEW/REPORT) with NO prefixed ancestor is only
-     * addressable as Structure.Field — no unqualified word may bind to it,
-     * even one textually equal to a compound label (the generated browse
-     * queue's 'JCA:StartedDate LIKE(...)' shadowing the FILE,PRE(JCA) field).
-     * CLASS/INTERFACE/MAP members are excluded (their scoping is separate).
+     * #350 — see TokenHelper.requiresDotQualification (moved there so the
+     * definition path's SymbolDefinitionResolver shares the same rule).
      */
-    private static readonly DOT_ONLY_STRUCTURES = new Set(['QUEUE', 'GROUP', 'FILE', 'RECORD', 'VIEW', 'REPORT']);
     static requiresDotQualification(t: Token): boolean {
-        let anc = t.parent;
-        let sawDataStructure = false;
-        while (anc) {
-            if (anc.structurePrefix) return false;
-            if (anc.type === TokenType.Structure) {
-                const v = anc.value.toUpperCase();
-                if (v === 'CLASS' || v === 'INTERFACE' || v === 'MAP' || v === 'MODULE') return false;
-                if (SymbolFinderService.DOT_ONLY_STRUCTURES.has(v)) sawDataStructure = true;
-            }
-            anc = anc.parent;
-        }
-        return sawDataStructure;
+        return TokenHelper.requiresDotQualification(t);
     }
 
     findModuleVariable(

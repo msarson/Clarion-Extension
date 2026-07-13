@@ -40,6 +40,32 @@ export class TokenHelper {
     }
 
     /**
+     * #350 — Language Reference, Field Qualification: "You must use this Field
+     * Qualification syntax to reference any field in a complex structure that
+     * does not have a PRE attribute." A Label inside a data-structure chain
+     * (QUEUE/GROUP/FILE/RECORD/VIEW/REPORT) with NO prefixed ancestor is only
+     * addressable as Structure.Field — no unqualified word may bind to it,
+     * even one textually equal to a compound label (the generated browse
+     * queue's 'JCA:StartedDate LIKE(...)' shadowing the FILE,PRE(JCA) field).
+     * CLASS/INTERFACE/MAP members are excluded (their scoping is separate).
+     */
+    private static readonly DOT_ONLY_STRUCTURES = new Set(['QUEUE', 'GROUP', 'FILE', 'RECORD', 'VIEW', 'REPORT']);
+    public static requiresDotQualification(t: Token): boolean {
+        let anc = t.parent;
+        let sawDataStructure = false;
+        while (anc) {
+            if (anc.structurePrefix) return false;
+            if (anc.type === TokenType.Structure) {
+                const v = anc.value.toUpperCase();
+                if (v === 'CLASS' || v === 'INTERFACE' || v === 'MAP' || v === 'MODULE') return false;
+                if (TokenHelper.DOT_ONLY_STRUCTURES.has(v)) sawDataStructure = true;
+            }
+            anc = anc.parent;
+        }
+        return sawDataStructure;
+    }
+
+    /**
      * Gets the innermost scope at a line (optimized version using DocumentStructure)
      * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
      * @param structure DocumentStructure instance

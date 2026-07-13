@@ -85,6 +85,19 @@ export class SymbolDefinitionResolver {
                     logger.info(`❌ PREFIX-REJECT (token): qualifier "${qualifier}" does not match PRE(${token.structurePrefix}) / structure "${structureLabel}"`);
                     continue;
                 }
+            } else if (TokenHelper.requiresDotQualification(token)) {
+                // #350: fields of a PRE-LESS data structure are only addressable
+                // as Structure.Field (Field Qualification rule). The generated
+                // browse queue's compound labels ('JCA:StartedDate LIKE(...)')
+                // textually match the full word but must not bind — unless the
+                // word's own qualifier IS the enclosing structure's label
+                // (SaveQueue.Field1 stays resolvable).
+                const qualifier = hasPrefix ? word.substring(0, colonIndex > 0 ? colonIndex : dotIndex) : '';
+                const structureLabel = token.parent?.label ?? token.parent?.value ?? '';
+                if (qualifier.toUpperCase() !== structureLabel.toUpperCase()) {
+                    logger.info(`❌ DOT-ONLY-REJECT (#350): "${token.value}" is a field of PRE-less structure "${structureLabel}" — Structure.Field required`);
+                    continue;
+                }
             }
 
             // Check if this is a structure field that requires a prefix

@@ -12,6 +12,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from '../utils/TokenHelper';
+import { SymbolDefinitionResolver } from '../utils/SymbolDefinitionResolver';
 import { setServerInitialized } from '../serverState';
 import { TokenType } from '../tokenizer/TokenTypes';
 import {
@@ -388,6 +389,59 @@ MyProc PROCEDURE()
                 'must NOT bind to the PRE-less queue field at win.clw:5 — that field is only addressable as ' +
                 'Queue:Browse:1.JCA:StartedDate (Field Qualification rule); got ' +
                 `${result!.location.uri}:${result!.location.line}`);
+        });
+
+        test('BUG PIN #350 (definition path) — findAllLabelCandidates rejects the shadowing queue compound label', () => {
+            // F12 rides SymbolDefinitionResolver.findAllLabelCandidates BEFORE
+            // findSymbol — the queue field has no structurePrefix so it passed
+            // the #265 check and won the scope-priority sort (Mark's retest:
+            // 'Goto is still taking me to the queue definition').
+            const code = [
+                "  MEMBER('prog.clw')",
+                '  MAP',
+                '  END',
+                'SelectJob PROCEDURE',
+                'Queue:Browse:1       QUEUE',                        // no PRE()
+                'JCA:StartedDate        LIKE(JCA:StartedDate)',      // line 5
+                '                     END',
+                '  CODE',
+                '  IF JCA:StartedDate > 0',
+                '  END',
+                '  RETURN',
+            ].join('\n');
+            const doc = createDocument(code, 'test://symbol350c.clw');
+            const tokens = tokenCache.getTokens(doc);
+
+            const resolver = new SymbolDefinitionResolver();
+            const candidates = resolver.findAllLabelCandidates('JCA:StartedDate', doc, tokens);
+            assert.strictEqual(candidates.length, 0,
+                'the PRE-less queue compound label must NOT be a definition candidate for the unqualified word; got lines=[' +
+                candidates.map(c => c.range.start.line).join(',') + ']');
+            tokenCache.clearTokens('test://symbol350c.clw');
+        });
+
+        test('#350 REGRESSION GUARD (definition path) — Structure.Field qualified lookup still finds the PRE-less field', () => {
+            const code = [
+                "  MEMBER('prog.clw')",
+                '  MAP',
+                '  END',
+                'P PROCEDURE',
+                'SaveQueue            QUEUE',       // no PRE()
+                'Field1                 LONG',      // line 5
+                '                     END',
+                '  CODE',
+                '  SaveQueue.Field1 = 1',
+                '  RETURN',
+            ].join('\n');
+            const doc = createDocument(code, 'test://symbol350d.clw');
+            const tokens = tokenCache.getTokens(doc);
+
+            const resolver = new SymbolDefinitionResolver();
+            const candidates = resolver.findAllLabelCandidates('SaveQueue.Field1', doc, tokens);
+            assert.ok(candidates.some(c => c.range.start.line === 5),
+                'SaveQueue.Field1 (qualified with the structure label) must still resolve to the field at line 5; got lines=[' +
+                candidates.map(c => c.range.start.line).join(',') + ']');
+            tokenCache.clearTokens('test://symbol350d.clw');
         });
 
         test('#350 REGRESSION GUARD — queue with PRE keeps resolving its fields via the prefix', async () => {
