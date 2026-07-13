@@ -47,6 +47,8 @@ export class IncludeVerifier {
     // #344: memoized owner-project key per from-file (findProjectForFile walks
     // projects x sourceFiles - too hot to run per resolveIncludePath call).
     private ownerKeyCache = new Map<string, { key: string; at: number }>();
+    // #345: reachable-include-name set per host file (fingerprint-verified + TTL).
+    private reachableSetCache = new Map<string, { at: number; fingerprint: string; set: Set<string> }>();
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     private static readonly CACHE_DURATION = 60000; // 60 seconds
 
@@ -181,18 +183,42 @@ export class IncludeVerifier {
     }
 
     /**
-     * Checks if a class file is reachable via any transitive include chain (BFS, cycle-safe).
+     * Checks if a class file is reachable via any transitive include chain.
+     *
+     * #345: the BFS previously ran PER CLASS CHECKED — a validation pass with
+     * six class-typed variables paid six full walks of the include universe
+     * (6 × 5.2s measured on the real 40-project solution), and the class-
+     * constants code action paid another. The reachable-include-name SET is
+     * now computed ONCE per host file and answered by membership; identity is
+     * the host's direct-include fingerprint (same discipline as #344's chain
+     * index — a path alone is not identity), TTL-bounded for chain-file edits.
      */
     private async hasTransitiveInclude(classFileName: string, directIncludes: IncludeStatement[], baseFilePath: string): Promise<boolean> {
+        const set = await this.getReachableIncludeNameSet(directIncludes, baseFilePath);
+        return set.has(path.basename(classFileName).toLowerCase());
+    }
+
+    /** #345 — every include NAME reachable from the host (direct + transitive), cached. */
+    private async getReachableIncludeNameSet(directIncludes: IncludeStatement[], baseFilePath: string): Promise<Set<string>> {
+        const key = baseFilePath.toLowerCase();
+        const fingerprint = directIncludes.map(i => i.fileName.toLowerCase()).sort().join(';');
+        const cached = this.reachableSetCache.get(key);
+        const now = Date.now();
+        if (cached && cached.fingerprint === fingerprint && (now - cached.at) < IncludeVerifier.CACHE_DURATION) {
+            return cached.set;
+        }
+
+        const set = new Set<string>();
         const baseDir = path.dirname(baseFilePath);
         const visited = new Set<string>();
         const queue: Array<{ fileName: string; baseDir: string }> = directIncludes.map(inc => ({ fileName: inc.fileName, baseDir }));
+        for (const inc of directIncludes) set.add(inc.fileName.toLowerCase());
 
         while (queue.length > 0) {
             const { fileName, baseDir: dir } = queue.shift()!;
-            const key = fileName.toLowerCase();
-            if (visited.has(key)) continue;
-            visited.add(key);
+            const visitKey = fileName.toLowerCase();
+            if (visited.has(visitKey)) continue;
+            visited.add(visitKey);
 
             // #329: the whole chain resolves through the ROOT file's project —
             // redirection follows the compile unit, not each intermediate file.
@@ -200,16 +226,18 @@ export class IncludeVerifier {
             if (!incPath) continue;
 
             const subIncludes = await this.parseIncludesFromFilePath(incPath);
-            if (this.hasInclude(classFileName, subIncludes)) return true;
-
             const subDir = path.dirname(incPath);
             for (const sub of subIncludes) {
-                if (!visited.has(sub.fileName.toLowerCase())) {
+                const subKey = sub.fileName.toLowerCase();
+                set.add(subKey);
+                if (!visited.has(subKey)) {
                     queue.push({ fileName: sub.fileName, baseDir: subDir });
                 }
             }
         }
-        return false;
+
+        this.reachableSetCache.set(key, { at: now, fingerprint, set });
+        return set;
     }
 
     /**
@@ -521,6 +549,7 @@ export class IncludeVerifier {
             // full clear (solution reload) alongside the include cache.
             this.pathCache.clear();
             this.ownerKeyCache.clear(); // #344
+            this.reachableSetCache.clear(); // #345
             logger.info('Cleared all include caches');
         }
     }

@@ -146,4 +146,32 @@ suite('Issue #344 — include-chain perf contracts', () => {
             try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
         }
     });
+
+    test('#345: reachable-include set computed once per host (reference-equal on repeat)', async () => {
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), '345-reach-'));
+        try {
+            fs.writeFileSync(path.join(tmpRoot, 'a.inc'), "  INCLUDE('b.inc'),ONCE\r\n");
+            fs.writeFileSync(path.join(tmpRoot, 'b.inc'), 'BVar  LONG\r\n');
+            const host = path.join(tmpRoot, 'main.clw');
+            fs.writeFileSync(host, '  PROGRAM\r\n  CODE\r\n');
+
+            (IncludeVerifier as unknown as { instance: unknown }).instance = undefined;
+            const verifier = IncludeVerifier.getInstance() as unknown as {
+                getReachableIncludeNameSet(directs: Array<{ fileName: string; hasOnce: boolean; lineNumber: number }>, base: string): Promise<Set<string>>;
+            };
+            const directs = [{ fileName: 'a.inc', hasOnce: true, lineNumber: 1 }];
+
+            const s1 = await verifier.getReachableIncludeNameSet(directs, host);
+            const s2 = await verifier.getReachableIncludeNameSet(directs, host);
+            assert.strictEqual(s2, s1, 'repeat lookups must serve the cached set (the per-class BFS was 6 x 5.2s measured)');
+            assert.ok(s1.has('a.inc') && s1.has('b.inc'), 'set must carry direct + transitive names');
+
+            // Fingerprint identity: changed direct includes must rebuild.
+            const s3 = await verifier.getReachableIncludeNameSet([{ fileName: 'b.inc', hasOnce: true, lineNumber: 1 }], host);
+            assert.notStrictEqual(s3, s1, 'a changed direct-include fingerprint must not serve the stale set');
+        } finally {
+            (IncludeVerifier as unknown as { instance: unknown }).instance = undefined;
+            try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
+        }
+    });
 });
