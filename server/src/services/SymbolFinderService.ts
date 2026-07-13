@@ -1352,12 +1352,26 @@ export class SymbolFinderService {
             }
             for (const tok of included.tokens) {
                 if (tok.type !== TokenType.Label || tok.start !== 0) continue;
-                if (tok.parent !== undefined) continue;
                 if (tok.line >= includedBoundary) continue;
                 if (procedureLines.has(tok.line)) continue;
-                const k = tok.value.toLowerCase();
-                if (!names.has(k)) {
-                    names.set(k, { uri: included.document.uri, line: tok.line, character: tok.start });
+                if (tok.parent === undefined) {
+                    const k = tok.value.toLowerCase();
+                    if (!names.has(k)) {
+                        names.set(k, { uri: included.document.uri, line: tok.line, character: tok.start });
+                    }
+                    continue;
+                }
+                // #347: structure member — reachable only as PREFIX:Label, via the
+                // nearest ancestor structure carrying a non-empty PRE() (the
+                // JCA:StartedDate shape: FILE,PRE(JCA) → Record RECORD,PRE() →
+                // field). Bare member names stay un-indexed (#265: PRE()'d fields
+                // need their qualifier).
+                let anc: Token | undefined = tok.parent;
+                while (anc && !anc.structurePrefix) { anc = anc.parent; }
+                if (!anc?.structurePrefix) continue;
+                const pk = `${anc.structurePrefix.toLowerCase()}:${tok.value.toLowerCase()}`;
+                if (!names.has(pk)) {
+                    names.set(pk, { uri: included.document.uri, line: tok.line, character: tok.start });
                 }
             }
 
