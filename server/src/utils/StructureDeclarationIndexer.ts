@@ -23,11 +23,14 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * warm builds then cost one stat per file instead of a read + scan.
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
-const DISK_CACHE_VERSION = 1;
+// v2 (#362): entries now also carry procedure declarations (`procs`).
+const DISK_CACHE_VERSION = 2;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
     decls: StructureDeclarationInfo[];
+    /** #362 — procedure/method declarations from the same scan (may be absent in a v1 cache; treated as []). */
+    procs?: ProcedureDeclarationInfo[];
 }
 
 interface SdiDiskCacheFile {
@@ -102,6 +105,7 @@ export interface StructureIndex {
 /** Minimal interface consumed by providers — allows easy substitution/testing */
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
+    findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
     findInFile(fileName: string, projectPath?: string): StructureDeclarationInfo[];
     getOrBuildIndex(projectPath: string): Promise<StructureIndex>;
     buildIndex(projectPath: string): Promise<StructureIndex>;
@@ -331,6 +335,13 @@ export function scanSourceForProcedures(
 export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     private static instance: StructureDeclarationIndexer;
     private indexes: Map<string, StructureIndex> = new Map();
+    /**
+     * #362 — procedure index, parallel to `indexes`, keyed by the same normalized
+     * project key: procNameLower → all procedure/method declarations with that name.
+     * Kept separate from the type `indexes` so procedure names never appear in the
+     * type `find()` results (the #361 hover gate would regress).
+     */
+    private procIndexes: Map<string, Map<string, ProcedureDeclarationInfo[]>> = new Map();
     /** In-flight build promises — prevents duplicate parallel builds for the same project */
     private pendingBuilds: Map<string, Promise<StructureIndex>> = new Map();
 
@@ -534,6 +545,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     }
                 }
                 reusedFromDisk = Object.keys(diskCache.files).length;
+                // #362 — build the procedure index from the same cached entries.
+                this.procIndexes.set(this.normalizeKey(projectPath), this.buildProcIndex(Object.values(diskCache.files)));
                 const index: StructureIndex = { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
                 const duration = Date.now() - startTime;
                 this.lastBuildStats = { files: fileCount, scanned: 0, reusedFromDisk, ms: duration };
@@ -568,6 +581,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             total = scanTotal;
             scanned = scanScanned;
             reusedFromDisk = scanReused;
+            // #362 — build the procedure index from the freshly-scanned entries.
+            this.procIndexes.set(this.normalizeKey(projectPath), this.buildProcIndex(Object.values(freshEntries)));
 
             // Only rewrite the disk cache when something actually changed — a fully-warm build
             // (everything reused) would otherwise re-stringify ~70k declarations for nothing.
@@ -648,10 +663,10 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     freshEntries[key] = cached;
                     return cached.decls;
                 }
-                const decls = await this.scanFile(f);
+                const scanResult = await this.scanFile(f);
                 scanned++;
-                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls };
-                return decls;
+                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls: scanResult.decls, procs: scanResult.procs };
+                return scanResult.decls;
             }));
             for (const decls of batchResults) {
                 total += decls.length;
@@ -693,6 +708,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 index.byName.clear();
                 for (const [k, v] of byName) index.byName.set(k, v);
                 index.lastIndexed = Date.now();
+                // #362 — swap the procedure index in place too.
+                this.procIndexes.set(key, this.buildProcIndex(Object.values(freshEntries)));
                 await this.saveDiskCache(projectPath, freshEntries);
             }
             this.lastValidationStats = { files: allFiles.length, scanned, reusedFromDisk, drift, ms: Date.now() - vStart };
@@ -804,21 +821,62 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return results;
     }
 
+    /**
+     * #362 — case-insensitive procedure lookup across all indexed projects (or a
+     * specific one). Answers "where is procedure/method X declared?" from the
+     * index — no include-chain walk, no tokenize. Empty when the proc index isn't
+     * built yet (callers fall back to their existing walk).
+     */
+    findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[] {
+        const key = name.toLowerCase();
+        if (projectPath) {
+            const idx = this.procIndexes.get(this.normalizeKey(projectPath));
+            if (idx) return idx.get(key) ?? [];
+            // Fall through to cross-index search (mirrors find()'s #290 behaviour).
+        }
+        for (const idx of this.procIndexes.values()) {
+            const hit = idx.get(key);
+            if (hit?.length) return hit;
+        }
+        return [];
+    }
+
     clearCache(): void {
         this.indexes.clear();
+        this.procIndexes.clear();
     }
 
     clearProjectCache(projectPath: string): void {
-        this.indexes.delete(this.normalizeKey(projectPath));
+        const key = this.normalizeKey(projectPath);
+        this.indexes.delete(key);
+        this.procIndexes.delete(key);
     }
 
-    private async scanFile(filePath: string): Promise<StructureDeclarationInfo[]> {
+    /** #362 — scan a file for both structure declarations and procedure declarations. */
+    private async scanFile(filePath: string): Promise<{ decls: StructureDeclarationInfo[]; procs: ProcedureDeclarationInfo[] }> {
         try {
             const source = await fs.promises.readFile(filePath, 'utf-8');
-            return scanSourceForDeclarations(source, filePath);
+            return {
+                decls: scanSourceForDeclarations(source, filePath),
+                procs: scanSourceForProcedures(source, filePath)
+            };
         } catch {
-            return [];
+            return { decls: [], procs: [] };
         }
+    }
+
+    /** #362 — build a name→procedures index from a set of cache entries. */
+    private buildProcIndex(entries: Iterable<SdiDiskCacheEntry>): Map<string, ProcedureDeclarationInfo[]> {
+        const byProcName = new Map<string, ProcedureDeclarationInfo[]>();
+        for (const entry of entries) {
+            for (const p of entry.procs ?? []) {
+                const k = p.name.toLowerCase();
+                let bucket = byProcName.get(k);
+                if (!bucket) { bucket = []; byProcName.set(k, bucket); }
+                bucket.push(p);
+            }
+        }
+        return byProcName;
     }
 
     private extractSearchPaths(entries: RedirectionEntry[]): string[] {
