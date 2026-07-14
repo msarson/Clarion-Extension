@@ -33,6 +33,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
+const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
 
 // ─── #344: include-chain global-name index ──────────────────────────────
 // One walk per host file instead of one walk per unresolved name (#334's
@@ -1503,6 +1504,15 @@ export class SymbolFinderService {
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
 
+            // #362 — proc index before BOTH cross-file variable tiers (no locals
+            // exist here to shadow, so it is unconditionally safe). Skips the
+            // include-chain global index build and the sibling family build.
+            const procNoScope = await this.findProcedureViaIndex(word, document);
+            if (procNoScope) {
+                logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
+                return procNoScope;
+            }
+
             // #319 (reopen): global BEFORE the sibling walk. Globals like
             // GlobalResponse occur in EVERY member module, so the index prune
             // can't help the walk — and the parent lookup is one file. Clarion
@@ -1510,14 +1520,6 @@ export class SymbolFinderService {
             // module data is not (the walk stays as a last-resort finder).
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
-
-            // #362 — proc index before the sibling walk (no locals exist here to
-            // shadow, so it is unconditionally safe in the no-scope branch).
-            const procNoScope = await this.findProcedureViaIndex(word, document);
-            if (procNoScope) {
-                logger.info(`✅ Found as indexed procedure (no-scope, skipped tier-6 walk): ${word}`);
-                return procNoScope;
-            }
 
             const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
             if (siblingModuleResult) return siblingModuleResult;
@@ -1561,6 +1563,21 @@ export class SymbolFinderService {
             return result;
         }
 
+        // 3b. #362 — a name the procedure index knows is a PROCEDURE (a MAP/MODULE
+        // prototype in an INCLUDEd library header, e.g. NetTalk's NetDebugTrace) is
+        // neither a global nor a module variable — the two cross-file tiers below
+        // BOTH pay to prove that the hard way: findGlobalVariable builds the host's
+        // #344 include-chain global index, and the sibling walk builds the whole
+        // program family's label index (~15s each on a big program). Since a name
+        // in the procedure index cannot also be a variable (same namespace in
+        // Clarion), resolve it here — after the cheap in-document tiers so a
+        // same-named local still shadows — and skip BOTH expensive tiers.
+        result = await this.findProcedureViaIndex(word, document);
+        if (result) {
+            logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
+            return result;
+        }
+
         // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
         // Globals like GlobalResponse occur in EVERY member module (the index
         // prune can't help), and the parent lookup is one file vs a 161-file
@@ -1569,19 +1586,6 @@ export class SymbolFinderService {
         result = await this.findGlobalVariable(word, tokens, document);
         if (result) {
             logger.info(`✅ Found as global variable: ${word}`);
-            return result;
-        }
-
-        // 4b. #362 — a name the procedure index knows is a PROCEDURE (a MAP/MODULE
-        // prototype in an INCLUDEd library header, e.g. NetTalk's NetDebugTrace) is
-        // NOT a module variable. Resolve it straight from the index — loading only
-        // the declaring file — BEFORE the tier-6 sibling walk, whose family label
-        // index build cost ~15s on a 279-file program hunting a variable that
-        // cannot exist. Runs after the local/global tiers so a same-named local
-        // still shadows (design: proc fast-path AFTER local tiers).
-        result = await this.findProcedureViaIndex(word, document);
-        if (result) {
-            logger.info(`✅ Found as indexed procedure (skipped tier-6 walk): ${word}`);
             return result;
         }
 
@@ -1765,24 +1769,51 @@ export class SymbolFinderService {
         const hits = StructureDeclarationIndexer.getInstance().findProcedure(word);
         if (hits.length === 0) return null;
 
+        // TRUST the index. Its scanner only records MAP/MODULE-context prototypes
+        // and column-0 procedure declarations, so a hit IS a real declaration —
+        // dropping it through to the ~15s sibling-member VARIABLE walk is never the
+        // right answer. We still try a token re-confirm for a PRECISE column and
+        // to skip the (rare) case where a hit's file no longer tokenizes as a
+        // MODULE prototype, but we resolve on the FIRST hit regardless: a stale
+        // column is a cosmetic cursor offset; a 15s freeze is the bug.
         const wordLower = word.toLowerCase();
-        for (const hit of hits) {
-            const loaded = this.loadTokensForFile(hit.filePath);
-            if (!loaded) continue;
-            const declToken = this.findModuleScopedProcToken(loaded.tokens, wordLower);
-            if (!declToken) continue;
-            logger.info(`✅ #362: "${word}" resolved via procedure index → ${path.basename(hit.filePath)}:${declToken.line} (${hits.length} index hit(s))`);
-            return {
-                token: declToken,
-                type: 'PROCEDURE',
-                scope: { token: declToken, type: 'module' },
-                location: { uri: loaded.document.uri, line: declToken.line, character: declToken.start },
-                originalWord: word,
-                searchWord: word
-            };
+        const hit = hits[0];
+        const loaded = this.loadTokensForFile(hit.filePath);
+        let tok: Token | undefined;
+        let confirmed = false;
+        if (loaded) {
+            const moduleScoped = this.findModuleScopedProcToken(loaded.tokens, wordLower);
+            if (moduleScoped) { tok = moduleScoped; confirmed = true; }
+            else {
+                // Lenient: any token with this name on the indexed line (covers a
+                // shorthand prototype the module-scoped check missed, e.g. an
+                // unpaired MODULE range in an odd header layout).
+                tok = loaded.tokens.find(t => t.line === hit.line && t.value.toLowerCase() === wordLower);
+            }
         }
-        logger.info(`🛈 #362: "${word}" has ${hits.length} procedure-index hit(s) but none confirmed as a MODULE-scoped prototype — falling through`);
-        return null;
+        const uri = loaded ? loaded.document.uri : pathToCanonicalUri(hit.filePath);
+        const line = tok ? tok.line : hit.line;
+        const character = tok ? tok.start : 0;
+        const token = tok ?? ({ value: word, type: TokenType.Label, line, start: character } as unknown as Token);
+
+        perfLogger.perf("proc index fast-path", {
+            word,
+            hits: hits.length,
+            file: path.basename(hit.filePath),
+            line,
+            confirmed: String(confirmed),
+            loaded: String(!!loaded),
+            resolved: 'true'
+        });
+
+        return {
+            token,
+            type: 'PROCEDURE',
+            scope: { token, type: 'module' },
+            location: { uri, line, character },
+            originalWord: word,
+            searchWord: word
+        };
     }
 
     /**
