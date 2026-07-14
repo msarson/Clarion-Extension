@@ -444,6 +444,13 @@ export class ClarionProjectServer {
 
                     pathSet.add(resolvedPath);
                 }
+
+                // #356: pipe stop marker — dirs from entries past a matching
+                // stop-entry are unreachable to the IDE's search; don't offer
+                // them as search paths either.
+                if (entry.stopsSearch) {
+                    break;
+                }
             }
         }
 

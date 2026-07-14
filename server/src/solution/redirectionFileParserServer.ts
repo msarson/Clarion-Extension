@@ -33,6 +33,14 @@ export interface RedirectionEntry {
   section: string;
   extension: string;
   paths: string[];
+  /**
+   * #356 — the entry's dir list ended with the `|` stop marker. Per the
+   * decompiled IDE (RedirectionFile.Section.Item): dirs after the pipe on the
+   * same line are dropped at parse time, and once a lookup consults a
+   * mask-matching stop-entry the ENTIRE search ends — later entries, chained
+   * REDs, and fallbacks are never reached.
+   */
+  stopsSearch?: boolean;
 }
 
 /**
@@ -454,20 +462,15 @@ export class RedirectionFileParserServer {
             const mask = trimmed.substring(0, equalPos).trim();
             const raw = trimmed.substring(equalPos + 1).trim();
             
-            // Pre-allocate array size for better performance
-            const pathParts = raw.split(";");
-            const paths = new Array(pathParts.length);
-            
-            for (let j = 0; j < pathParts.length; j++) {
-              const resolved = this.resolveMacro(pathParts[j].trim());
-              paths[j] = resolved;
-            }
-            
-            const entry = {
+            // #356: pipe stop marker handled in the shared splitter.
+            const { paths, stopsSearch } = this.buildEntryPaths(raw);
+
+            const entry: RedirectionEntry = {
               redFile: redFileToParse,
               section: currentSection,
               extension: mask,
-              paths
+              paths,
+              ...(stopsSearch ? { stopsSearch: true } : {})
             };
             
             entries.push(entry);
@@ -579,30 +582,25 @@ export class RedirectionFileParserServer {
           if (equalPos > 0) {
             const mask = trimmed.substring(0, equalPos).trim();
             const raw = trimmed.substring(equalPos + 1).trim();
-            
-            // Pre-allocate array size for better performance
-            const pathParts = raw.split(";");
-            const paths = new Array(pathParts.length);
-            
-            for (let j = 0; j < pathParts.length; j++) {
-              const resolved = this.resolveMacro(pathParts[j].trim());
-              paths[j] = resolved;
-            }
-            
-            const entry = {
+
+            // #356: pipe stop marker handled in the shared splitter.
+            const { paths, stopsSearch } = this.buildEntryPaths(raw);
+
+            const entry: RedirectionEntry = {
               redFile: redFileToParse,
               section: currentSection,
               extension: mask,
-              paths
+              paths,
+              ...(stopsSearch ? { stopsSearch: true } : {})
             };
-            
+
             entries.push(entry);
-            
+
             // If this is an include file, also add to the include entries
             if (!isFirst) {
               includeEntries.push(entry);
             }
-            
+
             logger.info(`Added entry: ${mask} = ${paths.join(';')} in section [${currentSection}]`);
           }
         }
@@ -619,6 +617,38 @@ export class RedirectionFileParserServer {
     }
 
     return entries;
+  }
+
+  /**
+   * #356 — split an entry's dir list, honouring the `|` stop marker exactly
+   * like the decompiled IDE's Section.Item ctor: the pipe is checked on the
+   * RAW segment and again on the macro-EXPANDED result (a macro can expand to
+   * a pipe-terminated value); either way the pipe is stripped, the dir kept,
+   * the remaining dirs on the line dropped, and the entry marked stopsSearch.
+   */
+  private buildEntryPaths(raw: string): { paths: string[]; stopsSearch: boolean } {
+    const parts = raw.split(';');
+    const paths: string[] = [];
+    let stopsSearch = false;
+    for (const part of parts) {
+      let p = part.trim();
+      if (p.endsWith('|')) {
+        stopsSearch = true;
+        p = p.slice(0, -1).trim();
+      }
+      if (p.length > 0) {
+        let resolved = this.resolveMacro(p);
+        if (resolved.endsWith('|')) {
+          stopsSearch = true;
+          resolved = resolved.slice(0, -1);
+        }
+        if (resolved.length > 0) {
+          paths.push(resolved);
+        }
+      }
+      if (stopsSearch) break;
+    }
+    return { paths, stopsSearch };
   }
 
   private resolveMacro(input: string): string {
@@ -759,16 +789,24 @@ export class RedirectionFileParserServer {
                 source: FilePathSource.Redirected,
                 entry: entry
               };
-              
+
               const duration = Date.now() - t0;
               logger.debug(`[RED][resolve:end] name="${filename}" → ${normalizedCandidate} durMs=${duration}`);
               return result;
             }
           }
+          // #356: pipe stop marker — once a mask-matching stop-entry has been
+          // consulted without a hit, the IDE ends the ENTIRE search (later
+          // entries, chained REDs, and all fallbacks are never reached).
+          if (entry.stopsSearch) {
+            const duration = Date.now() - t0;
+            logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pipe stop marker) durMs=${duration}`);
+            return null;
+          }
         }
       }
     }
-    
+
     // Tier 2: explicit project-root probe (3161ea89). Replaces the implicit
     // behavior previously emergent from the synthetic *.* catch-all. Returns
     // FilePathSource.Project (not Redirected) since this is a direct probe,
@@ -864,7 +902,11 @@ export class RedirectionFileParserServer {
     
     // Create an array of promises to check all possible paths in parallel
     const checkPromises: Promise<ResolvedFilePath | null>[] = [];
-    
+
+    // #356: set when a mask-matching stop-entry (`|`) was consulted — no
+    // later entries are collected and the tier 2/3 fallbacks are suppressed.
+    let walledOff = false;
+
     // If we have redirection entries, search through them
     if (this.entries.length > 0) {
       for (const entry of this.entries) {
@@ -920,13 +962,26 @@ export class RedirectionFileParserServer {
             
             checkPromises.push(checkPromise);
           }
+          // #356: pipe stop marker — collect nothing past a consulted
+          // mask-matching stop-entry (mirrors the sync path's hard return).
+          if (entry.stopsSearch) {
+            walledOff = true;
+            break;
+          }
         }
       }
     }
-    
+
     // Wait for all checks to complete and find the first successful result
     const results = await Promise.all(checkPromises);
     let result = results.find(result => result !== null) || null;
+
+    // #356: a miss behind the wall is final — no tier 2/3 fallbacks.
+    if (!result && walledOff) {
+      const duration = Date.now() - t0;
+      logger.debug(`[RED][resolve:end] name="${filename}" → NOT_FOUND (pipe stop marker) durMs=${duration}`);
+      return null;
+    }
 
     // Tier 2: explicit project-root probe (3161ea89). Replaces the implicit
     // behavior previously emergent from the synthetic *.* catch-all. Returns
