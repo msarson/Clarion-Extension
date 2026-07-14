@@ -2827,21 +2827,23 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 });
 
 // Handle definition requests
-connection.onDefinition(async (params) => {
-    
+connection.onDefinition(async (params, token) => {
+
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
         return null;
     }
-    
+
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         logger.test(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
-    
+
     try {
-        const definition = await definitionProvider.provideDefinition(document, params.position);
+        // #360: thread the LSP cancellation token so a giving-up user can abort a
+        // slow F12 (parity with onImplementation), and so the trace records it.
+        const definition = await definitionProvider.provideDefinition(document, params.position, token);
         if (definition) {
             logger.info(`✅ Found definition for ${params.textDocument.uri}`);
         } else {
@@ -3386,8 +3388,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [358 BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [358 BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [360-INSTR BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [360-INSTR BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

@@ -1,4 +1,4 @@
-import { Definition, Location, Position, Range, DocumentSymbol } from 'vscode-languageserver-protocol';
+import { Definition, Location, Position, Range, DocumentSymbol, CancellationToken } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { SolutionManager } from '../solution/solutionManager';
 import * as path from 'path';
@@ -28,6 +28,7 @@ import { resolveViaProjectRedirection, resolveViaProjectRedirectionFromUri } fro
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
+import { DefinitionTrace } from './utils/DefinitionTrace';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error");
@@ -63,7 +64,10 @@ export class DefinitionProvider {
      * @param position The position within the document
      * @returns A Definition (Location or Location[]) or null if no definition is found
      */
-    public async provideDefinition(document: TextDocument, position: Position): Promise<Definition | null> {
+    public async provideDefinition(document: TextDocument, position: Position, token?: CancellationToken): Promise<Definition | null> {
+        // #360 — per-call instrumentation. The heartbeat starts NOW so it spans
+        // the whole call; emitIfSlow() in the finally covers every return path.
+        const trace = new DefinitionTrace(Date.now());
         try {
             // Get tokens once for reuse throughout the method
             const tokens = this.tokenCache.getTokens(document);
@@ -121,7 +125,8 @@ export class DefinitionProvider {
             }
 
             const word = document.getText(wordRange);
-            
+            trace.symbol = word;
+
             // Get the line to check context
             const line = document.getText({
                 start: { line: position.line, character: 0 },
@@ -674,9 +679,19 @@ export class DefinitionProvider {
                 // Don't return null yet - continue to check other resolution methods
             }
 
+            // #360: between-phase cancellation checkpoint. Cheap early-out if the
+            // user has already given up before the heaviest phase. (Deep cancellation
+            // INSIDE the resolver — for the case where one phase blocks for tens of
+            // seconds — is the phase-2 fix once instrumentation names the tier.)
+            if (token?.isCancellationRequested) { trace.cancelled = true; return null; }
+
             // Next, check if this is a reference to a variable or other symbol
             // Do this BEFORE checking MAP procedure implementations to avoid false positives
-            const symbolDefinition = await this.findSymbolDefinition(word, document, position);
+            // #360: findSymbolDefinition is the prime 38s suspect ("runs for minutes
+            // on large solutions" per the fast-path guard above) — time it explicitly.
+            trace.route = 'symbolDefinition';
+            const symbolDefinition = await trace.time('symbolDefinition',
+                () => this.findSymbolDefinition(word, document, position));
             if (symbolDefinition) {
                 return symbolDefinition;
             }
@@ -704,7 +719,9 @@ export class DefinitionProvider {
             }
 
             // Next, check if this is a reference to a Clarion structure (queue, window, view, etc.)
-            const structureDefinition = await this.findStructureDefinition(word, document, position);
+            trace.route = 'structureDefinition';
+            const structureDefinition = await trace.time('structureDefinition',
+                () => this.findStructureDefinition(word, document, position));
             if (structureDefinition) {
                 return structureDefinition;
             }
@@ -712,7 +729,9 @@ export class DefinitionProvider {
             // Check if word is a CLASS/INTERFACE/QUEUE/GROUP type name via the structure index.
             // The SDI is pre-built on solution load and is O(1) per lookup — check it BEFORE
             // walking the include chain (findTypeInIncludes) which can be slow on large solutions.
-            const classLocation = await this.findClassTypeDefinition(word, document);
+            trace.route = 'classTypeDefinition';
+            const classLocation = await trace.time('classTypeDefinition',
+                () => this.findClassTypeDefinition(word, document));
             if (classLocation) {
                 return classLocation;
             }
@@ -720,7 +739,11 @@ export class DefinitionProvider {
             // Check if this word is a type name (QUEUE/GROUP/etc) declared in an INCLUDE file
             // Handles F12 on type names in LIKE(TypeName), QUEUE(TypeName), etc.
             // Fallback for types not covered by the SDI (e.g. not yet indexed).
-            const typeDefInIncludes = await this.findTypeInIncludes(word, document);
+            // #360: an include-chain walk — potential 38s culprit on large solutions.
+            trace.route = 'typeInIncludes';
+            trace.fallbackEntered = true;
+            const typeDefInIncludes = await trace.time('typeInIncludes',
+                () => this.findTypeInIncludes(word, document));
             if (typeDefInIncludes) {
                 return typeDefInIncludes;
             }
@@ -728,16 +751,21 @@ export class DefinitionProvider {
             // Finally, check if this is a file reference
             // This is the lowest priority - only look for files if no local definitions are found
             if (this.fileResolver.isLikelyFileReference(word, document, position, tokens)) {
-                return await this.fileResolver.findFileDefinition(word, document.uri);
+                trace.route = 'fileReference';
+                return await trace.time('fileReference',
+                    () => this.fileResolver.findFileDefinition(word, document.uri));
             }
 
             return null;
         } catch (error) {
             logger.error(`Error providing definition: ${error instanceof Error ? error.message : String(error)}`);
             return null;
+        } finally {
+            trace.cancelled = trace.cancelled || (token?.isCancellationRequested ?? false);
+            trace.emitIfSlow();
         }
     }
-    
+
     /**
      * Finds the definition of a structure field reference
      * Handles both dot notation (Structure.Field) and prefix notation (PREFIX:Field)
