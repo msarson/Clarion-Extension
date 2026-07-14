@@ -1564,6 +1564,19 @@ export class SymbolFinderService {
             return result;
         }
 
+        // 4b. #362 — a name the procedure index knows is a PROCEDURE (a MAP/MODULE
+        // prototype in an INCLUDEd library header, e.g. NetTalk's NetDebugTrace) is
+        // NOT a module variable. Resolve it straight from the index — loading only
+        // the declaring file — BEFORE the tier-6 sibling walk, whose family label
+        // index build cost ~15s on a 279-file program hunting a variable that
+        // cannot exist. Runs after the local/global tiers so a same-named local
+        // still shadows (design: proc fast-path AFTER local tiers).
+        result = await this.findProcedureViaIndex(word, document);
+        if (result) {
+            logger.info(`✅ Found as indexed procedure (skipped tier-6 walk): ${word}`);
+            return result;
+        }
+
         result = await this.findModuleVariableInSiblingMembers(word, document, position);
         if (result) {
             logger.info(`✅ Found as sibling MEMBER module variable: ${word}`);
@@ -1714,6 +1727,75 @@ export class SymbolFinderService {
             originalWord: word,
             searchWord: word
         };
+    }
+
+    /**
+     * #362 — resolve a cross-file PROCEDURE from the declaration index instead of
+     * the tier-6 sibling-member VARIABLE walk. The index (a cheap regex scan) knows
+     * where MAP/MODULE prototypes live — e.g. NetTalk's `NetDebugTrace` inside a
+     * `module('')` block of NetMap.inc. We load ONLY the declaring file the index
+     * points at and confirm the declaration with the SAME module-scoped check the
+     * hover walk uses (MapProcedureResolver.findModuleScopedProcDeclLine) — parity
+     * by construction. Nothing else is tokenized, and crucially the tier-6 family
+     * label index (~15s on a 279-file program) is never built for a procedure that
+     * cannot be a module variable.
+     *
+     * Scope is reported as 'module' so the DefinitionProvider cross-file
+     * accessibility gate (which only re-checks 'global' results) passes the
+     * navigation through untouched — a library header prototype is always a valid
+     * jump target for its call site. A NON-module-scoped index hit (e.g. a bare
+     * col-0 global impl) is deliberately NOT resolved here; it returns null and the
+     * caller falls through to the unchanged tiers, so this can only speed up, never
+     * change an answer.
+     */
+    private async findProcedureViaIndex(word: string, document: TextDocument): Promise<SymbolInfo | null> {
+        // Procedure names never contain dots (a dotted word is member access) —
+        // and the index keys methods by their dotted name, which this tier is not
+        // trying to resolve. Skip the index probe for anything qualified.
+        if (word.includes('.') || word.includes(':')) return null;
+
+        const hits = StructureDeclarationIndexer.getInstance().findProcedure(word);
+        if (hits.length === 0) return null;
+
+        const wordLower = word.toLowerCase();
+        for (const hit of hits) {
+            const loaded = this.loadTokensForFile(hit.filePath);
+            if (!loaded) continue;
+            const declToken = this.findModuleScopedProcToken(loaded.tokens, wordLower);
+            if (!declToken) continue;
+            logger.info(`✅ #362: "${word}" resolved via procedure index → ${path.basename(hit.filePath)}:${declToken.line} (${hits.length} index hit(s))`);
+            return {
+                token: declToken,
+                type: 'PROCEDURE',
+                scope: { token: declToken, type: 'module' },
+                location: { uri: loaded.document.uri, line: declToken.line, character: declToken.start },
+                originalWord: word,
+                searchWord: word
+            };
+        }
+        logger.info(`🛈 #362: "${word}" has ${hits.length} procedure-index hit(s) but none confirmed as a MODULE-scoped prototype — falling through`);
+        return null;
+    }
+
+    /**
+     * #362 — the module-scoped declaration test, matching
+     * MapProcedureResolver.findModuleScopedProcDeclLine so the F12 index fast-path
+     * and the hover walk agree by construction: a MapProcedure/Function token named
+     * `nameLower` sitting INSIDE a MODULE block. Returns the token (for its exact
+     * line/character), or null.
+     */
+    private findModuleScopedProcToken(tokens: Token[], nameLower: string): Token | null {
+        const moduleRanges = tokens
+            .filter(t => t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        if (moduleRanges.length === 0) return null;
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+            moduleRanges.some(r => t.line > r.start && t.line < r.end)
+        );
+        return decl ?? null;
     }
 
     /**
