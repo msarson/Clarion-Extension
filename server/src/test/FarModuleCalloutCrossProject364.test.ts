@@ -29,10 +29,13 @@ import { ReferencesProvider } from '../providers/ReferencesProvider';
 import { ClarionProjectServer } from '../solution/clarionProjectServer';
 import { ClarionSourcerFileServer } from '../solution/clarionSourceFileServer';
 import { SolutionManager } from '../solution/solutionManager';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { serverSettings } from '../serverSettings';
 
 suite('FAR module-callout cross-project (#364)', () => {
     let root: string;
     let savedSm: SolutionManager | null;
+    let savedLibsrc: string[] = [];
     const docs = new Map<string, TextDocument>();
 
     // SQL project — mixed-case impl filename, UPPER-case MODULE reference.
@@ -160,12 +163,22 @@ suite('FAR module-callout cross-project (#364)', () => {
         await FileRelationshipGraph.getInstance().buildInBackground(paths);
         ReferenceCountIndex.getInstance().reset();
         await ReferenceCountIndex.getInstance().buildInBackground(paths);
+
+        // #362 — build the SDI procedure index so findProcedureViaIndex fires,
+        // matching the REAL resolution path (proc index → INC) that the lens uses.
+        savedLibsrc = serverSettings.libsrcPaths;
+        serverSettings.libsrcPaths = [sqlDir, prvDir];
+        StructureDeclarationIndexer.getInstance().clearCache();
+        await StructureDeclarationIndexer.getInstance().buildIndex(sqlDir);
+        await StructureDeclarationIndexer.getInstance().buildIndex(prvDir);
     });
 
     teardown(() => {
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = savedSm;
         FileRelationshipGraph.getInstance().reset();
         ReferenceCountIndex.getInstance().reset();
+        StructureDeclarationIndexer.getInstance().clearCache();
+        serverSettings.libsrcPaths = savedLibsrc;
         TokenCache.getInstance().clearAllTokens();
         try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
     });

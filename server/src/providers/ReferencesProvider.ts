@@ -514,8 +514,12 @@ export class ReferencesProvider {
             return classTypeRef;
         }
 
-        // Plain symbol path
-        const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
+        // Plain symbol path. #364 — FAR opts out of the #362 procedure-index
+        // fast-path: it resolves a module-callout procedure to the INC prototype
+        // (potentially the wrong project's), which breaks the module widening that
+        // keys off the implementation file. Falling through to findProcedureDeclaration
+        // (impl in-doc → Case B) / the procedure-hunt is the correct FAR resolution.
+        const symbolInfo = await this.symbolFinder.findSymbol(word, document, position, undefined, { skipProcIndex: true });
         if (!symbolInfo) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
             this.trace({ route: 'procedure-hunt', word });

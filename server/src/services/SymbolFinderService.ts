@@ -1519,7 +1519,8 @@ export class SymbolFinderService {
         word: string,
         document: TextDocument,
         position: { line: number; character: number },
-        scopeToken?: Token
+        scopeToken?: Token,
+        opts?: { skipProcIndex?: boolean }
     ): Promise<SymbolInfo | null> {
         const tokens = this.tokenCache.getTokens(document);
         
@@ -1538,10 +1539,12 @@ export class SymbolFinderService {
             // #362 — proc index before BOTH cross-file variable tiers (no locals
             // exist here to shadow, so it is unconditionally safe). Skips the
             // include-chain global index build and the sibling family build.
-            const procNoScope = await this.findProcedureViaIndex(word, document);
-            if (procNoScope) {
-                logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
-                return procNoScope;
+            if (!opts?.skipProcIndex) {
+                const procNoScope = await this.findProcedureViaIndex(word, document);
+                if (procNoScope) {
+                    logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
+                    return procNoScope;
+                }
             }
 
             // #319 (reopen): global BEFORE the sibling walk. Globals like
@@ -1603,10 +1606,17 @@ export class SymbolFinderService {
         // in the procedure index cannot also be a variable (same namespace in
         // Clarion), resolve it here — after the cheap in-document tiers so a
         // same-named local still shadows — and skip BOTH expensive tiers.
-        result = await this.findProcedureViaIndex(word, document);
-        if (result) {
-            logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
-            return result;
+        // #364 — FAR opts out of this fast-path. It resolves a module-callout
+        // procedure to the INC prototype, which breaks Find-All-References: the
+        // module widening keys off the IMPLEMENTATION file (getFilesToSearch
+        // Case B / the #322 design), and a cross-file INC hit can even be the
+        // wrong project's. F12/hover keep it (jumping to the declaration is right).
+        if (!opts?.skipProcIndex) {
+            result = await this.findProcedureViaIndex(word, document);
+            if (result) {
+                logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
+                return result;
+            }
         }
 
         // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
