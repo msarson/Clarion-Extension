@@ -1519,8 +1519,7 @@ export class SymbolFinderService {
         word: string,
         document: TextDocument,
         position: { line: number; character: number },
-        scopeToken?: Token,
-        opts?: { skipProcIndex?: boolean }
+        scopeToken?: Token
     ): Promise<SymbolInfo | null> {
         const tokens = this.tokenCache.getTokens(document);
         
@@ -1539,12 +1538,10 @@ export class SymbolFinderService {
             // #362 — proc index before BOTH cross-file variable tiers (no locals
             // exist here to shadow, so it is unconditionally safe). Skips the
             // include-chain global index build and the sibling family build.
-            if (!opts?.skipProcIndex) {
-                const procNoScope = await this.findProcedureViaIndex(word, document);
-                if (procNoScope) {
-                    logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
-                    return procNoScope;
-                }
+            const procNoScope = await this.findProcedureViaIndex(word, document);
+            if (procNoScope) {
+                logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
+                return procNoScope;
             }
 
             // #319 (reopen): global BEFORE the sibling walk. Globals like
@@ -1606,17 +1603,10 @@ export class SymbolFinderService {
         // in the procedure index cannot also be a variable (same namespace in
         // Clarion), resolve it here — after the cheap in-document tiers so a
         // same-named local still shadows — and skip BOTH expensive tiers.
-        // #364 — FAR opts out of this fast-path. It resolves a module-callout
-        // procedure to the INC prototype, which breaks Find-All-References: the
-        // module widening keys off the IMPLEMENTATION file (getFilesToSearch
-        // Case B / the #322 design), and a cross-file INC hit can even be the
-        // wrong project's. F12/hover keep it (jumping to the declaration is right).
-        if (!opts?.skipProcIndex) {
-            result = await this.findProcedureViaIndex(word, document);
-            if (result) {
-                logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
-                return result;
-            }
+        result = await this.findProcedureViaIndex(word, document);
+        if (result) {
+            logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
+            return result;
         }
 
         // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
@@ -1818,7 +1808,20 @@ export class SymbolFinderService {
         // MODULE prototype, but we resolve on the FIRST hit regardless: a stale
         // column is a cosmetic cursor offset; a 15s freeze is the bug.
         const wordLower = word.toLowerCase();
-        const hit = hits[0];
+        // #364 — when the name exists in more than one project (AppendText in both
+        // PRVData and SQLInstallAndUpgrade), prefer the hit in the CURRENT document's
+        // project so F12/hover/FAR resolve within the project the cursor is in rather
+        // than whichever the index lists first.
+        let hit = hits[0];
+        if (hits.length > 1) {
+            const sm = SolutionManager.getInstance();
+            const curPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const curProject = sm?.findProjectForFile(curPath);
+            if (curProject) {
+                const inProject = hits.find(h => sm!.findProjectForFile(h.filePath) === curProject);
+                if (inProject) hit = inProject;
+            }
+        }
         const loaded = this.loadTokensForFile(hit.filePath);
         let tok: Token | undefined;
         let confirmed = false;
@@ -1834,8 +1837,20 @@ export class SymbolFinderService {
         }
         const uri = loaded ? loaded.document.uri : pathToCanonicalUri(hit.filePath);
         const line = tok ? tok.line : hit.line;
-        const character = tok ? tok.start : 0;
-        const token = tok ?? ({ value: word, type: TokenType.Label, line, start: character } as unknown as Token);
+        // #364 — the token carrying subType=MapProcedure has an INCONSISTENT .value:
+        // the procedure NAME for a keyword-less shorthand prototype (`Name(params)`),
+        // but the literal "PROCEDURE" keyword for the `Name PROCEDURE` form (there the
+        // name lives on t.label). Downstream consumers require token.value === the
+        // procedure name — most importantly FAR, which searches for `symbolInfo.token.value`
+        // (a "PROCEDURE"-valued token made FAR search for the keyword, matching only
+        // declaration lines → the "2 references" under-count). Always synthesize a
+        // token whose value IS the name, positioned at the name's column.
+        let character = tok ? tok.start : 0;
+        if (loaded && tok && tok.value.toLowerCase() !== wordLower) {
+            const nameTok = loaded.tokens.find(t => t.line === tok!.line && t.value.toLowerCase() === wordLower);
+            if (nameTok) character = nameTok.start;
+        }
+        const token = { value: word, type: TokenType.Label, line, start: character } as unknown as Token;
 
         perfLogger.perf("proc index fast-path", {
             word,
