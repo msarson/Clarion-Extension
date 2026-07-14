@@ -29,6 +29,7 @@ import { SymbolFinderService } from '../services/SymbolFinderService';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
+import { getCrossFileEpoch } from '../utils/crossFileEpoch';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error");
@@ -1078,7 +1079,31 @@ export class DefinitionProvider {
         return token.type === TokenType.Structure;
     }
 
+    // #360/#361 — F12 (findSymbolDefinition) on a symbol in a big PROGRAM file walks
+    // findSymbol's tier cascade + the parent/include chains: ~15s cold for a NetTalk
+    // proc (NetDebugTrace) on IBSCommon.clw. Cache the RESULT per (uri, word, line),
+    // invalidated by the cross-file epoch (the #340 watcher / #355 drift path), so a
+    // repeat F12 on the same call site is instant. Keyed by line (not scope) so the
+    // #330 self-exclusion — which is position-specific — stays correct per call site.
+    private symDefCache = new Map<string, Definition | null>();
+    private symDefEpoch = -1;
+
     private async findSymbolDefinition(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
+        const epoch = getCrossFileEpoch();
+        if (epoch !== this.symDefEpoch) {
+            this.symDefCache.clear();
+            this.symDefEpoch = epoch;
+        }
+        const cacheKey = `${document.uri.toLowerCase()}|${word.toLowerCase()}|${position.line}`;
+        if (this.symDefCache.has(cacheKey)) {
+            return this.symDefCache.get(cacheKey)!;
+        }
+        const result = await this.findSymbolDefinitionUncached(word, document, position);
+        this.symDefCache.set(cacheKey, result);
+        return result;
+    }
+
+    private async findSymbolDefinitionUncached(word: string, document: TextDocument, position: Position): Promise<Definition | null> {
         logger.info(`Looking for symbol definition: ${word}`);
 
         const tokens = this.tokenCache.getTokens(document);
