@@ -788,6 +788,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
+            // #352: moved out of the sync pass — its cold include-chain walk blocked
+            // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
+            ['viewProjectFields', () => DiagnosticProvider.validateViewProjectFields(tokens, document, getOpenDocumentContent)],
             ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
             ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
             ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
@@ -796,7 +799,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
         ];
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
             caller === 'sdiReady'
                 ? await (async () => {
                     const results: Diagnostic[][] = [];
@@ -822,7 +825,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);

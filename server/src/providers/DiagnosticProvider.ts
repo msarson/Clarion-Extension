@@ -70,7 +70,6 @@ export class DiagnosticProvider {
             ['fileStructures', () => validateFileStructures(tokens!, document)],
             ['caseStructures', () => validateCaseStructures(tokens!, document)],
             ['executeStructures', () => validateExecuteStructures(tokens!, document)],
-            ['viewProjectFields', () => validateViewProjectFields(tokens!, document, getOpenDocumentContent)],
             ['returnStatements', () => validateReturnStatements(tokens!, document, structure)],
             ['classProperties', () => validateClassProperties(tokens!, document)],
             ['discardedReturnPlainCalls', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
@@ -188,6 +187,21 @@ export class DiagnosticProvider {
         document: TextDocument
     ): Promise<Diagnostic[]> {
         return this.filterOmitted(await validateMissingIncludes(tokens, document), tokens, document);
+    }
+
+    /**
+     * Async pass: warn when a VIEW's PROJECT/JOIN names a field absent from the
+     * FROM/JOIN file. Lived in the sync pass until #352 — its cold include-chain
+     * walk blocked the onDidOpen handler ~4.4s on large solutions, before the
+     * solution was even loaded. The #345 phase-4 memo makes repeat passes ~0ms;
+     * this placement keeps the one cold build off the interactive path.
+     */
+    public static async validateViewProjectFields(
+        tokens: Token[],
+        document: TextDocument,
+        getOpenDocumentContent?: (absPath: string) => string | null
+    ): Promise<Diagnostic[]> {
+        return this.filterOmitted(validateViewProjectFields(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
     /** Async pass: info when a variable's class requires Link/DLL project constants not yet defined. Closes #83 */

@@ -2464,7 +2464,12 @@ MyView VIEW(Customer)
         assert.ok(diags[1].message.includes('Bogus2'));
     });
 
-    test('validateDocument includes the VIEW PROJECT diagnostic', () => {
+    // Pin flexed under #352: this asserted the diagnostic surfaced via the SYNC
+    // pass (validateDocument). The validator now lives in the async pass — its
+    // cold include-chain walk blocked onDidOpen ~4.4s on large solutions. The
+    // facade-level contract (diagnostic still produced, filterOmitted applied)
+    // is pinned via the async wrapper instead.
+    test('DiagnosticProvider facade surfaces the VIEW PROJECT diagnostic (async wrapper, #352)', async () => {
         const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
 Record RECORD
 Id   LONG
@@ -2476,9 +2481,10 @@ MyView VIEW(Customer)
        END
 `;
         const doc = createDocument(code);
-        const diags = DiagnosticProvider.validateDocument(doc);
+        const tokens = new ClarionTokenizer(code).tokenize();
+        const diags = await DiagnosticProvider.validateViewProjectFields(tokens, doc);
         const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
-        assert.ok(viewDiags.length >= 1, 'validateDocument should surface VIEW PROJECT diagnostic');
+        assert.ok(viewDiags.length >= 1, 'facade should surface VIEW PROJECT diagnostic via the async pass');
     });
 
     // d4fe847b — two extensions over v1.
@@ -2772,6 +2778,55 @@ MyView VIEW(Customer)
             assert.strictEqual(diags.length, 1, `expected only the genuine miss; got: ${JSON.stringify(diags.map(d => d.message))}`);
             assert.ok(diags[0].message.includes("'Ord:Missing'"), `expected missing field warning; got: ${diags[0].message}`);
         });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #352 — viewProjectFields moves from the sync pass to the async pass.
+// The sync pass runs inside the onDidOpen handler; the validator's cold
+// include-chain walk cost ~4.4s of event-loop block at first open on a real
+// solution, before the solution was even loaded. Bidirectional pin: the
+// diagnostic must be GONE from validateDocument and PRESENT via the async
+// wrapper.
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('DiagnosticProvider - viewProjectFields pass placement (#352)', () => {
+
+    const missingFieldCode = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id, Cus:Bogus)
+       END
+`;
+
+    test('sync pass (validateDocument) does NOT emit VIEW PROJECT diagnostics', () => {
+        const doc = createDocument(missingFieldCode);
+        const diags = DiagnosticProvider.validateDocument(doc);
+        const vpf = diags.filter(d => d.message.includes("'Cus:Bogus'"));
+        assert.strictEqual(vpf.length, 0,
+            `viewProjectFields must not run in the sync/onDidOpen pass (#352); got: ${JSON.stringify(vpf.map(d => d.message))}`);
+    });
+
+    test('async wrapper (DiagnosticProvider.validateViewProjectFields) emits the diagnostic', async () => {
+        const doc = createDocument(missingFieldCode);
+        const tokens = new ClarionTokenizer(missingFieldCode).tokenize();
+        // Cast keeps this compiling before the wrapper exists (stash-RED pattern).
+        const provider = DiagnosticProvider as unknown as {
+            validateViewProjectFields?: (
+                tokens: unknown,
+                document: unknown,
+                getOpenDocumentContent?: (absPath: string) => string | null
+            ) => Promise<Array<{ message: string }>>
+        };
+        assert.ok(typeof provider.validateViewProjectFields === 'function',
+            'DiagnosticProvider.validateViewProjectFields async wrapper must exist (#352)');
+        const diags = await provider.validateViewProjectFields!(tokens, doc);
+        assert.strictEqual(diags.length, 1, 'the moved validator still fires on a bogus PROJECT field');
+        assert.ok(diags[0].message.includes("'Cus:Bogus'"));
     });
 });
 
