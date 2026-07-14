@@ -68,6 +68,29 @@ export interface StructureDeclarationInfo {
     lineContent: string;
 }
 
+/**
+ * #362 — a procedure/method declaration found during a file scan. Kept SEPARATE
+ * from StructureDeclarationInfo (and a separate index) so procedure names never
+ * appear in the type `find()` results — the #361 hover type-gate does
+ * `find(name).length > 0` and would regress if procedures polluted it.
+ *
+ * Captured cheaply by the same regex line-scan the SDI uses — NO tokenizer — so
+ * cross-file hover/F12/implementation can answer "where is procedure X declared?"
+ * with an O(1) index lookup instead of tokenizing the include universe (#362).
+ */
+export interface ProcedureDeclarationInfo {
+    /** Original-case label; dotted (`Class.Method`) for method implementations. */
+    name: string;
+    filePath: string;
+    /** 0-based line number */
+    line: number;
+    /** `method` when the label is dotted (an implementation), else `procedure`. */
+    kind: 'procedure' | 'method';
+    /** Text after the PROCEDURE/FUNCTION keyword: params + return type + attributes. */
+    signature: string;
+    lineContent: string;
+}
+
 /** Per-project index */
 export interface StructureIndex {
     /** name (lowercase) → all declarations with that name across all scanned files */
@@ -115,6 +138,12 @@ const EQUATE_PATTERN =
     /^([A-Za-z_][\w:]*)\s+EQUATE\b/i;
 const END_PATTERN =
     /^END\b/i;
+// #362 — a column-0 label followed by PROCEDURE or FUNCTION. Captures the label
+// (bare or dotted `Class.Method`), the keyword, and the trailing signature.
+// PROCEDURE and FUNCTION are equivalent in modern Clarion (both return values),
+// so both are procedure declarations.
+const PROCEDURE_PATTERN =
+    /^([A-Za-z_][\w.]*)\s+(?:PROCEDURE|FUNCTION)\b(.*)$/i;
 
 /** Extract the PRE attribute value from an ITEMIZE line, e.g. "Color ITEMIZE(0),PRE(Clr)" → "Clr" */
 function extractPre(line: string): string {
@@ -247,6 +276,49 @@ export function scanSourceForDeclarations(
             });
             continue;
         }
+    }
+
+    return results;
+}
+
+/**
+ * #362 — scan raw source for procedure/method declarations (MAP/MODULE
+ * prototypes, global PROCEDURE/FUNCTION implementations, and `Class.Method`
+ * implementations). A column-0 label followed by PROCEDURE/FUNCTION is a
+ * declaration in Clarion — the same cheap regex line-scan the SDI uses, no
+ * tokenizer. Comments are stripped first (matching scanSourceForDeclarations).
+ */
+export function scanSourceForProcedures(
+    source: string,
+    filePath: string
+): ProcedureDeclarationInfo[] {
+    const results: ProcedureDeclarationInfo[] = [];
+    const lines = source.split(/\r?\n/);
+
+    for (let i = 0; i < lines.length; i++) {
+        const rawLine = lines[i];
+        // Fast reject: a declaration label is at column 0 (no leading whitespace)
+        // and the line must mention PROCEDURE/FUNCTION. Cheapest possible guard.
+        if (rawLine.length === 0 || rawLine[0] === ' ' || rawLine[0] === '\t') continue;
+
+        // Strip inline comment (same simple rule as scanSourceForDeclarations).
+        const commentIdx = rawLine.indexOf('!');
+        const line = commentIdx >= 0 ? rawLine.substring(0, commentIdx) : rawLine;
+        const trimmedEnd = line.trimEnd();
+        if (!trimmedEnd) continue;
+
+        const m = PROCEDURE_PATTERN.exec(trimmedEnd);
+        if (!m) continue;
+
+        const name = m[1];
+        results.push({
+            name,
+            filePath,
+            line: i,
+            kind: name.includes('.') ? 'method' : 'procedure',
+            signature: (m[2] ?? '').trim(),
+            lineContent: trimmedEnd.trim()
+        });
     }
 
     return results;
