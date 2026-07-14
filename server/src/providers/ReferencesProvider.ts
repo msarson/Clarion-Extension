@@ -3474,7 +3474,19 @@ export class ReferencesProvider {
                 // 2. Check all cached project files
                 const solutionManager = SolutionManager.getInstance();
                 if (solutionManager?.solution?.projects?.length) {
-                    outerLoop: for (const project of solutionManager.solution.projects) {
+                    // #364 — hunt the CURRENT document's project FIRST. A procedure
+                    // name that also exists in another project (e.g. AppendText in
+                    // both PRVData and SQLInstallAndUpgrade) must resolve to the
+                    // declaration in the project the user is actually in. Without
+                    // this, a same-named declaration in an earlier-listed project
+                    // wins, and getFilesToSearch then scopes the whole search to
+                    // that wrong project — leaking its references and dropping every
+                    // real one (the reported "only 2 references" under-count).
+                    const currentProject = solutionManager.findProjectForFile(currentPath);
+                    const orderedProjects = currentProject
+                        ? [currentProject, ...solutionManager.solution.projects.filter(p => p !== currentProject)]
+                        : solutionManager.solution.projects;
+                    outerLoop: for (const project of orderedProjects) {
                         for (const sourceFile of project.sourceFiles) {
                             if (await this.yieldIfNeeded(++ycHunt, token)) return null;
                             const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);

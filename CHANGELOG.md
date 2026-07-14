@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.1] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **Find All References no longer under-counts a procedure whose name also exists in another project** ([#364](https://github.com/msarson/Clarion-Extension/issues/364)): a procedure like `AppendText` that exists as its own module-callout family in two projects (PRVData and SQLInstallAndUpgrade) resolved, from a call site, to whichever project sorted first — because the declaration hunt iterated projects in order with no preference for the one the cursor is in. Find All References then scoped the whole search to that wrong project, leaking its references and dropping every real one (the reported "only 2 references"). The hunt now checks the current document's project first, so references resolve within the project you're actually in.
+
 **New Features**
 
 - ⚡ **The first hover / F12 / Find-All-References after startup is no longer cold** ([#363](https://github.com/msarson/Clarion-Extension/issues/363)): before 1.0.1 the (slow) startup validators happened to build the cross-file indexes as a side effect, so by the time you interacted they were warm; the 1.0.1 validator perf work removed that incidental warming and left the ~15s cold build to land on whichever action you tried first. The startup background lane now *deliberately* pre-warms those indexes (the include-chain global index and the sibling family label index) for the open documents — last, alone, after every other consumer, so it never contends with startup — restoring 1.0.0's warm-interaction feel without the slow validators. The build is cache-backed and yields, and the warm is best-effort.
