@@ -31,6 +31,8 @@ export class DefinitionTrace {
     cacheHits = 0;
     cacheMisses = 0;
     fallbackEntered = false;
+    /** #362 — how many procedure-index hits the symbol has (−1 = not probed). */
+    procIndexHits = -1;
 
     private readonly startMs: number;
     private phaseMs = new Map<string, number>();
@@ -90,6 +92,7 @@ export class DefinitionTrace {
             attributed_ms: attributed,
             unattributed_ms: elapsed - attributed,
             candidate_count: this.candidateCount,
+            proc_index_hits: this.procIndexHits,
             files_examined: this.filesExamined,
             cache_hits: this.cacheHits,
             cache_misses: this.cacheMisses,

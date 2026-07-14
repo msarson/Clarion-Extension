@@ -609,7 +609,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
                 reusedFromDisk = Object.keys(diskCache.files).length;
                 // #362 — build the procedure index from the same cached entries.
-                this.procIndexes.set(this.normalizeKey(projectPath), this.buildProcIndex(Object.values(diskCache.files)));
+                const cachedProcIndex = this.buildProcIndex(Object.values(diskCache.files));
+                this.procIndexes.set(this.normalizeKey(projectPath), cachedProcIndex);
                 const index: StructureIndex = { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
                 const duration = Date.now() - startTime;
                 this.lastBuildStats = { files: fileCount, scanned: 0, reusedFromDisk, ms: duration };
@@ -626,6 +627,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     scanned: 0,
                     reused_from_disk: reusedFromDisk,
                     declarations: total,
+                    proc_names: cachedProcIndex.size,
                     project: path.basename(projectPath) || projectPath
                 });
                 // #357: defer the drift sweep onto the sequential lane at startup;

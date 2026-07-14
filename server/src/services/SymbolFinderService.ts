@@ -1511,6 +1511,14 @@ export class SymbolFinderService {
             const globalResult = await this.findGlobalVariable(word, tokens, document);
             if (globalResult) return globalResult;
 
+            // #362 — proc index before the sibling walk (no locals exist here to
+            // shadow, so it is unconditionally safe in the no-scope branch).
+            const procNoScope = await this.findProcedureViaIndex(word, document);
+            if (procNoScope) {
+                logger.info(`✅ Found as indexed procedure (no-scope, skipped tier-6 walk): ${word}`);
+                return procNoScope;
+            }
+
             const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
             if (siblingModuleResult) return siblingModuleResult;
 

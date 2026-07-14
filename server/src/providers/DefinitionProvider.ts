@@ -26,6 +26,7 @@ import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { resolveViaProjectRedirection, resolveViaProjectRedirectionFromUri } from '../utils/RedirectionResolution';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
@@ -690,6 +691,14 @@ export class DefinitionProvider {
             // Do this BEFORE checking MAP procedure implementations to avoid false positives
             // #360: findSymbolDefinition is the prime 38s suspect ("runs for minutes
             // on large solutions" per the fast-path guard above) — time it explicitly.
+            // #362 — decisive probe: how many procedure-index hits does this symbol
+            // have? A cross-file library proc (NetDebugTrace) should be >0 so the
+            // findSymbol proc fast-path fires and skips the ~15s sibling walk; a 0
+            // here means the index never captured it (the real bug is upstream).
+            if (!word.includes('.') && !word.includes(':')) {
+                trace.procIndexHits = StructureDeclarationIndexer.getInstance().findProcedure(word).length;
+            }
+
             trace.route = 'symbolDefinition';
             const symbolDefinition = await trace.time('symbolDefinition',
                 () => this.findSymbolDefinition(word, document, position));
