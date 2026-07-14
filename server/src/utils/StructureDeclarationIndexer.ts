@@ -24,7 +24,7 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
 // v2 (#362): entries now also carry procedure declarations (`procs`).
-const DISK_CACHE_VERSION = 2;
+const DISK_CACHE_VERSION = 3;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -148,6 +148,20 @@ const END_PATTERN =
 // so both are procedure declarations.
 const PROCEDURE_PATTERN =
     /^([A-Za-z_][\w.]*)\s+(?:PROCEDURE|FUNCTION)\b(.*)$/i;
+// #362 — MAP/MODULE prototype-context detection (shorthand procedure form).
+// MODULE('...') and a MAP structure both open a prototype context; inside it a
+// keyword-less `Name(...)` (or indented `Name PROCEDURE`) is a declaration.
+const MODULE_OPEN_PATTERN = /^MODULE\s*\(/i;
+const MAP_OPEN_PATTERN = /^(?:[A-Za-z_][\w:]*\s+)?MAP\b/i;
+const SHORTHAND_PROTO_PATTERN =
+    /^([A-Za-z_][\w.:]*)\s*(?:\(|PROCEDURE\b|FUNCTION\b)/i;
+// Names that take a `(` inside a MAP/MODULE but are NOT procedures.
+const PROC_CONTEXT_EXCLUDE = new Set<string>([
+    'MODULE', 'MAP', 'END', 'INCLUDE', 'COMPILE', 'OMIT', 'SECTION', 'EQUATE',
+    'CLASS', 'INTERFACE', 'QUEUE', 'GROUP', 'RECORD', 'FILE', 'VIEW', 'WINDOW',
+    'REPORT', 'APPLICATION', 'MENUBAR', 'MENU', 'TOOLBAR', 'SHEET', 'TAB',
+    'OPTION', 'ITEMIZE', 'JOIN'
+]);
 
 /** Extract the PRE attribute value from an ITEMIZE line, e.g. "Color ITEMIZE(0),PRE(Clr)" → "Clr" */
 function extractPre(line: string): string {
@@ -299,30 +313,79 @@ export function scanSourceForProcedures(
     const results: ProcedureDeclarationInfo[] = [];
     const lines = source.split(/\r?\n/);
 
+    // #362 — inside a MAP/MODULE prototype context, procedures are declared in the
+    // Clarion *shorthand* form: an (often indented) label with NO PROCEDURE/FUNCTION
+    // keyword, e.g.  `NetDebugTrace(string),long,proc,pascal,name('...'),DLL(...)`.
+    // This is exactly what the tokenizer recognises in processShorthandProcedures.
+    // We track MAP/MODULE nesting line-by-line and capture those `Name(...)` lines;
+    // without this the library MODULE prototypes (NetTalk et al.) never index, so
+    // the hover/definition fast-paths can never fire for them.
+    let mapDepth = 0;
+
     for (let i = 0; i < lines.length; i++) {
         const rawLine = lines[i];
-        // Fast reject: a declaration label is at column 0 (no leading whitespace)
-        // and the line must mention PROCEDURE/FUNCTION. Cheapest possible guard.
-        if (rawLine.length === 0 || rawLine[0] === ' ' || rawLine[0] === '\t') continue;
+        if (rawLine.length === 0) continue;
 
         // Strip inline comment (same simple rule as scanSourceForDeclarations).
         const commentIdx = rawLine.indexOf('!');
         const line = commentIdx >= 0 ? rawLine.substring(0, commentIdx) : rawLine;
-        const trimmedEnd = line.trimEnd();
-        if (!trimmedEnd) continue;
+        const t = line.trim();
+        if (!t) continue;
 
-        const m = PROCEDURE_PATTERN.exec(trimmedEnd);
-        if (!m) continue;
+        const atColumnZero = rawLine[0] !== ' ' && rawLine[0] !== '\t';
 
-        const name = m[1];
-        results.push({
-            name,
-            filePath,
-            line: i,
-            kind: name.includes('.') ? 'method' : 'procedure',
-            signature: (m[2] ?? '').trim(),
-            lineContent: trimmedEnd.trim()
-        });
+        // --- MAP/MODULE structure tracking -------------------------------------
+        // Close first so a MAP/MODULE that ends on the same conceptual line pops.
+        if (mapDepth > 0 && (END_PATTERN.test(t) || t === '.')) {
+            mapDepth--;
+            continue;
+        }
+        // A MODULE('...') opens a prototype context (with or without an enclosing MAP).
+        if (MODULE_OPEN_PATTERN.test(t)) {
+            mapDepth++;
+            continue;
+        }
+        // A MAP structure (bare `MAP` or `Label MAP`) opens a prototype context.
+        if (MAP_OPEN_PATTERN.test(t)) {
+            mapDepth++;
+            continue;
+        }
+
+        // --- Column-0 explicit form: `Name PROCEDURE/FUNCTION ...` --------------
+        // Global implementations and `Class.Method` bodies live at column 0.
+        if (atColumnZero) {
+            const m = PROCEDURE_PATTERN.exec(t);
+            if (m) {
+                const name = m[1];
+                results.push({
+                    name,
+                    filePath,
+                    line: i,
+                    kind: name.includes('.') ? 'method' : 'procedure',
+                    signature: (m[2] ?? '').trim(),
+                    lineContent: t
+                });
+                continue;
+            }
+        }
+
+        // --- MAP/MODULE shorthand prototypes -----------------------------------
+        // Inside a prototype context, `Name(...)` (keyword-less) or an indented
+        // `Name PROCEDURE/FUNCTION` is a declaration. Exclude directives/structure
+        // keywords that also take a `(` (INCLUDE, MODULE, GROUP, …).
+        if (mapDepth > 0) {
+            const sh = SHORTHAND_PROTO_PATTERN.exec(t);
+            if (sh && !PROC_CONTEXT_EXCLUDE.has(sh[1].toUpperCase())) {
+                results.push({
+                    name: sh[1],
+                    filePath,
+                    line: i,
+                    kind: sh[1].includes('.') ? 'method' : 'procedure',
+                    signature: t.substring(sh[1].length).trim(),
+                    lineContent: t
+                });
+            }
+        }
     }
 
     return results;

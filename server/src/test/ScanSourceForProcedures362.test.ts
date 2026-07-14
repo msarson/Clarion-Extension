@@ -47,6 +47,34 @@ suite('scanSourceForProcedures (#362)', () => {
         assert.strictEqual(byName.get('ThisWindow.Init')!.kind, 'method', 'dotted name → method');
     });
 
+    test('catches keyword-LESS MODULE shorthand prototypes (NetTalk/library form)', () => {
+        // The real NetTalk shape Mark pasted: indented, no PROCEDURE keyword,
+        // `Name(params),attrs` inside a MODULE('') block. Before #362-shorthand
+        // these never indexed, so the hover/F12 fast-path could never fire.
+        const src = [
+            '  map',
+            "    module('')",
+            "      NetDebugTrace(string),long,proc,pascal,name('NetDebugTrace'),DLL(dll_mode)",
+            "      NetAutoGetServer(long,string,long),long,proc,pascal,name('NetAutoGetServer'),DLL(dll_mode)",
+            "      !NetGet_NetCriticalSection(),long,proc,pascal,name('x'),DLL(dll_mode)",  // commented out
+            "      INCLUDE('driver.inc')",                                                    // directive, not a proc
+            '    end',
+            '  end'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\netall.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(byName.has('NetDebugTrace'), 'keyword-less shorthand prototype captured');
+        assert.strictEqual(byName.get('NetDebugTrace')!.kind, 'procedure');
+        assert.ok(byName.get('NetDebugTrace')!.signature.startsWith('(string)'), 'signature captured');
+        assert.ok(byName.has('NetAutoGetServer'), 'second shorthand prototype captured');
+
+        assert.ok(!byName.has('NetGet_NetCriticalSection'), 'commented-out prototype excluded');
+        assert.ok(!byName.has('INCLUDE'), 'INCLUDE directive not mistaken for a procedure');
+        assert.ok(!byName.has('module'), 'MODULE not mistaken for a procedure');
+    });
+
     test('does not treat indented lines, fields, or comment text as declarations', () => {
         const src = [
             'Rec  QUEUE',
