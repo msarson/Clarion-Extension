@@ -20,6 +20,7 @@ import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
 import { getCrossFileEpoch } from './crossFileEpoch';
+import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
@@ -102,6 +103,30 @@ export class MapProcedureResolver {
             if (parentPath) startPaths.push(parentPath);
         }
 
+        // #362 — index-first POSITIVE fast-path. If the procedure index (built by a
+        // cheap regex scan, a superset of the reachable includes) knows this proc
+        // UNAMBIGUOUSLY, load just that ONE file and confirm it with the SAME
+        // module-scoped check the walk uses — parity by construction — instead of
+        // tokenizing the whole include chain. A unique hit is safe: this only runs on
+        // a proc-CALL hover, so the proc is reachable, and a unique declaration IS the
+        // target. Anything else (0, or >1 ambiguous, or the candidate isn't a
+        // MODULE-scoped prototype) falls through to the unchanged walk — so this can
+        // only speed up, never change an answer. (The negative "skip walk when the
+        // index is empty" gate is deliberately NOT taken: a prototype could live in an
+        // INCLUDEd .clw the SDI doesn't scan, and the walk must still find it.)
+        const procHits = StructureDeclarationIndexer.getInstance().findProcedure(procName);
+        if (procHits.length === 1) {
+            const loaded = await this.loadDocForWalk(procHits[0].filePath);
+            if (loaded) {
+                const fastLine = this.findModuleScopedProcDeclLine(loaded.tokens, procName.toLowerCase());
+                if (fastLine !== null) {
+                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(procHits[0].filePath)}:${fastLine}`);
+                    mapDeclWalkCache.set(cacheKey, { docUri: loaded.document.uri, declLine: fastLine });
+                    return { doc: loaded.document, tokens: loaded.tokens, declLine: fastLine };
+                }
+            }
+        }
+
         const visited = new Set<string>();
         for (const start of startPaths) {
             const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
@@ -112,6 +137,25 @@ export class MapProcedureResolver {
         }
         mapDeclWalkCache.set(cacheKey, null);
         return null;
+    }
+
+    /**
+     * #362 — the walk's declaration test, extracted so the index fast-path and the
+     * walk agree by construction: a MapProcedure/Function token named `nameLower`
+     * that sits INSIDE a MODULE block. Returns the 0-based line, or null.
+     */
+    private findModuleScopedProcDeclLine(tokens: Token[], nameLower: string): number | null {
+        const moduleRanges = tokens
+            .filter(t => t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        if (moduleRanges.length === 0) return null;
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+            moduleRanges.some(r => t.line > r.start && t.line < r.end)
+        );
+        return decl ? decl.line : null;
     }
 
     /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
@@ -208,20 +252,10 @@ export class MapProcedureResolver {
             if (!inc) continue;
 
             // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const moduleRanges = inc.tokens
-                .filter(t => t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
-                .map(t => ({ start: t.line, end: t.finishesAt! }));
-            if (moduleRanges.length > 0) {
-                const decl = inc.tokens.find(t =>
-                    (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
-                    (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
-                    moduleRanges.some(r => t.line > r.start && t.line < r.end)
-                );
-                if (decl) {
-                    logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${decl.line}`);
-                    return { doc: inc.document, tokens: inc.tokens, declLine: decl.line };
-                }
+            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower);
+            if (declLine !== null) {
+                logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
+                return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
             const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
