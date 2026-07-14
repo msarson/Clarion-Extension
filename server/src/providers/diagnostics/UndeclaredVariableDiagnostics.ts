@@ -194,20 +194,9 @@ function buildScopeContext(tokens: Token[], document: TextDocument): ScopeContex
  * procedure's CODE marker. Resolved names are added back to declaredNames
  * (memoization: at most one async lookup per unique name per cycle).
  */
-/**
- * #351 — true when the token textually touches a ':' on either side: it is a
- * fragment of a compound reference the tokenizer split (double-colon labels,
- * prefix chains), never a standalone name.
- */
-function isColonAdjacentFragment(t: Token, document: TextDocument): boolean {
-    const lineText = document.getText({
-        start: { line: t.line, character: 0 },
-        end: { line: t.line + 1, character: 0 }
-    });
-    const before = t.start > 0 ? lineText[t.start - 1] : '';
-    const after = lineText[t.start + t.value.length] ?? '';
-    return before === ':' || after === ':';
-}
+// #351's isColonAdjacentFragment was folded into isGluedNumberSuffix (#358):
+// that discriminator already covers ':' on both sides AND the dotted-member
+// case, so the augment pass now shares the collect pass's single check.
 
 async function augmentDeclaredViaSymbolFinder(
     ctx: ScopeContext,
@@ -235,13 +224,17 @@ async function augmentDeclaredViaSymbolFinder(
         // the 40-entry keyword list — 'OPEN' alone triggered the full include-
         // chain cold build (32s measured) hunting a declaration that can't exist.
         if (BuiltinFunctionService.getInstance().isBuiltin(candidate.name)) continue;
-        // #351: colon-adjacent tokens are FRAGMENTS of a compound reference
-        // (BRW1::SortHeader.Init → 'SortHeader'; ScrollSort:AllowAlpha →
-        // 'ScrollSort' when the tokenizer splits). The whole compound is the
-        // real name; the fragment can never resolve — 7 such ghosts exhausted
-        // every tier per pass and the first paid the 23s chain cold build.
-        // Fused single-token compounds (JCA:StartedDate) are unaffected.
-        if (isColonAdjacentFragment(t, document)) continue;
+        // #351/#358: skip tokens that are FRAGMENTS of a larger compound the
+        // tokenizer split — the same discriminator the COLLECT pass uses
+        // (isGluedNumberSuffix). Covers colon-adjacent prefix chains
+        // (ScrollSort:AllowAlpha, #351) AND dotted-member leaves: the trailing
+        // segment of `TemplateHelper.Debug.DriverOptions` tokenizes as a bare
+        // Variable preceded by '.', so it looks like a standalone name but is
+        // member access that can never resolve. 51 such leaves on the real
+        // IBSCommon.clw cost ~9s warm / triggered the ~18.5s chain cold build,
+        // while COLLECT already ignored them (asymmetry = pure wasted lookups).
+        // Using the shared discriminator realigns AUGMENT with COLLECT (#300).
+        if (isGluedNumberSuffix(t, document)) continue;
         candidateNames.add(upper);
     }
     if (candidateNames.size === 0) return;

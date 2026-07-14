@@ -3386,8 +3386,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [357A BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [357A BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [358 BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [358 BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

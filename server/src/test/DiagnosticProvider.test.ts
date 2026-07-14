@@ -2289,9 +2289,78 @@ End`;
 // Gap L follow-up — VIEW PROJECT(field) validation against FROM file
 // ─────────────────────────────────────────────────────────────────────────────
 import { validateViewProjectFields } from '../providers/diagnostics/StructureDiagnostics';
-import { validateUndeclaredVariables } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
+import { validateUndeclaredVariables, validateUndeclaredVariablesAsync } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
 import { serverSettings } from '../serverSettings';
 import { TokenCache } from '../TokenCache';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #358 — dotted-member leaves must not be collected as cross-file candidates.
+// `TemplateHelper.Debug.DriverOptions = ''` tokenizes as StructureField
+// (`TemplateHelper.Debug`) + `.` + Variable(`DriverOptions`). The COLLECT pass
+// already skips the trailing Variable via isGluedNumberSuffix (prevChar '.'),
+// so it fires no diagnostic — but the AUGMENT pass only skipped colon-adjacent
+// fragments, so it spent a full cross-file findSymbol walk on each leaf. On the
+// real IBSCommon.clw, 51 such leaves cost ~9s (warm) / triggered the ~18.5s
+// chain-index cold build. The augment pass must use the SAME discriminator.
+// ─────────────────────────────────────────────────────────────────────────────
+suite('DiagnosticProvider - undeclaredVar dotted-member leaves (#358)', () => {
+    let savedEnabled = false;
+
+    setup(() => {
+        savedEnabled = serverSettings.undeclaredVariablesEnabled;
+        serverSettings.undeclaredVariablesEnabled = true;
+        StructureDeclarationIndexer.getInstance().clearCache();
+    });
+
+    teardown(() => {
+        serverSettings.undeclaredVariablesEnabled = savedEnabled;
+        StructureDeclarationIndexer.getInstance().clearCache();
+    });
+
+    test('the trailing leaf of a multi-level dotted assignment is never looked up cross-file', async () => {
+        const code = `SomeProc PROCEDURE()
+  CODE
+  TemplateHelper.Debug.DriverOptions = ''
+  RETURN`;
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+
+        const lookedUp: string[] = [];
+        const stubFinder = {
+            findSymbol: async (name: string) => { lookedUp.push(name.toUpperCase()); return null; }
+        } as unknown as import('../services/SymbolFinderService').SymbolFinderService;
+
+        const diags = await validateUndeclaredVariablesAsync(tokens, doc, stubFinder);
+
+        assert.ok(!lookedUp.includes('DRIVEROPTIONS'),
+            `dotted-member leaf must not be collected as a candidate; looked up: ${JSON.stringify(lookedUp)}`);
+        // And it must never fire a diagnostic (collect-pass contract, pinned here too).
+        assert.ok(!diags.some(d => d.message.includes("'DriverOptions'")),
+            'no diagnostic for the dotted-member leaf');
+    });
+
+    test('the leading scope of the dotted chain is still checked', async () => {
+        // TemplateHelper (the head) is genuinely undeclared here → it SHOULD be
+        // looked up (and, unresolved, flagged). Proves the fix narrows only the
+        // member portion, not the whole chain.
+        const code = `SomeProc PROCEDURE()
+  CODE
+  TemplateHelper.Debug.DriverOptions = ''
+  RETURN`;
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+
+        const lookedUp: string[] = [];
+        const stubFinder = {
+            findSymbol: async (name: string) => { lookedUp.push(name.toUpperCase()); return null; }
+        } as unknown as import('../services/SymbolFinderService').SymbolFinderService;
+
+        await validateUndeclaredVariablesAsync(tokens, doc, stubFinder);
+        assert.ok(lookedUp.includes('TEMPLATEHELPER'),
+            `the leading scope must still be checked; looked up: ${JSON.stringify(lookedUp)}`);
+    });
+});
 
 suite('DiagnosticProvider - VIEW PROJECT field validation (Gap L follow-up)', () => {
 
