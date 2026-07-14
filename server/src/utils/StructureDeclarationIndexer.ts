@@ -359,9 +359,43 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     /** #355 — in-flight background validations, chained per project key. */
     private backgroundValidations: Map<string, Promise<void>> = new Map();
 
+    /**
+     * #357 — when true, a cache-trusted build records its drift sweep as PENDING
+     * instead of launching it immediately. The startup orchestrator sets this so
+     * the 4,104-stat sweep does not race FRG / RefIndex / the revalidation pass /
+     * interactive code actions on an op-rate-bound disk (the [352-355] retest
+     * showed those overlapping and starving code actions 9-26s). The sweep is
+     * drained as the LAST step of the sequential background lane. Off by default,
+     * so non-startup callers (tests, on-demand builds) keep the #355 behaviour.
+     */
+    public deferBackgroundValidation = false;
+
+    /** #357 — drift sweeps deferred during a cache-trusted startup, drained via runDeferredValidations(). */
+    private deferredValidations: Array<{
+        projectPath: string;
+        allFiles: string[];
+        diskCache: SdiDiskCacheFile;
+        index: StructureIndex;
+    }> = [];
+
     /** Resolves when the background validation for this project (if any) has completed. */
     whenValidated(projectPath: string): Promise<void> {
         return this.backgroundValidations.get(this.normalizeKey(projectPath)) ?? Promise.resolve();
+    }
+
+    /**
+     * #357 — run every drift sweep deferred by a cache-trusted startup, STRICTLY
+     * one at a time (await each fully before the next starts). Called by the
+     * startup orchestrator as the final step of the background lane, after FRG,
+     * RefIndex, and the revalidation pass — so at most one disk sweep is ever
+     * in flight. Safe to call when nothing is pending (no-op).
+     */
+    async runDeferredValidations(): Promise<void> {
+        const pending = this.deferredValidations.splice(0);
+        for (const d of pending) {
+            this.launchBackgroundValidation(d.projectPath, d.allFiles, d.diskCache, d.index);
+            await this.whenValidated(d.projectPath);
+        }
     }
 
     async buildIndex(projectPath: string): Promise<StructureIndex> {
@@ -446,7 +480,13 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                     declarations: total,
                     project: path.basename(projectPath) || projectPath
                 });
-                this.launchBackgroundValidation(projectPath, allFiles, diskCache, index);
+                // #357: defer the drift sweep onto the sequential lane at startup;
+                // otherwise launch it immediately (the #355 default).
+                if (this.deferBackgroundValidation) {
+                    this.deferredValidations.push({ projectPath, allFiles, diskCache, index });
+                } else {
+                    this.launchBackgroundValidation(projectPath, allFiles, diskCache, index);
+                }
                 return index;
             }
 

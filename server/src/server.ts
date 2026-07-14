@@ -2164,6 +2164,13 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         }
                     }, 500);
                 };
+                // #357 phase A: defer the SDI drift sweep onto the sequential
+                // background lane. The cache-trusted build (#355) returns fast; its
+                // 4,104-stat validation sweep must NOT race FRG / RefIndex / the
+                // revalidation pass / interactive code actions on an op-rate-bound
+                // disk — the [352-355] retest showed those overlapping and starving
+                // code actions 9-26s. The sweep is drained as the LAST lane step below.
+                indexer.deferBackgroundValidation = true;
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
@@ -2250,6 +2257,23 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     doc_count: revalCount,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
+
+                // #357 phase A: LAST lane step — the deferred SDI drift sweep. It only
+                // reconciles an external change made between sessions (rare; #355
+                // contract), so it runs alone here after every user-facing consumer,
+                // never contending with them. onDrift still fires the debounced
+                // revalidation if the sweep finds drift.
+                // Reset the flag FIRST so any on-demand index build after startup
+                // (a file opened in a not-yet-indexed project) validates immediately
+                // rather than deferring onto a lane that has already drained.
+                const driftStart = Date.now();
+                indexer.deferBackgroundValidation = false;
+                await indexer.runDeferredValidations();
+                perfLogger.perf("Phase: SDI deferred drift sweep complete (lane tail)", {
+                    ms: Date.now() - driftStart,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
