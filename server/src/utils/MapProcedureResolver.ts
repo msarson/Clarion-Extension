@@ -509,31 +509,19 @@ export class MapProcedureResolver {
         containingProcedure?: string
     ): Location | null {
         logger.info(`Looking for MAP declaration for procedure: ${procName}`);
-        logger.info(`📊 Total tokens in document: ${tokens.length}`);
-
-        // Debug: Find any tokens with value 'MAP' regardless of type
-        const anyMapTokens = TokenHelper.findTokens(tokens, { value: 'MAP' });
-        logger.info(`🔍 Found ${anyMapTokens.length} token(s) with value 'MAP' (any type)`);
-        if (anyMapTokens.length > 0) {
-            anyMapTokens.forEach((t, i) => {
-                logger.info(`   MAP token #${i + 1}: line ${t.line}, type=${t.type}, subType=${t.subType}, value="${t.value}"`);
-            });
-        }
 
         if (!tokens || tokens.length === 0) {
             logger.info(`No tokens available`);
             return null;
         }
 
-        // Find all MAP structures
+        // #353/#354 — the former debug block here ran a full-document
+        // TokenHelper.findTokens({value:'MAP'}) scan (O(token count)) plus a
+        // per-token log forEach, purely to feed logger.info calls the "error"
+        // log level discards. On a 68k-token program that scan + string-building
+        // ran on EVERY hover/F12 — part of the ~700ms per-interaction floor. The
+        // authoritative lookup below (findMapStructures) is the only scan needed.
         const mapStructures = TokenHelper.findMapStructures(tokens);
-
-        logger.info(`📋 Found ${mapStructures.length} MAP structure(s) in document "${document.uri.split('/').pop()}"`);
-        if (mapStructures.length > 0) {
-            mapStructures.forEach((map, i) => {
-                logger.info(`   MAP #${i + 1}: line ${map.line}, finishesAt ${map.finishesAt}`);
-            });
-        }
 
         if (mapStructures.length === 0) {
             logger.info(`No MAP blocks found`);
