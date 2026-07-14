@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.1] - Unreleased
 
+**New Features**
+
+- ⚡ **Hovering a procedure call no longer costs ~350ms every time** ([#354](https://github.com/msarson/Clarion-Extension/issues/354)): a proc-call hover resolves the enclosing MAP's INCLUDE chain twice (once to find the declaration, once to find the implementation), and each pass re-ran a `statSync`-per-include loop over the module's callout INCs — on a generated module that is dozens of disk stats, twice, on every hover, uncached (~190ms + ~165ms measured, flat across repeats). The merged MAP-includes token set is now memoized per host content and cleared by the file-watcher epoch, so the second pass and every repeat hover are a cache hit. Router-level and proc-call-level hover timing was added to pin the cost.
+
 **Bug Fixes**
 
 - 🐛 **Find All References (and the reference-count CodeLens) no longer collapses to "2 references" for a procedure whose name also exists in another project** ([#364](https://github.com/msarson/Clarion-Extension/issues/364)): a procedure like `AppendText` — declared `Name PROCEDURE(...)` inside a module-callout INC and called across dozens of modules — showed "2 references" (with the estimate correctly near ~164). The cross-file procedure index (added for fast F12/hover) synthesized the resolved symbol from the declaration token, whose *value* is the literal `PROCEDURE` keyword for the `Name PROCEDURE` form (the name lives on the token's label). Find All References searches for `symbol.value`, so it was searching for the word **"PROCEDURE"** — matching only declaration lines (filtered to two by signature) and never the actual `AppendText(...)` call sites. The resolved symbol now always carries the procedure *name*; and, since the name can exist in two projects, resolution now prefers the current document's project so references land where the cursor is. F12/hover benefit from the same corrected name and position.
