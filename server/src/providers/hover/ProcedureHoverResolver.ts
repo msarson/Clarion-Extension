@@ -63,7 +63,7 @@ export class ProcedureHoverResolver {
         const mk = (n: string) => { const now = Date.now(); st.push([n, now - last]); last = now; };
         const emit = () => {
             const tot = Date.now() - rStart;
-            if (tot < 150) return;
+            if (tot < 300) return;
             const top = st.filter(([, m]) => m >= 15).sort((a, b) => b[1] - a[1]).slice(0, 6)
                 .map(([n, m]) => `${n}=${m}`).join(', ');
             perfLogger.perf("Hover proc breakdown", { total_ms: tot, top: top || '(all <15ms)', word });

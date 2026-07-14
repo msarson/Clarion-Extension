@@ -65,7 +65,7 @@ export class HoverRouter {
         const mark = (name: string) => { const now = Date.now(); stages.push([name, now - last]); last = now; };
         const emitIfSlow = () => {
             const total = Date.now() - routerStart;
-            if (total < 200) return;
+            if (total < 300) return;
             const top = stages.filter(([, ms]) => ms >= 20).sort((a, b) => b[1] - a[1]).slice(0, 6)
                 .map(([n, ms]) => `${n}=${ms}`).join(', ');
             perfLogger.perf("Hover router breakdown", { total_ms: total, top: top || '(all stages <20ms)', word });
