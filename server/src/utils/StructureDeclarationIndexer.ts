@@ -346,6 +346,24 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     /** Stats of the most recent buildIndex call (exposed for perf lines and tests). */
     public lastBuildStats: { files: number; scanned: number; reusedFromDisk: number; ms: number } | null = null;
 
+    /** #355 — stats of the most recent BACKGROUND validation (exposed for perf lines and tests). */
+    public lastValidationStats: { files: number; scanned: number; reusedFromDisk: number; drift: boolean; ms: number } | null = null;
+
+    /**
+     * #355 — fired after a background validation found drift (an external change made
+     * between sessions) and swapped the corrected declarations into the live index.
+     * server.ts wires this to the #340 debounced open-document revalidation.
+     */
+    public onDrift?: (projectPath: string) => void;
+
+    /** #355 — in-flight background validations, chained per project key. */
+    private backgroundValidations: Map<string, Promise<void>> = new Map();
+
+    /** Resolves when the background validation for this project (if any) has completed. */
+    whenValidated(projectPath: string): Promise<void> {
+        return this.backgroundValidations.get(this.normalizeKey(projectPath)) ?? Promise.resolve();
+    }
+
     async buildIndex(projectPath: string): Promise<StructureIndex> {
         const startTime = Date.now();
         const byName = new Map<string, StructureDeclarationInfo[]>();
@@ -389,47 +407,55 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             // distinguish cache read (I/O), cache parse (CPU block), the stat/scan loop
             // (yielding — its wall-clock absorbs interleaved interactive work), and save.
             const { cache: diskCache, readMs: cacheReadMs, parseMs: cacheParseMs } = await this.loadDiskCache(projectPath);
-            const freshEntries: Record<string, SdiDiskCacheEntry> = {};
 
-            logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
-
-            // #311: 20 → 64. The attributed trace put the warm path's cost in the stat
-            // loop (4,104 stats / 205 batches / a setImmediate round-trip each ≈ 4.2s
-            // wall). Stats are tiny I/O ops — 64-wide keeps chunks small while cutting
-            // the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
-            // 64 concurrent reads is well within Node's comfort.
-            const BATCH_SIZE = 64;
-            const statLoopStart = Date.now();
-            for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
-                const batch = allFiles.slice(i, i + BATCH_SIZE);
-                const batchResults = await Promise.all(batch.map(async f => {
-                    const stat = await fs.promises.stat(f).catch(() => null);
-                    if (!stat) return [] as StructureDeclarationInfo[];
-                    const key = f.toLowerCase();
-                    const cached = diskCache?.files[key];
-                    if (cached && cached.mtimeMs === stat.mtimeMs) {
-                        reusedFromDisk++;
-                        freshEntries[key] = cached;
-                        return cached.decls;
-                    }
-                    const decls = await this.scanFile(f);
-                    scanned++;
-                    freshEntries[key] = { mtimeMs: stat.mtimeMs, decls };
-                    return decls;
-                }));
-                for (const decls of batchResults) {
-                    total += decls.length;
-                    for (const d of decls) {
+            // #355: TRUST the disk cache at startup. The stat sweep exists to catch
+            // external changes made between sessions, but 4,104 stats cost whatever the
+            // machine's per-I/O tax is (97ms warm dev box … 7s cold/AV-taxed VM), and
+            // the async validator pass gates on this build (#289) — so the sweep's price
+            // was a straight diagnostics delay. Serve the cached declarations
+            // immediately; the same batched/yielding sweep runs in the BACKGROUND and,
+            // on drift, swaps the corrected declarations into this index IN PLACE and
+            // fires onDrift (wired to the #340 debounced revalidation). Staleness
+            // window: seconds, only after an external change, self-correcting — the
+            // contract #340 already established for mid-session changes.
+            if (diskCache && Object.keys(diskCache.files).length > 0) {
+                for (const entry of Object.values(diskCache.files)) {
+                    total += entry.decls.length;
+                    for (const d of entry.decls) {
                         const key = d.name.toLowerCase();
                         if (!byName.has(key)) byName.set(key, []);
                         byName.get(key)!.push(d);
                     }
                 }
-                // Yield between batches to keep the event loop responsive
-                await new Promise<void>(resolve => setImmediate(resolve));
+                reusedFromDisk = Object.keys(diskCache.files).length;
+                const index: StructureIndex = { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
+                const duration = Date.now() - startTime;
+                this.lastBuildStats = { files: fileCount, scanned: 0, reusedFromDisk, ms: duration };
+                perfLogger.perf("SDI buildIndex complete", {
+                    ms: duration,
+                    red_ms: redMs,
+                    dir_scan_ms: dirScanMs,
+                    cache_read_ms: cacheReadMs,
+                    cache_parse_ms: cacheParseMs,
+                    stat_loop_ms: 0,
+                    save_ms: 0,
+                    cache_trusted: 'true',
+                    files: fileCount,
+                    scanned: 0,
+                    reused_from_disk: reusedFromDisk,
+                    declarations: total,
+                    project: path.basename(projectPath) || projectPath
+                });
+                this.launchBackgroundValidation(projectPath, allFiles, diskCache, index);
+                return index;
             }
 
-            const statLoopMs = Date.now() - statLoopStart;
+            const { byName: scannedByName, freshEntries, total: scanTotal, scanned: scanScanned, reusedFromDisk: scanReused, statLoopMs } =
+                await this.statScanFiles(allFiles, diskCache);
+            for (const [k, v] of scannedByName) byName.set(k, v);
+            total = scanTotal;
+            scanned = scanScanned;
+            reusedFromDisk = scanReused;
 
             // Only rewrite the disk cache when something actually changed — a fully-warm build
             // (everything reused) would otherwise re-stringify ~70k declarations for nothing.
@@ -468,6 +494,112 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         }
 
         return { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
+    }
+
+    /**
+     * The mtime-validating stat/scan sweep, shared by the cold full build and the
+     * #355 background validation.
+     *
+     * #311: 20 → 64. The attributed trace put the warm path's cost in the stat
+     * loop (4,104 stats / 205 batches / a setImmediate round-trip each ≈ 4.2s
+     * wall). Stats are tiny I/O ops — 64-wide keeps chunks small while cutting
+     * the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
+     * 64 concurrent reads is well within Node's comfort.
+     */
+    private async statScanFiles(allFiles: string[], diskCache: SdiDiskCacheFile | null): Promise<{
+        byName: Map<string, StructureDeclarationInfo[]>;
+        freshEntries: Record<string, SdiDiskCacheEntry>;
+        total: number;
+        scanned: number;
+        reusedFromDisk: number;
+        statLoopMs: number;
+    }> {
+        const byName = new Map<string, StructureDeclarationInfo[]>();
+        const freshEntries: Record<string, SdiDiskCacheEntry> = {};
+        let total = 0;
+        let scanned = 0;
+        let reusedFromDisk = 0;
+
+        logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
+
+        const BATCH_SIZE = 64;
+        const statLoopStart = Date.now();
+        for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+            const batch = allFiles.slice(i, i + BATCH_SIZE);
+            const batchResults = await Promise.all(batch.map(async f => {
+                const stat = await fs.promises.stat(f).catch(() => null);
+                if (!stat) return [] as StructureDeclarationInfo[];
+                const key = f.toLowerCase();
+                const cached = diskCache?.files[key];
+                if (cached && cached.mtimeMs === stat.mtimeMs) {
+                    reusedFromDisk++;
+                    freshEntries[key] = cached;
+                    return cached.decls;
+                }
+                const decls = await this.scanFile(f);
+                scanned++;
+                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls };
+                return decls;
+            }));
+            for (const decls of batchResults) {
+                total += decls.length;
+                for (const d of decls) {
+                    const key = d.name.toLowerCase();
+                    if (!byName.has(key)) byName.set(key, []);
+                    byName.get(key)!.push(d);
+                }
+            }
+            // Yield between batches to keep the event loop responsive
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+
+        return { byName, freshEntries, total, scanned, reusedFromDisk, statLoopMs: Date.now() - statLoopStart };
+    }
+
+    /**
+     * #355 — validate a cache-trusted index against the file system in the background.
+     * Chained per project key so two launches never run concurrent sweeps. On drift the
+     * corrected declarations are swapped into the SAME index object callers already hold
+     * (synchronous clear+refill — no await between — so readers never see a half state),
+     * the disk cache is rewritten, and onDrift fires.
+     */
+    private launchBackgroundValidation(
+        projectPath: string,
+        allFiles: string[],
+        diskCache: SdiDiskCacheFile,
+        index: StructureIndex
+    ): void {
+        const key = this.normalizeKey(projectPath);
+        const prev = this.backgroundValidations.get(key) ?? Promise.resolve();
+        const run = prev.then(async () => {
+            const vStart = Date.now();
+            const { byName, freshEntries, scanned, reusedFromDisk, statLoopMs } =
+                await this.statScanFiles(allFiles, diskCache);
+            const drift = scanned > 0
+                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
+            if (drift) {
+                index.byName.clear();
+                for (const [k, v] of byName) index.byName.set(k, v);
+                index.lastIndexed = Date.now();
+                await this.saveDiskCache(projectPath, freshEntries);
+            }
+            this.lastValidationStats = { files: allFiles.length, scanned, reusedFromDisk, drift, ms: Date.now() - vStart };
+            perfLogger.perf("SDI background validation complete", {
+                ms: Date.now() - vStart,
+                stat_loop_ms: statLoopMs,
+                files: allFiles.length,
+                scanned,
+                reused_from_disk: reusedFromDisk,
+                drift: String(drift),
+                project: path.basename(projectPath) || projectPath
+            });
+            if (drift) {
+                this.onDrift?.(key);
+            }
+        }).catch(err => {
+            logger.error(`[#355] SDI background validation failed (index stays cache-trusted): ${err instanceof Error ? err.message : String(err)}`);
+        });
+        this.backgroundValidations.set(key, run);
     }
 
     /** Location of the per-project disk cache (OS temp dir — never pollutes the user's solution). */

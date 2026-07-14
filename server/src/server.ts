@@ -2146,6 +2146,24 @@ connection.onNotification('clarion/updatePaths', async (params: {
             setImmediate(async () => {
                 const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
                 const indexer = StructureDeclarationIndexer.getInstance();
+                // #355: the index now returns cache-trusted (no startup stat sweep) and
+                // validates mtimes in the background. If that sweep finds an external
+                // change made between sessions, treat it exactly like a #340 watched-file
+                // change: drop every cross-file memo and revalidate open docs (debounced —
+                // a regeneration drifts many files but must trigger one sweep).
+                indexer.onDrift = (driftedProject) => {
+                    logger.info(`🔄 [#355] SDI background validation found drift (${path.basename(driftedProject)}) — revalidating`);
+                    evictIncludeChainIndexes();
+                    bumpCrossFileEpoch();
+                    IncludeVerifier.getInstance().clearCache();
+                    if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
+                    watchedFilesRevalidateTimer = setTimeout(() => {
+                        watchedFilesRevalidateTimer = undefined;
+                        for (const openDoc of documents.all()) {
+                            validateTextDocument(openDoc, 'sdiDrift');
+                        }
+                    }, 500);
+                };
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
@@ -3344,8 +3362,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [352-353 BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [352-353 BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [352-355 BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [352-355 BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });
