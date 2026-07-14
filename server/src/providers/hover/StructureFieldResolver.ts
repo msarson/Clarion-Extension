@@ -12,6 +12,7 @@ import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../../utils/RedirectionResolution';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -336,9 +337,23 @@ export class StructureFieldResolver {
      * Finds the structure declaration in INCLUDE files and shows the type definition.
      */
     async resolveTypeNameHover(typeName: string, document: TextDocument): Promise<Hover | null> {
+        // #361 — GATE the include walk on the SDI. findTypeDeclarationInIncludes
+        // does a recursive fs.readFileSync + tokenize of EVERY reachable INCLUDE;
+        // on IBSCommon.clw a hover over a word that isn't a type (NetDebugTrace,
+        // dll_mode, a word inside a string) walked the whole ABC/NetTalk/libsrc
+        // universe synchronously — a 38s frozen editor. The SDI already indexes
+        // every declared type across the redirection search paths, which is a
+        // SUPERSET of this document's reachable includes: if it has no entry, the
+        // walk cannot find one either. So skip the walk on an SDI miss. (This runs
+        // only after checkClassTypeHover's SDI lookup already missed, so the walk
+        // was pure wasted work for non-types.) The cheap direct equates.clw token
+        // check below stays — it's a single bounded file, not a chain walk.
+        const sdiKnowsType = StructureDeclarationIndexer.getInstance().find(typeName).length > 0;
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const result = await this.findTypeDeclarationInIncludes(typeName, filePath, new Set());
-        if (result) return result;
+        if (sdiKnowsType) {
+            const result = await this.findTypeDeclarationInIncludes(typeName, filePath, new Set());
+            if (result) return result;
+        }
 
         // Fallback: check equates.clw directly (FILE:Queue etc. are defined there, not in INCLUDEs)
         const solutionManager = SolutionManager.getInstance();
@@ -379,8 +394,12 @@ export class StructureFieldResolver {
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
             }
-            // Also walk any INCLUDEs in equates.clw
-            return this.findTypeDeclarationInIncludes(typeName, equatesPath, new Set());
+            // Also walk any INCLUDEs in equates.clw — but only when the SDI
+            // knows the type (same #361 gate; otherwise this is another full
+            // chain walk that finds nothing).
+            if (sdiKnowsType) {
+                return this.findTypeDeclarationInIncludes(typeName, equatesPath, new Set());
+            }
         }
         return null;
     }

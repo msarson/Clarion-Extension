@@ -3388,8 +3388,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [360-INSTR BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [360-INSTR BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [361-HOVER BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [361-HOVER BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });
