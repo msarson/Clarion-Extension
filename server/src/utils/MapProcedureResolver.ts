@@ -18,13 +18,28 @@ import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
-import { cooperativeCheckpoint } from './cooperativeScan';
+import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
+import { getCrossFileEpoch } from './crossFileEpoch';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
+
+/**
+ * #361 — walk-RESULT cache for findDeclarationInMapIncludes, keyed by
+ * host+procName. The walk recursively reads + tokenizes the reachable MAP
+ * include chain; on IBSCommon.clw a hover over a NetTalk procedure (NetDebugTrace)
+ * cost ~89s, and hovering repeatedly around a block re-paid it every time. The
+ * walk result (including a NEGATIVE "no declaration reachable") is memoized here
+ * and reused until the cross-file epoch bumps (the #340 watcher / #355 drift path
+ * — the same invalidation every other cross-file memo uses). Module-level so it
+ * survives across the per-request resolver instances.
+ */
+interface MapDeclWalkHit { docUri: string; declLine: number; }
+const mapDeclWalkCache = new Map<string, MapDeclWalkHit | null>();
+let mapDeclWalkEpoch = -1;
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
@@ -56,6 +71,28 @@ export class MapProcedureResolver {
         // every reachable INC before concluding "not a MAP procedure").
         if (procName.includes('.')) return null;
 
+        // #361 — result cache (positive + NEGATIVE), epoch-invalidated. The walk
+        // below is ~89s on a big NetTalk PROGRAM file; without this, hovering
+        // repeatedly around a block re-pays it every time. A NEGATIVE result
+        // (NetDebugTrace is not a reachable MAP proc) is exactly what needs
+        // remembering — it's the common, most expensive case.
+        const epoch = getCrossFileEpoch();
+        if (epoch !== mapDeclWalkEpoch) {
+            mapDeclWalkCache.clear();
+            mapDeclWalkEpoch = epoch;
+        }
+        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}`;
+        if (mapDeclWalkCache.has(cacheKey)) {
+            const cached = mapDeclWalkCache.get(cacheKey)!;
+            if (!cached) return null;
+            // Re-derive the live doc/tokens (CrossFileCache makes this cheap) so a
+            // stale document object is never handed out.
+            const reloaded = await this.loadDocForWalk(
+                decodeURIComponent(cached.docUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
+            if (reloaded) return { doc: reloaded.document, tokens: reloaded.tokens, declLine: cached.declLine };
+            // Reload failed (file gone) — fall through to a fresh walk.
+        }
+
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
@@ -68,8 +105,12 @@ export class MapProcedureResolver {
         const visited = new Set<string>();
         for (const start of startPaths) {
             const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
-            if (hit) return hit;
+            if (hit) {
+                mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine });
+                return hit;
+            }
         }
+        mapDeclWalkCache.set(cacheKey, null);
         return null;
     }
 
@@ -131,6 +172,12 @@ export class MapProcedureResolver {
         const nameLower = procName.toLowerCase();
         let match: RegExpExecArray | null;
 
+        // #361 — the inner loop below loads (and, cold, tokenizes) EVERY include of
+        // this file with no yield between them; a big NetTalk chain blocked the event
+        // loop ~38s in one stretch. Yield whenever a time budget elapses so the
+        // editor stays responsive even on a cold, slow walk.
+        const timeSlice = makeTimeSlicer();
+
         // Offset→line lookup for the MAP-range filter (built once, binary-searched).
         let lineStarts: number[] | null = null;
         if (mapRanges) {
@@ -156,6 +203,7 @@ export class MapProcedureResolver {
             const incPath = this.resolveIncludeTarget(match[1], fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
 
+            await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);
             if (!inc) continue;
 
