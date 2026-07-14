@@ -2274,6 +2274,30 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
 
+                // #363 — pre-warm the cross-file indexes (#344 include-chain global,
+                // #345 sibling family label) for the open documents, LAST on this
+                // idle lane. At v1.0.0 the slow startup validators built these as a
+                // side effect, so the user's first hover/F12/FAR was warm; the 1.0.1
+                // validator perf work removed that incidental warming (#363), moving
+                // the ~15s cold build onto whatever the user touched first. Building
+                // them deliberately here — after every user-facing consumer, never
+                // contending — restores the warm-interaction feel without the slow
+                // validators. Best-effort: the builders are cache-backed and yield.
+                const warmStart = Date.now();
+                const warmFinder = new SymbolFinderService(tokenCache, new ScopeAnalyzer(tokenCache, undefined as never));
+                let warmedDocs = 0;
+                for (const openDoc of documents.all()) {
+                    try {
+                        await warmFinder.warmCrossFileIndexes(openDoc);
+                        warmedDocs++;
+                    } catch { /* warming is best-effort — never fail the lane */ }
+                }
+                perfLogger.perf("Phase: cross-file index pre-warm complete (lane tail)", {
+                    ms: Date.now() - warmStart,
+                    docs: warmedDocs,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
@@ -3388,8 +3412,8 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [362-F12v3 BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [362-F12v3 BUILD] at " + new Date().toISOString());
+logger.info("🚀 SERVER: Starting to listen on connection [363-PREWARM BUILD]");
+console.error("🚀 SERVER: Starting to listen on connection [363-PREWARM BUILD] at " + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

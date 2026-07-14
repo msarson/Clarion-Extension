@@ -690,6 +690,37 @@ export class SymbolFinderService {
     }
 
     /**
+     * #363 — pre-warm the cross-file indexes that a hover / F12 / FAR would
+     * otherwise build COLD on the first user interaction: the #344 include-chain
+     * global index and the #345 sibling family label index. At v1.0.0 the (slow)
+     * startup validators happened to build these as a side effect, so the first
+     * interaction was warm; the 1.0.1 validator perf work removed that incidental
+     * warming (see #363), moving the ~15s cold build onto whatever the user
+     * touched first. Building them deliberately on the idle background lane
+     * restores the warm-interaction feel without bringing back the slow validators.
+     *
+     * Best-effort and idempotent: the underlying builders are cache-backed
+     * (content + TTL + the #340 watcher / cross-file epoch), so a warm that races a
+     * real lookup simply shares the cache. A sentinel name that can never be a real
+     * Clarion identifier drives each builder to completion without resolving anything.
+     */
+    public async warmCrossFileIndexes(document: TextDocument): Promise<void> {
+        const SENTINEL = ' __clarion_warm_sentinel__';
+        try {
+            const tokens = this.tokenCache.getTokens(document);
+            // #344 — drive the full global tier so BOTH the host's own include-chain
+            // index AND (for a MEMBER file) the parent PROGRAM's chain index get
+            // built — a real F12/hover on a global resolves through the parent, so
+            // warming only the host's chain would leave the parent's cold.
+            await this.findGlobalVariable(SENTINEL, tokens, document);
+        } catch { /* warming is best-effort — a failure must never surface */ }
+        try {
+            // #345 — build this program family's sibling label index.
+            await this.findModuleVariableInSiblingMembers(SENTINEL, document, { line: 0, character: 0 });
+        } catch { /* warming is best-effort */ }
+    }
+
+    /**
      * Find a module-scope variable declared in a sibling MEMBER file of the same PROGRAM.
      *
      * Uses FRG MEMBER edges to enumerate sibling MEMBER files, then scans each file's
