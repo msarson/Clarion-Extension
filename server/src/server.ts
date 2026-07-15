@@ -799,18 +799,23 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
         ];
-        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
-            caller === 'sdiReady'
-                ? await (async () => {
-                    const results: Diagnostic[][] = [];
-                    for (const [name, thunk] of validatorThunks) {
-                        results.push(await timeIt(name, thunk()));
-                        // Real macrotask yield between validators — lets queued requests in
-                        await new Promise<void>(resolve => setImmediate(resolve));
-                    }
-                    return results;
-                })()
-                : await Promise.all(validatorThunks.map(([name, thunk]) => timeIt(name, thunk())));
+        // #367: sequential-with-yield for EVERY caller, not just 'sdiReady'. The old
+        // ternary gave interactive edits and crossFileUpdate a Promise.all of 8
+        // validators — 8 chains awaiting mostly-cached (already-resolved) promises
+        // advance on the microtask queue, so the event loop never reaches its poll
+        // phase to read incoming LSP messages while any chain has work (a cooperative
+        // yield inside one validator can't help while the others keep the microtask
+        // queue full). Running them one at a time with a real macrotask yield between
+        // restores the yields' effect on every path; total work is unchanged (single
+        // thread — the concurrency never bought parallelism). The startup lane already
+        // proved this fixed a 20s+ starved-tree-expand.
+        const validatorResults: Diagnostic[][] = [];
+        for (const [name, thunk] of validatorThunks) {
+            validatorResults.push(await timeIt(name, thunk()));
+            // Real macrotask yield between validators — lets queued requests in.
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -3436,7 +3441,7 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 // Listen on the connection
 // Build tag — names the fixes under test in this build so a pasted perf log
 // unambiguously identifies which VSIX produced it. Update per shipped item.
-const BUILD_TAG = "[#366 BFS-YIELD]";
+const BUILD_TAG = "[#367 VALIDATOR-YIELDS]";
 logger.info(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG}`);
 console.error(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG} at ` + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {

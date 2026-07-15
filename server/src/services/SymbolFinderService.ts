@@ -1436,15 +1436,17 @@ export class SymbolFinderService {
         hostDoc: TextDocument,
         visited: Set<string>,
         names: Map<string, ChainDeclInfo>,
-        contributing: Map<string, number>
+        contributing: Map<string, number>,
+        // #367: ONE slicer shared across the whole recursive walk. A fresh
+        // makeTimeSlicer() per recursion frame reset the 25ms budget at every level,
+        // so a chain N deep could run 25×N ms of synchronous tokenizing before a
+        // single yield fired — the ~1.4s undeclaredVar block. The top-level caller
+        // omits it (fresh slicer); recursive calls thread this one through.
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<void> {
         const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
         const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
         const hostDir = path.dirname(hostPath);
-        // #345 phase 3: the cold build tokenizes each chain file synchronously —
-        // on a generated app the chain is the whole ABC/libsrc universe, and the
-        // unyielded loop showed up as a 20s+ event-loop block. Yield per include.
-        const timeSlice = makeTimeSlicer();
 
         for (const t of hostTokens) {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
@@ -1528,7 +1530,7 @@ export class SymbolFinderService {
             }
 
             // Nested includes (e.g. Globals.inc itself INCLUDEs deeper files).
-            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names, contributing);
+            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names, contributing, timeSlice);
         }
     }
 

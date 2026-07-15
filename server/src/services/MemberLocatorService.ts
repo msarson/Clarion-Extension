@@ -12,6 +12,7 @@
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -581,10 +582,14 @@ export class MemberLocatorService {
         ifaceName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        // #367: ONE slicer across the whole recursive include walk (this loaded +
+        // tokenized every reachable INC with no yield at all — an ifaceImpl freeze).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<Array<{ name: string; paramCount: number }> | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -597,7 +602,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
                 );
                 if (nested) return nested;
             }
@@ -746,10 +751,13 @@ export class MemberLocatorService {
         tokens: Token[],
         fromDir: string,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        // #367: ONE slicer across the whole recursive include walk (previously no yield).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<MemberInfo | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -760,7 +768,7 @@ export class MemberLocatorService {
                 if (result) return result;
 
                 const nested = await this.findInterfaceInIncludeChain(
-                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited
+                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited, timeSlice
                 );
                 if (nested) return nested;
             }
@@ -1110,10 +1118,12 @@ export class MemberLocatorService {
         ifaceName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        timeSlice: () => Promise<void> = makeTimeSlicer() // #367: shared across the recursion
     ): Promise<string[] | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -1124,7 +1134,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChain(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
                 );
                 if (nested) return nested;
             }
