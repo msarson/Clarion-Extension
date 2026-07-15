@@ -177,7 +177,7 @@ export class ClassConstantsCodeActionProvider {
             // measured) — its include-chain walk (isClassIncluded) and constant checks
             // re-ran on every request. Same memo discipline as the INCLUDE path.
             const wordMemoKey = `w|${document.uri}|${document.version}|${word.toLowerCase()}`;
-            const memoizedWord = ClassConstantsCodeActionProvider.includeActionsMemo.get(wordMemoKey);
+            const memoizedWord = this.getMemoizedActions(wordMemoKey);
             if (memoizedWord) return memoizedWord;
 
             // Check if this is a class type with missing constants
@@ -288,12 +288,16 @@ export class ClassConstantsCodeActionProvider {
      * constructs a fresh provider per request. Bounded LRU-ish.
      */
     private static includeActionsMemo = new Map<string, CodeAction[]>();
+    // #365: raised 100→256 — the map holds three key namespaces (INCLUDE-line, word-at-cursor,
+    // and now the missing-include branch) across every open file, so 100 thrashed under a
+    // multi-file startup storm. Actions arrays are tiny; 256 is cheap headroom.
+    private static readonly MEMO_CAP = 256;
 
     private async getActionsForInclude(includeFile: string, document: TextDocument): Promise<CodeAction[]> {
         const actions: CodeAction[] = [];
 
         const memoKey = `${document.uri}|${document.version}|${includeFile.toLowerCase()}`;
-        const memoized = ClassConstantsCodeActionProvider.includeActionsMemo.get(memoKey);
+        const memoized = this.getMemoizedActions(memoKey);
         if (memoized) return memoized;
 
         try {
@@ -385,10 +389,12 @@ export class ClassConstantsCodeActionProvider {
         return this.memoizeIncludeActions(memoKey, actions);
     }
 
-    /** #312 — bounded insert into the static INCLUDE-actions memo. */
+    /** #312 — bounded insert into the static INCLUDE-actions memo (#365: LRU-evicted). */
     private memoizeIncludeActions(key: string, actions: CodeAction[]): CodeAction[] {
         const memo = ClassConstantsCodeActionProvider.includeActionsMemo;
-        if (memo.size >= 100) {
+        // #365: re-insert on write keeps eviction least-recently-USED.
+        memo.delete(key);
+        if (memo.size >= ClassConstantsCodeActionProvider.MEMO_CAP) {
             const oldest = memo.keys().next().value;
             if (oldest !== undefined) memo.delete(oldest);
         }
@@ -397,11 +403,33 @@ export class ClassConstantsCodeActionProvider {
     }
 
     /**
+     * #365 — LRU read for the shared memo. A hit re-inserts the key so a hot line (e.g. the
+     * missing-include quick-fix VS Code re-requests on every cursor move) survives a multi-file
+     * startup storm — otherwise other files' keys FIFO-evict it out before it is revisited.
+     */
+    private getMemoizedActions(key: string): CodeAction[] | undefined {
+        const memo = ClassConstantsCodeActionProvider.includeActionsMemo;
+        const hit = memo.get(key);
+        if (hit) { memo.delete(key); memo.set(key, hit); } // move to MRU end
+        return hit;
+    }
+
+    /**
      * Gets Code Actions for adding a missing INCLUDE statement
      */
     private async getActionsForMissingInclude(className: string, includeFile: string, document: TextDocument, projectPath: string, cwprojPath: string | undefined): Promise<CodeAction[]> {
+        // #365 (cause 1): this path is reached from a missing-include diagnostic on EVERY
+        // cursor move, and previously ran uncached — parseFile + a per-constant
+        // ProjectConstantsChecker loop each time (100-350ms measured on the VM). Same
+        // (className, includeFile, uri, version) → same actions, so memoize like the
+        // INCLUDE-line and word paths. (The word-path caller also memoizes under its own
+        // key; this makes the diagnostic-branch caller — which returns before that — cheap.)
+        const memoKey = `mi|${className.toLowerCase()}|${includeFile.toLowerCase()}|${document.uri}|${document.version}`;
+        const memoized = this.getMemoizedActions(memoKey);
+        if (memoized) return memoized;
+
         const actions: CodeAction[] = [];
-        
+
         try {
             // projectPath and cwprojPath are now passed in from the caller
             
@@ -530,9 +558,10 @@ export class ClassConstantsCodeActionProvider {
             
         } catch (error) {
             logger.error(`Error getting actions for missing INCLUDE: ${error instanceof Error ? error.message : String(error)}`);
+            return actions; // #365: errors are not memoized — retry on the next request
         }
-        
-        return actions;
+
+        return this.memoizeIncludeActions(memoKey, actions);
     }
 
     /**
