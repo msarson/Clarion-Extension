@@ -3434,8 +3434,11 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [HOVER-MAPCACHE BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [HOVER-MAPCACHE BUILD] at " + new Date().toISOString());
+// Build tag — names the fixes under test in this build so a pasted perf log
+// unambiguously identifies which VSIX produced it. Update per shipped item.
+const BUILD_TAG = "[#316 LENS-DEFER + #295 INDEX-PERSIST]";
+logger.info(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG}`);
+console.error(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG} at ` + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });
