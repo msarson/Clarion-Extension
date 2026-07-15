@@ -3441,7 +3441,7 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 // Listen on the connection
 // Build tag — names the fixes under test in this build so a pasted perf log
 // unambiguously identifies which VSIX produced it. Update per shipped item.
-const BUILD_TAG = "[#358 RVD-CLASSMEMBERS-MTIME]";
+const BUILD_TAG = "[#358 RVD-TYPEMEMO + #365 CACONST-MEMO]";
 logger.info(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG}`);
 console.error(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG} at ` + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
