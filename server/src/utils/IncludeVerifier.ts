@@ -6,6 +6,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { pathToCanonicalUri } from './UriUtils';
 import { makeTimeSlicer } from './cooperativeScan';
+import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from '../services/IncludeIndexDiskCache'; // #366
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -263,7 +264,7 @@ export class IncludeVerifier {
 
         // #366: publish the promise SYNCHRONOUSLY (before the first await inside the
         // build) so a concurrent second pass finds it and awaits the same walk.
-        const promise = this.buildReachableIncludeNameSet(directIncludes, baseFilePath);
+        const promise = this.loadOrBuildReachableSet(directIncludes, baseFilePath, fingerprint);
         this.reachableSetCache.set(key, { at: now, fingerprint, promise });
         // A rejected build must not be cached as a poisoned entry — drop it so the
         // next call rebuilds (matches the fail-safe posture of isClassIncluded).
@@ -278,10 +279,43 @@ export class IncludeVerifier {
     // start. A stampede (two concurrent passes) would bump this by 2 for one host.
     private reachableSetBuildCount = 0;
     getReachableSetBuildCount(): number { return this.reachableSetBuildCount; }
+    // #366 — number of reachable sets served from the persisted disk cache.
+    private reachableSetDiskReuseCount = 0;
+    getReachableSetDiskReuseCount(): number { return this.reachableSetDiskReuseCount; }
 
-    private async buildReachableIncludeNameSet(directIncludes: IncludeStatement[], baseFilePath: string): Promise<Set<string>> {
+    /**
+     * #366: the reachable-set BFS costs ~2.6s cold and REBUILT every session (in-memory
+     * cache only). Persist it to disk (mtime-validated, the #295 IncludeIndexDiskCache
+     * pattern): a warm start reuses the derived name set and skips the whole walk.
+     * Reuse is gated on the direct-include fingerprint (signature) + every contributing
+     * file's mtime. Known limitation (shared with the #295 chain/sibling indexes): a
+     * redirection RE-POINT — same include name resolving to a different file with both
+     * files' mtimes unchanged — is not detected here; the #340 watcher clears the
+     * in-memory cache on any workspace change, and a `.red`/settings edit changes mtimes.
+     */
+    private async loadOrBuildReachableSet(
+        directIncludes: IncludeStatement[],
+        baseFilePath: string,
+        fingerprint: string
+    ): Promise<Set<string>> {
+        const disk = loadIncludeIndex<string[]>('reachableset', baseFilePath.toLowerCase());
+        if (disk && await includeIndexFresh(disk, fingerprint)) {
+            this.reachableSetDiskReuseCount++;
+            return new Set(disk.payload);
+        }
+        return this.buildReachableIncludeNameSet(directIncludes, baseFilePath, fingerprint);
+    }
+
+    private async buildReachableIncludeNameSet(
+        directIncludes: IncludeStatement[],
+        baseFilePath: string,
+        fingerprint: string
+    ): Promise<Set<string>> {
         this.reachableSetBuildCount++;
         const set = new Set<string>();
+        // #366: every chain file walked + its mtime, so a warm start can validate and
+        // reuse the persisted set instead of re-walking the include universe.
+        const contributing = new Map<string, number>();
         const baseDir = path.dirname(baseFilePath);
         const visited = new Set<string>();
         const queue: Array<{ fileName: string; baseDir: string }> = directIncludes.map(inc => ({ fileName: inc.fileName, baseDir }));
@@ -304,6 +338,8 @@ export class IncludeVerifier {
             // redirection follows the compile unit, not each intermediate file.
             const incPath = await this.resolveIncludePath(fileName, dir, baseFilePath);
             if (!incPath) continue;
+            // #366: record this contributing file + mtime for the disk cache's drift check.
+            try { contributing.set(incPath, (await fs.promises.stat(incPath)).mtimeMs); } catch { /* unreadable → skip */ }
 
             const subIncludes = await this.parseIncludesFromFilePath(incPath);
             const subDir = path.dirname(incPath);
@@ -314,6 +350,16 @@ export class IncludeVerifier {
                     queue.push({ fileName: sub.fileName, baseDir: subDir });
                 }
             }
+        }
+
+        // #366: persist so a warm start skips this BFS entirely. Only when anchored to
+        // real on-disk files (empty contributing = synthetic/unresolvable → never reused).
+        if (contributing.size > 0) {
+            saveIncludeIndex<string[]>('reachableset', baseFilePath.toLowerCase(), {
+                signature: fingerprint,
+                contributing: Object.fromEntries(contributing),
+                payload: [...set],
+            });
         }
 
         return set;

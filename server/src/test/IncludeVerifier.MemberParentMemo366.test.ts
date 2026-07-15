@@ -27,6 +27,7 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
         savedSm = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = null;
         IncludeVerifier.getInstance().clearCache();
+        clearReachableSetBucket();
 
         // Parent PROGRAM that INCLUDEs the class — a non-empty MEMBER parent.
         fs.writeFileSync(path.join(tmpRoot, 'parent.clw'), [
@@ -76,8 +77,14 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = savedSm;
         savedSm = null;
         IncludeVerifier.getInstance().clearCache();
+        clearReachableSetBucket();
         try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
+
+    const clearReachableSetBucket = () => {
+        try { fs.rmSync(path.join(os.tmpdir(), 'clarion-extension-reachableset'), { recursive: true, force: true }); }
+        catch { /* best-effort */ }
+    };
 
     const childDoc = (version = 1) => {
         const p = path.join(tmpRoot, 'child.clw');
@@ -138,7 +145,10 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
 
         // Baseline: a single pass builds the host's reachable set exactly once
         // (hostprog → level1 → SharedThings, found transitively; no MEMBER parent).
+        // Clear the DISK bucket too, else the persisted set (#366) would be served
+        // instead of built, defeating the build-count comparison.
         iv.clearCache();
+        clearReachableSetBucket();
         const singleBefore = iv.getReachableSetBuildCount();
         assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', hostProgDoc()), true,
             'sanity: the class is reachable via the transitive chain');
@@ -148,6 +158,7 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
         // so the second arrives mid-build. They must await one shared build — the total
         // must match the single-pass build count, not double it.
         iv.clearCache();
+        clearReachableSetBucket();
         const concBefore = iv.getReachableSetBuildCount();
         await Promise.all([
             iv.isClassIncluded('SharedThings.inc', hostProgDoc()),
@@ -158,6 +169,51 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
         assert.ok(singleBuilds >= 1, `sanity: one pass builds the set (got ${singleBuilds})`);
         assert.strictEqual(concBuilds, singleBuilds,
             `two concurrent passes must share the build (single=${singleBuilds} concurrent=${concBuilds})`);
+    });
+
+    test('a warm start reuses the persisted reachable-include set from disk (#366)', async () => {
+        const iv = IncludeVerifier.getInstance();
+        iv.clearCache();
+        clearReachableSetBucket();
+
+        // First pass: cold BFS build + persist to disk (hostprog → level1 → SharedThings).
+        const buildBefore = iv.getReachableSetBuildCount();
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', hostProgDoc()), true,
+            'sanity: SharedThings.inc resolves via the transitive chain');
+        assert.ok(iv.getReachableSetBuildCount() > buildBefore, 'first pass builds + persists the reachable set');
+
+        // Simulate a fresh process: drop the in-memory cache; the disk cache survives.
+        iv.clearCache();
+        const buildAfterEvict = iv.getReachableSetBuildCount();
+        const reuseBefore = iv.getReachableSetDiskReuseCount();
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', hostProgDoc()), true,
+            'still resolves from the disk-served reachable set');
+        assert.strictEqual(iv.getReachableSetBuildCount(), buildAfterEvict,
+            'the second pass reuses the persisted set — no re-walk');
+        assert.ok(iv.getReachableSetDiskReuseCount() > reuseBefore,
+            'the reachable set was served from the disk cache');
+    });
+
+    test('a changed contributing include invalidates the persisted set (no stale reuse) (#366)', async () => {
+        const iv = IncludeVerifier.getInstance();
+        iv.clearCache();
+        clearReachableSetBucket();
+
+        await iv.isClassIncluded('SharedThings.inc', hostProgDoc()); // build + persist
+
+        iv.clearCache();
+        // Change a CONTRIBUTING include's content + advance its mtime.
+        const inc = path.join(tmpRoot, 'SharedThings.inc');
+        fs.writeFileSync(inc, 'SomeClass   CLASS,TYPE\nDoIt PROCEDURE(),LONG\n            END\nExtra LONG\n');
+        const future = new Date(Date.now() + 5000);
+        fs.utimesSync(inc, future, future);
+
+        const reuseBefore = iv.getReachableSetDiskReuseCount();
+        const buildBefore = iv.getReachableSetBuildCount();
+        await iv.isClassIncluded('SharedThings.inc', hostProgDoc());
+        assert.strictEqual(iv.getReachableSetDiskReuseCount(), reuseBefore,
+            'a drifted contributing mtime must NOT be served from disk — the mtime check rejects it');
+        assert.ok(iv.getReachableSetBuildCount() > buildBefore, 'it rebuilds cold instead of serving stale');
     });
 
     test('a document version bump recomputes the parent (memo keyed by uri+version)', async () => {
