@@ -1126,6 +1126,24 @@ connection.onCodeLensResolve(async (lens) => {
             }
         }
 
+        // #316: during the startup background burst, do NOT kick off the exact scan.
+        // A visible lens resolve fires the moment the file opens, and the scan
+        // cold-tokenizes its candidate file set (~293 files → 9.5s measured on the real
+        // solution) while the startup lane is still contending for the loop and the
+        // TokenCache is cold. Show the placeholder now (the approximate '~' estimate if
+        // the index gave us one, else "counting…"); scheduleLensRefresh() fires when
+        // startupBackgroundActive clears, re-resolving every visible lens so the scan
+        // runs once the burst is over — warm cache, no contention. Routine lenses are
+        // exempt (same-file scan, cheap at any phase — same carve-out as the estimate).
+        if (!cached && !data.routine && startupBackgroundActive) {
+            lens.command = {
+                title: placeholderTitle ?? 'counting…',
+                command: 'clarion.showReferences',
+                arguments: [data.uri, { line: data.line, character: data.character }, []],
+            };
+            return lens;
+        }
+
         let refs: Location[] | null;
         if (cached) {
             refs = cached.refs;
@@ -2301,6 +2319,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
+                // #316: the burst is over — re-resolve visible lenses whose exact scan we
+                // deferred above so their counts land now, warm and uncontended.
+                scheduleLensRefresh();
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -3370,6 +3391,7 @@ const drainDeferredIfNoSolution = () => {
     });
     solutionPipelineReady = true;
     startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
+    scheduleLensRefresh(); // #316: re-resolve any lens whose exact scan we deferred during the burst
     sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);
     deferredAsyncDocs.clear();
