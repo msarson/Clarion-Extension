@@ -481,6 +481,33 @@ export class MemberLocatorService {
         );
     }
 
+    /**
+     * #358: ensure the MEMBER('...') parent of `document` is tokenized and in the TokenCache,
+     * OFF the felt path. Resolving a MEMBER module's globals (e.g. GlobalErrors, thisStartup)
+     * walks to their declarations in the parent — on IBSWorking that parent (IBSCommon.clw) is
+     * 873 KB / 68k tokens declaring globals ~9,500 lines deep, so the FIRST cold receiver-type
+     * resolution pays ~1.1s just to tokenize it. Warming it on the startup idle lane pays that
+     * once, in the background, so no interactive validation lands it. Best-effort: returns true
+     * when a parent was resolved (already-cached or freshly loaded).
+     */
+    public async warmMemberParent(document: TextDocument): Promise<boolean> {
+        const tokens = this.tokenCache.getTokens(document);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        if (!memberToken?.referencedFile) return false;
+
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+        if (!parentPath) return false;
+
+        // Already tokenized (open in the editor, or warmed by another member sharing this
+        // parent) → nothing to do. loadDocument keys by this same fs-path-derived uri.
+        const parentUri = `file:///${parentPath.replace(/\\/g, '/')}`;
+        if (this.tokenCache.getTokensByUri(parentUri)) return true;
+
+        await this.loadDocument(parentPath); // reads + tokenizes + caches
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------

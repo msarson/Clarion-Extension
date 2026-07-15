@@ -2308,16 +2308,27 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // validators. Best-effort: the builders are cache-backed and yield.
                 const warmStart = Date.now();
                 const warmFinder = new SymbolFinderService(tokenCache, new ScopeAnalyzer(tokenCache, undefined as never));
+                // #358: also tokenize each open MEMBER module's parent file here. A MEMBER's
+                // globals (GlobalErrors/thisStartup) are declared deep in that parent, and on
+                // IBSWorking the parent (IBSCommon.clw, 873 KB / 68k tokens) costs ~1.1s to
+                // tokenize — paid by the first cold receiver-type resolution unless warmed off
+                // the felt path here. Shared parents are tokenized once (getTokensByUri guard).
+                const warmLocator = new MemberLocatorService();
                 let warmedDocs = 0;
+                let warmedParents = 0;
                 for (const openDoc of documents.all()) {
                     try {
                         await warmFinder.warmCrossFileIndexes(openDoc);
                         warmedDocs++;
                     } catch { /* warming is best-effort — never fail the lane */ }
+                    try {
+                        if (await warmLocator.warmMemberParent(openDoc)) warmedParents++;
+                    } catch { /* best-effort */ }
                 }
                 perfLogger.perf("Phase: cross-file index pre-warm complete (lane tail)", {
                     ms: Date.now() - warmStart,
                     docs: warmedDocs,
+                    member_parents_warmed: warmedParents,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
 
