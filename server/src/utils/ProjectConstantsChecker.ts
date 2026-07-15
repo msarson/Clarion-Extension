@@ -19,7 +19,12 @@ export interface ProjectConstant {
  * Checks project files for defined constants
  */
 export class ProjectConstantsChecker {
-    private constantsCache = new Map<string, Map<string, string>>(); // projectPath -> (constantName -> value)
+    // #368: this checker is constructed FRESH on every call site (validator + code-action), so
+    // an instance-field cache never hit — each call re-read + xml2js-parsed the .cwproj. Made
+    // static (shared across instances) and mtime-validated by the resolved .cwproj file, so a
+    // DefineConstants edit re-parses on the next call but repeats are free — no reliance on an
+    // external clearCache() call (the landmine #368 flagged). One stat per lookup vs a full XML parse.
+    private static constantsCache = new Map<string, { filePath: string; mtimeMs: number; constants: Map<string, string> }>();
 
     /**
      * Checks if a constant is defined in the project
@@ -61,21 +66,28 @@ export class ProjectConstantsChecker {
      */
     async getProjectConstants(projectPath: string): Promise<Map<string, string>> {
         const normalizedPath = path.normalize(projectPath);
-        
-        // Check cache
-        const cached = this.constantsCache.get(normalizedPath);
+
+        // #368: mtime-validated cache hit — one stat vs a full re-read + XML parse.
+        const cached = ProjectConstantsChecker.constantsCache.get(normalizedPath);
         if (cached) {
-            logger.info(`Using cached constants for ${normalizedPath} (${cached.size} constants)`);
-            return cached;
+            try {
+                if ((await fs.promises.stat(cached.filePath)).mtimeMs === cached.mtimeMs) {
+                    return cached.constants;
+                }
+            } catch { /* .cwproj gone/unstatable → fall through and re-parse */ }
         }
 
-        // Find and parse project file
-        const constants = await this.parseProjectFile(projectPath);
-        
-        // Cache the results
-        this.constantsCache.set(normalizedPath, constants);
-        logger.info(`Cached ${constants.size} constants for ${normalizedPath}`);
-        
+        // Find and parse project file (returns the resolved .cwproj path so we can mtime it)
+        const { constants, filePath } = await this.parseProjectFile(projectPath);
+
+        // Cache only when we resolved a real, statable .cwproj — otherwise re-parse next time.
+        if (filePath) {
+            try {
+                const mtimeMs = (await fs.promises.stat(filePath)).mtimeMs;
+                ProjectConstantsChecker.constantsCache.set(normalizedPath, { filePath, mtimeMs, constants });
+            } catch { /* couldn't stat — leave uncached */ }
+        }
+
         return constants;
     }
 
@@ -84,12 +96,11 @@ export class ProjectConstantsChecker {
      * @param projectPath Full path to a .cwproj file, or path to the project directory
      * @returns Map of constant names to values
      */
-    private async parseProjectFile(projectPath: string): Promise<Map<string, string>> {
+    private async parseProjectFile(projectPath: string): Promise<{ constants: Map<string, string>; filePath: string }> {
         const constants = new Map<string, string>();
+        let projectFilePath = '';
 
         try {
-            let projectFilePath: string;
-
             if (projectPath.toLowerCase().endsWith('.cwproj')) {
                 // Full path to specific cwproj provided — use it directly
                 projectFilePath = projectPath;
@@ -100,7 +111,7 @@ export class ProjectConstantsChecker {
 
                 if (!projectFile) {
                     logger.warn(`No .cwproj file found in ${projectPath}`);
-                    return constants;
+                    return { constants, filePath: '' };
                 }
 
                 projectFilePath = path.join(projectPath, projectFile);
@@ -116,7 +127,7 @@ export class ProjectConstantsChecker {
             const project = result.Project;
             if (!project || !project.PropertyGroup) {
                 logger.warn('No PropertyGroup found in project file');
-                return constants;
+                return { constants, filePath: projectFilePath };
             }
 
             // PropertyGroup can be an array
@@ -143,7 +154,7 @@ export class ProjectConstantsChecker {
             logger.error(`Error parsing project file: ${error instanceof Error ? error.message : String(error)}`);
         }
 
-        return constants;
+        return { constants, filePath: projectFilePath };
     }
 
     /**
@@ -201,10 +212,10 @@ export class ProjectConstantsChecker {
     clearCache(projectPath?: string): void {
         if (projectPath) {
             const normalized = path.normalize(projectPath);
-            this.constantsCache.delete(normalized);
+            ProjectConstantsChecker.constantsCache.delete(normalized);
             logger.info(`Cleared constants cache for ${normalized}`);
         } else {
-            this.constantsCache.clear();
+            ProjectConstantsChecker.constantsCache.clear();
             logger.info('Cleared all constants cache');
         }
     }

@@ -39,15 +39,36 @@ export class ClassConstantParser {
     // Pattern: CLASS definition start (with or without opening paren)
     private static readonly CLASS_PATTERN = /^(\w+)\s+CLASS\b/i;
 
+    // #368: parseFile is a hot shared call — the missingConstants validator and the
+    // classConstants code-action both hit it, previously an uncached readFile + regex scan on
+    // every call. Cache the parsed result keyed by path, validated by mtime (the same pattern
+    // as IncludeVerifier's disk lists and the #358 RVD memos): a stat is cheap, so repeats are
+    // free while an edit to the .inc re-parses on the next call. Static so it's shared across
+    // the per-call `new ClassConstantParser()` instances.
+    private static readonly parseCache = new Map<string, { mtimeMs: number; result: ClassConstantInfo[] }>();
+
     /**
      * Parses a CLASS definition file and extracts all required constants
      * @param filePath Path to the .inc file
      * @returns Array of ClassConstantInfo for each class in the file
      */
     async parseFile(filePath: string): Promise<ClassConstantInfo[]> {
+        const key = filePath.toLowerCase();
+        let mtimeMs: number | null = null;
+        try {
+            mtimeMs = (await fs.promises.stat(filePath)).mtimeMs;
+        } catch { /* unstatable (missing) — fall through; the read below logs + returns [] */ }
+
+        if (mtimeMs !== null) {
+            const cached = ClassConstantParser.parseCache.get(key);
+            if (cached && cached.mtimeMs === mtimeMs) return cached.result;
+        }
+
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');
-            return this.parseContent(content);
+            const result = this.parseContent(content);
+            if (mtimeMs !== null) ClassConstantParser.parseCache.set(key, { mtimeMs, result });
+            return result;
         } catch (error) {
             logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
             return [];
