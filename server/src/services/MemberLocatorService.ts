@@ -138,7 +138,12 @@ export class MemberLocatorService {
         varName: string,
         tokens: Token[],
         document: TextDocument,
-        scopeLine?: number
+        scopeLine?: number,
+        // #358: when supplied, collects the fs path(s) whose CONTENT determined the
+        // resolved type — the declaring file of the variable, plus any LIKE-alias file
+        // dereferenced. RVD uses this to mtime-validate its receiver-type memo across
+        // epoch bumps instead of clearing it wholesale. Other callers omit it (no-op).
+        provenance?: Set<string>
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         const found = await this.findVariableTokenCrossFile(varName, tokens, document, scopeLine);
         if (!found) {
@@ -147,9 +152,16 @@ export class MemberLocatorService {
             }
             return null;
         }
+        // The file that declares the variable is the primary dependency of this resolution.
+        provenance?.add(this.uriToFsPath(found.doc.uri));
         const extracted = this.extractTypeFromToken(found.token, found.tokens);
         if (!extracted) return null;
-        return this.resolveTypeAlias(extracted, found.tokens, found.doc, scopeLine);
+        return this.resolveTypeAlias(extracted, found.tokens, found.doc, scopeLine, provenance);
+    }
+
+    /** #358: uri → native fs path (the conversion inlined throughout this file). */
+    private uriToFsPath(uri: string): string {
+        return decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
     }
 
     /**
@@ -160,7 +172,8 @@ export class MemberLocatorService {
         typeInfo: { typeName: string; isClass: boolean; isReference: boolean },
         tokens: Token[],
         document: TextDocument,
-        scopeLine?: number
+        scopeLine?: number,
+        provenance?: Set<string> // #358: records any alias file actually dereferenced
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean }> {
         let current = typeInfo;
         const visited = new Set<string>();
@@ -196,6 +209,8 @@ export class MemberLocatorService {
             if (!aliasType) break;
             if (aliasType.typeName.toLowerCase() === current.typeName.toLowerCase()) break;
 
+            // #358: this alias file's content also determined the final type.
+            provenance?.add(this.uriToFsPath(aliasDecl.doc.uri));
             current = {
                 typeName: aliasType.typeName,
                 isClass: aliasType.isClass,
