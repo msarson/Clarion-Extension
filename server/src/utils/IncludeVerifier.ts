@@ -5,6 +5,7 @@ import { TokenHelper } from './TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { pathToCanonicalUri } from './UriUtils';
+import { makeTimeSlicer } from './cooperativeScan';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -286,7 +287,14 @@ export class IncludeVerifier {
         const queue: Array<{ fileName: string; baseDir: string }> = directIncludes.map(inc => ({ fileName: inc.fileName, baseDir }));
         for (const inc of directIncludes) set.add(inc.fileName.toLowerCase());
 
+        // #366: the per-file awaits below resolve from cache synchronously, so they
+        // only drain microtasks — the walk of hundreds of includes ran as one ~4.6s
+        // event-loop block (max_blocked_ms=4575 measured). Yield to the loop every
+        // 25ms so the walk stays in the background and the UI stays responsive.
+        const timeSlice = makeTimeSlicer();
+
         while (queue.length > 0) {
+            await timeSlice();
             const { fileName, baseDir: dir } = queue.shift()!;
             const visitKey = fileName.toLowerCase();
             if (visited.has(visitKey)) continue;
