@@ -4,7 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
-import { selectBestMemberOverload, OverloadCandidate } from '../../utils/ClassMemberResolver';
+import { selectBestMemberOverload, OverloadCandidate, MemberEnumItem } from '../../utils/ClassMemberResolver';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -18,8 +18,22 @@ import { getCrossFileEpoch } from '../../utils/crossFileEpoch';
 const rvdTypeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
 const rvdClassMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
 let rvdMemoEpoch = -1;
+
+// #358: per-entry contributing-file mtimes for rvdClassMembersMemo. On a cross-file
+// epoch bump we validate each class enumeration against the mtimes of the file(s) that
+// actually declared its members instead of wiping the whole map — so a warm re-validation
+// no longer re-walks unchanged library classes (StringTheory 1394 members, ErrorClass 184).
+// The map is keyed identically to rvdClassMembersMemo (`${rvdDocKey}|${classKey}`):
+//   value = Map<lowercased fsPath, mtimeMs>  — empty means only the open doc contributed
+//   value = null                              — no reusable provenance → drop on the next bump
+// The open doc's own contribution is deliberately excluded: its content is already pinned by
+// the rvdDocKey content-hash below, which is the dirty-doc guard (unsaved edits change the
+// key, not the disk mtime).
+const rvdClassMembersFiles = new Map<string, Map<string, number> | null>();
+
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as path from 'path';
+import * as fs from 'fs';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
@@ -34,6 +48,48 @@ logger.setLevel("error");
 // always emits, even in a release VSIX — one line per validation, needed to diagnose slow-solution
 // reports.
 const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "perf");
+
+// ─── #358 class-members memo mtime validation ────────────────────────────────
+
+/** #358: cheap mtime read (ms) for a declaring file; null if unstatable. */
+function rvdStatMtimeMs(fsPath: string): number | null {
+    try { return fs.statSync(fsPath).mtimeMs; } catch { return null; }
+}
+
+/**
+ * #358: fingerprint the distinct files that declared a class's enumerated members,
+ * excluding the open document (already pinned by rvdDocKey). Returns null when any
+ * member lacks a statable file — such an entry can't be mtime-validated and is dropped
+ * on the next epoch bump rather than trusted.
+ */
+function rvdFingerprintContributingFiles(
+    items: MemberEnumItem[],
+    openDocPathLower: string
+): Map<string, number> | null {
+    const fp = new Map<string, number>();
+    for (const it of items) {
+        const p = it.file;
+        if (!p) return null;
+        const pl = p.toLowerCase();
+        if (pl === openDocPathLower) continue; // open doc → pinned by rvdDocKey (dirty-doc guard)
+        if (!fp.has(pl)) {
+            const m = rvdStatMtimeMs(p);
+            if (m === null) return null;
+            fp.set(pl, m);
+        }
+    }
+    return fp;
+}
+
+/** #358: true when every recorded contributing file still has its enumerated mtime. */
+function rvdClassMembersEntryFresh(fullKey: string): boolean {
+    const fp = rvdClassMembersFiles.get(fullKey);
+    if (!fp) return false; // null provenance (unenumerable / not yet recorded) → re-enumerate
+    for (const [p, mtime] of fp) {
+        if (rvdStatMtimeMs(p) !== mtime) return false;
+    }
+    return true;
+}
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
@@ -767,9 +823,29 @@ export async function validateDiscardedReturnValues(
     // (docUri, docVersion) with the #340 watcher epoch clearing everything on
     // any cross-file change.
     const rvdEpochNow = getCrossFileEpoch();
-    if (rvdEpochNow !== rvdMemoEpoch || rvdTypeMemo.size > 500 || rvdClassMembersMemo.size > 500) {
+    if (rvdEpochNow !== rvdMemoEpoch || rvdTypeMemo.size > 500 || rvdClassMembersMemo.size > 500 || rvdClassMembersFiles.size > 500) {
+        // #345 identity: the type memo resolves receiver VARIABLES against the open doc's
+        // tokens + cross-file type includes and carries no file provenance, so it stays
+        // conservatively cleared on any cross-file change. (Follow-up: thread the declaring
+        // file through resolveVariableType to mtime-validate it too.)
         rvdTypeMemo.clear();
-        rvdClassMembersMemo.clear();
+        // #358: class-member enumerations are gated by their DECLARING files, not the open
+        // doc — validate each entry against its recorded contributing-file mtimes instead of
+        // wiping all. Library classes whose files never changed survive the bump, killing the
+        // ~2.3s warm re-enumeration this issue is about. The >500 ceiling clears both maps
+        // together — it also reaps any fingerprint orphaned when an in-flight enumeration's
+        // entry was dropped mid-build below.
+        if (rvdClassMembersMemo.size > 500 || rvdClassMembersFiles.size > 500) {
+            rvdClassMembersMemo.clear();
+            rvdClassMembersFiles.clear();
+        } else if (rvdEpochNow !== rvdMemoEpoch) {
+            for (const key of [...rvdClassMembersMemo.keys()]) {
+                if (!rvdClassMembersEntryFresh(key)) {
+                    rvdClassMembersMemo.delete(key);
+                    rvdClassMembersFiles.delete(key);
+                }
+            }
+        }
         rvdMemoEpoch = rvdEpochNow;
     }
     // Content is part of the identity (the #340/#344 lesson) — same uri+version
@@ -780,6 +856,9 @@ export async function validateDiscardedReturnValues(
         rvdHash = ((rvdHash * 33) ^ rvdText.charCodeAt(i)) >>> 0;
     }
     const rvdDocKey = `${document.uri.toLowerCase()}|${document.version}|${rvdText.length}|${rvdHash}`;
+    // #358: the open doc's own FS path, so class members enumerated from live tokens are
+    // excluded from the mtime fingerprint (their validity is pinned by rvdDocKey above).
+    const openDocPathLower = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\').toLowerCase();
     const typeMemo = {
         get: (k: string) => rvdTypeMemo.get(`${rvdDocKey}|${k}`),
         set: (k: string, v: Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>) =>
@@ -809,6 +888,7 @@ export async function validateDiscardedReturnValues(
 
     const getClassMembers = (className: string): Promise<Map<string, OverloadCandidate[]> | null> => {
         const classKey = className.toLowerCase();
+        const fullKey = `${rvdDocKey}|${classKey}`; // #358: aligns with classMembersMemo's stored key
         let promise = classMembersMemo.get(classKey);
         if (!promise) {
             promise = (async () => {
@@ -821,7 +901,13 @@ export async function validateDiscardedReturnValues(
                             class: className, ms: enumMs, members: items?.length ?? 0
                         });
                     }
-                    if (!items || items.length === 0) return null;
+                    if (!items || items.length === 0) {
+                        rvdClassMembersFiles.set(fullKey, null); // #358: no provenance → drop on next bump
+                        return null;
+                    }
+                    // #358: record the declaring-file mtimes so this entry survives an epoch bump
+                    // when those files are unchanged (excludes the open doc, pinned by rvdDocKey).
+                    rvdClassMembersFiles.set(fullKey, rvdFingerprintContributingFiles(items, openDocPathLower));
                     const byName = new Map<string, OverloadCandidate[]>();
                     for (const item of items) {
                         const nameKey = item.name.toLowerCase();
@@ -836,6 +922,7 @@ export async function validateDiscardedReturnValues(
                     }
                     return byName;
                 } catch {
+                    rvdClassMembersFiles.set(fullKey, null); // #358: enumeration failure → drop on next bump
                     return null; // enumeration failure → per-site fallback, never a dead validator
                 }
             })();
