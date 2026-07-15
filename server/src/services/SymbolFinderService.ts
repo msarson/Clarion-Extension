@@ -31,6 +31,8 @@ import { resolveViaProjectRedirection as resolveViaProjectRedirection328 } from 
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
+import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from './IncludeIndexDiskCache';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
 const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
@@ -40,7 +42,10 @@ const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
 // original shape cost 74s on a real 43-project solution's undeclared-variable
 // pass). TTL-bounded; evicted wholesale by the #340 watched-files handler.
 interface ChainDeclInfo { uri: string; line: number; character: number; }
-interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string, ChainDeclInfo>; }
+// #295: `contributing` records every chain file read during the build + its mtime,
+// so a warm start can validate and reuse the persisted `names` map (below) instead
+// of re-tokenizing the whole include universe.
+interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string, ChainDeclInfo>; contributing: Map<string, number>; }
 const includeChainIndexCache = new Map<string, ChainIndexEntry>();
 interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
 const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
@@ -51,10 +56,18 @@ const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
 // outside the workspace), so it can be generous.
 const CHAIN_INDEX_TTL_MS = 600_000;
 let chainIndexBuildCount = 0;
+// #295: separate positive signal for "served from the persisted disk cache"
+// (a cold rebuild was avoided). Covers both the #344 chain and #345 sibling index.
+let includeIndexDiskReuseCount = 0;
 
 /** Test observability — number of chain-index builds since process start. */
 export function getChainIndexBuildCount(): number {
     return chainIndexBuildCount;
+}
+
+/** Test observability (#295) — number of include indexes served from the disk cache. */
+export function getIncludeIndexDiskReuseCount(): number {
+    return includeIndexDiskReuseCount;
 }
 
 /** #340/#344 — external file changes can invalidate any chain; evict wholesale. */
@@ -806,7 +819,22 @@ export class SymbolFinderService {
             return cached;
         }
 
+        // #295: reuse the mtime-validated disk cache before re-reading every member.
+        // Identity = the member-list fingerprint (which files belong to the family);
+        // member CONTENT changes are caught by the recorded per-member mtimes.
+        const disk = loadIncludeIndex<Record<string, string[]>>('siblingindex', key);
+        if (disk && await includeIndexFresh(disk, fingerprint)) {
+            const reused: SiblingIndexEntry = {
+                builtAt: Date.now(), fingerprint, names: new Map(Object.entries(disk.payload)),
+            };
+            siblingLabelIndexCache.set(key, reused);
+            includeIndexDiskReuseCount++;
+            logger.info(`📇 [#345/#295] sibling label index for ${path.basename(programFile)} served from disk: ${reused.names.size} name(s)`);
+            return reused;
+        }
+
         const entry: SiblingIndexEntry = { builtAt: Date.now(), fingerprint, names: new Map() };
+        const contributing = new Map<string, number>();
         const timeSlice = makeTimeSlicer();
         const labelRe = /^([A-Za-z_][A-Za-z0-9_:]*)/;
         const seenFiles = new Set<string>();
@@ -829,6 +857,8 @@ export class SymbolFinderService {
                     continue;
                 }
             }
+            // #295: record the member + mtime for the disk cache's drift check.
+            try { contributing.set(memberPath, fs.statSync(memberPath).mtimeMs); } catch { /* unreadable → skip */ }
             for (const line of raw.split(/\r?\n/)) {
                 const m = labelRe.exec(line);
                 if (!m) continue;
@@ -840,6 +870,14 @@ export class SymbolFinderService {
         }
 
         siblingLabelIndexCache.set(key, entry);
+        // Persist only when anchored to real on-disk members (see #344 note above).
+        if (contributing.size > 0) {
+            saveIncludeIndex<Record<string, string[]>>('siblingindex', key, {
+                signature: fingerprint,
+                contributing: Object.fromEntries(contributing),
+                payload: Object.fromEntries(entry.names),
+            });
+        }
         logger.info(`📇 [#345] sibling label index for ${path.basename(programFile)}: ${entry.names.size} name(s) across ${seenFiles.size} member(s)`);
         return entry;
     }
@@ -1322,11 +1360,39 @@ export class SymbolFinderService {
         const hostText = hostDoc.getText();
         let entry = includeChainIndexCache.get(key);
         if (!entry || Date.now() - entry.builtAt > CHAIN_INDEX_TTL_MS || entry.hostText !== hostText) {
-            entry = { builtAt: Date.now(), hostText, names: new Map() };
-            await this.buildIncludeChainIndex(hostTokens, hostDoc, new Set<string>(), entry.names);
-            includeChainIndexCache.set(key, entry);
-            chainIndexBuildCount++;
-            logger.info(`📇 [#344] include-chain index for ${path.basename(key)}: ${entry.names.size} global name(s)`);
+            // #295: identity of THIS index = the host's content (which INCLUDEs it
+            // pulls, and in what order). Any host edit changes the hash → rebuild.
+            const signature = crypto.createHash('md5').update(hostText).digest('hex');
+            // Reuse the mtime-validated disk cache before re-tokenizing the chain.
+            const disk = loadIncludeIndex<Record<string, ChainDeclInfo>>('chainindex', key);
+            if (disk && await includeIndexFresh(disk, signature)) {
+                entry = {
+                    builtAt: Date.now(),
+                    hostText,
+                    names: new Map(Object.entries(disk.payload)),
+                    contributing: new Map(Object.entries(disk.contributing)),
+                };
+                includeChainIndexCache.set(key, entry);
+                includeIndexDiskReuseCount++;
+                logger.info(`📇 [#344/#295] include-chain index for ${path.basename(key)} served from disk: ${entry.names.size} name(s)`);
+            } else {
+                entry = { builtAt: Date.now(), hostText, names: new Map(), contributing: new Map() };
+                await this.buildIncludeChainIndex(hostTokens, hostDoc, new Set<string>(), entry.names, entry.contributing);
+                includeChainIndexCache.set(key, entry);
+                chainIndexBuildCount++;
+                // Only persist a build anchored to real on-disk files — an empty
+                // contributing set (synthetic/in-memory fixture, or a host with no
+                // resolvable includes) can't be validated on reload, so it must not
+                // be reused across sessions.
+                if (entry.contributing.size > 0) {
+                    saveIncludeIndex<Record<string, ChainDeclInfo>>('chainindex', key, {
+                        signature,
+                        contributing: Object.fromEntries(entry.contributing),
+                        payload: Object.fromEntries(entry.names),
+                    });
+                }
+                logger.info(`📇 [#344] include-chain index for ${path.basename(key)}: ${entry.names.size} global name(s)`);
+            }
         }
 
         const decl = entry.names.get(word.toLowerCase());
@@ -1369,7 +1435,8 @@ export class SymbolFinderService {
         hostTokens: Token[],
         hostDoc: TextDocument,
         visited: Set<string>,
-        names: Map<string, ChainDeclInfo>
+        names: Map<string, ChainDeclInfo>,
+        contributing: Map<string, number>
     ): Promise<void> {
         const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
         const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
@@ -1402,13 +1469,15 @@ export class SymbolFinderService {
             if (visited.has(visitKey)) continue;
             visited.add(visitKey);
 
-            let loaded = this.loadTokensForFile(path.resolve(hostDir, includeName));
+            let resolvedPath = path.resolve(hostDir, includeName);
+            let loaded = this.loadTokensForFile(resolvedPath);
             if (!loaded) {
                 const solutionManager = SolutionManager.getInstance();
                 const viaRedirection = solutionManager
                     ? await solutionManager.findFileWithExtension(includeName, hostPath)
                     : null;
                 if (viaRedirection?.path) {
+                    resolvedPath = viaRedirection.path;
                     loaded = this.loadTokensForFile(viaRedirection.path);
                 }
             }
@@ -1417,6 +1486,11 @@ export class SymbolFinderService {
                 continue;
             }
             const included = loaded;
+            // #295: record this chain file + its mtime so a warm start can validate
+            // the persisted index and skip re-tokenizing it. Best-effort — a file we
+            // can't stat simply isn't recorded (its absence fails the freshness check
+            // on reload, forcing a safe rebuild).
+            try { contributing.set(resolvedPath, fs.statSync(resolvedPath).mtimeMs); } catch { /* unreadable → skip */ }
 
             const includedBoundary = SymbolFinderService.globalScopeEndLine(included.tokens);
             // One pass for the prototype/impl-label exclusion: lines carrying a
@@ -1454,7 +1528,7 @@ export class SymbolFinderService {
             }
 
             // Nested includes (e.g. Globals.inc itself INCLUDEs deeper files).
-            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names);
+            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names, contributing);
         }
     }
 
