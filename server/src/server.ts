@@ -3436,7 +3436,7 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 // Listen on the connection
 // Build tag — names the fixes under test in this build so a pasted perf log
 // unambiguously identifies which VSIX produced it. Update per shipped item.
-const BUILD_TAG = "[#366 MISSINGINCLUDES-PARENT-CACHE]";
+const BUILD_TAG = "[#366 IV-STEP-INSTR]";
 logger.info(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG}`);
 console.error(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG} at ` + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {

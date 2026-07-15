@@ -12,6 +12,9 @@ import * as os from 'os';
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');
+// #366 follow-up: name the residual ~467ms/check cost in isClassIncluded — the
+// getMemberParentDocument memo was only part of it. Fires per slow check only.
+const perfLogger = LoggerManager.getLogger('IncludeVerifier.Perf', 'perf');
 
 /**
  * Represents a parsed INCLUDE statement
@@ -86,47 +89,57 @@ export class IncludeVerifier {
      * @returns true if the class file is included, false otherwise
      */
     async isClassIncluded(classFileName: string, document: TextDocument): Promise<boolean> {
+        // #366 follow-up: per-step timing to name the residual ~467ms/check cost.
+        const startedAt = Date.now();
+        const step = { currentInc: 0, currentTrans: 0, parentDoc: 0, parentInc: 0, parentTrans: 0, companion: 0 };
+        let foundAt = 'none';
         try {
             logger.debug(`⏱️ [IV] isClassIncluded start: "${classFileName}" in ${document.uri.split('/').pop()}`);
 
             // Get includes from current file
             const t0 = Date.now();
             const currentIncludes = await this.getIncludesForFile(document);
-            logger.debug(`⏱️ [IV] getIncludesForFile (current) took ${Date.now() - t0}ms → ${currentIncludes.length} includes`);
-            
+            step.currentInc = Date.now() - t0;
+            logger.debug(`⏱️ [IV] getIncludesForFile (current) took ${step.currentInc}ms → ${currentIncludes.length} includes`);
+
             // Check if class file is in current file's direct includes
             if (this.hasInclude(classFileName, currentIncludes)) {
-                logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in current file`);
+                foundAt = 'current-direct';
                 return true;
             }
 
             // Check one level of transitive includes (e.g. MSSQL2DriverClass.Inc → DriverClass.Inc)
             const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-            if (await this.hasTransitiveInclude(classFileName, currentIncludes, fromPath)) {
-                logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via transitive include`);
+            const tCt = Date.now();
+            const currentHit = await this.hasTransitiveInclude(classFileName, currentIncludes, fromPath);
+            step.currentTrans = Date.now() - tCt;
+            if (currentHit) {
+                foundAt = 'current-transitive';
                 return true;
             }
 
             // Not found - check MEMBER parent
             const t1 = Date.now();
-            logger.debug(`⏱️ [IV] "${classFileName}" not in current file — checking MEMBER parent...`);
             const memberParent = await this.getMemberParentDocument(document);
-            logger.debug(`⏱️ [IV] getMemberParentDocument took ${Date.now() - t1}ms → ${memberParent ? memberParent.uri.split('/').pop() : 'null'}`);
-            
+            step.parentDoc = Date.now() - t1;
+
             if (memberParent) {
                 const t2 = Date.now();
                 const parentIncludes = await this.getIncludesForFile(memberParent);
-                logger.debug(`⏱️ [IV] getIncludesForFile (parent) took ${Date.now() - t2}ms → ${parentIncludes.length} includes`);
-                
+                step.parentInc = Date.now() - t2;
+
                 if (this.hasInclude(classFileName, parentIncludes)) {
-                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in MEMBER parent`);
+                    foundAt = 'parent-direct';
                     return true;
                 }
 
                 // Check transitive includes of MEMBER parent
                 const parentPath = decodeURIComponent(memberParent.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-                if (await this.hasTransitiveInclude(classFileName, parentIncludes, parentPath)) {
-                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via MEMBER parent transitive include`);
+                const tPt = Date.now();
+                const parentHit = await this.hasTransitiveInclude(classFileName, parentIncludes, parentPath);
+                step.parentTrans = Date.now() - tPt;
+                if (parentHit) {
+                    foundAt = 'parent-transitive';
                     return true;
                 }
             }
@@ -137,18 +150,22 @@ export class IncludeVerifier {
             // each CLASS's MODULE() attribute (with same-basename fallback) and
             // check its include chain — the include legitimately lives there in
             // the standard Clarion split-class layout.
+            const tCo = Date.now();
             const companionPaths = await this.getCompanionImplementationPaths(document, fromPath);
             for (const clwPath of companionPaths) {
                 const clwIncludes = await this.parseIncludesFromFilePath(clwPath);
                 if (this.hasInclude(classFileName, clwIncludes)) {
-                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" in companion module ${path.basename(clwPath)}`);
+                    foundAt = 'companion-direct';
+                    step.companion = Date.now() - tCo;
                     return true;
                 }
                 if (await this.hasTransitiveInclude(classFileName, clwIncludes, clwPath)) {
-                    logger.debug(`⏱️ [IV] ✅ Found "${classFileName}" via companion module ${path.basename(clwPath)} transitive include`);
+                    foundAt = 'companion-transitive';
+                    step.companion = Date.now() - tCo;
                     return true;
                 }
             }
+            step.companion = Date.now() - tCo;
 
             logger.debug(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
             return false;
@@ -156,6 +173,22 @@ export class IncludeVerifier {
         } catch (error) {
             logger.error(`Error verifying include: ${error instanceof Error ? error.message : String(error)}`);
             return false; // Fail safe - don't show hover if we can't verify
+        } finally {
+            const total = Date.now() - startedAt;
+            if (total >= 150) {
+                perfLogger.perf("isClassIncluded slow", {
+                    class: classFileName,
+                    ms: total,
+                    found_at: foundAt,
+                    currentInc_ms: step.currentInc,
+                    currentTrans_ms: step.currentTrans,
+                    parentDoc_ms: step.parentDoc,
+                    parentInc_ms: step.parentInc,
+                    parentTrans_ms: step.parentTrans,
+                    companion_ms: step.companion,
+                    uri: document.uri.split('/').pop() ?? ''
+                });
+            }
         }
     }
 
