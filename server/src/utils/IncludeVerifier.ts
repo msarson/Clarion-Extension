@@ -50,6 +50,12 @@ export class IncludeVerifier {
     private ownerKeyCache = new Map<string, { key: string; at: number }>();
     // #345: reachable-include-name set per host file (fingerprint-verified + TTL).
     private reachableSetCache = new Map<string, { at: number; fingerprint: string; set: Set<string> }>();
+    // #366: resolved MEMBER('...') parent document per host file (uri+version, TTL).
+    // getMemberParentDocument runs once per include-check (6x per pass on a generated
+    // module) with the SAME document, each re-reading + re-tokenizing the large parent
+    // from disk (~660ms x 6 = ~4s, diag_count=0). The parent depends only on the host's
+    // MEMBER line, so memoize it — backed by the same TTL + #340 watcher clear.
+    private memberParentCache = new Map<string, { at: number; version: number; parent: TextDocument | null }>();
     private pathCache = new Map<string, PathCache>();       // filename.lower -> PathCache
     // #345 phase 4: 60s expired between validation passes on a slow pass — the
     // reachable-set BFS (reads hundreds of libsrc files) rebuilt per restart
@@ -566,6 +572,21 @@ export class IncludeVerifier {
      * @returns The parent document or null if no MEMBER found
      */
     private async getMemberParentDocument(document: TextDocument): Promise<TextDocument | null> {
+        // #366: memoize per (uri, version) — this is called once per include-check
+        // (6x per pass), always with the same document, and the compute below does a
+        // fresh disk read + tokenize of the (large) MEMBER parent each time.
+        const key = document.uri.toLowerCase();
+        const cached = this.memberParentCache.get(key);
+        if (cached && cached.version === document.version &&
+            Date.now() - cached.at < IncludeVerifier.CACHE_DURATION) {
+            return cached.parent;
+        }
+        const parent = await this.computeMemberParentDocument(document);
+        this.memberParentCache.set(key, { at: Date.now(), version: document.version, parent });
+        return parent;
+    }
+
+    private async computeMemberParentDocument(document: TextDocument): Promise<TextDocument | null> {
         try {
             const tokens = this.tokenCache.getTokens(document);
             
@@ -637,6 +658,7 @@ export class IncludeVerifier {
     clearCache(uri?: string): void {
         if (uri) {
             this.includeCache.delete(uri);
+            this.memberParentCache.delete(uri.toLowerCase()); // #366
             logger.info(`Cleared include cache for ${uri}`);
         } else {
             this.includeCache.clear();
@@ -645,6 +667,7 @@ export class IncludeVerifier {
             this.pathCache.clear();
             this.ownerKeyCache.clear(); // #344
             this.reachableSetCache.clear(); // #345
+            this.memberParentCache.clear(); // #366
             logger.info('Cleared all include caches');
         }
     }
