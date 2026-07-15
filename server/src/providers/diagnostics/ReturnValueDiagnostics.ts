@@ -885,6 +885,12 @@ export async function validateDiscardedReturnValues(
     };
     let enumResolvedSites = 0;
     let fallbackSites = 0;
+    // #358 observability: module-level memo hit/miss per pass. A warm re-validation whose
+    // memos survived the epoch bump shows *_misses=0 (nothing re-resolved / re-enumerated);
+    // a cold pass shows misses>0. This makes the fix self-evident in one perf line, without
+    // eyeballing dotcall_loop deltas that TokenCache warmth confounds.
+    let typeMemoHits = 0, typeMemoMisses = 0;
+    let classMemoHits = 0, classMemoMisses = 0;
 
     const countParamsInSignature = (line: string): number => {
         const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
@@ -904,6 +910,7 @@ export async function validateDiscardedReturnValues(
         const classKey = className.toLowerCase();
         const fullKey = `${rvdDocKey}|${classKey}`; // #358: aligns with classMembersMemo's stored key
         let promise = classMembersMemo.get(classKey);
+        if (promise) classMemoHits++; else classMemoMisses++;
         if (!promise) {
             promise = (async () => {
                 try {
@@ -1012,6 +1019,7 @@ export async function validateDiscardedReturnValues(
             className = range.selfClassName!;
         } else {
             let typePromise = typeMemo.get(objUpper);
+            if (typePromise) typeMemoHits++; else typeMemoMisses++;
             if (!typePromise) {
                 // #310 follow-up: name slow receiver-type resolutions — the 8.5s→6.6s
                 // shortfall means the cost split (type resolution vs enumeration vs
@@ -1111,6 +1119,12 @@ export async function validateDiscardedReturnValues(
         fallback_sites: fallbackSites,
         cache_hits: cacheHits,
         cache_unique_keys: memberCache.size,
+        // #358: module-level memo reuse this pass — *_misses=0 on a warm re-validation whose
+        // memos survived the epoch bump; misses>0 cold. The direct proof of the #358 fix.
+        type_memo_hits: typeMemoHits,
+        type_memo_misses: typeMemoMisses,
+        class_memo_hits: classMemoHits,
+        class_memo_misses: classMemoMisses,
         diag_count: diagnostics.length,
         uri: document.uri
     });
