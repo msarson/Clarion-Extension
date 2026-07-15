@@ -26,6 +26,15 @@ export class SolutionManager {
     private equatesTokens: Token[] | null = null;
     private equatesPath: string | null = null;
 
+    // #365: findProjectForFile is called on the hot path (twice per code-action request, in
+    // the ClassConstantsCodeActionProvider prefix — before any of its memos). It scans every
+    // project's source files calling getAbsolutePath() (an fs.existsSync per file), so on a
+    // 3016-file solution one lookup is thousands of disk stats — measured as the ~120-290ms
+    // classConstants storm on Mark's VM. A file's owning project is stable for the loaded
+    // solution, so memoize positive lookups by normalized path; cleared on every solution
+    // (re)assignment below.
+    private projectForFileCache: Map<string, ClarionProjectServer> = new Map();
+
     // Static in-memory cache to store solution data by file path (similar to client-side implementation)
     private static inMemoryCache: Map<string, {
         version: number,
@@ -127,6 +136,7 @@ export class SolutionManager {
             
             this.solution = await this.parseSolution();
             this.equatesTokens = null; // reset so equates.clw is re-resolved with new project paths
+            this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
             this.equatesPath = null;
             
             // Log memory usage after parsing
@@ -278,6 +288,7 @@ export class SolutionManager {
 
                 // Save the parsed solution to cache
                 this.solution = solution;
+                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
                 const saveCacheStart = performance.now();
                 await this.saveToCache();
                 mark('saveToCache', saveCacheStart);
@@ -361,6 +372,16 @@ export class SolutionManager {
 
     public findProjectForFile(filePath: string): ClarionProjectServer | undefined {
         const normalizedPath = path.normalize(filePath).toLowerCase();
+
+        // #365: positive lookups are stable for the loaded solution — serve the hot path
+        // (code-action prefix, twice per request) from the memo instead of re-stat'ing
+        // every project's source files. The cache is cleared on each solution reassignment.
+        // Lazy-init: some call sites (and tests) construct via Object.create, bypassing the
+        // field initializer, so the map may not exist yet.
+        const cache = (this.projectForFileCache ??= new Map());
+        const cached = cache.get(normalizedPath);
+        if (cached) return cached;
+
         const baseName = path.basename(normalizedPath);
 
         // Prefer exact absolute path match (handles duplicate basenames across projects)
@@ -368,15 +389,20 @@ export class SolutionManager {
             for (const f of project.sourceFiles) {
                 const abs = f.getAbsolutePath();
                 if (abs && path.normalize(abs).toLowerCase() === normalizedPath) {
+                    cache.set(normalizedPath, project);
                     return project;
                 }
             }
         }
 
         // Fall back to basename match (for files resolved via redirection)
-        return this.solution.projects.find(project =>
+        const byBaseName = this.solution.projects.find(project =>
             project.sourceFiles.some(f => f.name.toLowerCase() === baseName)
         );
+        // Only positive results are memoized — a miss may become a hit once the solution
+        // finishes loading, so misses must re-scan rather than cache a stale negative.
+        if (byBaseName) cache.set(normalizedPath, byBaseName);
+        return byBaseName;
     }
 
     /**
@@ -968,6 +994,7 @@ export class SolutionManager {
                 // Cache is valid, use it
                 logger.info(`✅ Using solution from in-memory cache`);
                 this.solution = cache.solution;
+                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
                 return true;
             } catch (error) {
                 logger.error(`❌ Error checking file timestamps: ${error instanceof Error ? error.message : String(error)}`);
