@@ -44,6 +44,22 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
             '            END',
             '',
         ].join('\r\n'));
+        // A nested chain + a PROGRAM host so a single isClassIncluded drives exactly
+        // ONE reachable-set BFS (hostprog → level1 → SharedThings, found transitively;
+        // a PROGRAM has no MEMBER parent, so no second host is walked).
+        fs.writeFileSync(path.join(tmpRoot, 'level1.inc'), [
+            "  INCLUDE('SharedThings.inc'),ONCE",
+            '',
+        ].join('\r\n'));
+        fs.writeFileSync(path.join(tmpRoot, 'hostprog.clw'), [
+            '  PROGRAM',
+            "  INCLUDE('level1.inc'),ONCE",
+            '  MAP',
+            '  END',
+            '  CODE',
+            '  RETURN',
+            '',
+        ].join('\r\n'));
         // Member module — no own INCLUDE of the class; resolves through its parent.
         fs.writeFileSync(path.join(tmpRoot, 'child.clw'), [
             "  MEMBER('parent.clw')",
@@ -66,6 +82,11 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
     const childDoc = (version = 1) => {
         const p = path.join(tmpRoot, 'child.clw');
         return TextDocument.create(fileUri(p), 'clarion', version, fs.readFileSync(p, 'utf-8'));
+    };
+
+    const hostProgDoc = () => {
+        const p = path.join(tmpRoot, 'hostprog.clw');
+        return TextDocument.create(fileUri(p), 'clarion', 1, fs.readFileSync(p, 'utf-8'));
     };
 
     // Count disk reads of the parent file specifically, around a body of work.
@@ -110,6 +131,33 @@ suite('IncludeVerifier — MEMBER parent doc memoization (#366)', () => {
         assert.ok(oneCheck >= 1, `sanity: one cold check reads the parent at least once (got ${oneCheck})`);
         assert.strictEqual(sixChecks, oneCheck,
             `six checks must read the MEMBER parent the same number of times as one (memoized); one=${oneCheck} six=${sixChecks}`);
+    });
+
+    test('two concurrent passes share ONE reachable-set build (no stampede)', async () => {
+        const iv = IncludeVerifier.getInstance();
+
+        // Baseline: a single pass builds the host's reachable set exactly once
+        // (hostprog → level1 → SharedThings, found transitively; no MEMBER parent).
+        iv.clearCache();
+        const singleBefore = iv.getReachableSetBuildCount();
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', hostProgDoc()), true,
+            'sanity: the class is reachable via the transitive chain');
+        const singleBuilds = iv.getReachableSetBuildCount() - singleBefore;
+
+        // Two overlapping passes on the SAME host (the #359 shape), fired concurrently
+        // so the second arrives mid-build. They must await one shared build — the total
+        // must match the single-pass build count, not double it.
+        iv.clearCache();
+        const concBefore = iv.getReachableSetBuildCount();
+        await Promise.all([
+            iv.isClassIncluded('SharedThings.inc', hostProgDoc()),
+            iv.isClassIncluded('SharedThings.inc', hostProgDoc()),
+        ]);
+        const concBuilds = iv.getReachableSetBuildCount() - concBefore;
+
+        assert.ok(singleBuilds >= 1, `sanity: one pass builds the set (got ${singleBuilds})`);
+        assert.strictEqual(concBuilds, singleBuilds,
+            `two concurrent passes must share the build (single=${singleBuilds} concurrent=${concBuilds})`);
     });
 
     test('a document version bump recomputes the parent (memo keyed by uri+version)', async () => {

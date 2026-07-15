@@ -52,7 +52,10 @@ export class IncludeVerifier {
     // projects x sourceFiles - too hot to run per resolveIncludePath call).
     private ownerKeyCache = new Map<string, { key: string; at: number }>();
     // #345: reachable-include-name set per host file (fingerprint-verified + TTL).
-    private reachableSetCache = new Map<string, { at: number; fingerprint: string; set: Set<string> }>();
+    // #366 follow-up: store the in-flight PROMISE, not the resolved set, so two
+    // validation passes that overlap (member + parent, the #359 shape) share one
+    // ~4.3s BFS build instead of each starting its own (a cache stampede).
+    private reachableSetCache = new Map<string, { at: number; fingerprint: string; promise: Promise<Set<string>> }>();
     // #366: resolved MEMBER('...') parent document per host file (uri+version, TTL).
     // getMemberParentDocument runs once per include-check (6x per pass on a generated
     // module) with the SAME document, each re-reading + re-tokenizing the large parent
@@ -248,15 +251,35 @@ export class IncludeVerifier {
     }
 
     /** #345 — every include NAME reachable from the host (direct + transitive), cached. */
-    private async getReachableIncludeNameSet(directIncludes: IncludeStatement[], baseFilePath: string): Promise<Set<string>> {
+    private getReachableIncludeNameSet(directIncludes: IncludeStatement[], baseFilePath: string): Promise<Set<string>> {
         const key = baseFilePath.toLowerCase();
         const fingerprint = directIncludes.map(i => i.fileName.toLowerCase()).sort().join(';');
         const cached = this.reachableSetCache.get(key);
         const now = Date.now();
         if (cached && cached.fingerprint === fingerprint && (now - cached.at) < IncludeVerifier.CACHE_DURATION) {
-            return cached.set;
+            return cached.promise;
         }
 
+        // #366: publish the promise SYNCHRONOUSLY (before the first await inside the
+        // build) so a concurrent second pass finds it and awaits the same walk.
+        const promise = this.buildReachableIncludeNameSet(directIncludes, baseFilePath);
+        this.reachableSetCache.set(key, { at: now, fingerprint, promise });
+        // A rejected build must not be cached as a poisoned entry — drop it so the
+        // next call rebuilds (matches the fail-safe posture of isClassIncluded).
+        promise.catch(() => {
+            const current = this.reachableSetCache.get(key);
+            if (current && current.promise === promise) this.reachableSetCache.delete(key);
+        });
+        return promise;
+    }
+
+    // #366 test observability — number of reachable-set BFS builds since process
+    // start. A stampede (two concurrent passes) would bump this by 2 for one host.
+    private reachableSetBuildCount = 0;
+    getReachableSetBuildCount(): number { return this.reachableSetBuildCount; }
+
+    private async buildReachableIncludeNameSet(directIncludes: IncludeStatement[], baseFilePath: string): Promise<Set<string>> {
+        this.reachableSetBuildCount++;
         const set = new Set<string>();
         const baseDir = path.dirname(baseFilePath);
         const visited = new Set<string>();
@@ -285,7 +308,6 @@ export class IncludeVerifier {
             }
         }
 
-        this.reachableSetCache.set(key, { at: now, fingerprint, set });
         return set;
     }
 
