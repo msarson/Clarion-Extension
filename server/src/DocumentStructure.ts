@@ -13,6 +13,12 @@ export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
 export type { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
 
 const logger = LoggerManager.getLogger("DocumentStructure");
+
+// #354: DocumentStructure.process() runs on every tokenize of every file. Its per-token
+// info/debug trace sites build their template-literal arguments even when the log level
+// suppresses output. Gate them behind an env flag so the strings are never constructed in
+// production (same pattern as #353's CLARION_TOKENIZER_TRACE in ClarionTokenizer).
+const DOCSTRUCT_TRACE = process.env.CLARION_DOCSTRUCT_TRACE === '1';
 logger.setLevel("error");// Production: Only log errors
 
 /**
@@ -663,8 +669,8 @@ export class DocumentStructure {
                 // Special case: CODE/DATA at column 0 should be execution markers, not field labels
                 const upperValue = token.value.toUpperCase();
                 if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA')) {
-                    logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
-                    logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
+                    if (DOCSTRUCT_TRACE) logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
                 }
                 // Add label tokens as children of their parent structure (for GROUP/QUEUE/RECORD fields)
@@ -679,7 +685,7 @@ export class DocumentStructure {
                         if (parentStructure.structurePrefix) {
                             token.structurePrefix = parentStructure.structurePrefix;
                         }
-                        logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
+                        if (DOCSTRUCT_TRACE) logger.info(`📌 Added field '${token.value}' as child of structure '${parentStructure.value}'`);
                     }
                 }
             }
@@ -1334,10 +1340,10 @@ export class DocumentStructure {
         if (token.value.toUpperCase() === "CODE") {
             if (currentRoutine) {
                 currentRoutine.executionMarker = token;
-                logger.info(`🚀 CODE execution marker set for ROUTINE '${currentRoutine.value}' at Line ${token.line}`);
+                if (DOCSTRUCT_TRACE) logger.info(`🚀 CODE execution marker set for ROUTINE '${currentRoutine.value}' at Line ${token.line}`);
             } else if (currentProcedure) {
                 currentProcedure.executionMarker = token;
-                logger.info(`🚀 CODE execution marker set for PROCEDURE '${currentProcedure.label}' (line ${currentProcedure.line}) at Line ${token.line}. Stack depth: ${this.procedureStack.length}`);
+                if (DOCSTRUCT_TRACE) logger.info(`🚀 CODE execution marker set for PROCEDURE '${currentProcedure.label}' (line ${currentProcedure.line}) at Line ${token.line}. Stack depth: ${this.procedureStack.length}`);
             } else {
                 logger.warn(`⚠️ CODE statement found at Line ${token.line}, but no valid procedure or routine to assign it to.`);
             }
@@ -1358,7 +1364,7 @@ export class DocumentStructure {
                 token.type = TokenType.Label;
                 token.label = token.value;
                 maxLabelWidth = Math.max(maxLabelWidth, token.value.length);
-                logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, structureStack.length=${this.structureStack.length}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Label '${token.value}' detected at Line ${token.line}, structureStack.length=${this.structureStack.length}`);
 
                 // Enrich structureType: look for a Structure/Type token after the label on the same line
                 // e.g. "Names FILE,DRIVER(...)" → Names.structureType = 'FILE'
@@ -1458,7 +1464,7 @@ export class DocumentStructure {
             for (let j = currentIndex - 1; j >= 0; j--) {
                 const prev = sameLine[j];
                 if (prev.value === ',') {
-                    logger.info(`📛 Skipping MODULE at line ${token.line} – part of CLASS attribute list`);
+                    if (DOCSTRUCT_TRACE) logger.info(`📛 Skipping MODULE at line ${token.line} – part of CLASS attribute list`);
                     return;
                 }
                 if (prev.value === '(' || prev.type === TokenType.Structure || prev.type === TokenType.Keyword) {
@@ -1489,7 +1495,7 @@ export class DocumentStructure {
             }
             
             if (insideParentheses) {
-                logger.info(`📛 Skipping TOOLBAR at line ${token.line} – inside function call`);
+                if (DOCSTRUCT_TRACE) logger.info(`📛 Skipping TOOLBAR at line ${token.line} – inside function call`);
                 token.type = TokenType.Variable; // Change to variable instead
                 return;
             }
@@ -1566,7 +1572,7 @@ export class DocumentStructure {
                 this.addChildOnce(parentStructure, token);
                 // Set finishesAt to the parent's finishesAt (will be set when parent closes)
                 // For now, we'll set it in handleEndStatementForStructure
-                logger.info(`📌 MODULE inside ${parentType} at Line ${token.line} - not pushing to stack`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 MODULE inside ${parentType} at Line ${token.line} - not pushing to stack`);
                 return;
             }
         }
@@ -1585,7 +1591,7 @@ export class DocumentStructure {
             const parentStructure = this.structureStack[this.structureStack.length - 2];
             token.parent = parentStructure;
             this.addChildOnce(parentStructure, token);
-            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
+            if (DOCSTRUCT_TRACE) logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to structure ${parentStructure.value}`);
 
             // Mark RECORD tokens whose direct parent is a FILE — lifts the manual
             // parent-walk that consumers (e.g. StructureDiagnostics) used to do.
@@ -1600,7 +1606,7 @@ export class DocumentStructure {
             const parentProcedure = this.procedureStack[this.procedureStack.length - 1];
             token.parent = parentProcedure;
             this.addChildOnce(parentProcedure, token);
-            logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
+            if (DOCSTRUCT_TRACE) logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
         }
 
         // 🚀 PERFORMANCE: Use tokensByLine to find previous token
@@ -1622,7 +1628,7 @@ export class DocumentStructure {
                 token.label = prevToken.value;
             }
         }
-        logger.info(`🧱 Opened ${token.value} at Line ${token.line} ${token.label}`);
+        if (DOCSTRUCT_TRACE) logger.info(`🧱 Opened ${token.value} at Line ${token.line} ${token.label}`);
 
         // ✅ Extract structure prefix if present (PRE)
         // Look for PRE attribute in the same line or next few lines
@@ -1657,7 +1663,7 @@ export class DocumentStructure {
 
                         if (prefixValue) {
                             token.structurePrefix = prefixValue;
-                            logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
+                            if (DOCSTRUCT_TRACE) logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
                         }
                     }
                     break prefixSearch;
@@ -1666,10 +1672,10 @@ export class DocumentStructure {
         }
 
         if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(token.value.toUpperCase())) {
-            logger.info(`Checking if ${token.value.toUpperCase()} is inline`);
+            if (DOCSTRUCT_TRACE) logger.info(`Checking if ${token.value.toUpperCase()} is inline`);
             // 🚀 PERFORMANCE: Use tokensByLine index
             const sameLine = this.tokensByLine.get(token.line) || [];
-            logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
+            if (DOCSTRUCT_TRACE) logger.info(`Same line tokens: ${sameLine.map(t => t.value).join(", ")}`);
             const currentIndex = sameLine.findIndex(t => t === token);
             let isInlineAttribute = false;
 
@@ -1684,21 +1690,21 @@ export class DocumentStructure {
                 }
             }
 
-            logger.info(`Is inline attribute: ${isInlineAttribute}`);
+            if (DOCSTRUCT_TRACE) logger.info(`Is inline attribute: ${isInlineAttribute}`);
 
             if (!isInlineAttribute) {
                 this.insideClassOrInterfaceOrMapDepth++;
                 // Store the structure type in the token's value
                 // We'll use this later to identify the type of structure
-                logger.info(`Inside ${token.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
+                if (DOCSTRUCT_TRACE) logger.info(`Inside ${token.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
                 
                 // Special handling for MAP structure: look for shorthand procedure declarations
                 if (token.value.toUpperCase() === "MAP") {
-                    logger.info(`🗺️ Found MAP structure at line ${token.line}, calling processShorthandProcedures()`);
+                    if (DOCSTRUCT_TRACE) logger.info(`🗺️ Found MAP structure at line ${token.line}, calling processShorthandProcedures()`);
                     this.processShorthandProcedures(token, globalIndex);
                 }
             } else {
-                logger.info('Skipping inline attribute');
+                if (DOCSTRUCT_TRACE) logger.info('Skipping inline attribute');
                 return;
             }
         }
@@ -1722,7 +1728,7 @@ export class DocumentStructure {
             }
             if (ifaceNames.length > 0) {
                 token.implementedInterfaces = ifaceNames;
-                logger.info(`📋 CLASS '${token.label}' implements: ${ifaceNames.join(', ')}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📋 CLASS '${token.label}' implements: ${ifaceNames.join(', ')}`);
             }
         }
 
@@ -1744,7 +1750,7 @@ export class DocumentStructure {
     private processShorthandProcedures(mapToken: Token, mapIndex: number): void {
         if (mapIndex === -1) return;
         
-        logger.info(`🔍 Processing shorthand procedures in MAP at line ${mapToken.line}`);
+        if (DOCSTRUCT_TRACE) logger.info(`🔍 Processing shorthand procedures in MAP at line ${mapToken.line}`);
         
         // Find the END statement for this MAP
         let endIndex = -1;
@@ -1778,7 +1784,7 @@ export class DocumentStructure {
                 // This ensures it will be displayed correctly in the outline view
                 token.label = procName;
                 
-                logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
             }
             // Pattern 2: Check if this token is followed by "(" (separate tokens)
             else if ((token.type === TokenType.Function || 
@@ -1798,7 +1804,7 @@ export class DocumentStructure {
                 // Set the token's label to the procedure name
                 token.label = token.value;
                 
-                logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
             }
         }
     }
@@ -1839,7 +1845,7 @@ export class DocumentStructure {
         while (this.structureStack.length > loopIndex) {
             const poppedStructure = this.structureStack.pop()!;
             poppedStructure.finishesAt = token.line;
-            logger.info(`🔚 Closed ${poppedStructure.value} at Line ${token.line} (terminated by ${token.value.toUpperCase()})`);
+            if (DOCSTRUCT_TRACE) logger.info(`🔚 Closed ${poppedStructure.value} at Line ${token.line} (terminated by ${token.value.toUpperCase()})`);
         }
     }
 
@@ -1853,7 +1859,7 @@ export class DocumentStructure {
         
         if (structureOnSameLine) {
             // This is an inline terminator - don't pop from stack
-            logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+            if (DOCSTRUCT_TRACE) logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
             return;
         }
         
@@ -1875,7 +1881,7 @@ export class DocumentStructure {
                                        lastTokenOnPrevLine.value === '|';
                 if (hasContinuation) {
                     // This period ends a continued statement, not a structure
-                    logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
+                    if (DOCSTRUCT_TRACE) logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
                     return;
                 }
             }
@@ -1910,7 +1916,7 @@ export class DocumentStructure {
             // ✅ Set parent relationship so END knows what it closes
             token.parent = lastStructure;
             
-            logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
+            if (DOCSTRUCT_TRACE) logger.info(`🔚 Closed ${lastStructure.value} at Line ${token.line}`);
             
             // ✅ Special handling: Check if the structure that's NOW on top of the stack
             // (after popping) is an IF/CASE that continues with ELSE/ELSIF/OF
@@ -1920,14 +1926,14 @@ export class DocumentStructure {
                 
                 if ((parentType === 'IF' && isElseOrElsif) || (parentType === 'CASE' && isOf)) {
                     // The END closed a nested structure/branch, but the parent IF/CASE continues
-                    logger.info(`🔄 ${parentType} at Line ${parentStructure.line} continues with ${nextValue} at Line ${nextSignificantToken!.line}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`🔄 ${parentType} at Line ${parentStructure.line} continues with ${nextValue} at Line ${nextSignificantToken!.line}`);
                     // Parent IF/CASE stays on stack, will be closed by a later END
                 }
             }
             
             if (["CLASS", "MAP", "INTERFACE", "MODULE"].includes(lastStructure.value.toUpperCase())) {
                 this.insideClassOrInterfaceOrMapDepth = Math.max(0, this.insideClassOrInterfaceOrMapDepth - 1);
-                logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
+                if (DOCSTRUCT_TRACE) logger.info(`Exiting ${lastStructure.value.toUpperCase()} structure, depth: ${this.insideClassOrInterfaceOrMapDepth}`);
             }
         }
     }
@@ -1937,7 +1943,7 @@ export class DocumentStructure {
         if (prevToken?.type === TokenType.Label) {
             token.label = prevToken.value;
          //   token.subType = TokenType.Procedure; // optional but useful
-            logger.info(`📌 Found method definition '${token.label}' at line ${token.line} inside CLASS/MAP`);
+            if (DOCSTRUCT_TRACE) logger.info(`📌 Found method definition '${token.label}' at line ${token.line} inside CLASS/MAP`);
         }
     }
 
@@ -1956,10 +1962,10 @@ export class DocumentStructure {
                 token.subType = TokenType.MethodDeclaration;
             } else if (parentType === "MAP") {
                 token.subType = TokenType.MapProcedure;
-                logger.info(`📌 Found MAP procedure: ${token.label}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP procedure: ${token.label}`);
             } else if (parentType === "MODULE") {
                 token.subType = TokenType.MapProcedure; // Use same type for MODULE procedures
-                logger.info(`📌 Found MODULE procedure: ${token.label}`);
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MODULE procedure: ${token.label}`);
             } else if (parentType === "INTERFACE") {
                 token.subType = TokenType.InterfaceMethod;
             } else {
@@ -1969,7 +1975,7 @@ export class DocumentStructure {
             token.parent = parent;
             this.addChildOnce(parent, token);
 
-            logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
+            if (DOCSTRUCT_TRACE) logger.info(`📌 Declared ${TokenType[token.subType]} '${token.label}' inside ${parentType} at line ${token.line}`);
             return;
         }
         
@@ -2047,7 +2053,7 @@ export class DocumentStructure {
         
         this.procedureStack.push(token);
         
-        logger.info(`📌 Registered ${TokenType[token.subType]} '${token.label}' at line ${token.line}`);
+        if (DOCSTRUCT_TRACE) logger.info(`📌 Registered ${TokenType[token.subType]} '${token.label}' at line ${token.line}`);
     }
 
     private handleRoutineToken(token: Token, index: number): void {
@@ -2070,7 +2076,7 @@ export class DocumentStructure {
     private handleProcedureClosure(endLine: number): void {
         const lastProcedure = this.procedureStack.pop();
         if (lastProcedure) {
-            logger.info(`📤 Closed ${lastProcedure.subType} ${lastProcedure.value} at line ${endLine}`);
+            if (DOCSTRUCT_TRACE) logger.info(`📤 Closed ${lastProcedure.subType} ${lastProcedure.value} at line ${endLine}`);
             lastProcedure.finishesAt = endLine;
         }
 
@@ -2125,7 +2131,7 @@ export class DocumentStructure {
                 const filename = this.extractFilenameAfterKeyword(i);
                 if (filename) {
                     token.referencedFile = filename;
-                    logger.info(`✅ MODULE token at line ${token.line} references: ${token.referencedFile}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`✅ MODULE token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
@@ -2134,7 +2140,7 @@ export class DocumentStructure {
                 const filename = this.extractFilenameAfterKeyword(i);
                 if (filename) {
                     token.referencedFile = filename;
-                    logger.info(`✅ LINK token at line ${token.line} references: ${token.referencedFile}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`✅ LINK token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
@@ -2143,7 +2149,7 @@ export class DocumentStructure {
                 const filename = this.extractFilenameAfterKeyword(i);
                 if (filename) {
                     token.referencedFile = filename;
-                    logger.info(`✅ INCLUDE token at line ${token.line} references: ${token.referencedFile}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`✅ INCLUDE token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
             
@@ -2152,7 +2158,7 @@ export class DocumentStructure {
                 const filename = this.extractFilenameAfterKeyword(i);
                 if (filename) {
                     token.referencedFile = filename;
-                    logger.info(`✅ MEMBER token at line ${token.line} references: ${token.referencedFile}`);
+                    if (DOCSTRUCT_TRACE) logger.info(`✅ MEMBER token at line ${token.line} references: ${token.referencedFile}`);
                 }
             }
         }

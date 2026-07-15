@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 **New Features**
 
 - ⚡ **Hovering a procedure call no longer costs ~350ms every time** ([#354](https://github.com/msarson/Clarion-Extension/issues/354)): a proc-call hover resolves the enclosing MAP's INCLUDE chain twice (once to find the declaration, once to find the implementation), and each pass re-ran a `statSync`-per-include loop over the module's callout INCs — on a generated module that is dozens of disk stats, twice, on every hover, uncached (~190ms + ~165ms measured, flat across repeats). The merged MAP-includes token set is now memoized per host content and cleared by the file-watcher epoch, so the second pass and every repeat hover are a cache hit. Router-level and proc-call-level hover timing was added to pin the cost.
+- ⚡ **`DocumentStructure` no longer builds trace strings on every tokenize** ([#354](https://github.com/msarson/Clarion-Extension/issues/354)): its per-token `process()` pass carried 39 `logger.info`/`logger.debug` template-literal sites whose argument strings were constructed even when the log level discarded them (~45ms self on a 68k-token file, on every tokenize of every file). They are now gated behind a `CLARION_DOCSTRUCT_TRACE` env flag so the strings are never built in production — the same pattern applied to the tokenizer in #353. Structure output is unchanged (suite green).
 
 **Bug Fixes**
 
