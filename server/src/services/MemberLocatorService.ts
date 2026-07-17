@@ -19,6 +19,7 @@ import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
+import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
@@ -34,8 +35,20 @@ logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
     private tokenCache = TokenCache.getInstance();
+    /** Lazily constructed — MethodOverloadResolver sits in a benign import cycle
+     *  (MethodOverloadResolver → ArgumentTypeResolver → MemberLocatorService). */
+    private overloadResolver: MethodOverloadResolver | null = null;
 
     constructor(private crossFileCache?: CrossFileCache) {}
+
+    private getOverloadResolver(): MethodOverloadResolver {
+        if (!this.overloadResolver) {
+            // Lazy require breaks the module-load cycle (usage is runtime-only).
+            const { MethodOverloadResolver } = require('../utils/MethodOverloadResolver');
+            this.overloadResolver = new MethodOverloadResolver();
+        }
+        return this.overloadResolver!;
+    }
 
     private trace(message: string, ...args: any[]): void {
         logger.test(`[DotAccessTrace] ${message}`, ...args);
@@ -469,15 +482,20 @@ export class MemberLocatorService {
      * @param document       The document requesting completion
      * @param callerClass    Optional: the class the caller belongs to (for access filtering).
      *                       Omit to show only public members (external call site).
+     * @param options.overloadAware  When true, a child method shadows a parent method
+     *                       only when their PROTOTYPES match (same name + param shape),
+     *                       so inherited *sibling* overloads survive a single derived
+     *                       override. Default false = shadow by name (completion/hover).
      * @returns Flat, deduped, access-filtered list of MemberEnumItem
      */
     async enumerateMembersInClass(
         className: string,
         document: TextDocument,
-        callerClass?: string
+        callerClass?: string,
+        options?: { overloadAware?: boolean }
     ): Promise<MemberEnumItem[]> {
         return this.collectInheritedMembers(
-            className, document, callerClass, new Set()
+            className, document, callerClass, new Set(), options?.overloadAware ?? false
         );
     }
 
@@ -1417,15 +1435,22 @@ export class MemberLocatorService {
 
         const docLines = doc.getText().split(/\r?\n/);
         const results: MemberEnumItem[] = [];
+        // A class member is one declaration per line, but a named PROCEDURE parameter
+        // (e.g. `errCode` in `Foo PROCEDURE(LONG errCode)`) also tokenizes as a Variable
+        // on the same line — without this guard each parameterised overload emits a
+        // duplicate MemberEnumItem (an inherited overload set of N would surface as N+extras).
+        const seenLines = new Set<number>();
 
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (isInsideNested(token.line)) continue;
+            if (seenLines.has(token.line)) continue;
 
             const raw = docLines[token.line] ?? '';
             const memberMatch = raw.match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/);
             if (!memberMatch) continue;
+            seenLines.add(token.line);
 
             const name = memberMatch[1];
             const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
@@ -1662,7 +1687,8 @@ export class MemberLocatorService {
         className: string,
         document: TextDocument,
         callerClass: string | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        overloadAware: boolean = false
     ): Promise<MemberEnumItem[]> {
         const key = className.toLowerCase();
         if (visited.has(key)) return [];
@@ -1694,12 +1720,27 @@ export class MemberLocatorService {
 
         // 4. Recurse into the parent
         const parentMembers = await this.collectInheritedMembers(
-            parentClassName, document, callerClass, visited
+            parentClassName, document, callerClass, visited, overloadAware
         );
 
-        // 5. Merge child-first: child members shadow parent members by name
+        // 5. Merge child-first: child members shadow parent members.
+        //    - default: a child member hides ALL same-named parent members (a single
+        //      completion/hover entry per name — the historical contract).
+        //    - overloadAware: a child METHOD hides a parent method only when their
+        //      prototypes match (same name + param shape). Inherited sibling overloads
+        //      survive a single derived override — required for signature-help overload
+        //      enumeration, e.g. a PWEE embed buffer that re-declares one inherited
+        //      overload as `,DERIVED` must not collapse the other overloads.
         const childNames = new Set(filtered.map(m => m.name.toLowerCase()));
-        const uniqueParent = parentMembers.filter(m => !childNames.has(m.name.toLowerCase()));
+        const uniqueParent = overloadAware
+            ? parentMembers.filter(pm => {
+                if (pm.kind !== 'method') return !childNames.has(pm.name.toLowerCase());
+                return !filtered.some(cm =>
+                    cm.kind === 'method' &&
+                    cm.name.toLowerCase() === pm.name.toLowerCase() &&
+                    this.getOverloadResolver().signaturesMatch(cm.signature, pm.signature));
+            })
+            : parentMembers.filter(m => !childNames.has(m.name.toLowerCase()));
 
         return [...filtered, ...uniqueParent];
     }
