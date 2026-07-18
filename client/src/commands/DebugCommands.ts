@@ -95,5 +95,27 @@ export function registerDebugCommands(context: ExtensionContext, client: Languag
     context.subscriptions.push(showGraphCommand);
     disposables.push(showGraphCommand);
 
+    const showServerVersionCommand = commands.registerCommand('clarion.debug.showServerVersion', async () => {
+        if (!client) {
+            window.showWarningMessage('Clarion language server is not running.');
+            return;
+        }
+
+        try {
+            const json = await client.sendRequest<string>('clarion/getServerVersion');
+            const info = JSON.parse(json) as { version: string; buildDate: string };
+            const builtLocal = /^\d{4}-\d{2}-\d{2}T/.test(info.buildDate)
+                ? new Date(info.buildDate).toLocaleString()
+                : info.buildDate;
+            window.showInformationMessage(`Clarion Language Server v${info.version} — built ${builtLocal}`);
+        } catch (error) {
+            logger.error(`❌ Error fetching server version: ${error}`);
+            window.showErrorMessage(`Failed to get server version: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    });
+
+    context.subscriptions.push(showServerVersionCommand);
+    disposables.push(showServerVersionCommand);
+
     return disposables;
 }

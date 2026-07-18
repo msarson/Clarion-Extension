@@ -51,6 +51,7 @@ import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokens
 
 import { Token, TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
+import { getServerVersionInfo } from './buildInfo';
 
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
@@ -2496,6 +2497,12 @@ connection.onNotification('clarion/projectConstantsChanged', () => {
     projectConstantsCoalescer.trigger();
 });
 
+
+// Returns a JSON string {"version","buildDate"} identifying this build, so an
+// external tool can parse it and feature-gate against the running server.
+connection.onRequest('clarion/getServerVersion', (): string => {
+    return JSON.stringify(getServerVersionInfo());
+});
 
 connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {
     const startTime = performance.now();

@@ -389,6 +389,10 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.debug.showServerVersion",
+        "title": "Clarion: Show Server Version (Debug)"
+      },
+      {
         "command": "clarion.structureView.expandAll",
         "title": "Expand All",
         "icon": "$(expand-all)"
