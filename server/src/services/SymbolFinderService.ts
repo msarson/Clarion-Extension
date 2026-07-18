@@ -28,6 +28,7 @@ import { cooperativeCheckpoint, makeTimeSlicer } from '../utils/cooperativeScan'
 import { ReferenceCountIndex } from './ReferenceCountIndex';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import { resolveViaProjectRedirection as resolveViaProjectRedirection328 } from '../utils/RedirectionResolution';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1620,6 +1621,19 @@ export class SymbolFinderService {
                 return procNoScope;
             }
 
+            // #374 — a built-in (LONGPATH, CLIP, OPEN…) has no source declaration
+            // to find: the cross-file tiers below cold-build the include-chain +
+            // sibling-family indexes (~20s+ first-ever, measured 24.5s on F12
+            // LONGPATH) only to prove a miss. Every cheaper tier has had its turn
+            // — module data above, and a user MAP procedure shadowing a built-in
+            // name resolves via the proc index — so bail before the expense.
+            // Same precedent as #345's candidate filter ("'OPEN' alone triggered
+            // the full include-chain cold build").
+            if (BuiltinFunctionService.getInstance().isBuiltin(word)) {
+                logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers (no-scope)`);
+                return null;
+            }
+
             // #319 (reopen): global BEFORE the sibling walk. Globals like
             // GlobalResponse occur in EVERY member module, so the index prune
             // can't help the walk — and the parent lookup is one file. Clarion
@@ -1683,6 +1697,20 @@ export class SymbolFinderService {
         if (result) {
             logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
             return result;
+        }
+
+        // 3c. #374 — a built-in (LONGPATH, CLIP, OPEN…) has no source declaration
+        // to find: the two cross-file tiers below cold-build the include-chain +
+        // sibling-family indexes (~20s+ first-ever, measured 24.5s on F12
+        // LONGPATH) only to prove a miss. Every cheaper tier has had its turn —
+        // a same-named local/module variable shadows above (tiers 1-3), and a
+        // user MAP procedure shadowing a built-in name resolves via the proc
+        // index (3b) — so bail before the expense. Same precedent as #345's
+        // candidate filter ("'OPEN' alone triggered the full include-chain cold
+        // build").
+        if (BuiltinFunctionService.getInstance().isBuiltin(word)) {
+            logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers`);
+            return null;
         }
 
         // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.

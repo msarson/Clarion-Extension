@@ -10,6 +10,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import { findSectionLocation } from '../utils/SectionLocator';
 import { ScopeResolver } from '../scope/ScopeResolver';
@@ -1168,12 +1169,24 @@ export class DefinitionProvider {
             }
         }
 
+        // #374 — findSymbol's cheap tiers (locals/module/proc-index) had their
+        // turn above; a built-in (LONGPATH, CLIP…) that reached this point
+        // cannot be declared in the parent/include universe either, so skip the
+        // cold cross-file walk below (the one-time ~12-20s first-ever build) —
+        // it would only prove the miss the hard way. The cheap in-file label
+        // fallback further down still runs.
+        const wordIsBuiltin = BuiltinFunctionService.getInstance().isBuiltin(word);
+
         // MEMBER parent chain (including the parent's INCLUDE chain) — reaches
         // further than findSymbol's direct-parent global step.
-        const varLocation = await this.memberLocator.findVariableInParentChain(word, document);
-        if (varLocation) {
-            logger.info(`✅ Found variable "${word}" via MemberLocatorService: ${varLocation.uri} line ${varLocation.range.start.line}`);
-            return varLocation;
+        if (!wordIsBuiltin) {
+            const varLocation = await this.memberLocator.findVariableInParentChain(word, document);
+            if (varLocation) {
+                logger.info(`✅ Found variable "${word}" via MemberLocatorService: ${varLocation.uri} line ${varLocation.range.start.line}`);
+                return varLocation;
+            }
+        } else {
+            logger.info(`⏭️ [#374] "${word}" is a built-in — skipping the parent-chain walk`);
         }
 
         // FILE/QUEUE/GROUP/RECORD label fallback: a column-0 label immediately
