@@ -152,6 +152,9 @@ function findPositions(text) {
       path.join(CLARION_ROOT, 'Accessory', 'libsrc', 'win'),
     ],
     defaultLookupExtensions: ['.clw', '.inc', '.equ', '.int'],
+    // --undeclared: the #62 opt-in validator (off by default). Needed when
+    // measuring #358-class costs — without it `Validator undeclaredVar` is a no-op.
+    undeclaredVariablesEnabled: process.argv.includes('--undeclared'),
   });
   console.log(`[${Date.now() - t0}ms] updatePaths sent — waiting for solutionReady…`);
   const ready = await waitNotification('clarion/solutionReady');
@@ -165,7 +168,10 @@ function findPositions(text) {
   const positions = findPositions(text);
   console.log(`positions: ${positions.map(p => `${p.word}@${p.line + 1}:${p.character}`).join(', ') || '(none found — edit findPositions)'}`);
 
-  await new Promise(r => setTimeout(r, 3000)); // let didOpen tokenize settle
+  // --settle=N (seconds): observation window before the timed requests. Default 3s;
+  // raise it (e.g. 60) when measuring the async validator chain / idle-lane work.
+  const settleSec = Number(arg('settle') ?? 3);
+  await new Promise(r => setTimeout(r, settleSec * 1000));
 
   console.log(`\n== hover timings (cold then warm per word) ==`);
   const results = [];
