@@ -372,12 +372,38 @@ export class TokenHelper {
     }
 
     public static isPositionInString(tokens: Token[], line: number, character: number): boolean {
-        return tokens.some(t =>
+        if (tokens.some(t =>
             t.line === line &&
             t.type === TokenType.String &&
             t.start <= character &&
             character <= t.start + t.value.length
+        )) {
+            return true;
+        }
+
+        // #373: a string literal swallowed inside a composite token (e.g. the
+        // FunctionArgumentParameter token "command ('/netnolog')") never surfaces
+        // as a TokenType.String token, so the check above misses it and hover/F12
+        // ran the full resolver chain on string contents. Scan the covering
+        // token's source text for quoted spans instead — '' is an escaped quote,
+        // not a terminator.
+        const covering = tokens.find(t =>
+            t.line === line &&
+            t.type !== TokenType.Comment &&
+            t.start <= character &&
+            character < t.start + t.value.length
         );
+        if (!covering || !covering.value.includes("'")) return false;
+
+        let inString = false;
+        for (let i = 0; i < covering.value.length; i++) {
+            if (covering.value[i] === "'") {
+                if (inString && covering.value[i + 1] === "'") { i++; continue; } // '' escape
+                inString = !inString;
+            }
+            if (covering.start + i >= character) return inString;
+        }
+        return false;
     }
 
     /**

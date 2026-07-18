@@ -13,6 +13,7 @@ import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
+import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -31,6 +32,20 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
 logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
+
+/**
+ * #373 — walk-RESULT cache for findVariableTokenInParentChain, keyed by
+ * host+varName. The walk recursively reads + tokenizes the MEMBER parent's
+ * whole INCLUDE chain (a big NetTalk PROGRAM file → ~12.5s cold, measured as the
+ * `includesAndEquates` hover phase), and the first word to miss re-pays it in
+ * every fresh server process. The result — including the common NEGATIVE
+ * "not declared in any reachable include" — is memoized until the cross-file
+ * epoch bumps (the #340 watcher / #355 drift path, same invalidation as the
+ * #361 procedure-walk memo in MapProcedureResolver). Module-level so it
+ * survives across resolver instances.
+ */
+const varWalkCache = new Map<string, string | null>(); // value = file path where found, or null
+let varWalkEpoch = -1;
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -96,9 +111,49 @@ export class MemberLocatorService {
         varName: string,
         document: TextDocument
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        // #373 — result cache (positive + NEGATIVE), epoch-invalidated. The walk
+        // below cold-loads the MEMBER parent's whole include chain (~12.5s on a
+        // big NetTalk PROGRAM file) before concluding "not found" — the common
+        // case for a word that isn't a cross-file global, and exactly what needs
+        // remembering.
+        const epoch = getCrossFileEpoch();
+        if (epoch !== varWalkEpoch) {
+            varWalkCache.clear();
+            varWalkEpoch = epoch;
+        }
+        const cacheKey = `${document.uri.toLowerCase()}|${varName.toLowerCase()}`;
+        if (varWalkCache.has(cacheKey)) {
+            const cachedPath = varWalkCache.get(cacheKey)!;
+            if (!cachedPath) return null;
+            // Re-derive the live doc/tokens from the remembered file (cheap — the
+            // cross-file cache holds it) so a stale token is never handed out.
+            const data = await this.loadDocument(cachedPath);
+            const found = data?.tokens.find(t =>
+                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+            );
+            if (data && found) return { token: found, tokens: data.tokens, doc: data.doc };
+            // File gone or declaration moved — fall through to a fresh walk.
+        }
+
+        const result = await this.findVariableTokenInParentChainUncached(varName, document);
+        varWalkCache.set(cacheKey, result
+            ? decodeURIComponent(result.doc.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\')
+            : null);
+        return result;
+    }
+
+    private async findVariableTokenInParentChainUncached(
+        varName: string,
+        document: TextDocument
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
         const tokens = this.tokenCache.getTokens(document);
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
+
+        // #373: ONE slicer across both walks below — the recursion loaded + cold-
+        // tokenized every reachable INCLUDE with no yield (same shape as #367's
+        // interface walk and #361's procedure walk).
+        const timeSlice = makeTimeSlicer();
 
         const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
@@ -111,14 +166,14 @@ export class MemberLocatorService {
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
-                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
+                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()]), timeSlice
                     );
                     if (incResult) return incResult;
                 }
             }
         }
 
-        return this.searchIncludesForToken(varName, tokens, currentDir, new Set());
+        return this.searchIncludesForToken(varName, tokens, currentDir, new Set(), timeSlice);
     }
 
     /**
@@ -615,10 +670,15 @@ export class MemberLocatorService {
         varName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        // #373: ONE slicer threaded through the whole recursive walk (previously
+        // no yield at all — every reachable INCLUDE cold-loaded + tokenized in
+        // one synchronous stretch).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -632,7 +692,7 @@ export class MemberLocatorService {
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
 
-            const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited);
+            const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited, timeSlice);
             if (nested) return nested;
         }
         return null;
