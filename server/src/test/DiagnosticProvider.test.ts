@@ -2184,6 +2184,33 @@ MyVar   LONG
         assert.strictEqual(diags.length, 0, 'Normal label should not be flagged');
     });
 
+    // ── #372: a reserved keyword as the PREFIX of a colon-qualified label ─────
+    // `Return:NotSet` is a valid prefixed label — `Return` is a qualifier, not the
+    // RETURN statement. A keyword-colliding prefix tokenizes as a bare keyword
+    // Label immediately followed by ':', which must NOT be flagged. The genuine
+    // "RETURN at col 0 as variable label → error" test above is the sentinel that
+    // this fix does not over-suppress.
+
+    test('#372: prefixed EQUATE labels whose prefix is a keyword → no error', () => {
+        const code = `return:notset          EQUATE(0)
+return:xml             EQUATE(2)
+return:json            EQUATE(1)`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Prefixed equate labels (Return: prefix) must not be flagged');
+    });
+
+    test('#372: single keyword-prefixed EQUATE label → no error', () => {
+        const code = `return:notset  EQUATE(0)`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0);
+    });
+
+    test('#372: keyword-prefixed variable label (non-EQUATE) → no error', () => {
+        const code = `loop:counter   LONG`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'LOOP: prefix is a valid label qualifier, not the LOOP keyword');
+    });
+
     test('RETURN keyword in code body (not col 0) → no error', () => {
         const code = `TestProc  PROCEDURE()
   CODE

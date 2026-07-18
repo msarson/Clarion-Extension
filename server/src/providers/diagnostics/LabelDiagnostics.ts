@@ -61,6 +61,13 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
 
         const upper = token.value.toUpperCase();
 
+        // #372: a reserved word used as the PREFIX of a colon-qualified label
+        // (e.g. `Return:NotSet EQUATE(0)`) is a valid label — the keyword is a
+        // qualifier, not a standalone label. A keyword-colliding prefix tokenizes
+        // as a bare keyword Label immediately followed by ':', so skip any reserved
+        // Label whose next source character is ':'.
+        if (isColonQualifiedPrefix(token, document)) continue;
+
         if (FULLY_RESERVED.has(upper)) {
             // Reserved words are valid as field names and method names inside structures
             // (e.g. `Code LONG` inside GROUP, or `Code PROCEDURE()` inside CLASS)
@@ -88,6 +95,23 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
     }
 
     return diagnostics;
+}
+
+/**
+ * True when this token is the prefix segment of a colon-qualified label — i.e.
+ * the next source character after the token is ':'. A reserved keyword in that
+ * position (e.g. `Return` in `Return:NotSet`) is a valid label qualifier, not a
+ * standalone label. (#372 — a keyword-colliding prefix tokenizes as a bare
+ * keyword Label + ':' rather than a single `prefix:suffix` Label, so this reads
+ * the source directly instead of relying on adjacent-token shape.)
+ */
+function isColonQualifiedPrefix(token: Token, document: TextDocument): boolean {
+    const after = token.start + token.value.length;
+    const nextChar = document.getText({
+        start: { line: token.line, character: after },
+        end: { line: token.line, character: after + 1 },
+    });
+    return nextChar === ':';
 }
 
 function findNextOnLine(tokens: Token[], from: number, line: number): Token | undefined {
