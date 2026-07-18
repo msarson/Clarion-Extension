@@ -613,6 +613,10 @@ documents.onDidOpen((event) => {
             return;
         }
 
+        // #359 — snapshot the open content so the onDidChangeContent echo the
+        // TextDocuments manager fires for this same didOpen is skipped.
+        contentChangeGuard.snapshot(uri, document.getText());
+
         // Validate document for diagnostics
         validateTextDocument(document, 'onDidOpen');
 
@@ -634,6 +638,14 @@ export let globalClarionSettings: any = {};
 
 // Track last validated document versions to avoid duplicate work
 const lastValidatedVersions = new Map<string, number>();
+
+// #359 — skip identical-content change events (the TextDocuments manager fires
+// onDidChangeContent for didOpen too, and clients emit no-op didChange on tab
+// activation). Snapshot on open; an echo/no-op event then skips the whole
+// change pipeline — including revalidateRelatedDocuments, which otherwise
+// re-validated a MEMBER file's 68k-token parent PROGRAM on every member open.
+import { ContentChangeGuard } from './utils/ContentChangeGuard';
+const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
@@ -1457,7 +1469,21 @@ documents.onDidChangeContent(event => {
         }
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
-        
+
+        // #359 — identical-content event (the didOpen echo, or a no-op didChange
+        // from tab activation): nothing downstream can be affected. Skip the whole
+        // pipeline — cache evictions, the debounced self re-validation, and
+        // revalidateRelatedDocuments (which re-validated the 68k-token parent
+        // PROGRAM whenever a MEMBER file was merely opened). Genuine edits fall
+        // through and re-snapshot.
+        const currentText = document.getText();
+        if (!contentChangeGuard.hasChanged(uri, currentText)) {
+            lastProcessedVersions.set(uri, currentVersion);
+            logger.info(`⏭️ [#359] Skipping identical-content change event: ${uri} v${currentVersion}`);
+            return;
+        }
+        contentChangeGuard.snapshot(uri, currentText);
+
         // #189 Phase 2: invalidate only the CodeLens counts this edit can affect,
         // instead of every cached count. Counts for other files stay warm.
         invalidateCodeLensForFile(document);
@@ -1855,7 +1881,10 @@ documents.onDidClose(event => {
     try {
         const document = event.document;
         const uri = document.uri;
-        
+
+        // #359 — drop the content snapshot; a later reopen must re-validate.
+        contentChangeGuard.clear(uri);
+
         // Log all document details
         logger.info(`🗑️ [CRITICAL] Document closed: ${uri}`);
         logger.info(`🗑️ [CRITICAL] Document details:
