@@ -79,10 +79,17 @@ export function scanClassBodyForAllMembers(
 
                 if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
                     /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    nestDepth++;
+                    // Self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END" or the
+                    // period form "...,DIM(2).") is a net no-op. Checking end-of-line independently
+                    // of the opening match — rather than one regex trying to capture attributes and
+                    // terminator together — avoids the attrs-swallow-terminator failure mode; "."
+                    // is fully interchangeable with END for closing any Clarion structure.
+                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
+                        nestDepth++;
+                    }
                     continue;
                 }
-                if (/^END\s*$/i.test(stripped)) {
+                if (/^(END|\.)\s*$/i.test(stripped)) {
                     if (nestDepth > 0) { nestDepth--; continue; }
                     break;
                 }
@@ -163,8 +170,12 @@ export function scanClassBodyForMember(
 
                 if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
                     /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    nestDepth++;
-                } else if (/^END\s*$/i.test(stripped)) {
+                    // Self-closing single-line form is a net no-op (see scanClassBodyForAllMembers
+                    // for the full rationale — same attrs-swallow-terminator hazard, same fix).
+                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
+                        nestDepth++;
+                    }
+                } else if (/^(END|\.)\s*$/i.test(stripped)) {
                     if (nestDepth > 0) { nestDepth--; continue; }
                     break;
                 }
@@ -442,18 +453,21 @@ export class ClassMemberResolver {
             if (resolvedPath) {
                 logger.info(`Resolved to: ${resolvedPath}`);
                 const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-                
+                // Split on both line-ending styles — a bare '\n' split leaves a trailing '\r' on
+                // every line of a CRLF file, which silently breaks the comment-strip regex below
+                // (its '$' anchor can never reach past a leftover '\r').
+                const includeLines = includeContent.split(/\r?\n/);
+
                 // Find the class/queue/group structure
                 for (let j = 0; j < includeLines.length; j++) {
                     const includeLine = includeLines[j];
                     const classMatch = includeLine.match(new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i'));
                     if (classMatch) {
                         logger.info(`Found class ${className} in INCLUDE at line ${j}`);
-                        
+
                         // Collect all matching members for overload resolution
                         const candidates: { type: string; line: number; paramCount: number }[] = [];
-                        
+
                         // Find all members with this name
                         // Track nesting depth so nested GROUP/QUEUE/RECORD ENDs don't
                         // terminate the scan prematurely
@@ -462,12 +476,15 @@ export class ClassMemberResolver {
                             const memberLine = includeLines[k];
                             const stripped = memberLine.replace(/\s*!.*$/, '').trim(); // strip comments
 
-                            // Detect nested scope openers (GROUP/QUEUE/RECORD as type keyword)
-                            if (/\b(GROUP|QUEUE|RECORD)\b/i.test(stripped) && !stripped.match(/^\s*END\s*$/i)) {
+                            // Detect nested scope openers (GROUP/QUEUE/RECORD as type keyword), but
+                            // skip a self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END"
+                            // or the period form) — a net no-op, not an unclosed nested scope. "." is
+                            // fully interchangeable with END for closing any Clarion structure.
+                            if (/\b(GROUP|QUEUE|RECORD)\b/i.test(stripped) && !/(\bEND|\.)\s*$/i.test(stripped)) {
                                 nestDepth++;
                             }
 
-                            if (/^\s*END\s*$/i.test(stripped)) {
+                            if (/^(END|\.)\s*$/i.test(stripped)) {
                                 if (nestDepth > 0) {
                                     nestDepth--;
                                     continue;
