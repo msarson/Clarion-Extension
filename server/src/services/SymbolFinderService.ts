@@ -201,7 +201,13 @@ export class SymbolFinderService {
         
         const paramString = match[1];
         const params = paramString.split(',');
-        
+        // Column tracking so indexOf() below resolves each parameter's OWN position,
+        // not the first line-wide substring match — without this, searching for a
+        // parameter whose name is a prefix of an earlier-declared parameter's name
+        // (e.g. "pPar" vs an earlier "pParName") incorrectly resolves to that earlier
+        // parameter's position instead of its own.
+        let currentColumn = procedureLine.indexOf('(') + 1;
+
         for (const param of params) {
             const trimmedParam = param.trim();
             // Strip optional-parameter angle brackets: <Key K> → Key K
@@ -228,7 +234,7 @@ export class SymbolFinderService {
                         type: TokenType.Variable,
                         value: paramName,
                         line: scopeToken.line,
-                        start: procedureLine.indexOf(paramName),
+                        start: procedureLine.indexOf(paramName, currentColumn),
                         maxLabelLength: 0
                     };
                     
@@ -250,8 +256,9 @@ export class SymbolFinderService {
                     };
                 }
             }
+            currentColumn += param.length + 1; // +1 for comma
         }
-        
+
         logger.info(`❌ Parameter "${word}" not found`);
         return null;
     }
