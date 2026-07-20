@@ -306,11 +306,13 @@ export class ClarionTokenizer {
                                 // CLASS/INTERFACE/WINDOW/REPORT/APPLICATION) always require a preceding label
                                 // — "Label STRUCTURETYPE,attrs". These keywords are NOT reserved words in
                                 // Clarion; they're fully legal variable/label names (e.g. "Report &STRING"
-                                // declares a reference-to-STRING variable named Report). If nothing but
-                                // whitespace precedes this position on the line, this word IS the label
-                                // itself, not a structure type in second position — let it fall through to
-                                // Label/Variable instead of misclassifying it as an (unterminated) structure
-                                // declaration.
+                                // declares a reference-to-STRING variable named Report). A Clarion label must
+                                // start at column 0 (confirmed directly against the compiler: indenting a
+                                // label desyncs the parser and produces unrelated errors on the following
+                                // tokens) — so if this match is at column 0, it can only be the label itself,
+                                // never a structure type in second position (which always has a label before
+                                // it). Let it fall through to Label/Variable instead of misclassifying it as
+                                // an (unterminated) structure declaration.
                                 // Deliberately narrow — do NOT extend this to isDeclarationStructure's full
                                 // list. MAP, MODULE, ITEMIZE, JOIN, HEADER/FOOTER/FORM/DETAIL, and
                                 // MENU/MENUBAR/TOOLBAR/SHEET/TAB/OPTION are namespace-like or nested-body
@@ -326,8 +328,8 @@ export class ClarionTokenizer {
                                     structName === 'RECORD' || structName === 'CLASS' || structName === 'INTERFACE' ||
                                     structName === 'WINDOW' || structName === 'REPORT' || structName === 'APPLICATION' ||
                                     structName === 'VIEW';
-                                if (requiresLabel && line.slice(0, position).trim() === '') {
-                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - nothing precedes it on the line, so it's being used as a label`);
+                                if (requiresLabel && position === 0) {
+                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at column 0 - a Clarion label always starts at column 0, so this word is being used as a label`);
                                     continue; // Try next structure pattern
                                 }
 
