@@ -302,6 +302,35 @@ export class ClarionTokenizer {
                             }
 
                             if (match && match.index === 0) {
+                                // ✅ FIX: structures that declare a NAMED INSTANCE (FILE/QUEUE/GROUP/RECORD/
+                                // CLASS/INTERFACE/WINDOW/REPORT/APPLICATION) always require a preceding label
+                                // — "Label STRUCTURETYPE,attrs". These keywords are NOT reserved words in
+                                // Clarion; they're fully legal variable/label names (e.g. "Report &STRING"
+                                // declares a reference-to-STRING variable named Report). If nothing but
+                                // whitespace precedes this position on the line, this word IS the label
+                                // itself, not a structure type in second position — let it fall through to
+                                // Label/Variable instead of misclassifying it as an (unterminated) structure
+                                // declaration.
+                                // Deliberately narrow — do NOT extend this to isDeclarationStructure's full
+                                // list. MAP, MODULE, ITEMIZE, JOIN, HEADER/FOOTER/FORM/DETAIL, and
+                                // MENU/MENUBAR/TOOLBAR/SHEET/TAB/OPTION are namespace-like or nested-body
+                                // constructs that are legitimately written BARE, with no preceding label
+                                // (e.g. "MAP ... MODULE('') ... END ... END"). Gating on the full list here
+                                // caused a confirmed regression in the analogous fix in ClarionAssistant's
+                                // own per-slot structure-balance heuristic (ModernEmbeditorDiagnostics.cs) —
+                                // MAP/MODULE stopped being tracked as openers, desyncing END matching.
+                                // Execution structures (IF/LOOP/CASE/...) were never gated — they
+                                // legitimately have no preceding label either.
+                                const requiresLabel =
+                                    structName === 'FILE' || structName === 'QUEUE' || structName === 'GROUP' ||
+                                    structName === 'RECORD' || structName === 'CLASS' || structName === 'INTERFACE' ||
+                                    structName === 'WINDOW' || structName === 'REPORT' || structName === 'APPLICATION' ||
+                                    structName === 'VIEW';
+                                if (requiresLabel && line.slice(0, position).trim() === '') {
+                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - nothing precedes it on the line, so it's being used as a label`);
+                                    continue; // Try next structure pattern
+                                }
+
                                 // ✅ CRITICAL FIX: Check if structure keyword is inside optional parameters or qualified identifiers or parameter lists
                                 // This prevents matching keywords that are:
                                 // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
