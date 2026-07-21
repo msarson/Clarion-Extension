@@ -12,6 +12,7 @@ logger.setLevel("error");
 export interface HoverContext {
     hasLabelBefore: boolean;
     isInWindowContext: boolean;
+    isFollowedByIdentifier: boolean;
 }
 
 /**
@@ -29,6 +30,19 @@ export class SymbolHoverResolver {
      * Returns first matching hover or null
      */
     resolve(word: string, context: HoverContext): Hover | null {
+        // A bare word immediately followed by another identifier is a label with an
+        // explicit type ("Toolbar              ToolbarClass"), never a real
+        // control/data-type keyword reference — those always take '(', ',', '!' or
+        // end-of-line right after. checkDataType/checkControl below are pure name
+        // lookups with no positional awareness, so without this guard a custom class
+        // whose name happens to start with a control's name (ToolbarClass, MenuHandler,
+        // …) always wins the control lookup by elimination once the type fails the
+        // (much narrower) built-in-data-type check. Skip straight to downstream
+        // variable resolution instead of guessing.
+        if (context.isFollowedByIdentifier) {
+            return null;
+        }
+
         const checkDataTypeFirst = context.hasLabelBefore || !context.isInWindowContext;
 
         if (checkDataTypeFirst) {

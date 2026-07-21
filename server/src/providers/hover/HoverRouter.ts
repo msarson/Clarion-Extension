@@ -54,7 +54,7 @@ export class HoverRouter {
      * Route hover request to appropriate resolver
      */
     async route(context: HoverContext): Promise<Hover | null> {
-        const { word, wordRange, line, document, position, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore } = context;
+        const { word, wordRange, line, document, position, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore, isFollowedByIdentifier } = context;
 
         // Per-step timing — the outer HoverProvider trace buckets this whole call as
         // one `router` stage; this names WHICH router step is slow so the ~700ms
@@ -121,7 +121,7 @@ export class HoverRouter {
             }
 
             // 8. Handle data types and controls
-            const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext });
+            const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
             mark('symbol');
             if (symbolHover) return symbolHover;
 
@@ -460,8 +460,28 @@ export class HoverRouter {
             return null;
         }
 
-        logger.info(`Found built-in function: ${word}`);
         const signatures = this.builtinService.getSignatures(word);
+
+        // Some built-ins (NULL is the prototypical case) are legitimately BOTH a function
+        // call (NULL(field) -> LONG) and a bare constant/keyword (a &= NULL, IF a &= NULL).
+        // Showing the function-call signature card for the bare usage is misleading — only
+        // render it when the word is actually immediately followed by '(' (skipping
+        // whitespace); otherwise fall back to a plain constant-style card using the same
+        // description text (clarion-builtins.json descriptions already cover both meanings).
+        const isActualCall = /^\s*\(/.test(line.slice(wordRange.end.character));
+        if (!isActualCall) {
+            logger.info(`Word ${word} matches a built-in but isn't called (no '(' follows) - showing constant hover`);
+            const doc = signatures[0]?.documentation;
+            const description = typeof doc === 'string' ? doc : (doc?.value ?? '');
+            return this.formatter.formatKeyword({
+                name: word.toUpperCase(),
+                category: 'Built-in constant',
+                description,
+                syntax: word.toUpperCase()
+            });
+        }
+
+        logger.info(`Found built-in function: ${word}`);
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Parameter count in call: ${paramCount}`);
 
