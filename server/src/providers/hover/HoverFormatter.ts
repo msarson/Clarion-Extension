@@ -861,19 +861,30 @@ export class HoverFormatter {
         };
     }
 
-    /** Returns a display noun for the declaration type (e.g. CLASS → "class", GROUP → "group"). */
+    /**
+     * Returns a display noun for the declaration type (e.g. CLASS → "class", GROUP → "group").
+     *
+     * Uses a word-boundary check (\b), NOT .startsWith() — a custom class/type name that
+     * happens to start with one of these keywords as a text prefix (ToolbarClass,
+     * WindowManager — the ABC framework's OWN base window-manager class, used in almost
+     * every "ThisWindow CLASS(WindowManager)" declaration — ReportGenerator, GroupBox, …)
+     * would otherwise match by pure substring coincidence and get the wrong noun. \b
+     * correctly still matches the legitimate attribute-list forms this is meant to catch
+     * (e.g. "CLASS(WindowManager)", "GROUP,OVER(x)") since '(' and ',' are non-word
+     * characters, so a boundary exists right after the keyword either way.
+     */
     private getTypeNoun(type: string): string {
         const upper = type.trimStart().toUpperCase();
-        if (upper.startsWith('CLASS'))     return 'class';
-        if (upper.startsWith('GROUP'))     return 'group';
-        if (upper.startsWith('QUEUE'))     return 'queue';
-        if (upper.startsWith('FILE'))      return 'file';
-        if (upper.startsWith('VIEW'))      return 'view';
-        if (upper.startsWith('REPORT'))    return 'report';
-        if (upper.startsWith('WINDOW'))    return 'window';
-        if (upper.startsWith('MENU'))      return 'menu';
-        if (upper.startsWith('TOOLBAR'))   return 'toolbar';
-        if (upper.startsWith('INTERFACE')) return 'interface';
+        if (/^CLASS\b/.test(upper))     return 'class';
+        if (/^GROUP\b/.test(upper))     return 'group';
+        if (/^QUEUE\b/.test(upper))     return 'queue';
+        if (/^FILE\b/.test(upper))      return 'file';
+        if (/^VIEW\b/.test(upper))      return 'view';
+        if (/^REPORT\b/.test(upper))    return 'report';
+        if (/^WINDOW\b/.test(upper))    return 'window';
+        if (/^MENU\b/.test(upper))      return 'menu';
+        if (/^TOOLBAR\b/.test(upper))   return 'toolbar';
+        if (/^INTERFACE\b/.test(upper)) return 'interface';
         return 'variable';
     }
 }
