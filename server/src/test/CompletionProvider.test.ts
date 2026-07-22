@@ -395,4 +395,128 @@ suite('CompletionProvider — dot-triggered member completion', function () {
                 `Expected medications member in: [${names.join(', ')}]`);
         });
     });
+
+    // -------------------------------------------------------------------------
+    // #370 — member access at a letter-ending position (SELF.Th / inst.Hel)
+    // must keep resolving class members filtered by the typed partial, not fall
+    // through to the bare-prefix word/keyword dump. VS Code masked this by caching
+    // the '.'-triggered list; a per-keystroke host (ClarionAssistant/Monaco) did not.
+    // -------------------------------------------------------------------------
+    suite('onCompletion — member access at letter positions (#370)', function () {
+        const METHOD = 2, FIELD = 5, PROPERTY = 10; // CompletionItemKind
+
+        // The methods carry a parameter so member completion renders a signature label
+        // (`Hello(LONG pId)`, kind = Method) — a decisive marker that the chain was
+        // resolved to a class, since the bare-prefix word dump would only ever surface a
+        // plain `Hello` identifier (no parameter list) for the same partial.
+        test('SELF.<partial> resolves class members (with signatures), not the word dump', async function () {
+            this.timeout(10000);
+            const content = [
+                'Main PROCEDURE',
+                'Greeter CLASS',
+                'Hello   PROCEDURE(LONG pId)',
+                'Goodbye PROCEDURE(LONG pId)',
+                'END',
+                'CODE',
+                'Greeter.Hello PROCEDURE',
+                '  CODE',
+                '  SELF.Hel'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-370-self-partial.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 8, character: '  SELF.Hel'.length },
+                context: { triggerKind: 1 }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+
+            const hello = items.find(i => (i.label as string).toUpperCase().startsWith('HELLO'));
+            assert.ok(hello, `Expected Hello member for SELF.Hel, got: [${names.join(', ')}]`);
+            assert.strictEqual(hello!.kind, METHOD, `Hello should be a Method item, got kind=${hello!.kind}`);
+            assert.ok((hello!.label as string).includes('('),
+                `Hello should render its method signature (member completion), got label="${hello!.label}"`);
+            // The partial filters out the non-matching member.
+            assert.ok(!names.some(n => n.startsWith('GOODBYE')),
+                `Goodbye should be filtered out by partial 'Hel', got: [${names.join(', ')}]`);
+        });
+
+        test('Instance.<partial> resolves class members (with signatures), not the word dump', async function () {
+            this.timeout(10000);
+            const content = [
+                'Main PROCEDURE',
+                'Greeter CLASS',
+                'Hello   PROCEDURE(LONG pId)',
+                'Goodbye PROCEDURE(LONG pId)',
+                'END',
+                'inst  Greeter',
+                'CODE',
+                'inst.Hel'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-370-inst-partial.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 7, character: 'inst.Hel'.length },
+                context: { triggerKind: 1 }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+
+            const hello = items.find(i => (i.label as string).toUpperCase().startsWith('HELLO'));
+            assert.ok(hello, `Expected Hello member for inst.Hel, got: [${names.join(', ')}]`);
+            assert.strictEqual(hello!.kind, METHOD, `Hello should be a Method item, got kind=${hello!.kind}`);
+            assert.ok((hello!.label as string).includes('('),
+                `Hello should render its method signature (member completion), got label="${hello!.label}"`);
+            assert.ok(!names.some(n => n.startsWith('GOODBYE')),
+                `Goodbye should be filtered out by partial 'Hel', got: [${names.join(', ')}]`);
+        });
+
+        test('bare prefix with no dot still returns word completion (non-regression)', async function () {
+            this.timeout(10000);
+            const content = [
+                'Main PROCEDURE',
+                'Greeter CLASS',
+                'Hello   PROCEDURE()',
+                'END',
+                'inst  Greeter',
+                'CODE',
+                'ins'
+            ].join('\n');
+            const uri = 'file:///C:/temp/completion-370-bare-prefix.clw';
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 6, character: 'ins'.length },
+                context: { triggerKind: 1 }
+            } as any;
+
+            // No dot → word completion: it surfaces the in-scope variable `inst`, and must
+            // NOT do member completion (Greeter's `Hello` must not appear for a bare prefix).
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+            assert.ok(names.some(n => n.startsWith('INST')),
+                `Bare 'ins' should surface the local variable inst via word completion, got: [${names.join(', ')}]`);
+            assert.ok(!names.some(n => n.startsWith('HELLO')),
+                `Bare 'ins' must not do member completion (no Greeter members), got: [${names.join(', ')}]`);
+        });
+    });
 });

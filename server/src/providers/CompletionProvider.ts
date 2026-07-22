@@ -66,8 +66,26 @@ export class CompletionProvider {
             const eventCompletions = this.handleEventCompletion(lineText);
             if (eventCompletions) return eventCompletions;
 
-            // Ensure the trigger is actually '.'
+            // Member access is not abandoned once the line stops ending in '.'.
+            // At a letter-ending position like `SELF.Th` / `oKanban.Ini` the cursor is
+            // still inside a member reference — resolve the chain before the last dot and
+            // filter its members by the typed partial, instead of dumping the bare-prefix
+            // word list (#370). Only VS Code masked this by caching the '.'-triggered list
+            // client-side; a per-keystroke host (ClarionAssistant / Monaco) saw the dump.
             if (!lineText.trimEnd().endsWith('.')) {
+                const memberAccess = this.extractMemberAccessWithPartial(lineText);
+                if (memberAccess) {
+                    const tokens = this.tokenCache.getTokens(document);
+                    logger.info(`CompletionProvider: member-access partial — chain="${memberAccess.chain}", partial="${memberAccess.partial}"`);
+                    const memberItems = await this.completeMemberAccess(
+                        memberAccess.chain, memberAccess.partial, document, position, tokens
+                    );
+                    // Non-null means the chain resolved to a class/prefixed structure —
+                    // return its (partial-filtered) members even if empty. Null means the
+                    // chain isn't a member reference, so fall through to word completion.
+                    if (memberItems !== null) return memberItems;
+                }
+
                 const partialMatch = lineText.match(/[\w:]+$/);
                 const partial = partialMatch ? partialMatch[0] : '';
                 logger.info(`CompletionProvider: word trigger, partial="${partial}"`);
@@ -81,34 +99,7 @@ export class CompletionProvider {
             logger.info(`CompletionProvider: chain="${chain}" at line ${position.line}`);
 
             const tokens = this.tokenCache.getTokens(document);
-
-            // Dot after a structure label with PRE(prefix) should surface the same
-            // prefixed field set as qualifier completion (e.g. TestGloGroup. -> TGLO:*).
-            const structurePrefixItems = await this.completePrefixedStructureDot(chain, document, position, tokens);
-            if (structurePrefixItems) return structurePrefixItems;
-
-            // Resolve the final class name for this chain
-            const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
-            if (!resolved) {
-                logger.info(`CompletionProvider: could not resolve chain "${chain}"`);
-                return [];
-            }
-
-            const { className, callerClass } = resolved;
-            logger.info(`CompletionProvider: "${chain}" → class="${className}", caller="${callerClass ?? 'external'}"`);
-
-            // Enumerate all members (with inheritance + access filtering)
-            const members = await this.memberLocator.enumerateMembersInClass(
-                className, document, callerClass
-            );
-
-            if (members.length === 0) {
-                logger.info(`CompletionProvider: no members found for "${className}"`);
-                return [];
-            }
-
-            logger.info(`CompletionProvider: returning ${members.length} completion items for "${className}"`);
-            return members.map(m => this.toCompletionItem(m, className));
+            return (await this.completeMemberAccess(chain, '', document, position, tokens)) ?? [];
         } catch (err) {
             logger.error(`CompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
             return [];
@@ -213,6 +204,67 @@ export class CompletionProvider {
         // Includes prefixed variables like TGLO:Pictionary.
         const m = withoutDot.match(/([\w][\w.:]*)\s*$/);
         return m ? m[1] : null;
+    }
+
+    /**
+     * Detects a member reference with a trailing partial name at the cursor —
+     * `SELF.Th`, `oKanban.Ini`, `SELF.Order.Ge` — splitting it into the chain up to
+     * the last dot and the member-name letters after it. Returns null when there is no
+     * `chain.partial` shape (a bare prefix with no dot, or a trailing `.` which the
+     * dot-trigger path already handles). The partial is required to start with a
+     * letter/underscore so numeric fragments don't spuriously trigger member lookup.
+     */
+    private extractMemberAccessWithPartial(lineBeforeCursor: string): { chain: string; partial: string } | null {
+        const m = lineBeforeCursor.match(/([\w][\w.:]*)\.([A-Za-z_]\w*)$/);
+        return m ? { chain: m[1], partial: m[2] } : null;
+    }
+
+    /**
+     * Shared member-completion pipeline for both the '.'-trigger (partial = '') and the
+     * letter-ending member-access path (#370). Resolves the chain to a class (or a
+     * PRE()'d structure) and returns its members, filtered by `partial` when non-empty.
+     *
+     * Returns null when the chain resolves to nothing — the caller decides whether to
+     * fall back to word completion (letter path) or return empty (explicit dot).
+     */
+    private async completeMemberAccess(
+        chain: string,
+        partial: string,
+        document: TextDocument,
+        position: { line: number; character: number },
+        tokens: Token[]
+    ): Promise<CompletionItem[] | null> {
+        // Dot after a structure label with PRE(prefix) surfaces the same prefixed field
+        // set as qualifier completion (e.g. TestGloGroup. -> TGLO:*). Only meaningful on a
+        // bare dot; a partial after it is a field-name filter word completion already does.
+        if (partial === '') {
+            const structurePrefixItems = await this.completePrefixedStructureDot(chain, document, position, tokens);
+            if (structurePrefixItems) return structurePrefixItems;
+        }
+
+        const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
+        if (!resolved) {
+            logger.info(`CompletionProvider: could not resolve chain "${chain}"`);
+            return null;
+        }
+
+        const { className, callerClass } = resolved;
+        logger.info(`CompletionProvider: "${chain}" → class="${className}", caller="${callerClass ?? 'external'}"`);
+
+        // Enumerate all members (with inheritance + access filtering)
+        const members = await this.memberLocator.enumerateMembersInClass(className, document, callerClass);
+        if (members.length === 0) {
+            logger.info(`CompletionProvider: no members found for "${className}"`);
+            return [];
+        }
+
+        const partialLower = partial.toLowerCase();
+        const filtered = partialLower
+            ? members.filter(m => m.name.toLowerCase().startsWith(partialLower))
+            : members;
+
+        logger.info(`CompletionProvider: returning ${filtered.length} completion items for "${className}"${partial ? ` (partial "${partial}")` : ''}`);
+        return filtered.map(m => this.toCompletionItem(m, className));
     }
 
     /**
