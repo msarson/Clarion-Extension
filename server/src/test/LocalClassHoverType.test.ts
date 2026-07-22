@@ -122,6 +122,64 @@ suite('Local CLASS declaration hover type', () => {
         );
     });
 
+    // #380 follow-up (Mark, live testing): a WINDOW control whose keyword collides
+    // with a local instance's name (Clarion is case-insensitive: control TOOLBAR vs
+    // `Toolbar ToolbarClass`) was indexed as a child symbol named "TOOLBAR". The
+    // symbol-tree walk in findLocalVariable matched that control (indented, no type)
+    // before the real column-0 declaration, so hover showed `Toolbar — UNKNOWN`
+    // pointing at the control line instead of `ToolbarClass` at the declaration.
+    const TOOLBAR_COLLISION_CODE = `
+   MEMBER('Test.clw')
+
+Main PROCEDURE
+
+Window               WINDOW('Test'),AT(,,300,200),SYSTEM
+                       TOOLBAR,AT(0,0,600,8),USE(?TOOLBAR)
+                       END
+                     END
+
+Toolbar              ToolbarClass
+
+  CODE
+  Toolbar.Init()
+  RETURN
+`;
+
+    test('WINDOW TOOLBAR control does not shadow local `Toolbar ToolbarClass` variable', () => {
+        const tokenizer = new ClarionTokenizer(TOOLBAR_COLLISION_CODE);
+        const tokens = tokenizer.tokenize();
+
+        const uri = 'test://ToolbarCollision.clw';
+        const doc = TextDocument.create(uri, 'clarion', 1, TOOLBAR_COLLISION_CODE);
+
+        const cache = TokenCache.getInstance();
+        cache.getTokens(doc);
+
+        const scopeAnalyzer = new ScopeAnalyzer(cache, null);
+        const finder = new SymbolFinderService(cache, scopeAnalyzer);
+
+        const mainScope = tokens.find(t => t.label === 'Main' || t.value === 'Main');
+        assert.ok(mainScope, 'Should find Main procedure token');
+
+        const result = finder.findLocalVariable('Toolbar', tokens, mainScope!, doc);
+
+        console.log('\n=== findLocalVariable result for Toolbar ===');
+        console.log(JSON.stringify(result, null, 2));
+
+        assert.ok(result, 'findLocalVariable should find the Toolbar instance');
+        // Must resolve to the column-0 declaration `Toolbar  ToolbarClass`, not the
+        // indented WINDOW toolbar control.
+        assert.strictEqual(
+            result!.type, 'ToolbarClass',
+            `type should be 'ToolbarClass' (got: '${result!.type}')`
+        );
+        const declLine = TOOLBAR_COLLISION_CODE.split('\n').findIndex(l => /^Toolbar\s+ToolbarClass/.test(l));
+        assert.strictEqual(
+            result!.location.line, declLine,
+            `should point at the declaration line ${declLine}, not the control line (got: ${result!.location.line})`
+        );
+    });
+
     test('HelloWorld CLASS (no base class) has a valid type', () => {
         const tokenizer = new ClarionTokenizer(KANBAN_CODE);
         const tokens = tokenizer.tokenize();

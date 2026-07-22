@@ -353,8 +353,37 @@ export class SymbolFinderService {
         // (Language Reference, PRE attribute). Qualified searches resolve via
         // findPrefixedField / StructureFieldResolver instead.
         const bareSearch = !searchText.includes(':') && !searchText.includes('.');
-        const varSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
-        
+        const rawVarSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
+
+        // A WINDOW/APPLICATION/REPORT control keyword that carries a USE (e.g.
+        // `TOOLBAR,AT(...),USE(?Toolbar)` or `MENUBAR`) is indexed as a child symbol
+        // whose name collides with a real data declaration of the same name — Clarion is
+        // case-insensitive, so the control TOOLBAR and a local instance
+        // `Toolbar ToolbarClass` share one name. Such a control is a Structure token whose
+        // OWN value is the keyword/name (there is no separate label); a genuine data
+        // declaration always has a distinct Label/Variable token for the name on its line
+        // (`Counter LONG`, `MyQueue QUEUE`). When the matched symbol's line carries only
+        // the control Structure token and no data label for this name, discard the match
+        // so the declaration scan below binds the real variable — otherwise the control
+        // (which has no type) shadows it and hover renders type UNKNOWN.
+        let varSymbolIsControl = false;
+        if (rawVarSymbol !== null && bareSearch) {
+            const nameLower = searchText.toLowerCase();
+            const lineNameTokens = tokens.filter(t =>
+                t.line === rawVarSymbol.range.start.line &&
+                t.value.toLowerCase() === nameLower
+            );
+            const hasDataLabel = lineNameTokens.some(t =>
+                t.type === TokenType.Label || t.type === TokenType.Variable
+            );
+            const hasControlStructure = lineNameTokens.some(t => t.type === TokenType.Structure);
+            varSymbolIsControl = hasControlStructure && !hasDataLabel;
+            if (varSymbolIsControl) {
+                logger.info(`⏭️ Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a window/report control keyword, not a data declaration — deferring to declaration scan`);
+            }
+        }
+        const varSymbol = varSymbolIsControl ? null : rawVarSymbol;
+
         if (!varSymbol) {
             logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
 
