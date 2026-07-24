@@ -414,22 +414,22 @@ export class ClarionDocumentSymbolProvider {
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
-                    // Look ahead for procedure declarations inside this structure
+                    // Look ahead for procedure declarations inside this structure.
+                    // Bound the scan with the structure's own finishesAt — already computed by the
+                    // tokenizer with correct nesting depth — instead of re-deriving the end here.
+                    // The previous approach accepted an END only if no Structure token had been seen
+                    // since: a nested MODULE inside a MAP (or any nested structure) is itself a
+                    // Structure token, so that condition could never become true again once one
+                    // appeared, and the scan ran unbounded through the rest of the file — mis-marking
+                    // later identifier-followed-by-paren tokens (e.g. WINDOW attributes like FONT(...),
+                    // VALUE(...), FROM(...)) as MAP/MODULE procedures.
                     let j = i + 1;
-                    let endFound = false;
                     let lastProcedureLine = -1; // Track the line of the last identified procedure
-                    
-                    while (j < tokens.length && !endFound) {
+                    const scanEndLine = finishesAt ?? line;
+
+                    while (j < tokens.length && tokens[j].line <= scanEndLine) {
                         const nextToken = tokens[j];
-                        
-                        // Stop if we hit an END statement for this structure
-                        if (nextToken.type === TokenType.EndStatement &&
-                            nextToken.line > line &&
-                            !tokens.slice(i+1, j).some(t => t.type === TokenType.Structure)) {
-                            endFound = true;
-                            break;
-                        }
-                        
+
                         // If we find a procedure declaration with PROCEDURE or FUNCTION keyword, mark it
                         if (nextToken.type === TokenType.Keyword &&
                             ProcedureUtils.isProcedureKeyword(nextToken.value)) {
@@ -2034,13 +2034,17 @@ export class ClarionDocumentSymbolProvider {
             
             // Create proper detail with parent context
             let detail = "";
-            if (currentProcedure) {
-                detail = `in ${currentProcedure.name}`;
-            } else if (lastMethodImplementation) {
-                detail = `in ${lastMethodImplementation.name}`;
-            } else if (currentStructure) {
-                detail = `in ${currentStructure.name}`;
-            }
+            // Disabled: "in <Parent>" is redundant everywhere it's shown — the tree/breadcrumb
+            // already display the parent via hierarchy, and WorkspaceSymbolProvider derives its
+            // own containerName from the tree rather than reading detail. Commented out (not
+            // removed) so it's a one-line revert if a consumer turns out to need it after all.
+            // if (currentProcedure) {
+            //     detail = `in ${currentProcedure.name}`;
+            // } else if (lastMethodImplementation) {
+            //     detail = `in ${lastMethodImplementation.name}`;
+            // } else if (currentStructure) {
+            //     detail = `in ${currentStructure.name}`;
+            // }
 
             // Create the symbol name with variable name and type
             const symbolName = `${variableName} ${fullType}`;
@@ -2218,11 +2222,13 @@ export class ClarionDocumentSymbolProvider {
 
             // CRITICAL FIX: Update the variable's detail to match its actual parent
             // This ensures variables inside GROUPs show "in GROUP(...)" instead of "in Method(...)"
-            if (target) {
-                logger.info(`   🔍 DEBUG: target type=${target.kind}, target.name="${target.name}"`);
-                variableSymbol.detail = `in ${target.name}`;
-                logger.info(`   ✅ Updated variable detail to match target: "${variableSymbol.detail}"`);
-            }
+            // Disabled (kept for easy revert): see the matching comment further up in this
+            // function — "in <Parent>" duplicates what the tree/breadcrumb already show.
+            // if (target) {
+            //     logger.info(`   🔍 DEBUG: target type=${target.kind}, target.name="${target.name}"`);
+            //     variableSymbol.detail = `in ${target.name}`;
+            //     logger.info(`   ✅ Updated variable detail to match target: "${variableSymbol.detail}"`);
+            // }
             
             this.addSymbolToParent(variableSymbol, target, symbols);
         } else {
@@ -2372,19 +2378,22 @@ export class ClarionDocumentSymbolProvider {
         symbol.sortText = sortName.toLowerCase();
 
         // Enhance breadcrumb navigation by improving symbol details
-        if (!symbol.detail && parent) {
-            // Add context information to the detail for better breadcrumb navigation
-            if (isMethod || isMethodDeclaration) {
-                if (!symbol.detail) {
-                    symbol.detail = `in ${parent.name}`;
-                }
-            } else if (isVariable) {
-                // For variables, add the parent context if not already present
-                if (!symbol.detail && parent.name) {
-                    symbol.detail = `in ${parent.name}`;
-                }
-            }
-        }
+        // Disabled (kept for easy revert): a breadcrumb dropdown only ever lists direct
+        // siblings under one already-visible parent, so "in <Parent>" repeats on every row
+        // without adding information; the tree view shows the same parent via indentation.
+        // if (!symbol.detail && parent) {
+        //     // Add context information to the detail for better breadcrumb navigation
+        //     if (isMethod || isMethodDeclaration) {
+        //         if (!symbol.detail) {
+        //             symbol.detail = `in ${parent.name}`;
+        //         }
+        //     } else if (isVariable) {
+        //         // For variables, add the parent context if not already present
+        //         if (!symbol.detail && parent.name) {
+        //             symbol.detail = `in ${parent.name}`;
+        //         }
+        //     }
+        // }
 
         if (parent) {
             // CRITICAL FIX: Check if parent is a method implementation
