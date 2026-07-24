@@ -874,6 +874,15 @@ export class ClassMemberResolver {
         const likeMatch = name.match(/^LIKE\s*\(\s*([\w:]+)\s*\)/i);
         if (likeMatch) return likeMatch[1];
 
+        // GROUP(TypeName) / QUEUE(TypeName) / RECORD(TypeName) — structured-type property
+        // (e.g. "Settings GROUP(ConnectionSettingsType) END"): resolve to the referenced
+        // type name, same treatment as LIKE(TypeName) above. Without this, the comma/paren
+        // split below strips down to the bare keyword ("GROUP"), which then matches
+        // CLARION_PRIMITIVES and gets rejected as "not navigable" — breaking chained
+        // hover/member resolution (e.g. SELF.Settings.Address) one level too early.
+        const structRefMatch = name.match(/^(?:GROUP|QUEUE|RECORD)\s*\(\s*([\w:]+)\s*\)/i);
+        if (structRefMatch) return structRefMatch[1];
+
         // Take only the part before comma or parenthesis (attributes/dimensions)
         name = name.split(/[,(]/)[0].trim();
 
