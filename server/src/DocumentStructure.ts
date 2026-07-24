@@ -1501,12 +1501,34 @@ export class DocumentStructure {
             }
         }
 
+        // ✅ Assign the structure's label from the preceding same-line token before any
+        // early return below. A structure that closes on the same line (endsOnSameLine,
+        // checked further down) used to return before label assignment ran, so single-line
+        // declarations like "fq QUEUE(FILE:Queue) END" never got their label ("fq") attached
+        // to the token — the outline showed a bare "QUEUE" node instead of "QUEUE (fq)".
+        const sameLine = this.tokensByLine.get(token.line) || [];
+        const structureIndex = sameLine.indexOf(token);
+        if (structureIndex > 0) {
+            const prevToken = sameLine[structureIndex - 1];
+            if (prevToken.type === TokenType.Label) {
+                token.label = prevToken.value;
+            } else if (
+                structureIndex === 1 &&
+                prevToken.type === TokenType.Variable &&
+                (token.value.toUpperCase() === 'LOOP' || token.value.toUpperCase() === 'ACCEPT')
+            ) {
+                // Issue #65: indented `Label LOOP` / `Label ACCEPT` inside CODE
+                // sections — the tokenizer only emits TokenType.Label at column 0,
+                // so an indented loop label arrives as a leading Variable. Promote
+                // it so BREAK <Label> / CYCLE <Label> can resolve to this loop.
+                token.label = prevToken.value;
+            }
+        }
+
         // ✅ Check if structure ends on the same line (single-line declaration)
         // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
         // Also applies to single-line control flow: "IF condition THEN statement." or "IF x THEN y END"
         // Handles line continuation: "IF x THEN | \n statement."
-        const sameLine = this.tokensByLine.get(token.line) || [];
-        const structureIndex = sameLine.indexOf(token);
         let endsOnSameLine = false;
         let continuationLine = token.line;
         
@@ -1609,25 +1631,7 @@ export class DocumentStructure {
             if (DOCSTRUCT_TRACE) logger.info(`🔗 Structure ${token.value} at Line ${token.line} parented to procedure ${parentProcedure.value}`);
         }
 
-        // 🚀 PERFORMANCE: Use tokensByLine to find previous token
-        const lineTokens = this.tokensByLine.get(token.line) || [];
-        const tokenIndex = lineTokens.indexOf(token);
-        if (tokenIndex > 0) {
-            const prevToken = lineTokens[tokenIndex - 1];
-            if (prevToken.type === TokenType.Label) {
-                token.label = prevToken.value;
-            } else if (
-                tokenIndex === 1 &&
-                prevToken.type === TokenType.Variable &&
-                (token.value.toUpperCase() === 'LOOP' || token.value.toUpperCase() === 'ACCEPT')
-            ) {
-                // Issue #65: indented `Label LOOP` / `Label ACCEPT` inside CODE
-                // sections — the tokenizer only emits TokenType.Label at column 0,
-                // so an indented loop label arrives as a leading Variable. Promote
-                // it so BREAK <Label> / CYCLE <Label> can resolve to this loop.
-                token.label = prevToken.value;
-            }
-        }
+        // (label already assigned above, before the endsOnSameLine early return)
         if (DOCSTRUCT_TRACE) logger.info(`🧱 Opened ${token.value} at Line ${token.line} ${token.label}`);
 
         // ✅ Extract structure prefix if present (PRE)
