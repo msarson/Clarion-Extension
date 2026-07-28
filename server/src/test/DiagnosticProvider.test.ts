@@ -2246,6 +2246,14 @@ return:json            EQUATE(1)`;
         assert.strictEqual(diags.length, 1, 'Should flag QUEUE as PROCEDURE label');
     });
 
+    test('GROUP as PROCEDURE label → no error', () => {
+        const code = `GROUP   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'GROUP is valid as a global PROCEDURE label (confirmed via the group-record-diagnostics-repro test fixture, case G)');
+    });
+
     test('WINDOW as structure label (valid) → no error', () => {
         const code = `TestProc  PROCEDURE()
 WINDOW  WINDOW('Caption'),AT(,,300,200)

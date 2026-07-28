@@ -29,10 +29,19 @@ const FULLY_RESERVED = new Set([
  * CODE and DATA are execution-marker keywords — valid standalone at col 0,
  * and valid as method/field names inside a structure (e.g. CLASS), but
  * invalid as the label of a global PROCEDURE/FUNCTION declaration.
+ *
+ * GROUP is deliberately excluded from this set: unlike the rest, a global
+ * (non-nested) `Group PROCEDURE()` is valid, compiling, runnable Clarion —
+ * confirmed by compiling and running the ClarionAssistant
+ * `group-record-diagnostics-repro` test fixture's case G. This diagnostic
+ * previously false-flagged it. The remaining keywords below are UNVERIFIED
+ * for this same global-scope validity (some, e.g. SELF/PARENT, seem unlikely
+ * to share it) — do not remove any of them without independently confirming
+ * each one compiles as a global PROCEDURE/FUNCTION label first.
  */
 const STRUCTURE_ONLY = new Set([
     'APPLICATION', 'CLASS', 'CODE', 'DATA', 'DETAIL', 'FILE', 'FOOTER',
-    'FORM', 'GROUP', 'HEADER', 'ITEM', 'ITEMIZE',
+    'FORM', 'HEADER', 'ITEM', 'ITEMIZE',
     'JOIN', 'MAP', 'MENU', 'MENUBAR', 'MODULE',
     'OLE', 'OPTION', 'QUEUE', 'PARENT', 'RECORD',
     'REPORT', 'SELF', 'SHEET', 'TAB', 'TOOLBAR',
