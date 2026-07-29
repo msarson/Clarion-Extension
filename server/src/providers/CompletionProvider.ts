@@ -37,11 +37,12 @@ export class CompletionProvider {
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
     private wordCompletion: WordCompletionProvider;
+    private scopeAnalyzer: ScopeAnalyzer;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
-        const scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
-        this.wordCompletion = new WordCompletionProvider(this.tokenCache, scopeAnalyzer);
+        this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
+        this.wordCompletion = new WordCompletionProvider(this.tokenCache, this.scopeAnalyzer);
     }
 
     /**
@@ -65,6 +66,10 @@ export class CompletionProvider {
             // EVENT: completion
             const eventCompletions = this.handleEventCompletion(lineText);
             if (eventCompletions) return eventCompletions;
+
+            // ?Ctrl field-equate completion — fires on a bare '?' or '?partial'
+            const fieldEquateCompletions = this.handleFieldEquateCompletion(lineText, document, position);
+            if (fieldEquateCompletions) return fieldEquateCompletions;
 
             // Member access is not abandoned once the line stops ending in '.'.
             // At a letter-ending position like `SELF.Th` / `oKanban.Ini` the cursor is
@@ -184,6 +189,50 @@ export class CompletionProvider {
             };
             return item;
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // ?Ctrl field-equate completion
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns control-equate completions when the line ends in a bare `?` (or `?partial`),
+     * scoped to WINDOW/APPLICATION/REPORT structures declared inside the CURRENT
+     * PROCEDURE only — a `?OkButton` reference can't reach another procedure's controls,
+     * so cross-procedure names would just be noise. Returns null to fall through when
+     * the line doesn't end in `?...`; returns `[]` (not null) when it does but there's
+     * no containing procedure, so this never falls back to the general word list.
+     */
+    private handleFieldEquateCompletion(
+        lineBeforeCursor: string,
+        document: TextDocument,
+        position: { line: number; character: number }
+    ): CompletionItem[] | null {
+        const m = lineBeforeCursor.match(/\?(\w*)$/);
+        if (!m) return null;
+
+        const partial = m[1].toUpperCase();
+        const proc = this.scopeAnalyzer.getTokenScope(document, position)?.containingProcedure;
+        if (!proc) return [];
+
+        const structure = this.tokenCache.getStructure(document);
+        const seen = new Set<string>();
+        const items: CompletionItem[] = [];
+        for (const win of structure.getContainerStructuresInProcedure(proc)) {
+            for (const ctrl of structure.getControlsInStructure(win)) {
+                const name = ctrl.value.replace(/^\?/, '');
+                const key = name.toUpperCase();
+                if (!key.startsWith(partial) || seen.has(key)) continue;
+                seen.add(key);
+                items.push({
+                    label: ctrl.value,
+                    kind: CompletionItemKind.Constant, // FEQ is a compiler-generated EQUATE, same as a hand-written one
+                    insertText: name, // '?' is already typed
+                    detail: win.value, // WINDOW / APPLICATION / REPORT
+                });
+            }
+        }
+        return items;
     }
 
     // -------------------------------------------------------------------------

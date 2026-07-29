@@ -515,7 +515,7 @@ connection.onInitialize((params) => {
                     retriggerCharacters: [')']
                 },
                 completionProvider: {
-                    triggerCharacters: ['.', ':'],
+                    triggerCharacters: ['.', ':', '?'],
                     resolveProvider: false
                 },
                 documentLinkProvider: { resolveProvider: false },
