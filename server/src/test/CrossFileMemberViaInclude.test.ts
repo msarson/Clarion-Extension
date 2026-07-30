@@ -10,12 +10,19 @@ import { HoverProvider } from '../providers/HoverProvider';
 /**
  * MEMBER hidden behind an INCLUDE shim (real-world project convention: swap which
  * PROGRAM a shared source tree belongs to by swapping one small generated file,
- * e.g. `INCLUDE('member.clw')` where member.clw contains the actual
- * `MEMBER('parent.clw')` statement, rather than writing MEMBER directly in every
- * member module). TokenHelper.findMemberHeaderToken() only sees literal tokens in
- * the file it's given, so both MemberLocatorService (hover) and SymbolFinderService
- * (F12) need to fall through one INCLUDE hop to find it — this pins that fix for
- * both surfaces, mirroring CrossFilePrefixField327's direct-MEMBER case.
+ * e.g. `INCLUDE('member.clw')` where member.clw contains the actual `MEMBER('parent')`
+ * statement, rather than writing MEMBER directly in every member module).
+ * TokenHelper.findMemberHeaderToken() only sees literal tokens in the file it's given,
+ * so both MemberLocatorService (hover) and SymbolFinderService (F12) need to fall
+ * through one INCLUDE hop to find it — this pins that fix for both surfaces, mirroring
+ * CrossFilePrefixField327's direct-MEMBER case.
+ *
+ * `MEMBER('parent')` deliberately omits the `.clw` extension — idiomatic Clarion (the
+ * compiler infers it), and the exact shape that exposed a second bug: resolveFilePath /
+ * resolveViaProjectRedirection's redirection lookup matches by extension mask, so an
+ * extension-less name never matched and silently failed. A fixture using the (less
+ * common in the wild, but what the earlier version of this test used)
+ * `MEMBER('parent.clw')` form would never have caught that.
  */
 
 const PARENT_CONTENT =
@@ -29,7 +36,7 @@ const PARENT_CONTENT =
     "  RETURN\n";
 
 const SHIM_CONTENT =
-    "  MEMBER('parent.clw')\n";
+    "  MEMBER('parent')\n";
 
 const MEMBER_CONTENT =
     "  INCLUDE('shim.clw')\n" +

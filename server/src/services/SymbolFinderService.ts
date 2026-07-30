@@ -953,6 +953,19 @@ export class SymbolFinderService {
     }
 
     /**
+     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
+     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`. INCLUDE/LINK/MODULE targets
+     * always carry an explicit extension, so this is deliberately only applied to MEMBER targets.
+     * Both the redirection parser (matches by extension mask) and SolutionManager.findFileWithExtension
+     * (matches by exact source-file basename) silently fail to resolve an extension-less name:
+     * `resolveViaProjectRedirection('TargetProgram', ...)` -> null,
+     * `resolveViaProjectRedirection('TargetProgram.clw', ...)` -> the correct path.
+     */
+    private normalizeMemberFilename(name: string): string {
+        return path.extname(name) ? name : `${name}.clw`;
+    }
+
+    /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
      * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
      * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
@@ -974,7 +987,8 @@ export class SymbolFinderService {
         const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePath));
         if (memberToken?.referencedFile) {
             try {
-                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                const memberFile = this.normalizeMemberFilename(memberToken.referencedFile);
+                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberFile);
                 let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
                 // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
@@ -997,7 +1011,7 @@ export class SymbolFinderService {
                         // without it, prefixed fields of parent-inline FILEs dead-end here.
                         const solutionManager = SolutionManager.getInstance();
                         const viaRedirection = solutionManager
-                            ? await solutionManager.findFileWithExtension(memberToken.referencedFile, currentFilePath)
+                            ? await solutionManager.findFileWithExtension(memberFile, currentFilePath)
                             : null;
                         if (!viaRedirection?.path || !fs.existsSync(viaRedirection.path)) {
                             return null;
@@ -1171,7 +1185,9 @@ export class SymbolFinderService {
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+            const parentResult = await this.findGlobalVariableInParentFile(
+                word, this.normalizeMemberFilename(memberToken.referencedFile), document
+            );
             if (parentResult) return parentResult;
             // Fall through to equates.clw check
         }

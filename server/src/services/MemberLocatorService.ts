@@ -157,7 +157,7 @@ export class MemberLocatorService {
 
         const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -400,7 +400,7 @@ export class MemberLocatorService {
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
         const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -569,7 +569,7 @@ export class MemberLocatorService {
         const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (!memberToken?.referencedFile) return false;
 
-        const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+        const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
         if (!parentPath) return false;
 
         // Already tokenized (open in the editor, or warmed by another member sharing this
@@ -645,7 +645,7 @@ export class MemberLocatorService {
         // 2. MEMBER parent file (and its INCLUDE chain)
         const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -751,7 +751,7 @@ export class MemberLocatorService {
         // 2. MEMBER parent + its include chain
         const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -1760,6 +1760,19 @@ export class MemberLocatorService {
             if (nested) return nested;
         }
         return undefined;
+    }
+
+    /**
+     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
+     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`. INCLUDE/LINK/MODULE targets
+     * always carry an explicit extension, so this is deliberately only applied to MEMBER targets.
+     * `resolveViaProjectRedirection`'s redirection lookup matches by extension mask (e.g. the `*.clw
+     * = ...` line in a .red file), so an extension-less name never matches any rule and silently
+     * fails to resolve: `resolveViaProjectRedirection('TargetProgram', ...)` -> null,
+     * `resolveViaProjectRedirection('TargetProgram.clw', ...)` -> the correct path.
+     */
+    private normalizeMemberFilename(name: string): string {
+        return path.extname(name) ? name : `${name}.clw`;
     }
 
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
