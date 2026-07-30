@@ -920,6 +920,39 @@ export class SymbolFinderService {
     }
     
     /**
+     * Resolves the MEMBER token for a file, falling through into its own direct INCLUDE
+     * targets when no literal MEMBER statement is present locally — mirrors
+     * MemberLocatorService.resolveMemberHeaderToken (same project convention: MEMBER('program')
+     * often lives in a small generated shim reached via INCLUDE('member.clw') rather than being
+     * written directly in each member module, so a shared source tree can belong to different
+     * PROGRAMs across projects by swapping just that shim). TokenHelper.findMemberHeaderToken()
+     * only sees literal tokens in the tokens it's given, so it can never find a MEMBER hidden
+     * behind that indirection on its own. Only looks one INCLUDE hop deep.
+     */
+    private async resolveMemberHeaderToken(tokens: Token[], currentDir: string): Promise<Token | undefined> {
+        const direct = TokenHelper.findMemberHeaderToken(tokens);
+        if (direct) return direct;
+
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = path.resolve(currentDir, inc.referencedFile!);
+            if (!fs.existsSync(resolvedPath)) continue;
+            const incUri = pathToCanonicalUri(resolvedPath);
+            let incTokens = this.tokenCache.getTokensByUriCaseInsensitive(incUri);
+            if (!incTokens) {
+                try {
+                    const content = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const incDoc = TextDocument.create(incUri, 'clarion', 1, content);
+                    incTokens = this.tokenCache.getTokens(incDoc);
+                } catch { continue; }
+            }
+            const nested = TokenHelper.findMemberHeaderToken(incTokens);
+            if (nested) return nested;
+        }
+        return undefined;
+    }
+
+    /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
      * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
      * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
@@ -937,10 +970,10 @@ export class SymbolFinderService {
         if (result) return result;
 
         // If MEMBER file, search the parent PROGRAM file
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePath));
         if (memberToken?.referencedFile) {
             try {
-                const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
                 let resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
                 let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
@@ -1133,7 +1166,8 @@ export class SymbolFinderService {
         }
 
         // Step 2: If not found and current file has MEMBER token, search parent file
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const currentFilePathForMember = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePathForMember));
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);

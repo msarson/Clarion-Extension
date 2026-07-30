@@ -155,7 +155,7 @@ export class MemberLocatorService {
         // interface walk and #361's procedure walk).
         const timeSlice = makeTimeSlicer();
 
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -398,7 +398,7 @@ export class MemberLocatorService {
         }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath));
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
             if (parentPath) {
@@ -565,10 +565,10 @@ export class MemberLocatorService {
      */
     public async warmMemberParent(document: TextDocument): Promise<boolean> {
         const tokens = this.tokenCache.getTokens(document);
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath));
         if (!memberToken?.referencedFile) return false;
 
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
         if (!parentPath) return false;
 
@@ -643,7 +643,7 @@ export class MemberLocatorService {
         const currentDir = path.dirname(currentFilePath);
 
         // 2. MEMBER parent file (and its INCLUDE chain)
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -749,7 +749,7 @@ export class MemberLocatorService {
         if (found) return { token: found, tokens, doc: document };
 
         // 2. MEMBER parent + its include chain
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -1724,6 +1724,37 @@ export class MemberLocatorService {
      * ImplementationProvider / MethodHoverResolver already do via their
      * direct-fix-sites.
      */
+    /**
+     * Resolves the MEMBER token for a file, falling through into its own direct INCLUDE
+     * targets when no literal MEMBER statement is present locally.
+     *
+     * Project convention seen across many member modules: the real MEMBER('program')
+     * statement lives in a small generated shim file reached via e.g. INCLUDE('member.clw')
+     * rather than being written directly in each member — this lets the same shared source
+     * files belong to different PROGRAMs across projects by swapping just that one shim.
+     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
+     * so it can never find a MEMBER hidden behind that indirection on its own.
+     *
+     * Only looks one INCLUDE hop deep — matches the shim-file convention; a MEMBER statement
+     * buried deeper than that would be unusual. Takes the first MEMBER token found across the
+     * direct includes, in document order.
+     */
+    private async resolveMemberHeaderToken(tokens: Token[], fromDir: string): Promise<Token | undefined> {
+        const direct = TokenHelper.findMemberHeaderToken(tokens);
+        if (direct) return direct;
+
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            if (!resolvedPath) continue;
+            const data = await this.loadDocument(resolvedPath);
+            if (!data) continue;
+            const nested = TokenHelper.findMemberHeaderToken(data.tokens);
+            if (nested) return nested;
+        }
+        return undefined;
+    }
+
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
