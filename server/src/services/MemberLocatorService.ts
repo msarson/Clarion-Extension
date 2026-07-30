@@ -155,9 +155,9 @@ export class MemberLocatorService {
         // interface walk and #361's procedure walk).
         const timeSlice = makeTimeSlicer();
 
-        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -398,7 +398,7 @@ export class MemberLocatorService {
         }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
             if (parentPath) {
@@ -566,7 +566,7 @@ export class MemberLocatorService {
     public async warmMemberParent(document: TextDocument): Promise<boolean> {
         const tokens = this.tokenCache.getTokens(document);
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (!memberToken?.referencedFile) return false;
 
         const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
@@ -643,9 +643,9 @@ export class MemberLocatorService {
         const currentDir = path.dirname(currentFilePath);
 
         // 2. MEMBER parent file (and its INCLUDE chain)
-        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -749,9 +749,9 @@ export class MemberLocatorService {
         if (found) return { token: found, tokens, doc: document };
 
         // 2. MEMBER parent + its include chain
-        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -1738,14 +1738,21 @@ export class MemberLocatorService {
      * Only looks one INCLUDE hop deep — matches the shim-file convention; a MEMBER statement
      * buried deeper than that would be unusual. Takes the first MEMBER token found across the
      * direct includes, in document order.
+     *
+     * `fromFile` (the CURRENT file's own path, not the include target) must be threaded through
+     * to resolveFilePath's owner-project-first redirection (#328) — some projects use a DIFFERENT
+     * same-named shim per project (e.g. many `member.clw` files, one per project, each redirecting
+     * to a different MEMBER target so the same shared source tree can belong to different PROGRAMs).
+     * Omitting it makes redirection fall back to an unscoped solution-wide walk that can resolve to
+     * the WRONG project's shim.
      */
-    private async resolveMemberHeaderToken(tokens: Token[], fromDir: string): Promise<Token | undefined> {
+    private async resolveMemberHeaderToken(tokens: Token[], fromDir: string, fromFile?: string): Promise<Token | undefined> {
         const direct = TokenHelper.findMemberHeaderToken(tokens);
         if (direct) return direct;
 
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath) continue;
             const data = await this.loadDocument(resolvedPath);
             if (!data) continue;
