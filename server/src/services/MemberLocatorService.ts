@@ -772,6 +772,30 @@ export class MemberLocatorService {
     private findPrefixFieldInTokens(prefix: string, fieldName: string, tokens: Token[]): Token | undefined {
         const prefixUpper = prefix.toUpperCase();
         const fieldUpper = fieldName.toUpperCase();
+
+        // Prefer an actual FIELD of the structure over the structure's own PRE()'d declaration
+        // token. A field can coincidentally share its name with the enclosing structure (e.g. a
+        // FILE named `Evl` containing a field also named `Evl` — real shape in this codebase's
+        // event-log dictionary entry) — StructureProcessor stamps `structurePrefix` on the
+        // declaring structure token ITSELF as well as on its fields, so without this the
+        // declaration token wins the search below simply by appearing first in document order.
+        //
+        // `t.line > t.structureParent.line` additionally excludes a DocumentStructure quirk: the
+        // structure is pushed onto its structure-stack the moment its own keyword token (FILE,
+        // QUEUE, ...) is seen, so any later Variable/StructurePrefix-type token on THAT SAME
+        // declaration line — e.g. the `GLOB:Owner` in `OWNER(GLOB:Owner)`, or the `Evl` argument
+        // inside `PRE(Evl)` on the FILE's own line — gets mistagged isStructureField=true with the
+        // structure's own prefix too, even though it's an attribute argument, not a real field.
+        // Real fields are always declared on later lines, so this line comparison cleanly excludes
+        // that noise without touching the tokenizer's core (widely-depended-on) structure walker.
+        const fieldMatch = tokens.find(t =>
+            t.isStructureField &&
+            t.structurePrefix?.toUpperCase() === prefixUpper &&
+            t.value.toUpperCase() === fieldUpper &&
+            t.structureParent !== undefined && t.line > t.structureParent.line
+        );
+        if (fieldMatch) return fieldMatch;
+
         return tokens.find(t =>
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
