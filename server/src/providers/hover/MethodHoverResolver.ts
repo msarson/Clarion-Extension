@@ -90,8 +90,6 @@ export class MethodHoverResolver {
             );
             if (classToken) {
                 const typeStr = SymbolFinderService.extractTypeInfo(classToken, tokens);
-                const fileName = path.basename(document.uri.replace(/file:\/\/\//i, '').replace(/\//g, '\\'));
-                const lineNumber = classToken.line + 1;
                 const lineTokens = tokens.filter(t => t.line === classToken.line);
                 const declaration = lineTokens.map(t => t.value).join(' ');
                 const markdown = [
@@ -102,7 +100,7 @@ export class MethodHoverResolver {
                     '```clarion',
                     declaration,
                     '```',
-                    `${fileName}:${lineNumber}`
+                    this.formatter.locationLink(document.uri, classToken.line)
                 ];
                 return { contents: { kind: 'markdown', value: markdown.join('\n') } };
             }

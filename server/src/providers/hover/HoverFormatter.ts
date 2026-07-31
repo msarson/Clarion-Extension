@@ -3,7 +3,6 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
-import * as path from 'path';
 import * as fs from 'fs';
 
 /**
@@ -124,9 +123,6 @@ export class HoverFormatter {
         }
         
         if (document) {
-            const fileName = path.basename(document.uri.replace('file:///', ''));
-            const lineNumber = info.line + 1;
-            
             // Add the actual source code line
             const content = document.getText();
             const lines = content.split(/\r?\n/);
@@ -141,7 +137,7 @@ export class HoverFormatter {
             }
 
             // Location at bottom, after code block
-            markdown.push(`${fileName}:${lineNumber}`);
+            markdown.push(this.locationLink(document.uri, info.line));
 
             // Append doc comment if present
             const docComment = DocCommentReader.read(lines, info.line);
@@ -186,8 +182,7 @@ export class HoverFormatter {
             markdown.push('```');
         }
 
-        const fileName = info.file.split(/[\/\\]/).pop() || info.file;
-        markdown.push(`${fileName}:${info.line + 1}`);
+        markdown.push(this.locationLink(info.file, info.line));
 
         return { contents: { kind: 'markdown', value: markdown.join('\n') } };
     }
@@ -202,7 +197,9 @@ export class HoverFormatter {
 
         let docComment: DocComment | null = null;
         let declSnippet: string | null = null;
-        let declLocationStr = '';
+        // Derived from the URI alone, so it survives an unreadable file — hence built up-front
+        // instead of separately in the try and the catch.
+        const declLocationStr = this.locationLink(declarationInfo.file, declarationInfo.line);
 
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
@@ -211,11 +208,7 @@ export class HoverFormatter {
             const declLine = declLines[declarationInfo.line];
             docComment = DocCommentReader.read(declLines, declarationInfo.line);
             if (declLine) declSnippet = declLine.trim();
-            declLocationStr = `${path.basename(declUri)}:${declarationInfo.line + 1}`;
-        } catch {
-            const fileName = declarationInfo.file.split(/[\/\\]/).pop() || declarationInfo.file;
-            declLocationStr = `${fileName}:${declarationInfo.line + 1}`;
-        }
+        } catch { }
 
         if (declSnippet) {
             markdown.push('```clarion');
@@ -226,10 +219,11 @@ export class HoverFormatter {
         let implLocationStr = '';
         try {
             const lastColonIndex = implementationLocation.lastIndexOf(':');
-            const implFilePath = implementationLocation.substring(0, lastColonIndex).replace('file:///', '');
+            const implLocationUri = implementationLocation.substring(0, lastColonIndex);   // scheme kept, for the link
+            const implFilePath = implLocationUri.replace('file:///', '');
             const implLine = parseInt(implementationLocation.substring(lastColonIndex + 1));
             const implUri = decodeURIComponent(implFilePath);
-            implLocationStr = `${path.basename(implUri)}:${implLine + 1}`;
+            implLocationStr = this.locationLink(implLocationUri, implLine);
             if (!implUri.startsWith('test://')) {
                 try {
                     const implLines = fs.readFileSync(implUri, 'utf-8').split('\n');
@@ -278,8 +272,7 @@ export class HoverFormatter {
         markdown.push(declInfo.signature.trim());
         markdown.push('```');
 
-        const fileName = declInfo.file.split(/[\/\\]/).pop() || declInfo.file;
-        markdown.push(`${fileName}:${declInfo.line + 1}`);
+        markdown.push(this.locationLink(declInfo.file, declInfo.line));
 
         let docComment: DocComment | null = null;
         try {
@@ -557,11 +550,9 @@ export class HoverFormatter {
 
                 const mapLines = mapContent.split('\n');
                 const mapLine = mapLines[mapDecl.range.start.line];
-                const fileName = mapUri.includes('://')
-                    ? mapUri.split('/').pop() || 'unknown'
-                    : path.basename(mapUri);
-                const lineNumber = mapDecl.range.start.line + 1;
-                declLocationStr = `${fileName}:${lineNumber}`;
+                // Link from mapDecl.uri, NOT the decoded mapUri used for the fs read above — the
+                // original URI is what the opener needs, and it is already percent-encoded.
+                declLocationStr = this.locationLink(mapDecl.uri, mapDecl.range.start.line);
 
                 if (mapLine && !isAtMapDeclaration) {
                     parts.push(`\`\`\`clarion\n${mapLine.trim()}\n\`\`\``);
@@ -576,13 +567,7 @@ export class HoverFormatter {
         let implLocationStr = '';
         if (procImpl) {
             try {
-                const implUri = procImpl.uri.startsWith('test://')
-                    ? procImpl.uri
-                    : decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                const fileName = implUri.includes('://')
-                    ? implUri.split('/').pop() || 'unknown'
-                    : path.basename(implUri);
-                implLocationStr = `${fileName}:${procImpl.range.start.line + 1}`;
+                implLocationStr = this.locationLink(procImpl.uri, procImpl.range.start.line);
             } catch (error) {
                 logger.error(`Error reading PROCEDURE implementation: ${error}`);
             }
@@ -859,6 +844,54 @@ export class HoverFormatter {
         return {
             contents: { kind: 'markdown', value: content.trim() }
         };
+    }
+
+    /**
+     * Renders a hover footer location as a CLICKABLE markdown link — `[Foo.clw:12](file:///…/Foo.clw#L12)`.
+     *
+     * The `#L<line>` fragment is the editor-core convention for "open this file at that line": VS Code's
+     * opener service parses it out of the target URI before opening (`extractSelection`), so the link
+     * navigates with no client-side command, no `isTrusted` markdown, and no new LSP request. Hosts that
+     * embed Monaco get the same behaviour by registering a link opener.
+     *
+     * Each location is linked SEPARATELY — a "declaration → implementation" footer (`Foo.inc:12 →
+     * Foo.clw:340`) yields two independent links, since jumping to the prototype and jumping to the body
+     * are different intents.
+     *
+     * Falls back to the previous plain text when the location isn't openable (a `test://` fixture URI, or
+     * any other non-file scheme), so hover output is unchanged wherever a link would be dead.
+     */
+    locationLink(fileOrUri: string, line0: number): string {
+        const lineNo = line0 + 1;
+        const label = `${this.locationBaseName(fileOrUri)}:${lineNo}`;
+        const uri = this.toFileUri(fileOrUri);
+        return uri ? `[${label}](${uri}#L${lineNo})` : label;
+    }
+
+    /** File name for a footer label, from either a `file:///` URI or a plain path (percent-decoded). */
+    private locationBaseName(fileOrUri: string): string {
+        const last = (fileOrUri || '').split(/[\/\\]/).pop() || fileOrUri || '';
+        try { return decodeURIComponent(last); } catch { return last; }
+    }
+
+    /**
+     * Normalises a location to a `file:` URI for linking, or null when it can't be one.
+     * Already-URI inputs are passed through untouched (they are already percent-encoded); a plain
+     * path is converted segment-wise so spaces survive. The drive-letter segment (`d:`) is left
+     * UNESCAPED — that's the canonical `file:///d:/...` form vscode-uri/Node's pathToFileURL both
+     * produce (and what the OTHER half of a decl→impl footer already uses, since that one comes
+     * from an already-formed `file://` Location.uri). Percent-encoding it as `d%3A` — this
+     * function's first cut — was inconsistent with that and, being non-canonical, an avoidable
+     * risk for any URI consumer that special-cases the raw two-char drive-letter pattern.
+     */
+    private toFileUri(fileOrUri: string): string | null {
+        if (!fileOrUri) return null;
+        if (fileOrUri.startsWith('file://')) return fileOrUri;
+        if (fileOrUri.includes('://')) return null;   // test:// and friends — not openable
+        const segments = fileOrUri.replace(/\\/g, '/').split('/');
+        const encoded = segments.map((seg, i) =>
+            i === 0 && /^[a-zA-Z]:$/.test(seg) ? seg : encodeURIComponent(seg));
+        return 'file:///' + encoded.join('/');
     }
 
     /**

@@ -104,9 +104,6 @@ export class VariableHoverResolver {
             markdown.push(`${scopeIcon} Module variable`);
         }
         
-        const fileName = path.basename(document.uri.replace('file:///', ''));
-        const lineNumber = symbolInfo.location.line + 1;
-        
         // Add the actual source code line
         if (symbolInfo.declaration) {
             markdown.push(``);
@@ -116,7 +113,7 @@ export class VariableHoverResolver {
         }
 
         // Location at bottom, after code block
-        markdown.push(`${fileName}:${lineNumber}`);
+        markdown.push(this.formatter.locationLink(document.uri, symbolInfo.location.line));
         
         markdown.push(``);
         
@@ -302,9 +299,6 @@ export class VariableHoverResolver {
             }
         }
         
-        const fileName = path.basename(document.uri.replace('file:///', ''));
-        const lineNumber = globalVar.line + 1;
-        
         // Add the actual source code line
         const content = document.getText();
         const lines = content.split(/\r?\n/);
@@ -319,7 +313,7 @@ export class VariableHoverResolver {
         }
 
         // Location at bottom, after code block
-        markdown.push(`${fileName}:${lineNumber}`);
+        markdown.push(this.formatter.locationLink(document.uri, globalVar.line));
         
         return {
             contents: {
