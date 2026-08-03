@@ -10,10 +10,11 @@ import { SolutionManager } from '../solution/solutionManager';
  * Project convention: the real MEMBER('program') statement is not written directly in
  * every member module — it lives in a small shared shim file reached via
  * INCLUDE('member.clw'). MemberLocatorService.resolveMemberHeaderToken() already follows
- * that one INCLUDE hop for hover/F12/completion; IncludeVerifier.computeMemberParentDocument()
- * did not, so isClassIncluded() could never see the MEMBER parent's include chain for any
- * file using the shim — a class only reachable through the real PROGRAM file's includes was
- * reported as a missing-include false positive even though it compiles fine.
+ * that one INCLUDE hop (plus normalizeMemberFilename's extension-less MEMBER target fix) for
+ * hover/F12/completion; IncludeVerifier.computeMemberParentDocument() had neither, so
+ * isClassIncluded() could never see the MEMBER parent's include chain for any file using the
+ * shim — a class only reachable through the real PROGRAM file's includes was reported as a
+ * missing-include false positive even though it compiles fine.
  */
 suite('IncludeVerifier — MEMBER resolved via INCLUDE shim (member.clw convention)', () => {
     let tmpRoot = '';
@@ -29,9 +30,11 @@ suite('IncludeVerifier — MEMBER resolved via INCLUDE shim (member.clw conventi
         IncludeVerifier.getInstance().clearCache();
         clearReachableSetBucket();
 
-        // The shim: no CODE of its own, just the real MEMBER() statement.
+        // The shim: no CODE of its own, just the real MEMBER() statement — extension-less,
+        // the idiomatic Clarion form (MEMBER('TargetProgram') style), which exercises the
+        // normalizeMemberFilename fallback alongside the INCLUDE-hop fallback.
         fs.writeFileSync(path.join(tmpRoot, 'member.clw'), [
-            "  MEMBER('parent.clw')",
+            "  MEMBER('parent')",
             '',
         ].join('\r\n'));
 

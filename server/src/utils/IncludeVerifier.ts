@@ -711,15 +711,23 @@ export class IncludeVerifier {
                 return null;
             }
 
-            logger.debug(`⏱️ [IV] getMemberParentDocument: resolving "${memberToken.referencedFile}"`);
+            // MEMBER/PROGRAM references conventionally omit the file extension (e.g.
+            // MEMBER('TargetProgram')) — the Clarion compiler infers .clw. resolveViaProjectRedirection's
+            // redirection lookup matches by extension mask (e.g. the `*.clw = ...` line in a .red
+            // file), so an extension-less name never matches any rule and silently fails to resolve;
+            // the local-directory fallback below fails the same way (fs.existsSync on a path with no
+            // extension never finds the real "Name.clw" file). Same fix already applied in
+            // MemberLocatorService.normalizeMemberFilename() for hover/F12/completion.
+            const memberFileName = this.normalizeMemberFilename(memberToken.referencedFile);
+            logger.debug(`⏱️ [IV] getMemberParentDocument: resolving "${memberFileName}"`);
 
             // Resolve path: try redirection parser first, then local directory fallback
             let resolvedPath: string | null = null;
 
             // #328: owner-project-first redirection
-            resolvedPath = resolveViaProjectRedirection(memberToken.referencedFile, currentFilePath);
+            resolvedPath = resolveViaProjectRedirection(memberFileName, currentFilePath);
             if (!resolvedPath) {
-                const candidate = path.resolve(currentFileDir, memberToken.referencedFile);
+                const candidate = path.resolve(currentFileDir, memberFileName);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;
             }
 
@@ -811,6 +819,18 @@ export class IncludeVerifier {
             }
         }
         return undefined;
+    }
+
+    /**
+     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
+     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`. INCLUDE/LINK/MODULE targets
+     * always carry an explicit extension, so this is deliberately only applied to MEMBER targets.
+     * `resolveViaProjectRedirection`'s redirection lookup matches by extension mask (e.g. the `*.clw
+     * = ...` line in a .red file), so an extension-less name never matches any rule and silently
+     * fails to resolve. Mirrors MemberLocatorService.normalizeMemberFilename().
+     */
+    private normalizeMemberFilename(name: string): string {
+        return path.extname(name) ? name : `${name}.clw`;
     }
 
     /**
