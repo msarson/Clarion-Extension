@@ -87,6 +87,67 @@ suite('scanSourceForProcedures (#362)', () => {
         assert.strictEqual(procs.length, 0, `no false positives; got ${JSON.stringify(procs.map(p => p.name))}`);
     });
 
+    test('does not index CLASS/INTERFACE member prototypes as bare global procedures', () => {
+        // Real-world class bodies are often written unindented — member labels at
+        // column 0, the same shape as a real top-level declaration. Before the
+        // structureStack fix, a method like `DoWork` indexed identically to a
+        // global procedure — the bare name then resolved via
+        // SymbolFinderService.findProcedureViaIndex (and so the undeclared-variable
+        // diagnostic's cross-file augmentation) to this unrelated class member,
+        // matching the defect class PR #391 fixed for hover.
+        const src = [
+            'SomeClass CLASS,TYPE, MODULE(\'SomeClass.clw\')',
+            '',
+            'SomeField      &SomeFieldType',
+            'Construct      PROCEDURE()',
+            'Destruct       PROCEDURE()',
+            'DoWork         PROCEDURE( *? )',
+            '',
+            '             END',
+            '',
+            'SomeInterface  INTERFACE',
+            'Method1        PROCEDURE()',
+            '             END',
+            '',
+            'GlobalAfter    PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\SomeClass.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Construct'), 'CLASS member not indexed as bare global procedure');
+        assert.ok(!byName.has('Destruct'), 'CLASS member not indexed as bare global procedure');
+        assert.ok(!byName.has('DoWork'), 'CLASS member "DoWork" not indexed as bare global procedure (the real repro shape)');
+        assert.ok(!byName.has('Method1'), 'INTERFACE member not indexed as bare global procedure');
+
+        assert.ok(byName.has('GlobalAfter'), 'a real global procedure after the CLASS/INTERFACE close is still indexed');
+    });
+
+    test('CLASS/INTERFACE tracking survives an inline nested structure (e.g. a GROUP data member)', () => {
+        // A GROUP declared inline inside a CLASS needs its own END — that inner END
+        // must pop only the GROUP, not prematurely close the enclosing CLASS.
+        const src = [
+            'SomeClass2  CLASS,TYPE',
+            'Rec           GROUP',
+            'Field1           STRING(10)',
+            '              END',
+            'Method1       PROCEDURE()',
+            '            END',
+            '',
+            'GlobalAfter2  PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\y.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Method1'), 'CLASS member after an inline nested GROUP is still correctly excluded');
+        assert.ok(byName.has('GlobalAfter2'), 'a real global procedure after the CLASS close is still indexed');
+    });
+
     test('finds real procedures in IBSCommon.clw when present', function () {
         const real = 'F:\\TestApps\\Direct10Source\\IBSCommon.clw';
         if (!fs.existsSync(real)) { this.skip(); return; }
