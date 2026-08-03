@@ -24,7 +24,10 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
 // v2 (#362): entries now also carry procedure declarations (`procs`).
-const DISK_CACHE_VERSION = 3;
+// v3: scanSourceForProcedures now excludes CLASS/INTERFACE member prototypes
+// from the bare-name procedure index (previously indexed identically to a
+// global procedure — see the structureStack tracking in that function).
+const DISK_CACHE_VERSION = 4;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -321,6 +324,21 @@ export function scanSourceForProcedures(
     // without this the library MODULE prototypes (NetTalk et al.) never index, so
     // the hover/definition fast-paths can never fire for them.
     let mapDepth = 0;
+    // Tracks currently-open TYPE_PATTERN structures (CLASS/INTERFACE/QUEUE/GROUP/
+    // RECORD/FILE/VIEW) so a column-0 `Name PROCEDURE/FUNCTION` line found while a
+    // CLASS or INTERFACE is open is recognised as a member prototype, not a global
+    // procedure. Clarion class bodies are often written unindented (member labels
+    // at column 0, same shape as a real top-level declaration) — without this, a
+    // line like `Test PROCEDURE(...)` inside `SomeClass CLASS,TYPE...END` indexes
+    // identically to a real global procedure, and the bare name then resolves via
+    // SymbolFinderService.findProcedureViaIndex (and so the undeclared-variable
+    // diagnostic's cross-file augmentation) to an unrelated class's member. Same
+    // defect class fixed for hover in PR #391 (MemberLocatorService
+    // .isVariableLookupCandidate) — a separate, tokenizer-free code path that fix
+    // never touched. Non-CLASS/INTERFACE kinds are tracked too, purely so their own
+    // END pops correctly instead of prematurely closing an outer CLASS/INTERFACE
+    // (e.g. an inline GROUP field declared inside a class).
+    const structureStack: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
         const rawLine = lines[i];
@@ -351,9 +369,27 @@ export function scanSourceForProcedures(
             continue;
         }
 
+        // --- CLASS/INTERFACE/QUEUE/GROUP/... structure tracking -----------------
+        // Innermost-first: a nested structure's own END pops it before any
+        // enclosing CLASS/INTERFACE is affected.
+        if (structureStack.length > 0 && (END_PATTERN.test(t) || t === '.')) {
+            structureStack.pop();
+            continue;
+        }
+        const typeMatch = TYPE_PATTERN.exec(t);
+        if (typeMatch) {
+            structureStack.push(typeMatch[2].toUpperCase());
+            continue;
+        }
+        const inClassOrInterface = structureStack.some(
+            k => k === 'CLASS' || k === 'INTERFACE'
+        );
+
         // --- Column-0 explicit form: `Name PROCEDURE/FUNCTION ...` --------------
-        // Global implementations and `Class.Method` bodies live at column 0.
-        if (atColumnZero) {
+        // Global implementations and `Class.Method` bodies live at column 0 — but
+        // so do class/interface MEMBER prototypes in many real codebases
+        // (unindented style), which must NOT be indexed as bare global names.
+        if (atColumnZero && !inClassOrInterface) {
             const m = PROCEDURE_PATTERN.exec(t);
             if (m) {
                 const name = m[1];
