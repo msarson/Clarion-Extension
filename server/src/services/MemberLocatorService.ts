@@ -129,7 +129,7 @@ export class MemberLocatorService {
             // cross-file cache holds it) so a stale token is never handed out.
             const data = await this.loadDocument(cachedPath);
             const found = data?.tokens.find(t =>
-                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+                this.isVariableLookupCandidate(t, data!.doc) && this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (data && found) return { token: found, tokens: data.tokens, doc: data.doc };
             // File gone or declaration moved — fall through to a fresh walk.
@@ -162,7 +162,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t, parentData.doc) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -259,7 +259,7 @@ export class MemberLocatorService {
             // conclude "not an alias". A local declaration still takes the full check,
             // so same-file aliases keep exact semantics.
             const hasLocalDecl = tokens.some(t =>
-                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, key));
+                this.isVariableLookupCandidate(t, document) && this.tokenMatchesName(t, key));
             if (!hasLocalDecl) {
                 await this.ensureIndexBuilt();
                 if (this.sdi.find(current.typeName).length > 0) break;
@@ -633,7 +633,7 @@ export class MemberLocatorService {
 
         // 1. Current file (column 0 label or structure)
         const local = tokens.find(t =>
-            this.isVariableLookupCandidate(t) &&
+            this.isVariableLookupCandidate(t, document) &&
             this.tokenMatchesName(t, varNameLower) &&
             !isExcluded(t.line)
         );
@@ -650,7 +650,7 @@ export class MemberLocatorService {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t, parentData.doc) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -687,7 +687,7 @@ export class MemberLocatorService {
             if (!data) continue;
 
             const found = data.tokens.find(t =>
-                this.isVariableLookupCandidate(t) &&
+                this.isVariableLookupCandidate(t, data.doc) &&
                 this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
@@ -818,8 +818,19 @@ export class MemberLocatorService {
         return false;
     }
 
-    private isVariableLookupCandidate(t: Token): boolean {
-        return t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0;
+    private isVariableLookupCandidate(t: Token, doc: TextDocument): boolean {
+        if (!(t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0)) {
+            return false;
+        }
+        // A CLASS/INTERFACE member (property or method prototype) is only reachable via
+        // qualified access (SELF.X / instance.X) — Clarion has no bare/global path to it,
+        // even though its declaration token is column-0 and procedure-shaped exactly like a
+        // real global procedure. Without this guard, an undeclared word that happens to share
+        // a name with some unrelated class's method resolves to that method instead of
+        // correctly reporting "not found" (e.g. hovering a stray/typo'd bare word elsewhere in
+        // the include chain matched `SomeClass.SomeMethod`).
+        const context = this.tokenCache.getStructure(doc).getStructureContextAt(t.line);
+        return !context.inClass && !context.inInterface;
     }
 
     /**
