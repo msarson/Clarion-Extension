@@ -518,4 +518,21 @@ suite('WordCompletionProvider', () => {
             await assert.doesNotReject(async () => { await p.provide(doc, { line: 0, character: 5 }, 'n'); });
         });
     });
+
+    suite('Compiler directives', () => {
+        test('surfaces INCLUDE (and other directives) as keyword completions', async () => {
+            const doc = makeDoc([
+                'MyProg PROGRAM',
+                '  INCLUDE(\'somefile.inc\'), ONCE',
+                '',
+                'MyGlobalProc PROCEDURE()',
+                'CODE',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+            const items = await p.provide(doc, { line: 1, character: 2 }, 'INCL');
+            const labels = items.map(i => i.label);
+            assert.ok(labels.includes('INCLUDE'), `Expected INCLUDE keyword in: ${labels.join(', ')}`);
+        });
+    });
 });
