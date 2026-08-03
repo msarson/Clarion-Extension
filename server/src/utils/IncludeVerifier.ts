@@ -698,9 +698,13 @@ export class IncludeVerifier {
     private async computeMemberParentDocument(document: TextDocument): Promise<TextDocument | null> {
         try {
             const tokens = this.tokenCache.getTokens(document);
-            
-            // #337: module header lookup — no line cap (comment banners are legal)
-            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+            const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+            const currentFileDir = path.dirname(currentFilePath);
+
+            // #337: module header lookup — no line cap (comment banners are legal).
+            // Falls through to a one-INCLUDE-hop scan (e.g. INCLUDE('member.clw')) when this
+            // file has no literal MEMBER(...) of its own — see findMemberHeaderTokenWithFallback.
+            const memberToken = await this.findMemberHeaderTokenWithFallback(tokens, currentFileDir, currentFilePath);
 
             if (!memberToken || !memberToken.referencedFile) {
                 logger.debug(`⏱️ [IV] getMemberParentDocument: no MEMBER token in ${document.uri.split('/').pop()}`);
@@ -710,8 +714,6 @@ export class IncludeVerifier {
             logger.debug(`⏱️ [IV] getMemberParentDocument: resolving "${memberToken.referencedFile}"`);
 
             // Resolve path: try redirection parser first, then local directory fallback
-            const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            const currentFileDir = path.dirname(currentFilePath);
             let resolvedPath: string | null = null;
 
             // #328: owner-project-first redirection
@@ -758,6 +760,57 @@ export class IncludeVerifier {
             logger.error(`Error getting MEMBER parent: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * Resolves the MEMBER token for a file, falling through into its own direct INCLUDE
+     * targets when no literal MEMBER statement is present locally.
+     *
+     * Project convention seen across many member modules: the real MEMBER('program')
+     * statement lives in a small shared shim file reached via e.g. INCLUDE('member.clw')
+     * rather than being written directly in each member — this lets the same shared source
+     * files belong to different PROGRAMs across projects by swapping just that one shim.
+     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
+     * so it can never find a MEMBER hidden behind that indirection on its own — without this
+     * fallback, isClassIncluded()'s "MEMBER parent" check silently never fires for any file
+     * using the shim, so an include that's only reachable through the real PROGRAM/MEMBER
+     * file's chain is reported as missing even though it compiles fine.
+     *
+     * Same one-hop convention MemberLocatorService.resolveMemberHeaderToken() already
+     * applies for hover/F12/completion — mirrored here for the diagnostic path.
+     *
+     * Only looks one INCLUDE hop deep — matches the shim-file convention; a MEMBER
+     * statement buried deeper than that would be unusual. Takes the first MEMBER token
+     * found across the direct includes, in document order.
+     */
+    private async findMemberHeaderTokenWithFallback(
+        tokens: Token[],
+        fromDir: string,
+        fromFile: string
+    ): Promise<Token | undefined> {
+        const direct = TokenHelper.findMemberHeaderToken(tokens);
+        if (direct) return direct;
+
+        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
+        for (const inc of includeTokens) {
+            let resolvedPath: string | null = resolveViaProjectRedirection(inc.referencedFile!, fromFile);
+            if (!resolvedPath) {
+                const candidate = path.resolve(fromDir, inc.referencedFile!);
+                if (fs.existsSync(candidate)) resolvedPath = candidate;
+            }
+            if (!resolvedPath) continue;
+
+            try {
+                const contents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                const doc = TextDocument.create(pathToCanonicalUri(resolvedPath), 'clarion', 1, contents);
+                const nestedTokens = this.tokenCache.getTokens(doc);
+                const nested = TokenHelper.findMemberHeaderToken(nestedTokens);
+                if (nested) return nested;
+            } catch {
+                // Unreadable — skip
+            }
+        }
+        return undefined;
     }
 
     /**
