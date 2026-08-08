@@ -320,14 +320,13 @@ export class StructureFieldResolver {
         const declaration = lineTokens.map(t => t.value).join('  ').trim();
         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
         const fieldType = typeToken?.value ?? 'UNKNOWN';
-        const fileName = path.basename(decodeURIComponent(sourceUri.replace(/^file:\/\/\//, '')).replace(/\//g, path.sep));
         const markdown = [
             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
             ``,
             `\`\`\`clarion`,
             declaration,
             `\`\`\``,
-            `${fileName}:${fieldToken.line + 1}`
+            this.formatter.locationLink(sourceUri, fieldToken.line)
         ].join('\n');
         return { contents: { kind: 'markdown', value: markdown } };
     }
@@ -372,7 +371,6 @@ export class StructureFieldResolver {
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
                     const structKind = structToken?.value.toUpperCase() ?? 'TYPE';
                     const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                    const incFileName = path.basename(equatesPath);
                     let structureEndLine = Number.MAX_VALUE;
                     if (structToken?.finishesAt !== undefined) structureEndLine = structToken.finishesAt;
                     const fieldCount = equatesTokens.filter(t =>
@@ -389,7 +387,7 @@ export class StructureFieldResolver {
                         `\`\`\`clarion`,
                         declaration,
                         `\`\`\``,
-                        `${incFileName}:${labelToken.line + 1}`
+                        this.formatter.locationLink(equatesPath, labelToken.line)
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
@@ -452,7 +450,6 @@ export class StructureFieldResolver {
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
                     const structKind = structToken?.value.toUpperCase() ?? 'TYPE';
                     const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                    const incFileName = path.basename(resolvedPath);
 
                     // Count fields in the structure
                     let structureEndLine = Number.MAX_VALUE;
@@ -473,7 +470,7 @@ export class StructureFieldResolver {
                         `\`\`\`clarion`,
                         declaration,
                         `\`\`\``,
-                        `${incFileName}:${labelToken.line + 1}`
+                        this.formatter.locationLink(resolvedPath, labelToken.line)
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
@@ -561,14 +558,13 @@ export class StructureFieldResolver {
                         const declaration = lineTokens.map(t => t.value).join('  ').trim();
                         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
                         const fieldType = typeToken?.value ?? 'UNKNOWN';
-                        const incFileName = path.basename(resolvedPath);
                         const markdown = [
                             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
                             ``,
                             `\`\`\`clarion`,
                             declaration,
                             `\`\`\``,
-                            `${incFileName}:${fieldToken.line + 1}`
+                            this.formatter.locationLink(resolvedPath, fieldToken.line)
                         ].join('\n');
                         return { contents: { kind: 'markdown', value: markdown } };
                     }
