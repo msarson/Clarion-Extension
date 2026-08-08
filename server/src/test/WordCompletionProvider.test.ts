@@ -518,4 +518,36 @@ suite('WordCompletionProvider', () => {
             await assert.doesNotReject(async () => { await p.provide(doc, { line: 0, character: 5 }, 'n'); });
         });
     });
+
+    suite('PRAGMA does not leak as a false procedure boundary (#tokenizer-directive-fix)', () => {
+        test('a PRAGMA line before any procedure does not vacuum in later procedures\' locals', async () => {
+            // PRAGMA(...) at global scope, before any real procedure — previously
+            // mistokenized as TokenType.Function (indistinguishable from a real
+            // procedure/function declaration to isProcedureOrFunction()), so the
+            // scope-analyzer fallback treated it as an "open" enclosing procedure
+            // with no end, vacuuming every later procedure's locals into this
+            // position's completion list.
+            const doc = makeDoc([
+                'MyProg PROGRAM',
+                '  PRAGMA(\'define(profile=>off)\')',
+                '',
+                'FirstProc PROCEDURE()',
+                'SomeLocalVar LONG',
+                'CODE',
+                'END',
+                '',
+                'SecondProc PROCEDURE()',
+                'IncludeAddress LONG(TRUE)',
+                'CODE',
+                'END',
+            ].join('\n'));
+            const p = makeProvider(doc);
+            const items = await p.provide(doc, { line: 1, character: 2 }, '');
+            const variableLabels = items.filter(i => i.kind === CompletionItemKind.Variable).map(i => i.label);
+            assert.ok(!variableLabels.includes('IncludeAddress'),
+                `PRAGMA line must not see later procedures' locals, got: ${variableLabels.join(', ')}`);
+            assert.ok(!variableLabels.includes('SomeLocalVar'),
+                `PRAGMA line must not see later procedures' locals, got: ${variableLabels.join(', ')}`);
+        });
+    });
 });
