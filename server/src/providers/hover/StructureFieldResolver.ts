@@ -174,7 +174,7 @@ export class StructureFieldResolver {
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             // or typed class variable access (e.g., st.GetValue() where st is StringTheory)
-            const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+            const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
             if (structureNameMatch) {
                 const structureName = structureNameMatch[1];
                 logger.info(`Detected structure field access: ${structureName}.${word}`);

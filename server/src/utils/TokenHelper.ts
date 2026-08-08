@@ -329,7 +329,7 @@ export class TokenHelper {
             start = wordStart - 1; // Include the dot
             while (start > 0) {
                 const char = line.charAt(start - 1);
-                if (this.isWordCharacter(char)) {
+                if (this.isWordCharacter(char) || (includeColons && char === ':')) {
                     start--;
                 } else {
                     break;
