@@ -93,4 +93,31 @@ suite('ClassMemberResolver.extractClassName', () => {
     test('LIKE alone (no parens) — returns null', () => {
         assert.strictEqual(ClassMemberResolver.extractClassName('LIKE'), null);
     });
+
+    test('GROUP(TypeName) — returns the referenced type name', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('GROUP(ConnectionSettingsType)'), 'ConnectionSettingsType');
+    });
+
+    test('GROUP(TypeName) with trailing " END" (verbatim scanned declaration text) — real repro shape', () => {
+        // scanClassBodyForMember captures the whole line after the label, e.g.
+        // "Settings GROUP(ConnectionSettingsType) END" -> typeStr is
+        // "GROUP(ConnectionSettingsType) END", not just the paren part.
+        assert.strictEqual(ClassMemberResolver.extractClassName('GROUP(ConnectionSettingsType) END'), 'ConnectionSettingsType');
+    });
+
+    test('QUEUE(TypeName) — returns the referenced type name', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('QUEUE(BaseQueueType)'), 'BaseQueueType');
+    });
+
+    test('RECORD(TypeName) — returns the referenced type name', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('RECORD(SomeRecordType)'), 'SomeRecordType');
+    });
+
+    test('GROUP(TypeName) with trailing attributes after the paren', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('GROUP(FooType),DIM(2)'), 'FooType');
+    });
+
+    test('GROUP keyword alone still returns null (unaffected by GROUP(TypeName) handling)', () => {
+        assert.strictEqual(ClassMemberResolver.extractClassName('GROUP'), null);
+    });
 });
