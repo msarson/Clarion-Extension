@@ -519,4 +519,83 @@ suite('CompletionProvider — dot-triggered member completion', function () {
                 `Bare 'ins' must not do member completion (no Greeter members), got: [${names.join(', ')}]`);
         });
     });
+
+    // -------------------------------------------------------------------------
+    // ?Ctrl field-equate completion — scoped to windows in the CURRENT PROCEDURE
+    // -------------------------------------------------------------------------
+    suite('onCompletion — ?Ctrl field-equate completion', function () {
+        const CONSTANT = 21; // CompletionItemKind.Constant
+
+        function buildTwoProcedureDoc(uriName: string) {
+            const content = [
+                'MainProc PROCEDURE',
+                "Window WINDOW('Test'),AT(0,0,200,100)",
+                "    BUTTON('OK'),AT(10,10,50,14),USE(?OkButton)",
+                "    BUTTON('Cancel'),AT(70,10,50,14),USE(?CancelButton)",
+                'END',
+                'CODE',
+                '  ?',
+                '',
+                'OtherProc PROCEDURE',
+                "OtherWindow WINDOW('Other'),AT(0,0,100,100)",
+                "    BUTTON('Other'),AT(10,10,50,14),USE(?OtherButton)",
+                'END',
+                'CODE',
+                '  RETURN'
+            ].join('\n');
+            const uri = `file:///C:/temp/${uriName}.clw`;
+            const localDoc = TextDocument.create(uri, 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(localDoc);
+            return localDoc;
+        }
+
+        test('bare "?" surfaces controls only from windows in the current procedure', async function () {
+            this.timeout(10000);
+            const localDoc = buildTwoProcedureDoc('completion-feq-bare');
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: localDoc.uri },
+                position: { line: 6, character: '  ?'.length },
+                context: { triggerKind: 2, triggerCharacter: '?' }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, localDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+
+            assert.ok(names.includes('?OKBUTTON'), `Expected ?OkButton in: [${names.join(', ')}]`);
+            assert.ok(names.includes('?CANCELBUTTON'), `Expected ?CancelButton in: [${names.join(', ')}]`);
+            assert.ok(!names.includes('?OTHERBUTTON'),
+                `?OtherButton belongs to OtherProc's window and must NOT appear, got: [${names.join(', ')}]`);
+
+            items.forEach(i => assert.strictEqual(i.kind, CONSTANT, `Expected Constant kind, got ${i.kind}`));
+            const ok = items.find(i => (i.label as string).toUpperCase() === '?OKBUTTON');
+            assert.strictEqual(ok!.insertText, 'OkButton', 'insertText should omit the already-typed "?"');
+        });
+
+        test('"?" with a partial name filters by the typed prefix', async function () {
+            this.timeout(10000);
+            const localDoc = buildTwoProcedureDoc('completion-feq-partial');
+            const content = localDoc.getText().replace('  ?\n', '  ?Ok\n');
+            const partialDoc = TextDocument.create('file:///C:/temp/completion-feq-partial.clw', 'clarion', 1, content);
+            const cache = TokenCache.getInstance();
+            cache.clearAllTokens();
+            cache.getTokens(partialDoc);
+
+            const localProvider = new CompletionProvider();
+            const params = {
+                textDocument: { uri: partialDoc.uri },
+                position: { line: 6, character: '  ?Ok'.length },
+                context: { triggerKind: 2 }
+            } as any;
+
+            const items = await localProvider.onCompletion(params, partialDoc);
+            const names = items.map(i => (i.label as string).toUpperCase());
+
+            assert.ok(names.includes('?OKBUTTON'), `Expected ?OkButton to match partial "Ok", got: [${names.join(', ')}]`);
+            assert.ok(!names.includes('?CANCELBUTTON'),
+                `?CancelButton should be filtered out by partial "Ok", got: [${names.join(', ')}]`);
+        });
+    });
 });

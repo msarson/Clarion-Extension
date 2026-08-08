@@ -2568,6 +2568,28 @@ export class DocumentStructure {
     }
 
     /**
+     * Every WINDOW / APPLICATION / REPORT structure token declared inside
+     * `procedureToken`'s body — the windows whose `?Name` controls are actually
+     * reachable from code in this procedure. Backed by `structuresByType`, no
+     * token re-walk. Scopes field-equate (`?`) completion to the current
+     * procedure instead of every window in the file.
+     */
+    public getContainerStructuresInProcedure(procedureToken: Token): Token[] {
+        if (procedureToken.finishesAt === undefined) return [];
+        const result: Token[] = [];
+        for (const kw of ['WINDOW', 'APPLICATION', 'REPORT'] as const) {
+            const list = this.structuresByType.get(kw);
+            if (!list) continue;
+            for (const t of list) {
+                if (t.line > procedureToken.line && t.line <= procedureToken.finishesAt) {
+                    result.push(t);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
      * Look up a control by its `?Name` (case-insensitive; the leading `?` is required).
      * If `scope` is provided, search only that structure's per-name index. Without
      * `scope`, returns the first hit from the flat index, or null when ambiguous —
