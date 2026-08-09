@@ -174,45 +174,22 @@ Productivity features to write code faster.
 
 ## 🆕 What's New
 
-### Latest: v1.0.0 — Performance at scale, exact references, refactoring
+### Latest: v1.0.1 — Maintenance: performance follow-ups & correctness fixes
 
-The 1.0 release is the largest update yet — a ground-up performance overhaul verified on real 40-project / 3,000-file solutions, plus a batch of new editing features.
+1.0.1 is a stability release on top of the 1.0 overhaul — more startup and hover performance work verified on the real 40-project / 3,000-file solution, plus a batch of hover, completion, and diagnostic correctness fixes (many contributed by [@geircodes](https://github.com/geircodes)).
 
-#### ⚡ Startup & responsiveness overhaul
-- The IDE is **usable seconds after opening a large solution** (previously minutes of spinners): solution tree instant, background indexing strictly sequenced and time-sliced, no event-loop freezes.
-- **All indexes persist across sessions** (structure declarations, file-relationship graph, reference counts) — warm starts re-scan only changed files.
-- A Clarion regeneration touching every `.cwproj` now triggers **one** refresh instead of forty.
-- New `clarion.log.performance.enabled` setting (default off) emits a full diagnostic timeline for support.
-
-#### 🔢 Reference counts you can trust
-- CodeLens counts are **exact** — every lens runs a real scoped Find-All-References in the background and clicking shows the results instantly.
-- **Routines get lenses too**, and are now first-class navigation symbols: hover, F12, Go-to-Implementation, and references work on `ROUTINE` labels and `DO` sites — including generated `::` names.
-- Find-All-References understands the **module-callout pattern** (`MODULE('impl.clw')` INC included into many MAPs): references from an implementation now reach every calling module.
-- Overload-aware everywhere: FAR, F12, Ctrl+F12, hover, and signature help all pick the overload matching the call's **argument types** — typed variables, members, EQUATEs, implicit variables, `PRE:Field` arguments.
-
-#### 🔁 New refactors & quick fixes (Ctrl+.)
-- **Surround With…** (IF / LOOP / CASE), **Negate Condition**, **Flip IF/ELSE**, **Introduce EQUATE** (with data-section placement), and **Create routine from an unresolved `DO`**.
-
-#### 🎯 Diagnostics
-- New: discarded return values (including `SELF.`/`PARENT.` sites), literal-passed-by-reference, undeclared variables, indistinguishable prototypes.
-- Fixed: character-set validation respects all Windows ANSI code pages — national letters no longer flood non-Western files with warnings.
-- Unconditional `OMIT` blocks are invisible to diagnostics and reference counts (rename still updates them).
-
-#### 🧰 Under the hood
-- Language client/server upgraded to **LSP 8.x**; the marketplace package is trimmed to just the runtime files.
+- **Performance follow-ups:** startup validators no longer freeze the editor in multi-second blocks; F12 on a built-in returns instantly instead of a ~24s cold walk; the cross-file prewarm, reachable-include set, discarded-return-value memos, and MEMBER-parent docs all persist or cache so warm starts and repeat hovers stay cheap.
+- **Diagnostics:** `.app` global data is no longer falsely flagged "not declared" in generated MEMBER modules; a structure keyword used as a plain label no longer triggers a false "not terminated"; `PRAGMA(...)` is no longer mistyped as a procedure and corrupting completion scope.
+- **Completion & hover:** member completion keeps working once you type past the dot; `?Ctrl` field equates scope to the current procedure; hover footers render `file:line` locations as clickable links; several hover misclassifications (control-vs-variable, colon-prefixed dotted access, `GROUP/QUEUE/RECORD(Type)`) fixed.
+- **Highlighting:** custom prefix colours no longer bleed through commented-out lines.
 
 **[See the full changelog for the complete list →](CHANGELOG.md)**
 
 ---
 
-### Recent: v0.9.9 (2026-07-04) — Solution-wide scope correctness + no-solution resilience
+### Recent: v1.0.0 (2026-07-11) — Performance at scale, exact references, refactoring
 
-- Tightened **open-solution** scope correctness across cross-file PROGRAM globals, sibling-MEMBER module scope, Tier 1 routine-local shadowing in `SymbolFinder.findSymbol(...)`, and qualifier completion so `Prefix:` only returns symbols for that exact qualifier (e.g. `TGLO:*`).
-- Dot-completion member lists now show inline type information (for example `Var1 LONG`) while preserving clean insert text.
-- Clarion startup now uses a cleaner TypeScript-style status bar progress flow (activating → language server → solution loading/indexing → ready) instead of multiple transient load popups.
-- Build and generation commands now use a shared status-bar lifecycle (running/succeeded/failed) for clearer operation feedback.
-- Added lazy no-solution FRG coverage for DocumentLink/FAR/completion plus no-solution entry-point completion parity improvements as additive fallback hardening.
-- Landed cross-file overload fallback hardening when a built-but-irrelevant FRG is present.
+The 1.0 release was the largest update yet — a ground-up performance overhaul verified on real 40-project / 3,000-file solutions: the IDE is usable seconds after opening a large solution, with all indexes persisted across sessions and no event-loop freezes. It also brought exact reference counts with routine lenses, overload-aware navigation everywhere (FAR, F12, Ctrl+F12, hover, signature help), new refactors (Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, Create routine from `DO`), new diagnostics, and an upgrade to LSP 8.x.
 
 **[See full changelog →](CHANGELOG.md)**
 
