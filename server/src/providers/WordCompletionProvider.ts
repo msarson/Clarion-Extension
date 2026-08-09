@@ -13,6 +13,7 @@ import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
 import { AttributeService } from '../utils/AttributeService';
+import { DirectiveService } from '../utils/DirectiveService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
@@ -38,6 +39,7 @@ export class WordCompletionProvider {
     private dataTypeService = DataTypeService.getInstance();
     private controlService = ControlService.getInstance();
     private attributeService = AttributeService.getInstance();
+    private directiveService = DirectiveService.getInstance();
 
     constructor(tokenCache: TokenCache, scopeAnalyzer: ScopeAnalyzer) {
         this.tokenCache = tokenCache;
@@ -134,6 +136,12 @@ export class WordCompletionProvider {
             // E2. Attributes — context-aware: filter by control/structure type
             // ----------------------------------------------------------------
             this.collectAttributes(document, position, seen);
+
+            // ----------------------------------------------------------------
+            // E3. Compiler directives (INCLUDE, MEMBER, OMIT, etc.) — collected
+            // before keywords so directive descriptions take priority
+            // ----------------------------------------------------------------
+            this.collectDirectives(seen);
 
             // ----------------------------------------------------------------
             // F. Language keywords (skipped if already in seen from JSON)
@@ -654,6 +662,24 @@ export class WordCompletionProvider {
                     kind: CompletionItemKind.Property,
                     detail: this.attributeService.getAttributeSignature(attr.name),
                     documentation: attr.description,
+                });
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // E3. Compiler directives
+    // -------------------------------------------------------------------------
+
+    private collectDirectives(seen: Map<string, CompletionItem>): void {
+        for (const d of this.directiveService.getAllByPrefix('')) {
+            const key = d.name.toUpperCase();
+            if (!seen.has(key)) {
+                seen.set(key, {
+                    label: d.name,
+                    kind: CompletionItemKind.Keyword,
+                    detail: d.syntax,
+                    documentation: d.description,
                 });
             }
         }

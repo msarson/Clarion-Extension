@@ -183,7 +183,8 @@ export async function validateMissingIncludes(
             const thisClass = classConstants.find(c => c.className.toLowerCase() === typeName.toLowerCase());
             if (thisClass && thisClass.constants.length > 0) {
                 for (const constant of thisClass.constants) {
-                    const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath);
+                    // #335: EQUATEs in INCLUDEd source satisfy compile conditions too
+                    const isDefined = await constantsChecker.isConstantSatisfied(constant.name, cwprojPath, projectPath);
                     if (!isDefined) missingConstants.push(constant.name);
                 }
             }
@@ -292,7 +293,8 @@ export async function validateMissingConstants(
         // Check which constants are missing
         const missing: string[] = [];
         for (const constant of thisClass.constants) {
-            const isDefined = await constantsChecker.isConstantDefined(constant.name, cwprojPath);
+            // #335: EQUATEs in INCLUDEd source satisfy compile conditions too
+            const isDefined = await constantsChecker.isConstantSatisfied(constant.name, cwprojPath, projectPath);
             if (!isDefined) missing.push(constant.name);
         }
 

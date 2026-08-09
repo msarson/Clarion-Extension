@@ -51,6 +51,7 @@ import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokens
 
 import { Token, TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
+import { getServerVersionInfo } from './buildInfo';
 
 import LoggerManager from './logger';
 import ClarionFormatter from './ClarionFormatter';
@@ -98,6 +99,10 @@ import { pathToCanonicalUri } from './utils/UriUtils';
 import { ClarionSolutionInfo } from 'common/types';
 import { URI } from 'vscode-languageserver';
 import { setServerInitialized, serverInitialized } from './serverState';
+import { TokenHelper } from './utils/TokenHelper';
+import { evictIncludeChainIndexes } from './services/SymbolFinderService';
+import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
+import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -510,7 +515,7 @@ connection.onInitialize((params) => {
                     retriggerCharacters: [')']
                 },
                 completionProvider: {
-                    triggerCharacters: ['.', ':'],
+                    triggerCharacters: ['.', ':', '?'],
                     resolveProvider: false
                 },
                 documentLinkProvider: { resolveProvider: false },
@@ -608,6 +613,10 @@ documents.onDidOpen((event) => {
             return;
         }
 
+        // #359 — snapshot the open content so the onDidChangeContent echo the
+        // TextDocuments manager fires for this same didOpen is skipped.
+        contentChangeGuard.snapshot(uri, document.getText());
+
         // Validate document for diagnostics
         validateTextDocument(document, 'onDidOpen');
 
@@ -629,6 +638,14 @@ export let globalClarionSettings: any = {};
 
 // Track last validated document versions to avoid duplicate work
 const lastValidatedVersions = new Map<string, number>();
+
+// #359 — skip identical-content change events (the TextDocuments manager fires
+// onDidChangeContent for didOpen too, and clients emit no-op didChange on tab
+// activation). Snapshot on open; an echo/no-op event then skips the whole
+// change pipeline — including revalidateRelatedDocuments, which otherwise
+// re-validated a MEMBER file's 68k-token parent PROGRAM on every member open.
+import { ContentChangeGuard } from './utils/ContentChangeGuard';
+const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
@@ -784,6 +801,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
+            // #352: moved out of the sync pass — its cold include-chain walk blocked
+            // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
+            ['viewProjectFields', () => DiagnosticProvider.validateViewProjectFields(tokens, document, getOpenDocumentContent)],
             ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
             ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
             ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
@@ -792,18 +812,23 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
         ];
-        const [discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] =
-            caller === 'sdiReady'
-                ? await (async () => {
-                    const results: Diagnostic[][] = [];
-                    for (const [name, thunk] of validatorThunks) {
-                        results.push(await timeIt(name, thunk()));
-                        // Real macrotask yield between validators — lets queued requests in
-                        await new Promise<void>(resolve => setImmediate(resolve));
-                    }
-                    return results;
-                })()
-                : await Promise.all(validatorThunks.map(([name, thunk]) => timeIt(name, thunk())));
+        // #367: sequential-with-yield for EVERY caller, not just 'sdiReady'. The old
+        // ternary gave interactive edits and crossFileUpdate a Promise.all of 8
+        // validators — 8 chains awaiting mostly-cached (already-resolved) promises
+        // advance on the microtask queue, so the event loop never reaches its poll
+        // phase to read incoming LSP messages while any chain has work (a cooperative
+        // yield inside one validator can't help while the others keep the microtask
+        // queue full). Running them one at a time with a real macrotask yield between
+        // restores the yields' effect on every path; total work is unchanged (single
+        // thread — the concurrency never bought parallelism). The startup lane already
+        // proved this fixed a 20s+ starved-tree-expand.
+        const validatorResults: Diagnostic[][] = [];
+        for (const [name, thunk] of validatorThunks) {
+            validatorResults.push(await timeIt(name, thunk()));
+            // Real macrotask yield between validators — lets queued requests in.
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -818,7 +843,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
@@ -1119,6 +1144,24 @@ connection.onCodeLensResolve(async (lens) => {
             }
         }
 
+        // #316: during the startup background burst, do NOT kick off the exact scan.
+        // A visible lens resolve fires the moment the file opens, and the scan
+        // cold-tokenizes its candidate file set (~293 files → 9.5s measured on the real
+        // solution) while the startup lane is still contending for the loop and the
+        // TokenCache is cold. Show the placeholder now (the approximate '~' estimate if
+        // the index gave us one, else "counting…"); scheduleLensRefresh() fires when
+        // startupBackgroundActive clears, re-resolving every visible lens so the scan
+        // runs once the burst is over — warm cache, no contention. Routine lenses are
+        // exempt (same-file scan, cheap at any phase — same carve-out as the estimate).
+        if (!cached && !data.routine && startupBackgroundActive) {
+            lens.command = {
+                title: placeholderTitle ?? 'counting…',
+                command: 'clarion.showReferences',
+                arguments: [data.uri, { line: data.line, character: data.character }, []],
+            };
+            return lens;
+        }
+
         let refs: Location[] | null;
         if (cached) {
             refs = cached.refs;
@@ -1288,12 +1331,8 @@ function isStructureAffectingEdit(document: TextDocument): boolean {
  */
 function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
     try {
-        const isProgramFile = tokens.some(t =>
-            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM' && t.line < 5
-        );
-        const memberToken = tokens.find(t =>
-            t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile
-        );
+        const isProgramFile = TokenHelper.findProgramHeaderToken(tokens) !== undefined;
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
 
         if (isProgramFile) {
             // Re-validate any open MEMBER files that reference this PROGRAM file
@@ -1331,6 +1370,47 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
         logger.error(`❌ Error in revalidateRelatedDocuments: ${err instanceof Error ? err.message : String(err)}`);
     }
 }
+
+// #340: the client already forwards workspace file events for all lookup
+// extensions (synchronize.fileEvents in LanguageServerManager) — but no server
+// handler existed, so changes made OUTSIDE the editor (appgen regeneration,
+// git checkout/pull, external editors) never evicted the caches: cross-file
+// consumers kept serving stale tokens/text until a window reload. Evict per
+// changed file immediately; revalidate open documents once, debounced (a
+// regeneration touches hundreds of files — one sweep, not one per event).
+let watchedFilesRevalidateTimer: ReturnType<typeof setTimeout> | undefined;
+connection.onDidChangeWatchedFiles(params => {
+    try {
+        let evicted = 0;
+        for (const change of params.changes) {
+            // Open documents are authoritative via their live buffer/version —
+            // evicting them just forces one cheap re-tokenize; closed files are
+            // the actual stale-cache hazard.
+            tokenCache.clearTokens(change.uri);
+            evicted++;
+        }
+        if (evicted > 0) {
+            // #344: any changed file can invalidate any include-chain index.
+            evictIncludeChainIndexes();
+            // #345 phase 4: invalidate every cross-file result memo
+            // (viewProjectFields, RVD receiver types/enumerations) and the
+            // include verifier's in-memory caches (disk entries stay —
+            // they're mtime-guarded).
+            bumpCrossFileEpoch();
+            IncludeVerifier.getInstance().clearCache();
+            logger.info(`🔄 [#340] Watched-file change: evicted ${evicted} cache entr${evicted === 1 ? 'y' : 'ies'}`);
+            if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
+            watchedFilesRevalidateTimer = setTimeout(() => {
+                watchedFilesRevalidateTimer = undefined;
+                for (const openDoc of documents.all()) {
+                    validateTextDocument(openDoc, 'watchedFilesChanged');
+                }
+            }, 500);
+        }
+    } catch (err) {
+        logger.error(`[#340] onDidChangeWatchedFiles: ${err instanceof Error ? err.message : String(err)}`);
+    }
+});
 
 /**
  * #189 Phase 2 — evict only the CodeLens reference counts that an edit to `document`
@@ -1389,7 +1469,21 @@ documents.onDidChangeContent(event => {
         }
         
         logger.info(`📝 onDidChangeContent: ${uri} version=${currentVersion}`);
-        
+
+        // #359 — identical-content event (the didOpen echo, or a no-op didChange
+        // from tab activation): nothing downstream can be affected. Skip the whole
+        // pipeline — cache evictions, the debounced self re-validation, and
+        // revalidateRelatedDocuments (which re-validated the 68k-token parent
+        // PROGRAM whenever a MEMBER file was merely opened). Genuine edits fall
+        // through and re-snapshot.
+        const currentText = document.getText();
+        if (!contentChangeGuard.hasChanged(uri, currentText)) {
+            lastProcessedVersions.set(uri, currentVersion);
+            logger.info(`⏭️ [#359] Skipping identical-content change event: ${uri} v${currentVersion}`);
+            return;
+        }
+        contentChangeGuard.snapshot(uri, currentText);
+
         // #189 Phase 2: invalidate only the CodeLens counts this edit can affect,
         // instead of every cached count. Counts for other files stay warm.
         invalidateCodeLensForFile(document);
@@ -1787,7 +1881,10 @@ documents.onDidClose(event => {
     try {
         const document = event.document;
         const uri = document.uri;
-        
+
+        // #359 — drop the content snapshot; a later reopen must re-validate.
+        contentChangeGuard.clear(uri);
+
         // Log all document details
         logger.info(`🗑️ [CRITICAL] Document closed: ${uri}`);
         logger.info(`🗑️ [CRITICAL] Document details:
@@ -2102,6 +2199,31 @@ connection.onNotification('clarion/updatePaths', async (params: {
             setImmediate(async () => {
                 const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
                 const indexer = StructureDeclarationIndexer.getInstance();
+                // #355: the index now returns cache-trusted (no startup stat sweep) and
+                // validates mtimes in the background. If that sweep finds an external
+                // change made between sessions, treat it exactly like a #340 watched-file
+                // change: drop every cross-file memo and revalidate open docs (debounced —
+                // a regeneration drifts many files but must trigger one sweep).
+                indexer.onDrift = (driftedProject) => {
+                    logger.info(`🔄 [#355] SDI background validation found drift (${path.basename(driftedProject)}) — revalidating`);
+                    evictIncludeChainIndexes();
+                    bumpCrossFileEpoch();
+                    IncludeVerifier.getInstance().clearCache();
+                    if (watchedFilesRevalidateTimer !== undefined) clearTimeout(watchedFilesRevalidateTimer);
+                    watchedFilesRevalidateTimer = setTimeout(() => {
+                        watchedFilesRevalidateTimer = undefined;
+                        for (const openDoc of documents.all()) {
+                            validateTextDocument(openDoc, 'sdiDrift');
+                        }
+                    }, 500);
+                };
+                // #357 phase A: defer the SDI drift sweep onto the sequential
+                // background lane. The cache-trusted build (#355) returns fast; its
+                // 4,104-stat validation sweep must NOT race FRG / RefIndex / the
+                // revalidation pass / interactive code actions on an op-rate-bound
+                // disk — the [352-355] retest showed those overlapping and starving
+                // code actions 9-26s. The sweep is drained as the LAST lane step below.
+                indexer.deferBackgroundValidation = true;
                 const projectPaths = [...new Set(
                     globalSolution!.projects.map(p => p.path).filter(Boolean)
                 )];
@@ -2188,9 +2310,64 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     doc_count: revalCount,
                     since_module_load_ms: Date.now() - serverModuleLoadedAt
                 });
+
+                // #357 phase A: LAST lane step — the deferred SDI drift sweep. It only
+                // reconciles an external change made between sessions (rare; #355
+                // contract), so it runs alone here after every user-facing consumer,
+                // never contending with them. onDrift still fires the debounced
+                // revalidation if the sweep finds drift.
+                // Reset the flag FIRST so any on-demand index build after startup
+                // (a file opened in a not-yet-indexed project) validates immediately
+                // rather than deferring onto a lane that has already drained.
+                const driftStart = Date.now();
+                indexer.deferBackgroundValidation = false;
+                await indexer.runDeferredValidations();
+                perfLogger.perf("Phase: SDI deferred drift sweep complete (lane tail)", {
+                    ms: Date.now() - driftStart,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+
+                // #363 — pre-warm the cross-file indexes (#344 include-chain global,
+                // #345 sibling family label) for the open documents, LAST on this
+                // idle lane. At v1.0.0 the slow startup validators built these as a
+                // side effect, so the user's first hover/F12/FAR was warm; the 1.0.1
+                // validator perf work removed that incidental warming (#363), moving
+                // the ~15s cold build onto whatever the user touched first. Building
+                // them deliberately here — after every user-facing consumer, never
+                // contending — restores the warm-interaction feel without the slow
+                // validators. Best-effort: the builders are cache-backed and yield.
+                const warmStart = Date.now();
+                const warmFinder = new SymbolFinderService(tokenCache, new ScopeAnalyzer(tokenCache, undefined as never));
+                // #358: also tokenize each open MEMBER module's parent file here. A MEMBER's
+                // globals (GlobalErrors/thisStartup) are declared deep in that parent, and on
+                // IBSWorking the parent (IBSCommon.clw, 873 KB / 68k tokens) costs ~1.1s to
+                // tokenize — paid by the first cold receiver-type resolution unless warmed off
+                // the felt path here. Shared parents are tokenized once (getTokensByUri guard).
+                const warmLocator = new MemberLocatorService();
+                let warmedDocs = 0;
+                let warmedParents = 0;
+                for (const openDoc of documents.all()) {
+                    try {
+                        await warmFinder.warmCrossFileIndexes(openDoc);
+                        warmedDocs++;
+                    } catch { /* warming is best-effort — never fail the lane */ }
+                    try {
+                        if (await warmLocator.warmMemberParent(openDoc)) warmedParents++;
+                    } catch { /* best-effort */ }
+                }
+                perfLogger.perf("Phase: cross-file index pre-warm complete (lane tail)", {
+                    ms: Date.now() - warmStart,
+                    docs: warmedDocs,
+                    member_parents_warmed: warmedParents,
+                    since_module_load_ms: Date.now() - serverModuleLoadedAt
+                });
+
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
+                // #316: the burst is over — re-resolve visible lenses whose exact scan we
+                // deferred above so their counts land now, warm and uncontended.
+                scheduleLensRefresh();
             });
 
             // Build the file-relationship graph (MODULE/INCLUDE/MEMBER edges) in the background.
@@ -2350,6 +2527,12 @@ connection.onNotification('clarion/projectConstantsChanged', () => {
 });
 
 
+// Returns a JSON string {"version","buildDate"} identifying this build, so an
+// external tool can parse it and feature-gate against the running server.
+connection.onRequest('clarion/getServerVersion', (): string => {
+    return JSON.stringify(getServerVersionInfo());
+});
+
 connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {
     const startTime = performance.now();
     logger.info("📂 Received request for solution tree");
@@ -2421,7 +2604,11 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
     try {
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager) {
-            const result = await solutionManager.findFileWithExtension(params.filename);
+            // #329: resolve owner-project-first on behalf of the requesting source file.
+            const fromFsPath = params.sourceUri
+                ? decodeURIComponent(params.sourceUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\')
+                : undefined;
+            const result = await solutionManager.findFileWithExtension(params.filename, fromFsPath);
             if (result && result.path) {
                 logger.info(`✅ Found file: ${result.path} (source: ${result.source})`);
                 return result;
@@ -2430,7 +2617,7 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
                 if (!path.extname(params.filename)) {
                     for (const ext of serverSettings.defaultLookupExtensions) {
                         const filenameWithExt = `${params.filename}${ext}`;
-                        const resultWithExt = await solutionManager.findFileWithExtension(filenameWithExt);
+                        const resultWithExt = await solutionManager.findFileWithExtension(filenameWithExt, fromFsPath);
                         if (resultWithExt && resultWithExt.path) {
                             logger.info(`✅ Found file with added extension: ${resultWithExt.path} (source: ${resultWithExt.source})`);
                             return resultWithExt;
@@ -2698,7 +2885,9 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager) {
                 const fileName = decodeURIComponent(params.uri.split('/').pop() || '');
-                const result = await solutionManager.findFileWithExtension(fileName);
+                // #329: the sought file's own path is the owner anchor here.
+                const fromFsPath = decodeURIComponent(params.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+                const result = await solutionManager.findFileWithExtension(fileName, fromFsPath);
 
                 if (result.path && fs.existsSync(result.path)) {
                     const fileContent = fs.readFileSync(result.path, 'utf8');
@@ -2735,21 +2924,23 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 });
 
 // Handle definition requests
-connection.onDefinition(async (params) => {
-    
+connection.onDefinition(async (params, token) => {
+
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
         return null;
     }
-    
+
     const document = documents.get(params.textDocument.uri);
     if (!document) {
         logger.test(`⚠️ [SERVER] Document not found for definition: ${params.textDocument.uri}`);
         return null;
     }
-    
+
     try {
-        const definition = await definitionProvider.provideDefinition(document, params.position);
+        // #360: thread the LSP cancellation token so a giving-up user can abort a
+        // slow F12 (parity with onImplementation), and so the trace records it.
+        const definition = await definitionProvider.provideDefinition(document, params.position, token);
         if (definition) {
             logger.info(`✅ Found definition for ${params.textDocument.uri}`);
         } else {
@@ -3252,6 +3443,7 @@ const drainDeferredIfNoSolution = () => {
     });
     solutionPipelineReady = true;
     startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
+    scheduleLensRefresh(); // #316: re-resolve any lens whose exact scan we deferred during the burst
     sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);
     deferredAsyncDocs.clear();
@@ -3294,8 +3486,11 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 }
 
 // Listen on the connection
-logger.info("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD]");
-console.error("🚀 SERVER: Starting to listen on connection [TGLO-FIX BUILD] at " + new Date().toISOString());
+// Build tag — names the fixes under test in this build so a pasted perf log
+// unambiguously identifies which VSIX produced it. Update per shipped item.
+const BUILD_TAG = "[#358 MEMBER-PREWARM + #368 CONST-CACHES]";
+logger.info(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG}`);
+console.error(`🚀 SERVER: Starting to listen on connection ${BUILD_TAG} at ` + new Date().toISOString());
 perfLogger.perf("Phase: Server listening (connection.listen called)", {
     since_module_load_ms: Date.now() - serverModuleLoadedAt
 });

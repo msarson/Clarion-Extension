@@ -23,11 +23,14 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * warm builds then cost one stat per file instead of a read + scan.
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
-const DISK_CACHE_VERSION = 1;
+// v2 (#362): entries now also carry procedure declarations (`procs`).
+const DISK_CACHE_VERSION = 3;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
     decls: StructureDeclarationInfo[];
+    /** #362 — procedure/method declarations from the same scan (may be absent in a v1 cache; treated as []). */
+    procs?: ProcedureDeclarationInfo[];
 }
 
 interface SdiDiskCacheFile {
@@ -68,6 +71,29 @@ export interface StructureDeclarationInfo {
     lineContent: string;
 }
 
+/**
+ * #362 — a procedure/method declaration found during a file scan. Kept SEPARATE
+ * from StructureDeclarationInfo (and a separate index) so procedure names never
+ * appear in the type `find()` results — the #361 hover type-gate does
+ * `find(name).length > 0` and would regress if procedures polluted it.
+ *
+ * Captured cheaply by the same regex line-scan the SDI uses — NO tokenizer — so
+ * cross-file hover/F12/implementation can answer "where is procedure X declared?"
+ * with an O(1) index lookup instead of tokenizing the include universe (#362).
+ */
+export interface ProcedureDeclarationInfo {
+    /** Original-case label; dotted (`Class.Method`) for method implementations. */
+    name: string;
+    filePath: string;
+    /** 0-based line number */
+    line: number;
+    /** `method` when the label is dotted (an implementation), else `procedure`. */
+    kind: 'procedure' | 'method';
+    /** Text after the PROCEDURE/FUNCTION keyword: params + return type + attributes. */
+    signature: string;
+    lineContent: string;
+}
+
 /** Per-project index */
 export interface StructureIndex {
     /** name (lowercase) → all declarations with that name across all scanned files */
@@ -79,6 +105,7 @@ export interface StructureIndex {
 /** Minimal interface consumed by providers — allows easy substitution/testing */
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
+    findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
     findInFile(fileName: string, projectPath?: string): StructureDeclarationInfo[];
     getOrBuildIndex(projectPath: string): Promise<StructureIndex>;
     buildIndex(projectPath: string): Promise<StructureIndex>;
@@ -115,6 +142,26 @@ const EQUATE_PATTERN =
     /^([A-Za-z_][\w:]*)\s+EQUATE\b/i;
 const END_PATTERN =
     /^END\b/i;
+// #362 — a column-0 label followed by PROCEDURE or FUNCTION. Captures the label
+// (bare or dotted `Class.Method`), the keyword, and the trailing signature.
+// PROCEDURE and FUNCTION are equivalent in modern Clarion (both return values),
+// so both are procedure declarations.
+const PROCEDURE_PATTERN =
+    /^([A-Za-z_][\w.]*)\s+(?:PROCEDURE|FUNCTION)\b(.*)$/i;
+// #362 — MAP/MODULE prototype-context detection (shorthand procedure form).
+// MODULE('...') and a MAP structure both open a prototype context; inside it a
+// keyword-less `Name(...)` (or indented `Name PROCEDURE`) is a declaration.
+const MODULE_OPEN_PATTERN = /^MODULE\s*\(/i;
+const MAP_OPEN_PATTERN = /^(?:[A-Za-z_][\w:]*\s+)?MAP\b/i;
+const SHORTHAND_PROTO_PATTERN =
+    /^([A-Za-z_][\w.:]*)\s*(?:\(|PROCEDURE\b|FUNCTION\b)/i;
+// Names that take a `(` inside a MAP/MODULE but are NOT procedures.
+const PROC_CONTEXT_EXCLUDE = new Set<string>([
+    'MODULE', 'MAP', 'END', 'INCLUDE', 'COMPILE', 'OMIT', 'SECTION', 'EQUATE',
+    'CLASS', 'INTERFACE', 'QUEUE', 'GROUP', 'RECORD', 'FILE', 'VIEW', 'WINDOW',
+    'REPORT', 'APPLICATION', 'MENUBAR', 'MENU', 'TOOLBAR', 'SHEET', 'TAB',
+    'OPTION', 'ITEMIZE', 'JOIN'
+]);
 
 /** Extract the PRE attribute value from an ITEMIZE line, e.g. "Color ITEMIZE(0),PRE(Clr)" → "Clr" */
 function extractPre(line: string): string {
@@ -253,12 +300,111 @@ export function scanSourceForDeclarations(
 }
 
 /**
+ * #362 — scan raw source for procedure/method declarations (MAP/MODULE
+ * prototypes, global PROCEDURE/FUNCTION implementations, and `Class.Method`
+ * implementations). A column-0 label followed by PROCEDURE/FUNCTION is a
+ * declaration in Clarion — the same cheap regex line-scan the SDI uses, no
+ * tokenizer. Comments are stripped first (matching scanSourceForDeclarations).
+ */
+export function scanSourceForProcedures(
+    source: string,
+    filePath: string
+): ProcedureDeclarationInfo[] {
+    const results: ProcedureDeclarationInfo[] = [];
+    const lines = source.split(/\r?\n/);
+
+    // #362 — inside a MAP/MODULE prototype context, procedures are declared in the
+    // Clarion *shorthand* form: an (often indented) label with NO PROCEDURE/FUNCTION
+    // keyword, e.g.  `NetDebugTrace(string),long,proc,pascal,name('...'),DLL(...)`.
+    // This is exactly what the tokenizer recognises in processShorthandProcedures.
+    // We track MAP/MODULE nesting line-by-line and capture those `Name(...)` lines;
+    // without this the library MODULE prototypes (NetTalk et al.) never index, so
+    // the hover/definition fast-paths can never fire for them.
+    let mapDepth = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const rawLine = lines[i];
+        if (rawLine.length === 0) continue;
+
+        // Strip inline comment (same simple rule as scanSourceForDeclarations).
+        const commentIdx = rawLine.indexOf('!');
+        const line = commentIdx >= 0 ? rawLine.substring(0, commentIdx) : rawLine;
+        const t = line.trim();
+        if (!t) continue;
+
+        const atColumnZero = rawLine[0] !== ' ' && rawLine[0] !== '\t';
+
+        // --- MAP/MODULE structure tracking -------------------------------------
+        // Close first so a MAP/MODULE that ends on the same conceptual line pops.
+        if (mapDepth > 0 && (END_PATTERN.test(t) || t === '.')) {
+            mapDepth--;
+            continue;
+        }
+        // A MODULE('...') opens a prototype context (with or without an enclosing MAP).
+        if (MODULE_OPEN_PATTERN.test(t)) {
+            mapDepth++;
+            continue;
+        }
+        // A MAP structure (bare `MAP` or `Label MAP`) opens a prototype context.
+        if (MAP_OPEN_PATTERN.test(t)) {
+            mapDepth++;
+            continue;
+        }
+
+        // --- Column-0 explicit form: `Name PROCEDURE/FUNCTION ...` --------------
+        // Global implementations and `Class.Method` bodies live at column 0.
+        if (atColumnZero) {
+            const m = PROCEDURE_PATTERN.exec(t);
+            if (m) {
+                const name = m[1];
+                results.push({
+                    name,
+                    filePath,
+                    line: i,
+                    kind: name.includes('.') ? 'method' : 'procedure',
+                    signature: (m[2] ?? '').trim(),
+                    lineContent: t
+                });
+                continue;
+            }
+        }
+
+        // --- MAP/MODULE shorthand prototypes -----------------------------------
+        // Inside a prototype context, `Name(...)` (keyword-less) or an indented
+        // `Name PROCEDURE/FUNCTION` is a declaration. Exclude directives/structure
+        // keywords that also take a `(` (INCLUDE, MODULE, GROUP, …).
+        if (mapDepth > 0) {
+            const sh = SHORTHAND_PROTO_PATTERN.exec(t);
+            if (sh && !PROC_CONTEXT_EXCLUDE.has(sh[1].toUpperCase())) {
+                results.push({
+                    name: sh[1],
+                    filePath,
+                    line: i,
+                    kind: sh[1].includes('.') ? 'method' : 'procedure',
+                    signature: t.substring(sh[1].length).trim(),
+                    lineContent: t
+                });
+            }
+        }
+    }
+
+    return results;
+}
+
+/**
  * Singleton indexer — scans .inc files via redirection paths for each project.
  * Partitioned by project path so same-name symbols from different projects don't collide.
  */
 export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     private static instance: StructureDeclarationIndexer;
     private indexes: Map<string, StructureIndex> = new Map();
+    /**
+     * #362 — procedure index, parallel to `indexes`, keyed by the same normalized
+     * project key: procNameLower → all procedure/method declarations with that name.
+     * Kept separate from the type `indexes` so procedure names never appear in the
+     * type `find()` results (the #361 hover gate would regress).
+     */
+    private procIndexes: Map<string, Map<string, ProcedureDeclarationInfo[]>> = new Map();
     /** In-flight build promises — prevents duplicate parallel builds for the same project */
     private pendingBuilds: Map<string, Promise<StructureIndex>> = new Map();
 
@@ -346,6 +492,58 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     /** Stats of the most recent buildIndex call (exposed for perf lines and tests). */
     public lastBuildStats: { files: number; scanned: number; reusedFromDisk: number; ms: number } | null = null;
 
+    /** #355 — stats of the most recent BACKGROUND validation (exposed for perf lines and tests). */
+    public lastValidationStats: { files: number; scanned: number; reusedFromDisk: number; drift: boolean; ms: number } | null = null;
+
+    /**
+     * #355 — fired after a background validation found drift (an external change made
+     * between sessions) and swapped the corrected declarations into the live index.
+     * server.ts wires this to the #340 debounced open-document revalidation.
+     */
+    public onDrift?: (projectPath: string) => void;
+
+    /** #355 — in-flight background validations, chained per project key. */
+    private backgroundValidations: Map<string, Promise<void>> = new Map();
+
+    /**
+     * #357 — when true, a cache-trusted build records its drift sweep as PENDING
+     * instead of launching it immediately. The startup orchestrator sets this so
+     * the 4,104-stat sweep does not race FRG / RefIndex / the revalidation pass /
+     * interactive code actions on an op-rate-bound disk (the [352-355] retest
+     * showed those overlapping and starving code actions 9-26s). The sweep is
+     * drained as the LAST step of the sequential background lane. Off by default,
+     * so non-startup callers (tests, on-demand builds) keep the #355 behaviour.
+     */
+    public deferBackgroundValidation = false;
+
+    /** #357 — drift sweeps deferred during a cache-trusted startup, drained via runDeferredValidations(). */
+    private deferredValidations: Array<{
+        projectPath: string;
+        allFiles: string[];
+        diskCache: SdiDiskCacheFile;
+        index: StructureIndex;
+    }> = [];
+
+    /** Resolves when the background validation for this project (if any) has completed. */
+    whenValidated(projectPath: string): Promise<void> {
+        return this.backgroundValidations.get(this.normalizeKey(projectPath)) ?? Promise.resolve();
+    }
+
+    /**
+     * #357 — run every drift sweep deferred by a cache-trusted startup, STRICTLY
+     * one at a time (await each fully before the next starts). Called by the
+     * startup orchestrator as the final step of the background lane, after FRG,
+     * RefIndex, and the revalidation pass — so at most one disk sweep is ever
+     * in flight. Safe to call when nothing is pending (no-op).
+     */
+    async runDeferredValidations(): Promise<void> {
+        const pending = this.deferredValidations.splice(0);
+        for (const d of pending) {
+            this.launchBackgroundValidation(d.projectPath, d.allFiles, d.diskCache, d.index);
+            await this.whenValidated(d.projectPath);
+        }
+    }
+
     async buildIndex(projectPath: string): Promise<StructureIndex> {
         const startTime = Date.now();
         const byName = new Map<string, StructureDeclarationInfo[]>();
@@ -389,47 +587,67 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             // distinguish cache read (I/O), cache parse (CPU block), the stat/scan loop
             // (yielding — its wall-clock absorbs interleaved interactive work), and save.
             const { cache: diskCache, readMs: cacheReadMs, parseMs: cacheParseMs } = await this.loadDiskCache(projectPath);
-            const freshEntries: Record<string, SdiDiskCacheEntry> = {};
 
-            logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
-
-            // #311: 20 → 64. The attributed trace put the warm path's cost in the stat
-            // loop (4,104 stats / 205 batches / a setImmediate round-trip each ≈ 4.2s
-            // wall). Stats are tiny I/O ops — 64-wide keeps chunks small while cutting
-            // the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
-            // 64 concurrent reads is well within Node's comfort.
-            const BATCH_SIZE = 64;
-            const statLoopStart = Date.now();
-            for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
-                const batch = allFiles.slice(i, i + BATCH_SIZE);
-                const batchResults = await Promise.all(batch.map(async f => {
-                    const stat = await fs.promises.stat(f).catch(() => null);
-                    if (!stat) return [] as StructureDeclarationInfo[];
-                    const key = f.toLowerCase();
-                    const cached = diskCache?.files[key];
-                    if (cached && cached.mtimeMs === stat.mtimeMs) {
-                        reusedFromDisk++;
-                        freshEntries[key] = cached;
-                        return cached.decls;
-                    }
-                    const decls = await this.scanFile(f);
-                    scanned++;
-                    freshEntries[key] = { mtimeMs: stat.mtimeMs, decls };
-                    return decls;
-                }));
-                for (const decls of batchResults) {
-                    total += decls.length;
-                    for (const d of decls) {
+            // #355: TRUST the disk cache at startup. The stat sweep exists to catch
+            // external changes made between sessions, but 4,104 stats cost whatever the
+            // machine's per-I/O tax is (97ms warm dev box … 7s cold/AV-taxed VM), and
+            // the async validator pass gates on this build (#289) — so the sweep's price
+            // was a straight diagnostics delay. Serve the cached declarations
+            // immediately; the same batched/yielding sweep runs in the BACKGROUND and,
+            // on drift, swaps the corrected declarations into this index IN PLACE and
+            // fires onDrift (wired to the #340 debounced revalidation). Staleness
+            // window: seconds, only after an external change, self-correcting — the
+            // contract #340 already established for mid-session changes.
+            if (diskCache && Object.keys(diskCache.files).length > 0) {
+                for (const entry of Object.values(diskCache.files)) {
+                    total += entry.decls.length;
+                    for (const d of entry.decls) {
                         const key = d.name.toLowerCase();
                         if (!byName.has(key)) byName.set(key, []);
                         byName.get(key)!.push(d);
                     }
                 }
-                // Yield between batches to keep the event loop responsive
-                await new Promise<void>(resolve => setImmediate(resolve));
+                reusedFromDisk = Object.keys(diskCache.files).length;
+                // #362 — build the procedure index from the same cached entries.
+                const cachedProcIndex = this.buildProcIndex(Object.values(diskCache.files));
+                this.procIndexes.set(this.normalizeKey(projectPath), cachedProcIndex);
+                const index: StructureIndex = { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
+                const duration = Date.now() - startTime;
+                this.lastBuildStats = { files: fileCount, scanned: 0, reusedFromDisk, ms: duration };
+                perfLogger.perf("SDI buildIndex complete", {
+                    ms: duration,
+                    red_ms: redMs,
+                    dir_scan_ms: dirScanMs,
+                    cache_read_ms: cacheReadMs,
+                    cache_parse_ms: cacheParseMs,
+                    stat_loop_ms: 0,
+                    save_ms: 0,
+                    cache_trusted: 'true',
+                    files: fileCount,
+                    scanned: 0,
+                    reused_from_disk: reusedFromDisk,
+                    declarations: total,
+                    proc_names: cachedProcIndex.size,
+                    project: path.basename(projectPath) || projectPath
+                });
+                // #357: defer the drift sweep onto the sequential lane at startup;
+                // otherwise launch it immediately (the #355 default).
+                if (this.deferBackgroundValidation) {
+                    this.deferredValidations.push({ projectPath, allFiles, diskCache, index });
+                } else {
+                    this.launchBackgroundValidation(projectPath, allFiles, diskCache, index);
+                }
+                return index;
             }
 
-            const statLoopMs = Date.now() - statLoopStart;
+            const { byName: scannedByName, freshEntries, total: scanTotal, scanned: scanScanned, reusedFromDisk: scanReused, statLoopMs } =
+                await this.statScanFiles(allFiles, diskCache);
+            for (const [k, v] of scannedByName) byName.set(k, v);
+            total = scanTotal;
+            scanned = scanScanned;
+            reusedFromDisk = scanReused;
+            // #362 — build the procedure index from the freshly-scanned entries.
+            this.procIndexes.set(this.normalizeKey(projectPath), this.buildProcIndex(Object.values(freshEntries)));
 
             // Only rewrite the disk cache when something actually changed — a fully-warm build
             // (everything reused) would otherwise re-stringify ~70k declarations for nothing.
@@ -468,6 +686,114 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         }
 
         return { byName, lastIndexed: Date.now(), projectPath: path.normalize(projectPath) };
+    }
+
+    /**
+     * The mtime-validating stat/scan sweep, shared by the cold full build and the
+     * #355 background validation.
+     *
+     * #311: 20 → 64. The attributed trace put the warm path's cost in the stat
+     * loop (4,104 stats / 205 batches / a setImmediate round-trip each ≈ 4.2s
+     * wall). Stats are tiny I/O ops — 64-wide keeps chunks small while cutting
+     * the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
+     * 64 concurrent reads is well within Node's comfort.
+     */
+    private async statScanFiles(allFiles: string[], diskCache: SdiDiskCacheFile | null): Promise<{
+        byName: Map<string, StructureDeclarationInfo[]>;
+        freshEntries: Record<string, SdiDiskCacheEntry>;
+        total: number;
+        scanned: number;
+        reusedFromDisk: number;
+        statLoopMs: number;
+    }> {
+        const byName = new Map<string, StructureDeclarationInfo[]>();
+        const freshEntries: Record<string, SdiDiskCacheEntry> = {};
+        let total = 0;
+        let scanned = 0;
+        let reusedFromDisk = 0;
+
+        logger.debug(`⏱️ [SDI] Scanning ${allFiles.length} files in batches (disk cache: ${diskCache ? Object.keys(diskCache.files).length : 0} entries)`);
+
+        const BATCH_SIZE = 64;
+        const statLoopStart = Date.now();
+        for (let i = 0; i < allFiles.length; i += BATCH_SIZE) {
+            const batch = allFiles.slice(i, i + BATCH_SIZE);
+            const batchResults = await Promise.all(batch.map(async f => {
+                const stat = await fs.promises.stat(f).catch(() => null);
+                if (!stat) return [] as StructureDeclarationInfo[];
+                const key = f.toLowerCase();
+                const cached = diskCache?.files[key];
+                if (cached && cached.mtimeMs === stat.mtimeMs) {
+                    reusedFromDisk++;
+                    freshEntries[key] = cached;
+                    return cached.decls;
+                }
+                const scanResult = await this.scanFile(f);
+                scanned++;
+                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls: scanResult.decls, procs: scanResult.procs };
+                return scanResult.decls;
+            }));
+            for (const decls of batchResults) {
+                total += decls.length;
+                for (const d of decls) {
+                    const key = d.name.toLowerCase();
+                    if (!byName.has(key)) byName.set(key, []);
+                    byName.get(key)!.push(d);
+                }
+            }
+            // Yield between batches to keep the event loop responsive
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+
+        return { byName, freshEntries, total, scanned, reusedFromDisk, statLoopMs: Date.now() - statLoopStart };
+    }
+
+    /**
+     * #355 — validate a cache-trusted index against the file system in the background.
+     * Chained per project key so two launches never run concurrent sweeps. On drift the
+     * corrected declarations are swapped into the SAME index object callers already hold
+     * (synchronous clear+refill — no await between — so readers never see a half state),
+     * the disk cache is rewritten, and onDrift fires.
+     */
+    private launchBackgroundValidation(
+        projectPath: string,
+        allFiles: string[],
+        diskCache: SdiDiskCacheFile,
+        index: StructureIndex
+    ): void {
+        const key = this.normalizeKey(projectPath);
+        const prev = this.backgroundValidations.get(key) ?? Promise.resolve();
+        const run = prev.then(async () => {
+            const vStart = Date.now();
+            const { byName, freshEntries, scanned, reusedFromDisk, statLoopMs } =
+                await this.statScanFiles(allFiles, diskCache);
+            const drift = scanned > 0
+                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
+            if (drift) {
+                index.byName.clear();
+                for (const [k, v] of byName) index.byName.set(k, v);
+                index.lastIndexed = Date.now();
+                // #362 — swap the procedure index in place too.
+                this.procIndexes.set(key, this.buildProcIndex(Object.values(freshEntries)));
+                await this.saveDiskCache(projectPath, freshEntries);
+            }
+            this.lastValidationStats = { files: allFiles.length, scanned, reusedFromDisk, drift, ms: Date.now() - vStart };
+            perfLogger.perf("SDI background validation complete", {
+                ms: Date.now() - vStart,
+                stat_loop_ms: statLoopMs,
+                files: allFiles.length,
+                scanned,
+                reused_from_disk: reusedFromDisk,
+                drift: String(drift),
+                project: path.basename(projectPath) || projectPath
+            });
+            if (drift) {
+                this.onDrift?.(key);
+            }
+        }).catch(err => {
+            logger.error(`[#355] SDI background validation failed (index stays cache-trusted): ${err instanceof Error ? err.message : String(err)}`);
+        });
+        this.backgroundValidations.set(key, run);
     }
 
     /** Location of the per-project disk cache (OS temp dir — never pollutes the user's solution). */
@@ -560,21 +886,62 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return results;
     }
 
+    /**
+     * #362 — case-insensitive procedure lookup across all indexed projects (or a
+     * specific one). Answers "where is procedure/method X declared?" from the
+     * index — no include-chain walk, no tokenize. Empty when the proc index isn't
+     * built yet (callers fall back to their existing walk).
+     */
+    findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[] {
+        const key = name.toLowerCase();
+        if (projectPath) {
+            const idx = this.procIndexes.get(this.normalizeKey(projectPath));
+            if (idx) return idx.get(key) ?? [];
+            // Fall through to cross-index search (mirrors find()'s #290 behaviour).
+        }
+        for (const idx of this.procIndexes.values()) {
+            const hit = idx.get(key);
+            if (hit?.length) return hit;
+        }
+        return [];
+    }
+
     clearCache(): void {
         this.indexes.clear();
+        this.procIndexes.clear();
     }
 
     clearProjectCache(projectPath: string): void {
-        this.indexes.delete(this.normalizeKey(projectPath));
+        const key = this.normalizeKey(projectPath);
+        this.indexes.delete(key);
+        this.procIndexes.delete(key);
     }
 
-    private async scanFile(filePath: string): Promise<StructureDeclarationInfo[]> {
+    /** #362 — scan a file for both structure declarations and procedure declarations. */
+    private async scanFile(filePath: string): Promise<{ decls: StructureDeclarationInfo[]; procs: ProcedureDeclarationInfo[] }> {
         try {
             const source = await fs.promises.readFile(filePath, 'utf-8');
-            return scanSourceForDeclarations(source, filePath);
+            return {
+                decls: scanSourceForDeclarations(source, filePath),
+                procs: scanSourceForProcedures(source, filePath)
+            };
         } catch {
-            return [];
+            return { decls: [], procs: [] };
         }
+    }
+
+    /** #362 — build a name→procedures index from a set of cache entries. */
+    private buildProcIndex(entries: Iterable<SdiDiskCacheEntry>): Map<string, ProcedureDeclarationInfo[]> {
+        const byProcName = new Map<string, ProcedureDeclarationInfo[]>();
+        for (const entry of entries) {
+            for (const p of entry.procs ?? []) {
+                const k = p.name.toLowerCase();
+                let bucket = byProcName.get(k);
+                if (!bucket) { bucket = []; byProcName.set(k, bucket); }
+                bucket.push(p);
+            }
+        }
+        return byProcName;
     }
 
     private extractSearchPaths(entries: RedirectionEntry[]): string[] {

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import LoggerManager from './utils/LoggerManager';
+import { findPrefixMatchesOutsideComments } from './utils/clarionCommentScanner';
 
 const logger = LoggerManager.getLogger("ClarionDecorator");
 logger.setLevel("error");
@@ -289,26 +290,19 @@ export class ClarionDecorator {
             decorationRanges.set(prefix, []);
         });
         
-        // Process the document text
-        const text = document.getText();
-        this.prefixRegexCache!.lastIndex = 0;
-        
-        let match: RegExpExecArray | null;
-        while ((match = this.prefixRegexCache!.exec(text)) !== null) {
-            const [fullMatch, prefix, identifier] = match;
-            const startPos = match.index;
-            const endPos = startPos + fullMatch.length;
-            
-            // Convert position to VS Code Range
-            const startPosition = document.positionAt(startPos);
-            const endPosition = document.positionAt(endPos);
-            const range = new vscode.Range(startPosition, endPosition);
-            
-            // Add the range to the appropriate prefix
-            const ranges = decorationRanges.get(prefix);
-            if (ranges) {
-                ranges.push(range);
-                logger.info(`Found ${prefix}:${identifier} at ${startPosition.line}:${startPosition.character}`);
+        // Scan line-by-line so a comment (`!`/`|`, string-aware) suppresses the
+        // prefix colours for anything inside it (#397); a whole-document regex
+        // scan could not tell code from comment.
+        for (let lineNum = 0; lineNum < document.lineCount; lineNum++) {
+            const lineText = document.lineAt(lineNum).text;
+            const matches = findPrefixMatchesOutsideComments(lineText, this.prefixRegexCache!);
+            for (const m of matches) {
+                const range = new vscode.Range(lineNum, m.start, lineNum, m.end);
+                const ranges = decorationRanges.get(m.prefix);
+                if (ranges) {
+                    ranges.push(range);
+                    logger.info(`Found ${m.prefix}:${m.identifier} at ${lineNum}:${m.start}`);
+                }
             }
         }
         

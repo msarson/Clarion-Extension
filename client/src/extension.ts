@@ -2,7 +2,6 @@ import * as path from 'path';
 import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
-import { DocumentManager } from './documentManager';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
@@ -46,7 +45,6 @@ let treeView: TreeView<TreeNode> | undefined;
 let solutionTreeDataProvider: SolutionTreeDataProvider | undefined;
 let structureViewProvider: StructureViewProvider | undefined;
 let structureView: TreeView<any> | undefined;
-let documentManager: DocumentManager | undefined;
 
 
 // Helper function to escape special characters in file paths for RegExp
@@ -127,7 +125,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
         solutionTreeDataProvider,
         structureViewProvider,
         structureView,
-        documentManager,
         diagnosticCollection
     };
     
@@ -268,19 +265,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ...registerTreeCommands(solutionTreeDataProvider)
     );
     
-    // Create DocumentManager for standalone file support
-    if (!documentManager) {
-        logger.info("🔍 Creating DocumentManager for standalone file support...");
-        try {
-            documentManager = await DocumentManager.create();
-            logger.info("✅ DocumentManager created for standalone files");
-            
-            logger.info("🔍 Registering language features...");
-            registerLanguageFeatures(context, documentManager);
-        } catch (error) {
-            logger.error(`❌ Error creating DocumentManager: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
+    // #341: language features need no client-side DocumentManager — register directly.
+    registerLanguageFeatures(context);
     
     const activationDuration = Date.now() - activationStartTime;
     logger.info(`⏱️ [STARTUP] Client activation complete in ${activationDuration}ms`);
@@ -290,21 +276,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
 // Wrapper functions for solution initialization that inject dependencies
 async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: Disposable[]): Promise<void> {
-    await SolutionInitializer.workspaceHasBeenTrusted(context, disposables, initializeSolution, documentManager);
+    await SolutionInitializer.workspaceHasBeenTrusted(context, disposables, initializeSolution);
 }
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
-    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment, documentManager);
+    await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment);
     updateSolutionToolbar();
 }
 
-async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<DocumentManager> {
-    // #297 fix 12: assign the fresh manager back to the module variable — previously only
-    // returned, so every wrapper capturing `documentManager` (initializeSolution,
-    // closeClarionSolution, workspaceHasBeenTrusted) kept injecting the OLD, disposed instance
-    // after a solution reload, and the stale manager could never be collected.
-    documentManager = await SolutionInitializer.reinitializeEnvironment(refreshDocs, client, documentManager);
-    return documentManager;
+async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<void> {
+    await SolutionInitializer.reinitializeEnvironment(refreshDocs, client);
 }
 
 
@@ -325,7 +306,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 }
 
 export async function closeClarionSolution(context: ExtensionContext, reason: SolutionCloseReason = 'user') {
-    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, documentManager, reason);
+    await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, reason);
     updateSolutionToolbar();
 }
 

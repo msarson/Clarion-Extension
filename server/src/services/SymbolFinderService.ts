@@ -27,11 +27,70 @@ import { StructureDeclarationIndexer, scanSourceForDeclarations, StructureDeclar
 import { cooperativeCheckpoint, makeTimeSlicer } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from './ReferenceCountIndex';
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import { resolveViaProjectRedirection as resolveViaProjectRedirection328 } from '../utils/RedirectionResolution';
+import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
+import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from './IncludeIndexDiskCache';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
+const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
+
+// ─── #344: include-chain global-name index ──────────────────────────────
+// One walk per host file instead of one walk per unresolved name (#334's
+// original shape cost 74s on a real 43-project solution's undeclared-variable
+// pass). TTL-bounded; evicted wholesale by the #340 watched-files handler.
+interface ChainDeclInfo { uri: string; line: number; character: number; }
+// #295: `contributing` records every chain file read during the build + its mtime,
+// so a warm start can validate and reuse the persisted `names` map (below) instead
+// of re-tokenizing the whole include universe.
+interface ChainIndexEntry { builtAt: number; hostText: string; names: Map<string, ChainDeclInfo>; contributing: Map<string, number>; }
+const includeChainIndexCache = new Map<string, ChainIndexEntry>();
+interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
+const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
+// #345: the cold build tokenizes the ABC/libsrc universe (17-32s measured on
+// IBSWorking) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
+// run. The #340 watcher eviction is the primary invalidation (workspace file
+// changes); the TTL only backstops edits the watcher can't see (libsrc edited
+// outside the workspace), so it can be generous.
+const CHAIN_INDEX_TTL_MS = 600_000;
+let chainIndexBuildCount = 0;
+// #295: separate positive signal for "served from the persisted disk cache"
+// (a cold rebuild was avoided). Covers both the #344 chain and #345 sibling index.
+let includeIndexDiskReuseCount = 0;
+
+/** Test observability — number of chain-index builds since process start. */
+export function getChainIndexBuildCount(): number {
+    return chainIndexBuildCount;
+}
+
+/** Test observability (#295) — number of include indexes served from the disk cache. */
+export function getIncludeIndexDiskReuseCount(): number {
+    return includeIndexDiskReuseCount;
+}
+
+/** #340/#344 — external file changes can invalidate any chain; evict wholesale. */
+export function evictIncludeChainIndexes(): void {
+    includeChainIndexCache.clear();
+    siblingLabelIndexCache.clear(); // #345 phase 3
+}
+
+// #345 — per-tier cost attribution for callers that run many findSymbol walks
+// (undeclaredVar augment). Read+reset around a batch to see where time went.
+export interface SymbolFinderPerfStats {
+    globalCalls: number; globalMs: number;
+    siblingCalls: number; siblingMs: number;
+}
+const sfPerfStats: SymbolFinderPerfStats = { globalCalls: 0, globalMs: 0, siblingCalls: 0, siblingMs: 0 };
+export function resetSymbolFinderPerfStats(): void {
+    sfPerfStats.globalCalls = 0; sfPerfStats.globalMs = 0;
+    sfPerfStats.siblingCalls = 0; sfPerfStats.siblingMs = 0;
+}
+export function readSymbolFinderPerfStats(): SymbolFinderPerfStats {
+    return { ...sfPerfStats };
+}
 logger.setLevel("error");
 
 /**
@@ -201,7 +260,13 @@ export class SymbolFinderService {
         
         const paramString = match[1];
         const params = paramString.split(',');
-        
+        // Column tracking so indexOf() below resolves each parameter's OWN position,
+        // not the first line-wide substring match — without this, searching for a
+        // parameter whose name is a prefix of an earlier-declared parameter's name
+        // (e.g. "pPar" vs an earlier "pParName") incorrectly resolves to that earlier
+        // parameter's position instead of its own.
+        let currentColumn = procedureLine.indexOf('(') + 1;
+
         for (const param of params) {
             const trimmedParam = param.trim();
             // Strip optional-parameter angle brackets: <Key K> → Key K
@@ -228,7 +293,7 @@ export class SymbolFinderService {
                         type: TokenType.Variable,
                         value: paramName,
                         line: scopeToken.line,
-                        start: procedureLine.indexOf(paramName),
+                        start: procedureLine.indexOf(paramName, currentColumn),
                         maxLabelLength: 0
                     };
                     
@@ -250,8 +315,9 @@ export class SymbolFinderService {
                     };
                 }
             }
+            currentColumn += param.length + 1; // +1 for comma
         }
-        
+
         logger.info(`❌ Parameter "${word}" not found`);
         return null;
     }
@@ -282,8 +348,42 @@ export class SymbolFinderService {
         
         // Search for the variable in the symbol tree (if we have a procedure symbol)
         const searchText = originalWord || word;
-        const varSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
-        
+        // #265: a bare search word must never bind to a field of a PRE()'d
+        // structure — those are only addressable as Pre:Field or Structure.Field
+        // (Language Reference, PRE attribute). Qualified searches resolve via
+        // findPrefixedField / StructureFieldResolver instead.
+        const bareSearch = !searchText.includes(':') && !searchText.includes('.');
+        const rawVarSymbol = procedureSymbol ? this.findVariableInSymbol(procedureSymbol, searchText) : null;
+
+        // A WINDOW/APPLICATION/REPORT control keyword that carries a USE (e.g.
+        // `TOOLBAR,AT(...),USE(?Toolbar)` or `MENUBAR`) is indexed as a child symbol
+        // whose name collides with a real data declaration of the same name — Clarion is
+        // case-insensitive, so the control TOOLBAR and a local instance
+        // `Toolbar ToolbarClass` share one name. Such a control is a Structure token whose
+        // OWN value is the keyword/name (there is no separate label); a genuine data
+        // declaration always has a distinct Label/Variable token for the name on its line
+        // (`Counter LONG`, `MyQueue QUEUE`). When the matched symbol's line carries only
+        // the control Structure token and no data label for this name, discard the match
+        // so the declaration scan below binds the real variable — otherwise the control
+        // (which has no type) shadows it and hover renders type UNKNOWN.
+        let varSymbolIsControl = false;
+        if (rawVarSymbol !== null && bareSearch) {
+            const nameLower = searchText.toLowerCase();
+            const lineNameTokens = tokens.filter(t =>
+                t.line === rawVarSymbol.range.start.line &&
+                t.value.toLowerCase() === nameLower
+            );
+            const hasDataLabel = lineNameTokens.some(t =>
+                t.type === TokenType.Label || t.type === TokenType.Variable
+            );
+            const hasControlStructure = lineNameTokens.some(t => t.type === TokenType.Structure);
+            varSymbolIsControl = hasControlStructure && !hasDataLabel;
+            if (varSymbolIsControl) {
+                logger.info(`⏭️ Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a window/report control keyword, not a data declaration — deferring to declaration scan`);
+            }
+        }
+        const varSymbol = varSymbolIsControl ? null : rawVarSymbol;
+
         if (!varSymbol) {
             logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
 
@@ -299,7 +399,9 @@ export class SymbolFinderService {
                 t.line >= scopeStart && t.line <= scopeEnd &&
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value.toLowerCase() === wordLower
+                t.value.toLowerCase() === wordLower &&
+                !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
             );
             if (labelToken) {
                 // Skip MAP/global procedure declarations — these are handled by
@@ -340,7 +442,9 @@ export class SymbolFinderService {
                         t.line > parentProc.line && t.line <= dataEnd &&
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value.toLowerCase() === wordLower
+                        t.value.toLowerCase() === wordLower &&
+                        !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
                     );
                     if (found) {
                         const isProcDecl = tokens.some(t =>
@@ -388,7 +492,9 @@ export class SymbolFinderService {
                         t.line >= gpStart && t.line <= gpEnd &&
                         t.start === 0 &&
                         (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                        t.value.toLowerCase() === wordLower
+                        t.value.toLowerCase() === wordLower &&
+                        !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+                !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
                     );
                     if (found) {
                         // Skip MAP/global procedure declarations — they are not local variables
@@ -446,6 +552,20 @@ export class SymbolFinderService {
             logger.warn(`⚠️ Found symbol but couldn't locate token for ${varName} at line ${varSymbol.range.start.line}`);
             return null;
         }
+
+        // #265: the symbol-tree recursion descends into structure children, so a
+        // bare word can land on a PRE()'d structure's field here. Reject it — the
+        // module/global tiers are the legal binding for the bare name.
+        if (bareSearch && variableToken.structurePrefix) {
+            logger.info(`⏭️ "${searchText}" is a field of a PRE(${variableToken.structurePrefix}) structure — bare reference is invalid, deferring to outer scopes`);
+            return null;
+        }
+        // #350: same for fields of PRE-LESS data structures — only
+        // Structure.Field can reach them (Field Qualification rule).
+        if (SymbolFinderService.requiresDotQualification(variableToken)) {
+            logger.info(`⏭️ "${searchText}" is a field of a PRE-less structure — dot qualification required, deferring to outer scopes`);
+            return null;
+        }
         
         // If the current scope is a ROUTINE but the found variable is in the parent
         // procedure's data section (before the ROUTINE), use the parent procedure as
@@ -497,6 +617,7 @@ export class SymbolFinderService {
 
         const searchText = originalWord || word;
         const searchLower = searchText.toLowerCase();
+        const bareSearch = !searchText.includes(':') && !searchText.includes('.');
         const routineDataEnd = routineToken.executionMarker?.line ?? routineToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
 
         const routineVar = tokens.find(t =>
@@ -504,7 +625,9 @@ export class SymbolFinderService {
             t.line < routineDataEnd &&
             t.start === 0 &&
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-            t.value.toLowerCase() === searchLower
+            t.value.toLowerCase() === searchLower &&
+            !(bareSearch && t.structurePrefix) && // #265: PRE()'d fields need a qualifier
+            !SymbolFinderService.requiresDotQualification(t) // #350: PRE-less structure fields are dot-only
         );
 
         if (!routineVar) {
@@ -548,6 +671,14 @@ export class SymbolFinderService {
     /**
      * Find a module-level variable (declared before first PROCEDURE)
      */
+    /**
+     * #350 — see TokenHelper.requiresDotQualification (moved there so the
+     * definition path's SymbolDefinitionResolver shares the same rule).
+     */
+    static requiresDotQualification(t: Token): boolean {
+        return TokenHelper.requiresDotQualification(t);
+    }
+
     findModuleVariable(
         word: string,
         tokens: Token[],
@@ -609,12 +740,57 @@ export class SymbolFinderService {
     }
 
     /**
+     * #363 — pre-warm the cross-file indexes that a hover / F12 / FAR would
+     * otherwise build COLD on the first user interaction: the #344 include-chain
+     * global index and the #345 sibling family label index. At v1.0.0 the (slow)
+     * startup validators happened to build these as a side effect, so the first
+     * interaction was warm; the 1.0.1 validator perf work removed that incidental
+     * warming (see #363), moving the ~15s cold build onto whatever the user
+     * touched first. Building them deliberately on the idle background lane
+     * restores the warm-interaction feel without bringing back the slow validators.
+     *
+     * Best-effort and idempotent: the underlying builders are cache-backed
+     * (content + TTL + the #340 watcher / cross-file epoch), so a warm that races a
+     * real lookup simply shares the cache. A sentinel name that can never be a real
+     * Clarion identifier drives each builder to completion without resolving anything.
+     */
+    public async warmCrossFileIndexes(document: TextDocument): Promise<void> {
+        const SENTINEL = ' __clarion_warm_sentinel__';
+        try {
+            const tokens = this.tokenCache.getTokens(document);
+            // #344 — drive the full global tier so BOTH the host's own include-chain
+            // index AND (for a MEMBER file) the parent PROGRAM's chain index get
+            // built — a real F12/hover on a global resolves through the parent, so
+            // warming only the host's chain would leave the parent's cold.
+            await this.findGlobalVariable(SENTINEL, tokens, document);
+        } catch { /* warming is best-effort — a failure must never surface */ }
+        try {
+            // #345 — build this program family's sibling label index.
+            await this.findModuleVariableInSiblingMembers(SENTINEL, document, { line: 0, character: 0 });
+        } catch { /* warming is best-effort */ }
+    }
+
+    /**
      * Find a module-scope variable declared in a sibling MEMBER file of the same PROGRAM.
      *
      * Uses FRG MEMBER edges to enumerate sibling MEMBER files, then scans each file's
      * module scope (between MEMBER and first PROCEDURE) for a matching column-0 label.
      */
     public async findModuleVariableInSiblingMembers(
+        word: string,
+        document: TextDocument,
+        _position: { line: number; character: number }
+    ): Promise<SymbolInfo | null> {
+        sfPerfStats.siblingCalls++;
+        const perfT0 = Date.now();
+        try {
+            return await this.findModuleVariableInSiblingMembersInner(word, document, _position);
+        } finally {
+            sfPerfStats.siblingMs += Date.now() - perfT0;
+        }
+    }
+
+    private async findModuleVariableInSiblingMembersInner(
         word: string,
         document: TextDocument,
         _position: { line: number; character: number }
@@ -634,50 +810,22 @@ export class SymbolFinderService {
 
         const memberFiles = graph.getMemberFiles(programFile);
 
-        // #319: this walk read + fully tokenized EVERY member module of the program
-        // on a lookup miss — 161 files cold on Mark's VM = one 8.2s synchronous
-        // event-loop block (the undeclaredVar validator probes misses by definition).
-        // Prune with the reference index, the #315 FAR pattern: a module-scope
-        // declaration of `word` requires `word` to OCCUR in the file, so an indexed
-        // file with zero occurrences is skipped without touching disk. One batched
-        // freshness pass up front keeps mayContain stat-free (no per-file sync stat
-        // storm); compound words (BRW1::View:Browse) are never a single indexed
-        // name, so only bare identifiers prune; unknown files always load.
-        const refIdx = ReferenceCountIndex.getInstance();
-        const canPrune = refIdx.isBuilt && /^[A-Za-z_][A-Za-z0-9_]*$/.test(word);
-        if (canPrune) {
-            await refIdx.verifyFilesFresh(memberFiles);
+        // #319 → #345 phase 3: the walk previously probed EVERY member module
+        // PER LOOKUP (mayContain + a raw column-0 regex read per file) — the
+        // undeclared-variable augment probes misses by definition, so N
+        // candidates × M member files of repeated raw reads cost 23s on the
+        // real 40-project solution. One column-0 label index per program
+        // FAMILY (yielded build, TTL + watcher-evicted) now answers which
+        // files can possibly declare the word; only those are tokenized, and
+        // findModuleVariable stays the authoritative scope check.
+        const familyIndex = await this.getSiblingLabelIndex(programFile, memberFiles);
+        const candidateFiles = familyIndex.names.get(word.toLowerCase());
+        if (!candidateFiles || candidateFiles.length === 0) {
+            return null;
         }
-        const timeSlice = makeTimeSlicer();
 
-        const visited = new Set<string>();
-        for (const memberFile of memberFiles) {
-            const normMember = memberFile.toLowerCase().replace(/\\/g, '/');
-            if (visited.has(normMember)) continue;
-            visited.add(normMember);
-
-            const memberPath = memberFile.replace(/\//g, '\\');
+        for (const memberPath of candidateFiles) {
             if (memberPath.toLowerCase() === currentFilePath.toLowerCase()) continue;
-
-            if (canPrune && !refIdx.mayContain(memberPath, word)) continue;
-            // Un-pruned files still tokenize synchronously — yield between them so
-            // a cold family walk never holds the LSP loop (#319/#295).
-            await timeSlice();
-
-            // #319 (reopen): a module-scope declaration is a COLUMN-0 label by
-            // language rule. A file that merely USES the word (every generated
-            // module mentions globals/equates like WM_QUERYENDSESSION) passes
-            // mayContain but can never declare it — probe the raw text for a
-            // column-0 occurrence before paying tokenization (a read is ~40x
-            // cheaper than tokenizing a generated module). Files already in the
-            // token cache skip the probe — their scan is cheap anyway.
-            if (canPrune && !this.tokenCache.getTokensByUriCaseInsensitive(`file:///${memberPath.replace(/\\/g, '/')}`)) {
-                try {
-                    const raw = fs.readFileSync(memberPath, 'utf-8');
-                    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    if (!new RegExp(`^${esc}(?![A-Za-z0-9_:])`, 'im').test(raw)) continue;
-                } catch { /* unreadable — let loadTokensForFile handle/report it */ }
-            }
 
             const sibling = this.loadTokensForFile(memberPath);
             if (!sibling) continue;
@@ -689,6 +837,86 @@ export class SymbolFinderService {
         }
 
         return null;
+    }
+
+    /**
+     * #345 phase 3 — one raw-text pass over a program family's member modules,
+     * indexing every column-0 identifier (a module-scope declaration is a
+     * column-0 label by language rule; over-approximation is safe because
+     * findModuleVariable re-verifies scope on the shortlisted files).
+     */
+    private async getSiblingLabelIndex(programFile: string, memberFiles: string[]): Promise<SiblingIndexEntry> {
+        const key = programFile.toLowerCase();
+        // Identity = the member LIST (the #340/#344 discipline); member CONTENT
+        // changes are covered by the TTL and the #340 watcher eviction.
+        const fingerprint = [...memberFiles].map(m => m.toLowerCase()).sort().join(';');
+        const cached = siblingLabelIndexCache.get(key);
+        if (cached && cached.fingerprint === fingerprint &&
+            Date.now() - cached.builtAt < CHAIN_INDEX_TTL_MS) {
+            return cached;
+        }
+
+        // #295: reuse the mtime-validated disk cache before re-reading every member.
+        // Identity = the member-list fingerprint (which files belong to the family);
+        // member CONTENT changes are caught by the recorded per-member mtimes.
+        const disk = loadIncludeIndex<Record<string, string[]>>('siblingindex', key);
+        if (disk && await includeIndexFresh(disk, fingerprint)) {
+            const reused: SiblingIndexEntry = {
+                builtAt: Date.now(), fingerprint, names: new Map(Object.entries(disk.payload)),
+            };
+            siblingLabelIndexCache.set(key, reused);
+            includeIndexDiskReuseCount++;
+            logger.info(`📇 [#345/#295] sibling label index for ${path.basename(programFile)} served from disk: ${reused.names.size} name(s)`);
+            return reused;
+        }
+
+        const entry: SiblingIndexEntry = { builtAt: Date.now(), fingerprint, names: new Map() };
+        const contributing = new Map<string, number>();
+        const timeSlice = makeTimeSlicer();
+        const labelRe = /^([A-Za-z_][A-Za-z0-9_:]*)/;
+        const seenFiles = new Set<string>();
+
+        for (const memberFile of memberFiles) {
+            const memberPath = memberFile.replace(/\//g, '\\');
+            const norm = memberPath.toLowerCase();
+            if (seenFiles.has(norm)) continue;
+            seenFiles.add(norm);
+            await timeSlice();
+
+            // Cache-first (same discipline as loadTokensForFile): the member may
+            // be open in the editor or seeded by an in-memory fixture.
+            let raw = this.tokenCache.getDocumentTextByUriCaseInsensitive(
+                `file:///${memberPath.replace(/\\/g, '/')}`);
+            if (raw === null || raw === undefined) {
+                try {
+                    raw = fs.readFileSync(memberPath, 'utf-8');
+                } catch {
+                    continue;
+                }
+            }
+            // #295: record the member + mtime for the disk cache's drift check.
+            try { contributing.set(memberPath, fs.statSync(memberPath).mtimeMs); } catch { /* unreadable → skip */ }
+            for (const line of raw.split(/\r?\n/)) {
+                const m = labelRe.exec(line);
+                if (!m) continue;
+                const k = m[1].toLowerCase();
+                let arr = entry.names.get(k);
+                if (!arr) { arr = []; entry.names.set(k, arr); }
+                if (!arr.includes(memberPath)) arr.push(memberPath);
+            }
+        }
+
+        siblingLabelIndexCache.set(key, entry);
+        // Persist only when anchored to real on-disk members (see #344 note above).
+        if (contributing.size > 0) {
+            saveIncludeIndex<Record<string, string[]>>('siblingindex', key, {
+                signature: fingerprint,
+                contributing: Object.fromEntries(contributing),
+                payload: Object.fromEntries(entry.names),
+            });
+        }
+        logger.info(`📇 [#345] sibling label index for ${path.basename(programFile)}: ${entry.names.size} name(s) across ${seenFiles.size} member(s)`);
+        return entry;
     }
     
     /**
@@ -709,16 +937,12 @@ export class SymbolFinderService {
         if (result) return result;
 
         // If MEMBER file, search the parent PROGRAM file
-        const memberToken = tokens.find(t =>
-            t.value && t.value.toUpperCase() === 'MEMBER' &&
-            t.line < 5 &&
-            t.referencedFile
-        );
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             try {
                 const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
-                const resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
-                const parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
+                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
                 // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
                 // the parent PROGRAM may be open in the editor (unsaved edits) or seeded by
@@ -733,7 +957,30 @@ export class SymbolFinderService {
                     }
                 }
                 if (!parentTokens || !parentDoc) {
-                    if (!fs.existsSync(resolvedPath)) return null;
+                    if (!fs.existsSync(resolvedPath)) {
+                        // #348: MEMBER targets aren't necessarily same-dir (#300 parity —
+                        // generated multi-DLL apps put member modules in genfiles\src while
+                        // the app main resolves via the RED). Redirection is the last tier;
+                        // without it, prefixed fields of parent-inline FILEs dead-end here.
+                        const solutionManager = SolutionManager.getInstance();
+                        const viaRedirection = solutionManager
+                            ? await solutionManager.findFileWithExtension(memberToken.referencedFile, currentFilePath)
+                            : null;
+                        if (!viaRedirection?.path || !fs.existsSync(viaRedirection.path)) {
+                            return null;
+                        }
+                        resolvedPath = viaRedirection.path;
+                        parentUri = pathToCanonicalUri(resolvedPath);
+                        parentTokens = this.tokenCache.getTokensByUriCaseInsensitive(parentUri);
+                        if (parentTokens) {
+                            const cachedText = this.tokenCache.getDocumentTextByUriCaseInsensitive(parentUri);
+                            if (cachedText !== null) {
+                                parentDoc = TextDocument.create(parentUri, 'clarion', 1, cachedText);
+                            }
+                        }
+                    }
+                }
+                if (!parentTokens || !parentDoc) {
                     const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
                     parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                     parentTokens = this.tokenCache.getTokens(parentDoc);
@@ -859,73 +1106,35 @@ export class SymbolFinderService {
      * @returns SymbolInfo if found, null otherwise
      */
     async findGlobalVariable(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
+        sfPerfStats.globalCalls++;
+        const perfT0 = Date.now();
+        try {
+            return await this.findGlobalVariableInner(word, tokens, document);
+        } finally {
+            sfPerfStats.globalMs += Date.now() - perfT0;
+        }
+    }
+
+    private async findGlobalVariableInner(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
         logger.info(`🔍 findGlobalVariable: searching for "${word}"`);
-        
+
         // Step 1: Search current file for global variable (before first CODE/PROCEDURE)
-        const firstCodeToken = tokens.find(t => 
-            t.type === TokenType.Keyword && 
-            t.value.toUpperCase() === 'CODE'
-        );
-        
-        // If no CODE found, look for first PROCEDURE as the boundary
-        const firstProcedure = tokens.find(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.GlobalProcedure
-        );
-        
-        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
-        let globalScopeEndLine: number;
-        if (firstCodeToken) {
-            globalScopeEndLine = firstCodeToken.line;
-            logger.info(`First CODE token at line: ${globalScopeEndLine}`);
-        } else if (firstProcedure) {
-            globalScopeEndLine = firstProcedure.line;
-            logger.info(`No CODE token, using first PROCEDURE at line: ${globalScopeEndLine}`);
-        } else {
-            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
-            logger.info(`No CODE or PROCEDURE tokens, treating entire file as global scope`);
+        const currentFileResult = this.findGlobalVariableInCurrentFile(word, tokens, document);
+        if (currentFileResult) {
+            return currentFileResult;
         }
-        
-        const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.parent === undefined &&
-            t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === word.toLowerCase()
-        );
-        
-        if (globalVar) {
-            logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
-            
-            const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
-            const lineTokens = tokens.filter(t => t.line === globalVar.line);
-            const declaration = lineTokens.map(t => t.value).join(' ');
-            
-            return {
-                token: globalVar,
-                type: typeInfo,
-                scope: {
-                    token: globalVar,
-                    type: 'global'
-                },
-                location: {
-                    uri: document.uri,
-                    line: globalVar.line,
-                    character: globalVar.start
-                },
-                declaration: declaration,
-                originalWord: word,
-                searchWord: word
-            };
+
+        // #334: declarations pulled in via `INCLUDE(...)` at module/global scope
+        // (Clarion shops routinely declare solution-wide globals in .inc files
+        // included from every main module). #344: chain indexed once per host.
+        const currentIncludeResult = await this.findGlobalVariableInIncludes(word, tokens, document);
+        if (currentIncludeResult) {
+            return currentIncludeResult;
         }
-        
+
         // Step 2: If not found and current file has MEMBER token, search parent file
-        const memberToken = tokens.find(t => 
-            t.value && t.value.toUpperCase() === 'MEMBER' && 
-            t.line < 5 && 
-            t.referencedFile
-        );
-        
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
             const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
@@ -969,8 +1178,75 @@ export class SymbolFinderService {
     }
     
     /**
+     * Current-file half of the global lookup: a column-0 Label with no parent
+     * token (structure fields never qualify — they need their PRE()/dot
+     * qualifier) declared before the first CODE, or before the first
+     * PROCEDURE when the file has no CODE marker.
+     *
+     * #265: public so VariableHoverResolver.findGlobalVariableHover shares
+     * this exact decision with F12 instead of running its own scan.
+     */
+    public findGlobalVariableInCurrentFile(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
+        const firstCodeToken = tokens.find(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === 'CODE'
+        );
+
+        // If no CODE found, look for first PROCEDURE as the boundary
+        const firstProcedure = tokens.find(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure
+        );
+
+        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
+        let globalScopeEndLine: number;
+        if (firstCodeToken) {
+            globalScopeEndLine = firstCodeToken.line;
+        } else if (firstProcedure) {
+            globalScopeEndLine = firstProcedure.line;
+        } else {
+            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
+        }
+
+        const globalVar = tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.parent === undefined &&
+            t.line < globalScopeEndLine &&
+            t.value.toLowerCase() === word.toLowerCase()
+        );
+
+        if (!globalVar) {
+            return null;
+        }
+
+        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
+
+        const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
+        const lineTokens = tokens.filter(t => t.line === globalVar.line);
+        const declaration = lineTokens.map(t => t.value).join(' ');
+
+        return {
+            token: globalVar,
+            type: typeInfo,
+            scope: {
+                token: globalVar,
+                type: 'global'
+            },
+            location: {
+                uri: document.uri,
+                line: globalVar.line,
+                character: globalVar.start
+            },
+            declaration: declaration,
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
      * Helper: Find global variable in MEMBER parent file
-     * 
+     *
      * @param word - Variable name to find
      * @param parentFile - Relative path to parent file (from MEMBER token)
      * @param currentDocument - Current document (to resolve relative path)
@@ -1009,11 +1285,22 @@ export class SymbolFinderService {
                     // URI is canonical (#251) — hand-built file:/// shapes keep causing
                     // cache-identity bugs.
                     const solutionManager = SolutionManager.getInstance();
-                    const viaRedirection = solutionManager
-                        ? await solutionManager.findFileWithExtension(parentFile)
-                        : null;
+                    // #396: converge on the SAME owner-project redirection resolver hover uses
+                    // (resolveViaProjectRedirection → the owning project's .red parser) FIRST, so
+                    // the diagnostic and hover can't disagree on the parent's location. In a
+                    // generated multi-DLL app the member lives in a DLL project's genfiles\src while
+                    // the PROGRAM (holding .app global data) lives in the exe project; hover's .red
+                    // lookup finds it but findFileWithExtension's sourceFiles-first search missed —
+                    // flagging a global hover resolves. findFileWithExtension stays as the secondary
+                    // fallback for shapes the .red parser doesn't cover.
+                    const viaProjectRed = resolveViaProjectRedirection328(parentFile, currentFilePath);
+                    const viaRedirection = viaProjectRed
+                        ? { path: viaProjectRed }
+                        : solutionManager
+                            ? await solutionManager.findFileWithExtension(parentFile, currentFilePath)
+                            : null;
                     if (viaRedirection?.path && fs.existsSync(viaRedirection.path)) {
-                        logger.info(`✅ #300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
+                        logger.info(`✅ #396/#300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
                         resolvedPath = viaRedirection.path;
                         parentUri = pathToCanonicalUri(resolvedPath);
                         // The redirected target may itself be cached (open in the editor)
@@ -1084,13 +1371,234 @@ export class SymbolFinderService {
                 };
             }
             
+            // #334: not among the parent's own labels — follow the parent's
+            // global-scope INCLUDE chain (main modules declare shared globals
+            // via `INCLUDE('Globals.inc'),ONCE`-style pulls; #344: indexed once).
+            const includeResult = await this.findGlobalVariableInIncludes(word, parentTokens, parentDoc);
+            if (includeResult) return includeResult;
+
             logger.info(`❌ Global variable "${word}" not found in parent file`);
             return null;
-            
+
         } catch (err) {
             logger.error(`Error reading MEMBER parent file: ${err}`);
             return null;
         }
+    }
+
+    /**
+     * #334/#344 — resolve a global declared in the host's data-scope INCLUDE
+     * chain. #334's original walk exhausted the ENTIRE chain per unresolved
+     * name — on a real generated app the parent's chain is the whole
+     * ABC/libsrc universe and the undeclared-variable augment feeds it dozens
+     * of names (74s measured). The chain is now indexed ONCE per host
+     * (name → declaration site), TTL-bounded and evicted wholesale by the
+     * #340 watched-files handler; lookups are O(1).
+     */
+    private async findGlobalVariableInIncludes(
+        word: string,
+        hostTokens: Token[],
+        hostDoc: TextDocument
+    ): Promise<SymbolInfo | null> {
+        const key = decodeURIComponent(hostDoc.uri.replace(/^file:\/\/\/?/i, '')).toLowerCase();
+        // #340 lesson: the path alone is not identity — a host whose CONTENT
+        // changed (live edits, or a reused synthetic path in tests) must not
+        // serve the old chain. Chain-FILE changes are covered by the TTL and
+        // the #340 watcher eviction.
+        const hostText = hostDoc.getText();
+        let entry = includeChainIndexCache.get(key);
+        if (!entry || Date.now() - entry.builtAt > CHAIN_INDEX_TTL_MS || entry.hostText !== hostText) {
+            // #295: identity of THIS index = the host's content (which INCLUDEs it
+            // pulls, and in what order). Any host edit changes the hash → rebuild.
+            const signature = crypto.createHash('md5').update(hostText).digest('hex');
+            // Reuse the mtime-validated disk cache before re-tokenizing the chain.
+            const disk = loadIncludeIndex<Record<string, ChainDeclInfo>>('chainindex', key);
+            if (disk && await includeIndexFresh(disk, signature)) {
+                entry = {
+                    builtAt: Date.now(),
+                    hostText,
+                    names: new Map(Object.entries(disk.payload)),
+                    contributing: new Map(Object.entries(disk.contributing)),
+                };
+                includeChainIndexCache.set(key, entry);
+                includeIndexDiskReuseCount++;
+                logger.info(`📇 [#344/#295] include-chain index for ${path.basename(key)} served from disk: ${entry.names.size} name(s)`);
+            } else {
+                entry = { builtAt: Date.now(), hostText, names: new Map(), contributing: new Map() };
+                await this.buildIncludeChainIndex(hostTokens, hostDoc, new Set<string>(), entry.names, entry.contributing);
+                includeChainIndexCache.set(key, entry);
+                chainIndexBuildCount++;
+                // Only persist a build anchored to real on-disk files — an empty
+                // contributing set (synthetic/in-memory fixture, or a host with no
+                // resolvable includes) can't be validated on reload, so it must not
+                // be reused across sessions.
+                if (entry.contributing.size > 0) {
+                    saveIncludeIndex<Record<string, ChainDeclInfo>>('chainindex', key, {
+                        signature,
+                        contributing: Object.fromEntries(entry.contributing),
+                        payload: Object.fromEntries(entry.names),
+                    });
+                }
+                logger.info(`📇 [#344] include-chain index for ${path.basename(key)}: ${entry.names.size} global name(s)`);
+            }
+        }
+
+        const decl = entry.names.get(word.toLowerCase());
+        if (!decl) return null;
+
+        const declPath = decodeURIComponent(decl.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const loaded = this.loadTokensForFile(declPath);
+        if (!loaded) return null;
+        const declared = loaded.tokens.find(tok =>
+            tok.type === TokenType.Label &&
+            tok.line === decl.line &&
+            tok.start === decl.character);
+        if (!declared) return null;
+
+        const typeInfo = SymbolFinderService.extractTypeInfo(declared, loaded.tokens);
+        const lineTokens = loaded.tokens.filter(tok => tok.line === declared.line);
+        return {
+            token: declared,
+            type: typeInfo,
+            scope: { token: declared, type: 'global' },
+            location: {
+                uri: loaded.document.uri,
+                line: declared.line,
+                character: declared.start
+            },
+            declaration: lineTokens.map(tok => tok.value).join(' '),
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
+     * #344 — one recursive walk of the host's data-scope include chain,
+     * collecting every qualifying column-0 declaration label (same guards as
+     * #334: data-scope includes only — MAP/MODULE prototype pulls excluded —
+     * and `X PROCEDURE(...)` labels never count as globals). First
+     * declaration wins on name collisions (Clarion include order).
+     */
+    private async buildIncludeChainIndex(
+        hostTokens: Token[],
+        hostDoc: TextDocument,
+        visited: Set<string>,
+        names: Map<string, ChainDeclInfo>,
+        contributing: Map<string, number>,
+        // #367: ONE slicer shared across the whole recursive walk. A fresh
+        // makeTimeSlicer() per recursion frame reset the 25ms budget at every level,
+        // so a chain N deep could run 25×N ms of synchronous tokenizing before a
+        // single yield fired — the ~1.4s undeclaredVar block. The top-level caller
+        // omits it (fresh slicer); recursive calls thread this one through.
+        timeSlice: () => Promise<void> = makeTimeSlicer()
+    ): Promise<void> {
+        const boundary = SymbolFinderService.globalScopeEndLine(hostTokens);
+        const hostPath = decodeURIComponent(hostDoc.uri.replace('file:///', ''));
+        const hostDir = path.dirname(hostPath);
+
+        for (const t of hostTokens) {
+            if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (t.line >= boundary) continue;
+            await timeSlice();
+
+            // Only follow DATA-scope includes — an INCLUDE inside a structure
+            // (MAP/MODULE prototype pull, #322 shape) brings in prototypes.
+            const insideStructure = hostTokens.some(s =>
+                s.type === TokenType.Structure &&
+                s.finishesAt !== undefined &&
+                s.line <= t.line && s.finishesAt >= t.line);
+            if (insideStructure) continue;
+
+            const fileToken = hostTokens.find(s =>
+                s.line === t.line && s.start > t.start && s.type === TokenType.String);
+            if (!fileToken) continue;
+            const includeName = fileToken.value.replace(/^'|'$/g, '').replace(/''/g, "'").trim();
+            if (!includeName) continue;
+
+            const visitKey = includeName.toLowerCase();
+            if (visited.has(visitKey)) continue;
+            visited.add(visitKey);
+
+            let resolvedPath = path.resolve(hostDir, includeName);
+            let loaded = this.loadTokensForFile(resolvedPath);
+            if (!loaded) {
+                const solutionManager = SolutionManager.getInstance();
+                const viaRedirection = solutionManager
+                    ? await solutionManager.findFileWithExtension(includeName, hostPath)
+                    : null;
+                if (viaRedirection?.path) {
+                    resolvedPath = viaRedirection.path;
+                    loaded = this.loadTokensForFile(viaRedirection.path);
+                }
+            }
+            if (!loaded) {
+                logger.info(`[#334] INCLUDE target not resolvable: ${includeName} (from ${hostDoc.uri})`);
+                continue;
+            }
+            const included = loaded;
+            // #295: record this chain file + its mtime so a warm start can validate
+            // the persisted index and skip re-tokenizing it. Best-effort — a file we
+            // can't stat simply isn't recorded (its absence fails the freshness check
+            // on reload, forcing a safe rebuild).
+            try { contributing.set(resolvedPath, fs.statSync(resolvedPath).mtimeMs); } catch { /* unreadable → skip */ }
+
+            const includedBoundary = SymbolFinderService.globalScopeEndLine(included.tokens);
+            // One pass for the prototype/impl-label exclusion: lines carrying a
+            // PROCEDURE/FUNCTION token after column 0.
+            const procedureLines = new Set<number>();
+            for (const tok of included.tokens) {
+                if (tok.start > 0 &&
+                    (tok.value.toUpperCase() === 'PROCEDURE' || tok.value.toUpperCase() === 'FUNCTION')) {
+                    procedureLines.add(tok.line);
+                }
+            }
+            for (const tok of included.tokens) {
+                if (tok.type !== TokenType.Label || tok.start !== 0) continue;
+                if (tok.line >= includedBoundary) continue;
+                if (procedureLines.has(tok.line)) continue;
+                if (tok.parent === undefined) {
+                    const k = tok.value.toLowerCase();
+                    if (!names.has(k)) {
+                        names.set(k, { uri: included.document.uri, line: tok.line, character: tok.start });
+                    }
+                    continue;
+                }
+                // #347: structure member — reachable only as PREFIX:Label, via the
+                // nearest ancestor structure carrying a non-empty PRE() (the
+                // JCA:StartedDate shape: FILE,PRE(JCA) → Record RECORD,PRE() →
+                // field). Bare member names stay un-indexed (#265: PRE()'d fields
+                // need their qualifier).
+                let anc: Token | undefined = tok.parent;
+                while (anc && !anc.structurePrefix) { anc = anc.parent; }
+                if (!anc?.structurePrefix) continue;
+                const pk = `${anc.structurePrefix.toLowerCase()}:${tok.value.toLowerCase()}`;
+                if (!names.has(pk)) {
+                    names.set(pk, { uri: included.document.uri, line: tok.line, character: tok.start });
+                }
+            }
+
+            // Nested includes (e.g. Globals.inc itself INCLUDEs deeper files).
+            await this.buildIncludeChainIndex(included.tokens, included.document, visited, names, contributing, timeSlice);
+        }
+    }
+
+    /**
+     * Global scope ends at the first CODE keyword, else the first PROCEDURE,
+     * else never (pure declaration files like .inc). Same convention as
+     * `findGlobalVariableInCurrentFile` / the MEMBER-parent walk.
+     */
+    private static globalScopeEndLine(tokens: Token[]): number {
+        const firstCodeToken = tokens.find(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === 'CODE'
+        );
+        if (firstCodeToken) return firstCodeToken.line;
+
+        const firstProcedure = tokens.find(t =>
+            t.subType === TokenType.Procedure ||
+            t.subType === TokenType.GlobalProcedure
+        );
+        return firstProcedure ? firstProcedure.line : Number.MAX_SAFE_INTEGER;
     }
 
     private loadTokensForFile(filePath: string): { document: TextDocument; tokens: Token[] } | null {
@@ -1151,6 +1659,28 @@ export class SymbolFinderService {
             const moduleResult = this.findModuleVariable(word, tokens, document);
             if (moduleResult) return moduleResult;
 
+            // #362 — proc index before BOTH cross-file variable tiers (no locals
+            // exist here to shadow, so it is unconditionally safe). Skips the
+            // include-chain global index build and the sibling family build.
+            const procNoScope = await this.findProcedureViaIndex(word, document);
+            if (procNoScope) {
+                logger.info(`✅ Found as indexed procedure (no-scope, skipped cross-file variable tiers): ${word}`);
+                return procNoScope;
+            }
+
+            // #374 — a built-in (LONGPATH, CLIP, OPEN…) has no source declaration
+            // to find: the cross-file tiers below cold-build the include-chain +
+            // sibling-family indexes (~20s+ first-ever, measured 24.5s on F12
+            // LONGPATH) only to prove a miss. Every cheaper tier has had its turn
+            // — module data above, and a user MAP procedure shadowing a built-in
+            // name resolves via the proc index — so bail before the expense.
+            // Same precedent as #345's candidate filter ("'OPEN' alone triggered
+            // the full include-chain cold build").
+            if (BuiltinFunctionService.getInstance().isBuiltin(word)) {
+                logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers (no-scope)`);
+                return null;
+            }
+
             // #319 (reopen): global BEFORE the sibling walk. Globals like
             // GlobalResponse occur in EVERY member module, so the index prune
             // can't help the walk — and the parent lookup is one file. Clarion
@@ -1199,6 +1729,35 @@ export class SymbolFinderService {
         if (result) {
             logger.info(`✅ Found as module variable: ${word}`);
             return result;
+        }
+
+        // 3b. #362 — a name the procedure index knows is a PROCEDURE (a MAP/MODULE
+        // prototype in an INCLUDEd library header, e.g. NetTalk's NetDebugTrace) is
+        // neither a global nor a module variable — the two cross-file tiers below
+        // BOTH pay to prove that the hard way: findGlobalVariable builds the host's
+        // #344 include-chain global index, and the sibling walk builds the whole
+        // program family's label index (~15s each on a big program). Since a name
+        // in the procedure index cannot also be a variable (same namespace in
+        // Clarion), resolve it here — after the cheap in-document tiers so a
+        // same-named local still shadows — and skip BOTH expensive tiers.
+        result = await this.findProcedureViaIndex(word, document);
+        if (result) {
+            logger.info(`✅ Found as indexed procedure (skipped cross-file variable tiers): ${word}`);
+            return result;
+        }
+
+        // 3c. #374 — a built-in (LONGPATH, CLIP, OPEN…) has no source declaration
+        // to find: the two cross-file tiers below cold-build the include-chain +
+        // sibling-family indexes (~20s+ first-ever, measured 24.5s on F12
+        // LONGPATH) only to prove a miss. Every cheaper tier has had its turn —
+        // a same-named local/module variable shadows above (tiers 1-3), and a
+        // user MAP procedure shadowing a built-in name resolves via the proc
+        // index (3b) — so bail before the expense. Same precedent as #345's
+        // candidate filter ("'OPEN' alone triggered the full include-chain cold
+        // build").
+        if (BuiltinFunctionService.getInstance().isBuiltin(word)) {
+            logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers`);
+            return null;
         }
 
         // 4. Try as global variable — #319 (reopen): BEFORE the sibling walk.
@@ -1365,6 +1924,127 @@ export class SymbolFinderService {
     }
 
     /**
+     * #362 — resolve a cross-file PROCEDURE from the declaration index instead of
+     * the tier-6 sibling-member VARIABLE walk. The index (a cheap regex scan) knows
+     * where MAP/MODULE prototypes live — e.g. NetTalk's `NetDebugTrace` inside a
+     * `module('')` block of NetMap.inc. We load ONLY the declaring file the index
+     * points at and confirm the declaration with the SAME module-scoped check the
+     * hover walk uses (MapProcedureResolver.findModuleScopedProcDeclLine) — parity
+     * by construction. Nothing else is tokenized, and crucially the tier-6 family
+     * label index (~15s on a 279-file program) is never built for a procedure that
+     * cannot be a module variable.
+     *
+     * Scope is reported as 'module' so the DefinitionProvider cross-file
+     * accessibility gate (which only re-checks 'global' results) passes the
+     * navigation through untouched — a library header prototype is always a valid
+     * jump target for its call site. A NON-module-scoped index hit (e.g. a bare
+     * col-0 global impl) is deliberately NOT resolved here; it returns null and the
+     * caller falls through to the unchanged tiers, so this can only speed up, never
+     * change an answer.
+     */
+    private async findProcedureViaIndex(word: string, document: TextDocument): Promise<SymbolInfo | null> {
+        // Procedure names never contain dots (a dotted word is member access) —
+        // and the index keys methods by their dotted name, which this tier is not
+        // trying to resolve. Skip the index probe for anything qualified.
+        if (word.includes('.') || word.includes(':')) return null;
+
+        const hits = StructureDeclarationIndexer.getInstance().findProcedure(word);
+        if (hits.length === 0) return null;
+
+        // TRUST the index. Its scanner only records MAP/MODULE-context prototypes
+        // and column-0 procedure declarations, so a hit IS a real declaration —
+        // dropping it through to the ~15s sibling-member VARIABLE walk is never the
+        // right answer. We still try a token re-confirm for a PRECISE column and
+        // to skip the (rare) case where a hit's file no longer tokenizes as a
+        // MODULE prototype, but we resolve on the FIRST hit regardless: a stale
+        // column is a cosmetic cursor offset; a 15s freeze is the bug.
+        const wordLower = word.toLowerCase();
+        // #364 — when the name exists in more than one project (AppendText in both
+        // PRVData and SQLInstallAndUpgrade), prefer the hit in the CURRENT document's
+        // project so F12/hover/FAR resolve within the project the cursor is in rather
+        // than whichever the index lists first.
+        let hit = hits[0];
+        if (hits.length > 1) {
+            const sm = SolutionManager.getInstance();
+            const curPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const curProject = sm?.findProjectForFile(curPath);
+            if (curProject) {
+                const inProject = hits.find(h => sm!.findProjectForFile(h.filePath) === curProject);
+                if (inProject) hit = inProject;
+            }
+        }
+        const loaded = this.loadTokensForFile(hit.filePath);
+        let tok: Token | undefined;
+        let confirmed = false;
+        if (loaded) {
+            const moduleScoped = this.findModuleScopedProcToken(loaded.tokens, wordLower);
+            if (moduleScoped) { tok = moduleScoped; confirmed = true; }
+            else {
+                // Lenient: any token with this name on the indexed line (covers a
+                // shorthand prototype the module-scoped check missed, e.g. an
+                // unpaired MODULE range in an odd header layout).
+                tok = loaded.tokens.find(t => t.line === hit.line && t.value.toLowerCase() === wordLower);
+            }
+        }
+        const uri = loaded ? loaded.document.uri : pathToCanonicalUri(hit.filePath);
+        const line = tok ? tok.line : hit.line;
+        // #364 — the token carrying subType=MapProcedure has an INCONSISTENT .value:
+        // the procedure NAME for a keyword-less shorthand prototype (`Name(params)`),
+        // but the literal "PROCEDURE" keyword for the `Name PROCEDURE` form (there the
+        // name lives on t.label). Downstream consumers require token.value === the
+        // procedure name — most importantly FAR, which searches for `symbolInfo.token.value`
+        // (a "PROCEDURE"-valued token made FAR search for the keyword, matching only
+        // declaration lines → the "2 references" under-count). Always synthesize a
+        // token whose value IS the name, positioned at the name's column.
+        let character = tok ? tok.start : 0;
+        if (loaded && tok && tok.value.toLowerCase() !== wordLower) {
+            const nameTok = loaded.tokens.find(t => t.line === tok!.line && t.value.toLowerCase() === wordLower);
+            if (nameTok) character = nameTok.start;
+        }
+        const token = { value: word, type: TokenType.Label, line, start: character } as unknown as Token;
+
+        perfLogger.perf("proc index fast-path", {
+            word,
+            hits: hits.length,
+            file: path.basename(hit.filePath),
+            line,
+            confirmed: String(confirmed),
+            loaded: String(!!loaded),
+            resolved: 'true'
+        });
+
+        return {
+            token,
+            type: 'PROCEDURE',
+            scope: { token, type: 'module' },
+            location: { uri, line, character },
+            originalWord: word,
+            searchWord: word
+        };
+    }
+
+    /**
+     * #362 — the module-scoped declaration test, matching
+     * MapProcedureResolver.findModuleScopedProcDeclLine so the F12 index fast-path
+     * and the hover walk agree by construction: a MapProcedure/Function token named
+     * `nameLower` sitting INSIDE a MODULE block. Returns the token (for its exact
+     * line/character), or null.
+     */
+    private findModuleScopedProcToken(tokens: Token[], nameLower: string): Token | null {
+        const moduleRanges = tokens
+            .filter(t => t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        if (moduleRanges.length === 0) return null;
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+            moduleRanges.some(r => t.line > r.start && t.line < r.end)
+        );
+        return decl ?? null;
+    }
+
+    /**
      * Look up a named type (CLASS, INTERFACE, QUEUE, GROUP, etc.) in the
      * StructureDeclarationIndexer for the document's owning project.
      *
@@ -1460,13 +2140,10 @@ export class SymbolFinderService {
         while ((m = includeRe.exec(source)) !== null) {
             await cooperativeCheckpoint(scanned++);
             const includeFile = m[1];
-            let resolved: string | null = null;
-            if (sm?.solution) {
-                for (const project of sm.solution.projects) {
-                    const r = project.getRedirectionParser().findFile(includeFile);
-                    if (r?.path && fs.existsSync(r.path)) { resolved = r.path; break; }
-                }
-            }
+            // #328: owner-project-first redirection
+            let resolved: string | null = sm?.solution
+                ? resolveViaProjectRedirection328(includeFile, fromPath)
+                : null;
             if (!resolved) {
                 const candidate = path.join(fromDir, includeFile);
                 if (fs.existsSync(candidate)) resolved = candidate;

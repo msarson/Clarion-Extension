@@ -1,7 +1,6 @@
 import { commands, window, ExtensionContext, TreeView, workspace, Disposable, languages, extensions, window as vscodeWindow } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 
-import { DocumentManager } from '../documentManager';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from '../views/StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
@@ -26,7 +25,6 @@ export interface ActivationState {
     solutionTreeDataProvider?: SolutionTreeDataProvider;
     structureViewProvider?: StructureViewProvider;
     structureView?: TreeView<any>;
-    documentManager?: DocumentManager;
     diagnosticCollection: any;
 }
 
@@ -105,7 +103,7 @@ export async function startClientServer(
 
     if (!state.client) {
         logger.info("🚀 Starting Clarion Language Server...");
-        state.client = await startLanguageServer(context, state.documentManager, state.structureViewProvider);
+        state.client = await startLanguageServer(context, state.structureViewProvider);
     }
     logger.info("✅ Phase 6 complete: Language server started");
 }
@@ -174,7 +172,7 @@ export async function setupFolderDependentFeatures(
     isTrusted: boolean,
     state: ActivationState,
     isRefreshingRef: { value: boolean },
-    reinitializeEnvironment: (refreshDocs?: boolean) => Promise<DocumentManager>,
+    reinitializeEnvironment: (refreshDocs?: boolean) => Promise<void>,
     workspaceHasBeenTrusted: (context: ExtensionContext, disposables: Disposable[]) => Promise<void>,
     disposables: Disposable[]
 ): Promise<void> {
@@ -199,13 +197,13 @@ export async function setupFolderDependentFeatures(
                         }
                     }
                     
-                    await handleSettingsChange(context, reinitializeEnvironment, state.documentManager);
+                    await handleSettingsChange(context, reinitializeEnvironment);
                 }
             })
         );
 
         if (globalSolutionFile) {
-            await createSolutionFileWatchers(context, reinitializeEnvironment, state.documentManager);
+            await createSolutionFileWatchers(context, reinitializeEnvironment);
         }
 
         context.subscriptions.push(
@@ -213,7 +211,7 @@ export async function setupFolderDependentFeatures(
                 if (event.affectsConfiguration("clarion.redirectionFile") ||
                     event.affectsConfiguration("clarion.redirectionPath")) {
                     logger.info("🔄 Redirection settings changed. Recreating file watchers...");
-                    await createSolutionFileWatchers(context, reinitializeEnvironment, state.documentManager);
+                    await createSolutionFileWatchers(context, reinitializeEnvironment);
                 }
             })
         );

@@ -3,7 +3,8 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
+import { SymbolFinderService, resetSymbolFinderPerfStats, readSymbolFinderPerfStats } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
@@ -15,6 +16,7 @@ import LoggerManager from '../../logger';
 // output channel; release users won't see them (no extra noise). Promote to
 // error level temporarily when chasing a regression on the validator path.
 const logger = LoggerManager.getLogger('UndeclaredVariableDiagnostics');
+const perfLogger = LoggerManager.getLogger('UndeclaredVariableDiagnostics.Perf', 'perf');
 
 /**
  * Issue #62 — opt-in diagnostic for identifiers used in code that don't
@@ -107,10 +109,27 @@ export async function validateUndeclaredVariablesAsync(
     document: TextDocument,
     symbolFinder: SymbolFinderService
 ): Promise<Diagnostic[]> {
+    const t0 = Date.now();
     const ctx = buildScopeContext(tokens, document);
     if (!ctx) return [];
+    const ctxMs = Date.now() - t0;
     await augmentDeclaredViaSymbolFinder(ctx, document, symbolFinder);
-    return collectUndeclaredDiagnostics(ctx, document);
+    const augmentDoneMs = Date.now() - t0;
+    const result = collectUndeclaredDiagnostics(ctx, document);
+    const totalMs = Date.now() - t0;
+    if (totalMs > 1000) {
+        // Stage split so the augment-detail line can't hide sync stages
+        // (#345 attribution — the wrapper's 'Validator undeclaredVar' total
+        // additionally includes DiagnosticProvider.filterOmitted).
+        perfLogger.perf('undeclaredVar stage split', {
+            total_ms: totalMs,
+            ctx_ms: ctxMs,
+            augment_ms: augmentDoneMs - ctxMs,
+            collect_ms: totalMs - augmentDoneMs,
+            uri: document.uri
+        });
+    }
+    return result;
 }
 
 interface ScopeContext {
@@ -175,6 +194,10 @@ function buildScopeContext(tokens: Token[], document: TextDocument): ScopeContex
  * procedure's CODE marker. Resolved names are added back to declaredNames
  * (memoization: at most one async lookup per unique name per cycle).
  */
+// #351's isColonAdjacentFragment was folded into isGluedNumberSuffix (#358):
+// that discriminator already covers ':' on both sides AND the dotted-member
+// case, so the augment pass now shares the collect pass's single check.
+
 async function augmentDeclaredViaSymbolFinder(
     ctx: ScopeContext,
     document: TextDocument,
@@ -197,6 +220,21 @@ async function augmentDeclaredViaSymbolFinder(
         // tokenizer emits these as TokenType.Variable; without this filter they trip
         // the SymbolFinder cross-file lookup AND fire false-positive diagnostics.
         if (KeywordService.getInstance().isKeyword(candidate.name)) continue;
+        // #345: built-in statements/functions (OPEN, GET, CLEAR, ...) are not in
+        // the 40-entry keyword list — 'OPEN' alone triggered the full include-
+        // chain cold build (32s measured) hunting a declaration that can't exist.
+        if (BuiltinFunctionService.getInstance().isBuiltin(candidate.name)) continue;
+        // #351/#358: skip tokens that are FRAGMENTS of a larger compound the
+        // tokenizer split — the same discriminator the COLLECT pass uses
+        // (isGluedNumberSuffix). Covers colon-adjacent prefix chains
+        // (ScrollSort:AllowAlpha, #351) AND dotted-member leaves: the trailing
+        // segment of `TemplateHelper.Debug.DriverOptions` tokenizes as a bare
+        // Variable preceded by '.', so it looks like a standalone name but is
+        // member access that can never resolve. 51 such leaves on the real
+        // IBSCommon.clw cost ~9s warm / triggered the ~18.5s chain cold build,
+        // while COLLECT already ignored them (asymmetry = pure wasted lookups).
+        // Using the shared discriminator realigns AUGMENT with COLLECT (#300).
+        if (isGluedNumberSuffix(t, document)) continue;
         candidateNames.add(upper);
     }
     if (candidateNames.size === 0) return;
@@ -216,18 +254,56 @@ async function augmentDeclaredViaSymbolFinder(
     // knows the name, don't flag it. The SDI lookup is an in-memory map hit, so it runs
     // FIRST — sparing the (more expensive) findSymbol scope walk for genuine variables.
     const sdi = StructureDeclarationIndexer.getInstance();
+    // #345 — attribute where the augment loop's time goes: SDI vs findSymbol,
+    // and within findSymbol the global-include vs sibling-member tiers.
+    const augmentT0 = Date.now();
+    resetSymbolFinderPerfStats();
+    let sdiHits = 0, resolvedCount = 0, errorCount = 0, findSymbolMs = 0;
+    const slowest: Array<{ name: string; ms: number }> = [];
+    const unresolvedNames: string[] = [];
     for (const upperName of candidateNames) {
         await timeSlice();
         try {
             if (sdi.find(upperName).length > 0) {
                 ctx.declaredNames.add(upperName);
+                sdiHits++;
                 continue;
             }
+            const nameT0 = Date.now();
             const resolved = await symbolFinder.findSymbol(upperName, document, probePos);
-            if (resolved) ctx.declaredNames.add(upperName);
+            const nameMs = Date.now() - nameT0;
+            findSymbolMs += nameMs;
+            slowest.push({ name: upperName, ms: nameMs });
+            if (resolved) { ctx.declaredNames.add(upperName); resolvedCount++; }
+            else { unresolvedNames.push(upperName); }
         } catch (err) {
+            errorCount++;
+            unresolvedNames.push(`${upperName}(ERR)`);
             logger.info(`[#115] symbolFinder.findSymbol error for "${upperName}": ${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+    const augmentMs = Date.now() - augmentT0;
+    if (augmentMs > 1000) {
+        const sf = readSymbolFinderPerfStats();
+        const top = slowest.sort((a, b) => b.ms - a.ms).slice(0, 5)
+            .map(s => `${s.name}=${s.ms}`).join(', ');
+        // NB: perf-channel loggers silence info(); only perf() emits.
+        perfLogger.perf('undeclaredVar augment detail', {
+            total_ms: augmentMs,
+            candidates: candidateNames.size,
+            sdi_hits: sdiHits,
+            resolved: resolvedCount,
+            unresolved: unresolvedNames.length,
+            errors: errorCount,
+            findSymbol_ms: findSymbolMs,
+            global_tier_ms: sf.globalMs,
+            global_tier_calls: sf.globalCalls,
+            sibling_tier_ms: sf.siblingMs,
+            sibling_tier_calls: sf.siblingCalls,
+            top,
+            unresolved_names: unresolvedNames.slice(0, 10).join(', '),
+            uri: document.uri
+        });
     }
 }
 
@@ -374,6 +450,9 @@ function detectCheckableName(token: Token): CheckableName | null {
             // real app: it's stoplisted in the reference index, so mayContain answers
             // true conservatively and the sibling walk loaded the whole family for it.
             if (CLARION_STRUCTURAL_WORDS.has(token.value.toLowerCase())) return null;
+            // #345 — built-in statements/functions (OPEN, GET, CLEAR, ...) are
+            // runtime-provided; never flag and never spend lookups on them.
+            if (BuiltinFunctionService.getInstance().isBuiltin(token.value)) return null;
             return { name: token.value, length: token.value.length };
         }
     }

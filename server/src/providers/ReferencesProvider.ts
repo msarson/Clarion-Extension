@@ -10,6 +10,16 @@ import { SolutionManager } from '../solution/solutionManager';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SymbolFinderService, SymbolInfo } from '../services/SymbolFinderService';
 import { ScopeTypeIndexService } from '../services/ScopeTypeIndexService';
+import { ExpExportIndex } from '../services/ExpExportIndex';
+
+/** #330 tier 2 — structural project surface for the DLL-export expansion. */
+interface DllProjectLike {
+    name: string;
+    path: string;
+    sourceFiles?: Array<{ name?: string; relativePath?: string }>;
+    projectReferences?: Array<{ name?: string }>;
+    getRedirectionParser?: () => { findFile: (name: string) => { path: string } | null } | undefined;
+}
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
@@ -158,7 +168,7 @@ export class ReferencesProvider {
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },
         token?: CancellationToken,
-        opts?: { includeOmitted?: boolean }
+        opts?: { includeOmitted?: boolean; crossProjectDll?: boolean }
     ): Promise<Location[] | null> {
         const traceStart = Date.now();
         this.farTrace = {
@@ -168,7 +178,7 @@ export class ReferencesProvider {
         };
         let resultCount = -1; // -1 = null result
         try {
-            const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token);
+            const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token, opts?.crossProjectDll !== false);
             // #322: dedup by NORMALIZED path — the cursor document's URI casing can
             // differ from the file-walk casing (CloneScript.clw:196 AND
             // clonescript.clw:196 in the same result set). Same discipline as the
@@ -266,7 +276,10 @@ export class ReferencesProvider {
         document: TextDocument,
         position: { line: number; character: number },
         context: { includeDeclaration: boolean },
-        token?: CancellationToken
+        token?: CancellationToken,
+        // #330 tier 2: rename opts out — consumer MAP re-declarations are
+        // GENERATED code; the durable edit belongs in the .app (see #325).
+        crossProjectDll: boolean = true
     ): Promise<Location[] | null> {
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
@@ -381,6 +394,27 @@ export class ReferencesProvider {
                     return this.provideRoutineReferences(word, routineToken, routineStructure!, document, context.includeDeclaration);
                 }
             }
+
+            // ── Route G (#321): GOTO statement label ──
+            // Same shape as Route R with GOTO's tighter scope: exactly the
+            // current ROUTINE-or-PROCEDURE unit (Language Reference). Per-hit
+            // re-resolution excludes same-name labels in other units AND keeps
+            // procedure code and routine bodies apart — the generic symbol
+            // path treated the whole procedure (routines included) as one
+            // 'local' scope and bled across the unit boundary.
+            const gotoStructure = TokenCache.getInstance().getStructure(document);
+            const gotoLabelToken = gotoStructure
+                ? TokenHelper.findScopedStatementLabelToken(gotoStructure, tokens, word, position.line)
+                : undefined;
+            if (gotoLabelToken) {
+                const onLabel = gotoLabelToken.line === position.line;
+                const gotoMatch = fullLine.match(ClarionPatterns.GOTO_LABEL);
+                const onGotoSite = !!gotoMatch && gotoMatch[1].toLowerCase() === word.toLowerCase();
+                if (onLabel || onGotoSite) {
+                    this.trace({ route: 'gotoLabel', word });
+                    return this.provideGotoLabelReferences(word, gotoLabelToken, gotoStructure!, tokens, document, context.includeDeclaration);
+                }
+            }
         }
 
         // Route to member-access path when word contains a dot
@@ -474,7 +508,7 @@ export class ReferencesProvider {
 
         // ── Route D: CLASS TYPE name — always global, never scope-limited ──
         // Must run before findSymbol to prevent parameter/local scope limiting.
-        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration, token);
+        const classTypeRef = await this.findClassTypeReferences(word, document, context.includeDeclaration, token, crossProjectDll);
         if (classTypeRef !== null) {
             this.trace({ route: 'class-type', word });
             return classTypeRef;
@@ -485,11 +519,11 @@ export class ReferencesProvider {
         if (!symbolInfo) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
             this.trace({ route: 'procedure-hunt', word });
-            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token);
+            return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token, undefined, crossProjectDll);
         }
 
         const searchWord = symbolInfo.token.value;
-        const filesToSearch = this.getFilesToSearch(symbolInfo, document);
+        const filesToSearch = this.getFilesToSearch(symbolInfo, document, crossProjectDll);
         this.trace({ route: 'plain-symbol', word, scope: symbolInfo.scope.type, files: filesToSearch.length });
 
         // Build OverloadFilter for procedure / method declarations to distinguish
@@ -992,13 +1026,29 @@ export class ReferencesProvider {
         // when FRG is empty (test fixtures without graph setup).
         const isLocalClass = !effectiveModuleFile && !!className &&
             this.isClassDeclaredInDocument(className, document);
+
+        // #346: a class declared inside a procedure's DATA section is invisible
+        // outside its file — and sibling members each carry their OWN same-named
+        // class (every generated window has a BRW1), so family scanning returns
+        // other procedures' unrelated instances. Restrict to the current doc.
+        // Module-level local classes keep the family widening (3be2b68d Eve pin:
+        // sibling members hold real instance callers of module-data TYPE classes).
+        const isProcedureLocalClass = isLocalClass &&
+            this.isClassProcedureLocal(className!, document);
         if (isLocalClass) {
-            logger.test(`📌 [FAR] "${className}" is a local class — widening search to MEMBER siblings + reverse-includes`);
+            logger.test(`📌 [FAR] "${className}" is a local class — ${isProcedureLocalClass
+                ? 'procedure-local, restricting to current document'
+                : 'widening search to MEMBER siblings + reverse-includes'}`);
         }
 
-        const filesToSearch = isLocalClass
-            ? this.getLocalClassSearchFiles(document)
-            : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        const filesToSearch = isProcedureLocalClass
+            ? [document.uri]
+            : isLocalClass
+                ? this.getLocalClassSearchFiles(document)
+                : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
+        if (isProcedureLocalClass) {
+            this.trace({ files_source: 'proc-local-current-doc' });
+        }
 
         this.trace({
             member: memberName,
@@ -1822,6 +1872,74 @@ export class ReferencesProvider {
         return locations;
     }
 
+    /**
+     * #321 — references for a GOTO statement label: the label (once) + every
+     * GOTO site that RESOLVES to it. Each `GOTO <name>` occurrence is
+     * re-resolved through `TokenHelper.findScopedStatementLabelToken` at ITS
+     * line, which enforces GOTO's one-unit scope for free: a same-name label
+     * in another procedure — or in a routine of the SAME procedure — resolves
+     * to its own token and is excluded. GOTO cannot cross files by language
+     * rule, so no cross-file scan exists.
+     */
+    private provideGotoLabelReferences(
+        word: string,
+        labelToken: Token,
+        structure: DocumentStructure,
+        tokens: Token[],
+        document: TextDocument,
+        includeDeclaration: boolean
+    ): Location[] {
+        const locations: Location[] = [];
+        if (includeDeclaration) {
+            locations.push(Location.create(document.uri, {
+                start: { line: labelToken.line, character: labelToken.start },
+                end: { line: labelToken.line, character: labelToken.start + labelToken.value.length }
+            }));
+        }
+
+        const wordLower = word.toLowerCase();
+        const gotoRe = /\bGOTO\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
+        // #321 stretch: BREAK/CYCLE sites are the loop-label reference family —
+        // when the label names a labelled LOOP/ACCEPT, its BREAK/CYCLE sites
+        // re-resolve via the enclosing-loop rule (which excludes same-name
+        // labels in other procedures by range alone) and join the set.
+        const breakCycleRe = /\b(?:BREAK|CYCLE)\s+([A-Za-z_][A-Za-z0-9_:]*)/gi;
+        for (let ln = 0; ln < document.lineCount; ln++) {
+            let text = document.getText({
+                start: { line: ln, character: 0 },
+                end: { line: ln, character: Number.MAX_VALUE }
+            });
+            // Blank out string literals (preserving columns), then ignore
+            // matches at or beyond a line comment.
+            text = text.replace(/'(?:[^']|'')*'/g, s => ' '.repeat(s.length));
+            const bang = text.indexOf('!');
+            gotoRe.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = gotoRe.exec(text)) !== null) {
+                if (bang !== -1 && m.index >= bang) break;
+                if (m[1].toLowerCase() !== wordLower) continue;
+                if (TokenHelper.findScopedStatementLabelToken(structure, tokens, m[1], ln) !== labelToken) continue;
+                const nameStart = m.index + m[0].length - m[1].length;
+                locations.push(Location.create(document.uri, {
+                    start: { line: ln, character: nameStart },
+                    end: { line: ln, character: nameStart + m[1].length }
+                }));
+            }
+            breakCycleRe.lastIndex = 0;
+            while ((m = breakCycleRe.exec(text)) !== null) {
+                if (bang !== -1 && m.index >= bang) break;
+                if (m[1].toLowerCase() !== wordLower) continue;
+                if (TokenHelper.findEnclosingLoopLabelToken(tokens, m[1], ln) !== labelToken) continue;
+                const nameStart = m.index + m[0].length - m[1].length;
+                locations.push(Location.create(document.uri, {
+                    start: { line: ln, character: nameStart },
+                    end: { line: ln, character: nameStart + m[1].length }
+                }));
+            }
+        }
+        return locations;
+    }
+
     private async buildClassFamily(declaringClass: string, fileUris: string[], token?: CancellationToken): Promise<Set<string>> {
         const refIdx = ReferenceCountIndex.getInstance();
         const family = new Set<string>([declaringClass.toLowerCase()]);
@@ -1902,6 +2020,25 @@ export class ReferencesProvider {
             t.subType === TokenType.Class &&
             (t.label ?? '').toLowerCase() === nameLower
         );
+    }
+
+    /**
+     * True when the class's declaration in this document sits inside a
+     * procedure's DATA section (between a procedure/method label and its CODE
+     * marker) — procedure-local scope, unreferenceable from other files (#346).
+     */
+    private isClassProcedureLocal(className: string, document: TextDocument): boolean {
+        const tokens = this.tokenCache.getTokens(document);
+        const nameLower = className.toLowerCase();
+        const decl = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.subType === TokenType.Class &&
+            (t.label ?? '').toLowerCase() === nameLower);
+        if (!decl) { return false; }
+        return tokens.some(t =>
+            TokenHelper.isProcedureOrFunction(t) &&
+            t.line < decl.line &&
+            (t.executionMarker?.line ?? t.finishesAt ?? -1) > decl.line);
     }
 
     /**
@@ -2477,7 +2614,7 @@ export class ReferencesProvider {
     /**
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
-    private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] {
+    private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument, crossProjectDll: boolean = true): string[] {
         const scopeType = symbolInfo.scope.type;
         const solutionManager = SolutionManager.getInstance();
         const graph = FileRelationshipGraph.getInstance();
@@ -2536,6 +2673,22 @@ export class ReferencesProvider {
                         for (const includer of graph.getIncludingFiles(incEdge.toFile)) {
                             pushUnique(includer);
                         }
+                    }
+                }
+
+                // #330 tier 2: a MAP procedure declared inside MODULE('x.dll')
+                // (consumer re-declaration) — or declared in a project whose
+                // .exp exports it (defining side) — unifies FAR across the DLL
+                // boundary: the defining project plus every consumer, via the
+                // load-time-cached projectReferences reverse lookup. The .exp
+                // check is lazy + mtime-validated (no load-time work, per the
+                // #330 perf constraint).
+                if (crossProjectDll) {
+                    const word330 = symbolInfo.searchWord ?? symbolInfo.originalWord ?? symbolInfo.token.value;
+                    const defining330 = this.resolveDllDefiningProject(symbolInfo.location.uri, symbolInfo.location.line);
+                    if (defining330 && this.expandDllExportFamily(word330, defining330, implFiles)) {
+                        logger.test(`[FAR] Scope="module" (MAP procedure) → #330 DLL-export family, ${implFiles.length} file(s)`);
+                        return implFiles;
                     }
                 }
 
@@ -2598,6 +2751,18 @@ export class ReferencesProvider {
                         allFiles.push(uri);
                     }
                 }
+                // #330 tier 2: an exported procedure's references span the
+                // defining project AND every consuming project. The defining
+                // project comes from the DECLARATION SHAPE (a consumer-side
+                // hunt lands here with declProject = the consumer, and its
+                // re-declaration's MODULE('x.dll') names the real definer).
+                if (crossProjectDll && symbolInfo.type === 'PROCEDURE') {
+                    const word330 = symbolInfo.searchWord ?? symbolInfo.originalWord ?? symbolInfo.token.value;
+                    const defining330 = this.resolveDllDefiningProject(symbolInfo.location.uri, symbolInfo.location.line)
+                        ?? (declProject as unknown as DllProjectLike);
+                    this.expandDllExportFamily(word330, defining330, allFiles);
+                }
+
                 logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
                 return allFiles;
             }
@@ -2622,6 +2787,82 @@ export class ReferencesProvider {
         logger.test(`[FAR] Scope="${scopeType}" → global but NO solution loaded, searching ${noSolutionFiles.length} connected file(s)`);
 
         return noSolutionFiles;
+    }
+
+    /**
+     * #330 tier 2 — resolve the DEFINING project for a MAP declaration.
+     * A declaration inside MODULE('x.dll'|'x.lib') maps the library basename
+     * to the project whose main source is `<base>.clw` (the #299 pattern —
+     * verified 1:1 against projectReferences on the Direct10 substrate);
+     * any other declaration belongs to the project owning the declaring file.
+     * Third-party DLLs (no in-solution project) resolve to null.
+     */
+    private resolveDllDefiningProject(declUri: string, declLine: number): DllProjectLike | null {
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution?.projects?.length) return null;
+
+        const tokens = this.getTokensForUri(declUri);
+        const declTok = tokens?.find(t =>
+            t.line === declLine &&
+            t.parent !== undefined &&
+            t.parent.type === TokenType.Structure &&
+            t.parent.value.toUpperCase() === 'MODULE' &&
+            t.parent.referencedFile !== undefined);
+        const moduleRef = declTok?.parent?.referencedFile;
+
+        if (moduleRef) {
+            const ext = path.extname(moduleRef).toLowerCase();
+            if (ext === '.dll' || ext === '.lib') {
+                const base = path.basename(moduleRef, path.extname(moduleRef)).toLowerCase();
+                return (solutionManager.solution.projects as DllProjectLike[]).find(p =>
+                    (p.sourceFiles || []).some(sf => sf?.name && sf.name.toLowerCase() === `${base}.clw`)) ?? null;
+            }
+        }
+
+        const declPath = decodeURIComponent(declUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        return (solutionManager.findProjectForFile?.(declPath) as DllProjectLike | undefined) ?? null;
+    }
+
+    /**
+     * #330 tier 2 — when `word` is a plain procedure exported from
+     * `defining`'s .exp (lazy, mtime-validated ExpExportIndex — never parsed
+     * at solution load), extend `files` with the defining project's sources
+     * plus every CONSUMER project's sources. Consumers come from the reverse
+     * projectReferences lookup — data already cached at load, verified ≡ the
+     * MODULE('x.dll') import set on the real 43-project substrate. Consumer
+     * files are pre-pruned via ReferenceCountIndex.mayContain (safe-prune:
+     * unknown/unbuilt answers true). Returns true when the expansion applied.
+     */
+    private expandDllExportFamily(word: string, defining: DllProjectLike, files: string[]): boolean {
+        if (!word || !ExpExportIndex.getInstance().isExportedProcedure(defining, word)) return false;
+        const solutionManager = SolutionManager.getInstance();
+        if (!solutionManager?.solution?.projects?.length) return false;
+
+        const refIdx = ReferenceCountIndex.getInstance();
+        const seen = new Set(files.map(u => decodeURIComponent(u).toLowerCase()));
+        const push = (project: DllProjectLike, prune: boolean) => {
+            for (const sf of project.sourceFiles || []) {
+                if (!sf?.relativePath) continue;
+                const fullPath = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                if (prune && !refIdx.mayContain(fullPath, word)) continue;
+                const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                const key = decodeURIComponent(uri).toLowerCase();
+                if (seen.has(key)) continue;
+                seen.add(key);
+                files.push(uri);
+            }
+        };
+
+        push(defining, false);
+        const defNameLower = defining.name.toLowerCase();
+        for (const p of solutionManager.solution.projects as DllProjectLike[]) {
+            if (p === defining) continue;
+            if ((p.projectReferences || []).some(r => r?.name && r.name.toLowerCase() === defNameLower)) {
+                push(p, true);
+            }
+        }
+        logger.test(`[FAR] #330: "${word}" exported from ${defining.name} → DLL family spans ${files.length} file(s)`);
+        return true;
     }
 
     private getNoSolutionConnectedFiles(seedUris: Set<string>, currentDocument: TextDocument): string[] {
@@ -3153,7 +3394,8 @@ export class ReferencesProvider {
         word: string,
         document: TextDocument,
         includeDeclaration: boolean,
-        token?: CancellationToken
+        token?: CancellationToken,
+        crossProjectDll: boolean = true
     ): Promise<Location[] | null> {
         // Check if the word is a known CLASS type via the class definition indexer
         const fromPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
@@ -3179,7 +3421,7 @@ export class ReferencesProvider {
 
         // It IS a class type — do a global search using the procedure-reference machinery
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
-        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token, knownDecl);
+        return this.findProcedureReferences(word, document, tokens, includeDeclaration, token, knownDecl, crossProjectDll);
     }
 
     private async findProcedureReferences(
@@ -3188,7 +3430,8 @@ export class ReferencesProvider {
         currentTokens: Token[],
         includeDeclaration: boolean,
         token?: CancellationToken,
-        knownDecl?: { uri: string; line: number }
+        knownDecl?: { uri: string; line: number },
+        crossProjectDll: boolean = true
     ): Promise<Location[] | null> {
         // If the current file is a local-MAP implementation target, restrict search
         // to only files reachable via that same procedure-local MAP scope.
@@ -3231,7 +3474,19 @@ export class ReferencesProvider {
                 // 2. Check all cached project files
                 const solutionManager = SolutionManager.getInstance();
                 if (solutionManager?.solution?.projects?.length) {
-                    outerLoop: for (const project of solutionManager.solution.projects) {
+                    // #364 — hunt the CURRENT document's project FIRST. A procedure
+                    // name that also exists in another project (e.g. AppendText in
+                    // both PRVData and SQLInstallAndUpgrade) must resolve to the
+                    // declaration in the project the user is actually in. Without
+                    // this, a same-named declaration in an earlier-listed project
+                    // wins, and getFilesToSearch then scopes the whole search to
+                    // that wrong project — leaking its references and dropping every
+                    // real one (the reported "only 2 references" under-count).
+                    const currentProject = solutionManager.findProjectForFile(currentPath);
+                    const orderedProjects = currentProject
+                        ? [currentProject, ...solutionManager.solution.projects.filter(p => p !== currentProject)]
+                        : solutionManager.solution.projects;
+                    outerLoop: for (const project of orderedProjects) {
                         for (const sourceFile of project.sourceFiles) {
                             if (await this.yieldIfNeeded(++ycHunt, token)) return null;
                             const fullPath = path.isAbsolute(sourceFile.relativePath) ? sourceFile.relativePath : path.join(project.path, sourceFile.relativePath);
@@ -3317,7 +3572,7 @@ export class ReferencesProvider {
         };
 
         // Search all project files, plus any INC file where the MAP/MODULE declaration lives.
-        const filesToSearch = this.getFilesToSearch(syntheticInfo, document);
+        const filesToSearch = this.getFilesToSearch(syntheticInfo, document, crossProjectDll);
         if (incDecl && !filesToSearch.includes(incDecl.uri)) {
             filesToSearch.push(incDecl.uri);
         }

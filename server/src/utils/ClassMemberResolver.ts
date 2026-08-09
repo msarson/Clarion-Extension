@@ -4,6 +4,7 @@ import { CancellationToken } from 'vscode-languageserver';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { TokenHelper } from './TokenHelper';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
@@ -79,10 +80,17 @@ export function scanClassBodyForAllMembers(
 
                 if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
                     /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    nestDepth++;
+                    // Self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END" or the
+                    // period form "...,DIM(2).") is a net no-op. Checking end-of-line independently
+                    // of the opening match — rather than one regex trying to capture attributes and
+                    // terminator together — avoids the attrs-swallow-terminator failure mode; "."
+                    // is fully interchangeable with END for closing any Clarion structure.
+                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
+                        nestDepth++;
+                    }
                     continue;
                 }
-                if (/^END\s*$/i.test(stripped)) {
+                if (/^(END|\.)\s*$/i.test(stripped)) {
                     if (nestDepth > 0) { nestDepth--; continue; }
                     break;
                 }
@@ -163,8 +171,12 @@ export function scanClassBodyForMember(
 
                 if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
                     /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    nestDepth++;
-                } else if (/^END\s*$/i.test(stripped)) {
+                    // Self-closing single-line form is a net no-op (see scanClassBodyForAllMembers
+                    // for the full rationale — same attrs-swallow-terminator hazard, same fix).
+                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
+                        nestDepth++;
+                    }
+                } else if (/^(END|\.)\s*$/i.test(stripped)) {
                     if (nestDepth > 0) { nestDepth--; continue; }
                     break;
                 }
@@ -416,19 +428,8 @@ export class ClassMemberResolver {
             const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             let resolvedPath: string | null = null;
             
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    if (!redirectionParser) continue; // #233 Stage 2: project may have no redirection parser
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
             
             // Fallback to relative path
             if (!resolvedPath) {
@@ -442,18 +443,21 @@ export class ClassMemberResolver {
             if (resolvedPath) {
                 logger.info(`Resolved to: ${resolvedPath}`);
                 const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-                const includeLines = includeContent.split('\n');
-                
+                // Split on both line-ending styles — a bare '\n' split leaves a trailing '\r' on
+                // every line of a CRLF file, which silently breaks the comment-strip regex below
+                // (its '$' anchor can never reach past a leftover '\r').
+                const includeLines = includeContent.split(/\r?\n/);
+
                 // Find the class/queue/group structure
                 for (let j = 0; j < includeLines.length; j++) {
                     const includeLine = includeLines[j];
                     const classMatch = includeLine.match(new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i'));
                     if (classMatch) {
                         logger.info(`Found class ${className} in INCLUDE at line ${j}`);
-                        
+
                         // Collect all matching members for overload resolution
                         const candidates: { type: string; line: number; paramCount: number }[] = [];
-                        
+
                         // Find all members with this name
                         // Track nesting depth so nested GROUP/QUEUE/RECORD ENDs don't
                         // terminate the scan prematurely
@@ -462,12 +466,15 @@ export class ClassMemberResolver {
                             const memberLine = includeLines[k];
                             const stripped = memberLine.replace(/\s*!.*$/, '').trim(); // strip comments
 
-                            // Detect nested scope openers (GROUP/QUEUE/RECORD as type keyword)
-                            if (/\b(GROUP|QUEUE|RECORD)\b/i.test(stripped) && !stripped.match(/^\s*END\s*$/i)) {
+                            // Detect nested scope openers (GROUP/QUEUE/RECORD as type keyword), but
+                            // skip a self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END"
+                            // or the period form) — a net no-op, not an unclosed nested scope. "." is
+                            // fully interchangeable with END for closing any Clarion structure.
+                            if (/\b(GROUP|QUEUE|RECORD)\b/i.test(stripped) && !/(\bEND|\.)\s*$/i.test(stripped)) {
                                 nestDepth++;
                             }
 
-                            if (/^\s*END\s*$/i.test(stripped)) {
+                            if (/^(END|\.)\s*$/i.test(stripped)) {
                                 if (nestDepth > 0) {
                                     nestDepth--;
                                     continue;
@@ -741,17 +748,8 @@ export class ClassMemberResolver {
             const includeMatch = lines[i].match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (!includeMatch) continue;
 
-            let resolvedPath: string | null = null;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeMatch[1]);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            let resolvedPath: string | null = resolveViaProjectRedirection(includeMatch[1], filePath);
             if (!resolvedPath) {
                 const rel = path.join(path.dirname(filePath), includeMatch[1]);
                 if (fs.existsSync(rel)) resolvedPath = rel;
@@ -875,6 +873,15 @@ export class ClassMemberResolver {
         // LIKE(TypeName) or LIKE(PREFIX:TypeName) — inherited type: resolve to the referenced name
         const likeMatch = name.match(/^LIKE\s*\(\s*([\w:]+)\s*\)/i);
         if (likeMatch) return likeMatch[1];
+
+        // GROUP(TypeName) / QUEUE(TypeName) / RECORD(TypeName) — structured-type property
+        // (e.g. "Settings GROUP(ConnectionSettingsType) END"): resolve to the referenced
+        // type name, same treatment as LIKE(TypeName) above. Without this, the comma/paren
+        // split below strips down to the bare keyword ("GROUP"), which then matches
+        // CLARION_PRIMITIVES and gets rejected as "not navigable" — breaking chained
+        // hover/member resolution (e.g. SELF.Settings.Address) one level too early.
+        const structRefMatch = name.match(/^(?:GROUP|QUEUE|RECORD)\s*\(\s*([\w:]+)\s*\)/i);
+        if (structRefMatch) return structRefMatch[1];
 
         // Take only the part before comma or parenthesis (attributes/dimensions)
         name = name.split(/[,(]/)[0].trim();
@@ -1047,7 +1054,7 @@ export class ClassMemberResolver {
             const implFileName = path.basename(declPath, path.extname(declPath)) + '.clw';
 
             if (sm?.solution) {
-                for (const project of sm.solution.projects) {
+                for (const project of projectsOwnerFirst(declPath)) { // #328 owner-first
                     const resolved = project.getRedirectionParser().findFile(implFileName);
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         const loc = this.findImplementationInFile(resolved.path, className, methodName, declarationSig);

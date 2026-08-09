@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { MapProcedureResolver } from '../../utils/MapProcedureResolver';
+import { TokenHelper } from '../../utils/TokenHelper';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
@@ -13,6 +14,7 @@ import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ProcedureHoverResolver");
 logger.setLevel("error");
+const perfLogger = LoggerManager.getLogger("ProcedureHoverResolver.Perf", "perf");
 
 /**
  * Resolves hover information for procedures (MAP declarations and implementations)
@@ -51,12 +53,29 @@ export class ProcedureHoverResolver {
         }
 
         logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-        
+
+        // Sub-step timing — names WHICH part of the proc-call hover is slow (the
+        // ~700ms floor): the in-document MAP scan, the cross-file include walk, the
+        // implementation resolution, or formatting. Emitted only when slow.
+        const rStart = Date.now();
+        const st: Array<[string, number]> = [];
+        let last = rStart;
+        const mk = (n: string) => { const now = Date.now(); st.push([n, now - last]); last = now; };
+        const emit = () => {
+            const tot = Date.now() - rStart;
+            if (tot < 300) return;
+            const top = st.filter(([, m]) => m >= 15).sort((a, b) => b[1] - a[1]).slice(0, 6)
+                .map(([n, m]) => `${n}=${m}`).join(', ');
+            perfLogger.perf("Hover proc breakdown", { total_ms: tot, top: top || '(all <15ms)', word });
+        };
+        try {
         // Get tokens for parameter counting
         const tokens = this.tokenCache.getTokens(document);
-        
+        mk('tokens');
+
         // Find MAP declaration first
         let mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+        mk('findMapDecl');
         logger.info(`MAP declaration found: ${!!mapDecl}`);
 
         // #313: the declaration may live in an INC included inside a MAP (current
@@ -66,6 +85,7 @@ export class ProcedureHoverResolver {
         // implementation from ITS document — the proven declaration-side path.
         if (!mapDecl) {
             const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens);
+            mk('walkIncludes');
             if (hit) {
                 const declLineText = hit.doc.getText({
                     start: { line: hit.declLine, character: 0 },
@@ -81,6 +101,7 @@ export class ProcedureHoverResolver {
                 const includeImpl = await this.mapResolver.findProcedureImplementation(
                     word, hit.tokens, hit.doc, { line: hit.declLine, character: 0 }, declLineText
                 );
+                mk('implFromWalk');
                 if (mapDecl || includeImpl) {
                     return this.formatter.formatProcedure(word, mapDecl, includeImpl, document, position);
                 }
@@ -132,13 +153,17 @@ export class ProcedureHoverResolver {
             }
         }
         
+        mk('implFromMapDecl');
         logger.info(`Final result: mapDecl=${!!mapDecl}, procImpl=${!!procImpl}`);
-        
+
         if (mapDecl || procImpl) {
             return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
         }
-        
+
         return null;
+        } finally {
+            emit();
+        }
     }
 
     /**
@@ -181,11 +206,7 @@ export class ProcedureHoverResolver {
         if (!mapLocation) {
             // Not found in current file, check for MEMBER
             logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
-            const memberToken = tokens.find(t => 
-                t.line < 5 && 
-                t.value.toUpperCase() === 'MEMBER' &&
-                t.referencedFile
-            );
+            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
             
             if (memberToken?.referencedFile) {
                 logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);

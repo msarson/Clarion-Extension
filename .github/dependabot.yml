@@ -1,0 +1,33 @@
+# Dependabot configuration.
+#
+# Dependabot reads this from the DEFAULT branch (master); it takes effect once a
+# release merges version-x.y.z into master.
+#
+# Rationale (see #390 / #405): a routine transitive security patch was bundled
+# with a breaking `vscode-languageclient` 8->10 major. We keep security/patch/minor
+# updates flowing automatically, but LSP client/server MAJORS are excluded — those
+# are deliberate, tested migrations done in their own PR/feature release.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/client"
+      - "/server"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per directory for routine minor/patch bumps instead of a swarm.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # LSP client/server majors are a breaking migration, not an auto-PR (#405).
+      - dependency-name: "vscode-languageclient"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vscode-languageserver"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vscode-languageserver-textdocument"
+        update-types: ["version-update:semver-major"]

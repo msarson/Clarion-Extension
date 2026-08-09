@@ -8,6 +8,10 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("StructureProcessor");
 logger.setLevel("error");
 
+// #353: per-field logging here is hot-path — the template-literal arguments are
+// built before the logger's level check. Gated like the tokenizer's trace flag.
+const TOKENIZER_TRACE = process.env.CLARION_TOKENIZER_TRACE === '1';
+
 export class StructureProcessor {
     /**
      * Process structure fields with prefixes
@@ -37,41 +41,35 @@ export class StructureProcessor {
             if (preMatch) {
                 const prefix = preMatch[1];
                 structure.structurePrefix = prefix;
-                logger.info(`🔍 [DEBUG] Found structure ${structure.value} with prefix ${prefix}`);
-                
+                if (TOKENIZER_TRACE) logger.info(`🔍 [DEBUG] Found structure ${structure.value} with prefix ${prefix}`);
+
                 // Find the structure's end line
                 const structureEnd = structure.finishesAt || lines.length - 1;
-                
+
                 // Find all variable tokens between the structure start and end
                 const fieldsInStructure = tokens.filter(t =>
                     (t.type === TokenType.Variable || t.type === TokenType.Label) &&
                     t.line > structure.line &&
                     t.line < structureEnd
                 );
-                
-                logger.info(`🔍 [DEBUG] Found ${fieldsInStructure.length} potential fields in structure ${structure.value}`);
-                
+
+                if (TOKENIZER_TRACE) logger.info(`🔍 [DEBUG] Found ${fieldsInStructure.length} potential fields in structure ${structure.value}`);
+
                 // Mark these as structure fields and add the prefix
                 for (const field of fieldsInStructure) {
                     field.isStructureField = true;
                     field.structureParent = structure;
                     field.structurePrefix = prefix;
-                    logger.info(`🔍 [DEBUG] Field ${field.value} assigned prefix ${prefix}`);
-                    logger.info(`🔍 [DEBUG] Field ${field.value} - isStructureField=${field.isStructureField}, structurePrefix=${field.structurePrefix}`);
-                }
-                
-                // Also look for direct prefix references in the code
-                const prefixPattern = new RegExp(`\\b${prefix}:\\w+\\b`, 'gi');
-                
-                for (let i = 0; i < lines.length; i++) {
-                    const codeLine = lines[i];
-                    if (!codeLine) continue;
-                    
-                    const matches = codeLine.match(prefixPattern);
-                    if (matches) {
-                        logger.info(`🔍 [DEBUG] Found prefix references in line ${i}: ${matches.join(', ')}`);
+                    if (TOKENIZER_TRACE) {
+                        logger.info(`🔍 [DEBUG] Field ${field.value} assigned prefix ${prefix}`);
+                        logger.info(`🔍 [DEBUG] Field ${field.value} - isStructureField=${field.isStructureField}, structurePrefix=${field.structurePrefix}`);
                     }
                 }
+
+                // #353: a "direct prefix references" loop lived here that regex-scanned
+                // EVERY line of the file per PRE()'d structure — its only effect was a
+                // logger.info of the matches. Hundreds of FILE,PRE() structures × 11k
+                // lines made it a quadratic no-op; deleted outright.
             }
         }
     }

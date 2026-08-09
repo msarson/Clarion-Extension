@@ -410,7 +410,7 @@ export class ClarionProjectServer {
 
         // Include both Common and configuration-specific entries
         const matchingEntries = this.redirectionEntries.filter(entry =>
-            matchesActiveConfiguration(entry, serverSettings.configuration)
+            matchesActiveConfiguration(entry, serverSettings.configuration, this.path)
         );
 
         logger.info(`📂 Found ${matchingEntries.length} matching entries for section Common or ${serverSettings.configuration}`);
@@ -443,6 +443,13 @@ export class ClarionProjectServer {
                     }
 
                     pathSet.add(resolvedPath);
+                }
+
+                // #356: pipe stop marker — dirs from entries past a matching
+                // stop-entry are unreachable to the IDE's search; don't offer
+                // them as search paths either.
+                if (entry.stopsSearch) {
+                    break;
                 }
             }
         }
@@ -764,7 +771,7 @@ export class ClarionProjectServer {
             
             // Find specific entries for .clw files in the current configuration or Common section
             const clwEntries = redirectionEntries.filter(entry =>
-                matchesActiveConfiguration(entry, serverSettings.configuration) &&
+                matchesActiveConfiguration(entry, serverSettings.configuration, this.path) &&
                 (entry.extension.toLowerCase() === "*.clw" || entry.extension === "*.*")
             );
             

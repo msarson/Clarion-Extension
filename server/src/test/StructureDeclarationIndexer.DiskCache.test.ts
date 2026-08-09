@@ -28,7 +28,13 @@ suite('#290 SDI disk cache', () => {
         indexer.clearCache();
     });
 
-    teardown(() => {
+    teardown(async () => {
+        // #357: drain any deferred validation left by a test before settling.
+        await (indexer as unknown as { runDeferredValidations(): Promise<void> }).runDeferredValidations();
+        // #355: let any in-flight background validation settle before tearing the
+        // fixture down — a straggler would otherwise mutate stats mid-next-test.
+        await (indexer as unknown as { whenValidated(p: string): Promise<void> }).whenValidated(tmpDir);
+        (indexer as unknown as { deferBackgroundValidation: boolean }).deferBackgroundValidation = false;
         serverSettings.libsrcPaths = savedLibsrc;
         indexer.clearCache();
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -63,10 +69,97 @@ suite('#290 SDI disk cache', () => {
         const future = new Date(Date.now() + 5_000);
         fs.utimesSync(file, future, future);
 
+        // Pin flexed under #355: the rebuild serves the trusted cache first and the
+        // rescan happens in the background — the guarantee is now "after validation
+        // completes, the change is reflected" (mid-session changes stay covered by
+        // the #340 watcher, which evicts rather than trusts).
         const rebuilt = await indexer.buildIndex(tmpDir);
-        assert.strictEqual(indexer.lastBuildStats!.scanned, 1, 'changed file rescanned');
+        await indexer.whenValidated(tmpDir);
+        assert.strictEqual(indexer.lastValidationStats!.scanned, 1, 'changed file rescanned by background validation');
         assert.ok(rebuilt.byName.has('otherclass'), 'new declaration picked up');
         assert.ok(rebuilt.byName.has('myclass'), 'existing declaration retained');
+    });
+
+    test('#357: with deferBackgroundValidation set, a cache-trusted build does NOT auto-run the sweep', async () => {
+        // Cold build writes the cache; clear the in-memory index so the next build is cache-trusted.
+        await indexer.buildIndex(tmpDir);
+        indexer.clearCache();
+        indexer.lastValidationStats = null;
+
+        const ext = indexer as unknown as {
+            deferBackgroundValidation: boolean;
+            runDeferredValidations(): Promise<void>;
+        };
+        ext.deferBackgroundValidation = true;
+
+        // Change a file so a sweep WOULD detect drift — proving the sweep truly didn't run.
+        const file = path.join(tmpDir, 'MyClass.inc');
+        fs.appendFileSync(file, '\nOtherClass CLASS,TYPE\n        END\n');
+        const future = new Date(Date.now() + 5_000);
+        fs.utimesSync(file, future, future);
+
+        const built = await indexer.buildIndex(tmpDir);
+        // Give any (erroneously-launched) background sweep a chance to run.
+        await new Promise<void>(resolve => setTimeout(resolve, 50));
+        assert.strictEqual(indexer.lastValidationStats as unknown, null,
+            'deferred mode must not auto-launch the validation sweep');
+        assert.ok(!built.byName.has('otherclass'),
+            'index still serves the trusted snapshot; the change is not yet reflected');
+
+        // Draining the lane runs the sweep and reconciles the drift.
+        await ext.runDeferredValidations();
+        const stats = indexer.lastValidationStats as { scanned: number } | null;
+        assert.ok(stats, 'runDeferredValidations executed the sweep');
+        assert.strictEqual(stats!.scanned, 1, 'the changed file was rescanned');
+        assert.ok(built.byName.has('otherclass'), 'index reconciled in place after draining');
+    });
+
+    test('#357: runDeferredValidations runs multiple projects strictly one at a time', async () => {
+        // Second project dir with its own cache.
+        const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sdi-cache-357b-'));
+        fs.writeFileSync(path.join(tmpDir2, 'Other.inc'), 'OtherClass CLASS,TYPE\n        END\n');
+        const savedLib = serverSettings.libsrcPaths;
+        const ext = indexer as unknown as {
+            deferBackgroundValidation: boolean;
+            runDeferredValidations(): Promise<void>;
+            statScanFiles: (files: string[], cache: unknown) => Promise<unknown>;
+        };
+        try {
+            // Warm both caches.
+            serverSettings.libsrcPaths = [tmpDir];
+            await indexer.buildIndex(tmpDir);
+            serverSettings.libsrcPaths = [tmpDir2];
+            await indexer.buildIndex(tmpDir2);
+            indexer.clearCache();
+            ext.deferBackgroundValidation = true;
+
+            // Instrument statScanFiles to record concurrent entries.
+            const original = ext.statScanFiles.bind(indexer);
+            let inFlight = 0;
+            let maxInFlight = 0;
+            ext.statScanFiles = async (files: string[], cache: unknown) => {
+                inFlight++;
+                maxInFlight = Math.max(maxInFlight, inFlight);
+                await new Promise<void>(resolve => setTimeout(resolve, 20));
+                const result = await original(files, cache);
+                inFlight--;
+                return result;
+            };
+
+            serverSettings.libsrcPaths = [tmpDir];
+            await indexer.buildIndex(tmpDir);
+            serverSettings.libsrcPaths = [tmpDir2];
+            await indexer.buildIndex(tmpDir2);
+
+            await ext.runDeferredValidations();
+            assert.strictEqual(maxInFlight, 1,
+                'deferred validations must never overlap — one disk sweep at a time');
+
+            ext.statScanFiles = original;
+        } finally {
+            serverSettings.libsrcPaths = savedLib;
+            try { fs.rmSync(tmpDir2, { recursive: true, force: true }); } catch { /* ignore */ }
+        }
     });
 
     test('#290: with a solution loaded, a non-project (dirname) key redirects to the existing index — no rogue scan', async () => {
@@ -91,6 +184,90 @@ suite('#290 SDI disk cache', () => {
         } finally {
             smSlot.instance = savedSm;
             serverSettings.redirectionFile = savedRedFile;
+        }
+    });
+
+    test('#355: warm start trusts the disk cache — declarations served before any stat sweep', async () => {
+        // Cold build writes the disk cache.
+        await indexer.buildIndex(tmpDir);
+        indexer.clearCache();
+
+        // Delete the source file AFTER the cache was written. A build that
+        // stat-validates every file before serving would drop the declaration;
+        // a cache-trusted build serves it immediately and reconciles in the
+        // background (the #340 watcher contract, extended to startup).
+        fs.rmSync(path.join(tmpDir, 'MyClass.inc'));
+
+        const ext = indexer as unknown as {
+            whenValidated?: (projectPath: string) => Promise<void>;
+            onDrift?: (projectPath: string) => void;
+        };
+        assert.ok(typeof ext.whenValidated === 'function',
+            'indexer.whenValidated must exist (#355 background validation handle)');
+
+        const drifted: string[] = [];
+        ext.onDrift = p => drifted.push(p);
+        try {
+            const trusted = await indexer.buildIndex(tmpDir);
+            assert.ok(trusted.byName.has('myclass'),
+                'trusted startup serves the cached declaration without statting the file set');
+
+            await ext.whenValidated!(tmpDir);
+            assert.ok(!trusted.byName.has('myclass'),
+                'background validation reconciles the deletion in place');
+            assert.strictEqual(drifted.length, 1, 'drift callback fired once');
+        } finally {
+            ext.onDrift = undefined;
+        }
+    });
+
+    test('#355: background validation picks up a changed file and updates the index in place', async () => {
+        await indexer.buildIndex(tmpDir);
+        indexer.clearCache();
+
+        const file = path.join(tmpDir, 'MyClass.inc');
+        fs.appendFileSync(file, '\nOtherClass CLASS,TYPE\n        END\n');
+        const future = new Date(Date.now() + 5_000);
+        fs.utimesSync(file, future, future);
+
+        const ext = indexer as unknown as {
+            whenValidated?: (projectPath: string) => Promise<void>;
+            onDrift?: (projectPath: string) => void;
+        };
+        const drifted: string[] = [];
+        ext.onDrift = p => drifted.push(p);
+        try {
+            const trusted = await indexer.buildIndex(tmpDir);
+            assert.ok(!trusted.byName.has('otherclass'), 'trusted snapshot predates the change');
+            assert.ok(trusted.byName.has('myclass'), 'existing declaration served from cache');
+
+            await ext.whenValidated!(tmpDir);
+            assert.ok(trusted.byName.has('otherclass'), 'changed file rescanned in background, index updated in place');
+            assert.ok(trusted.byName.has('myclass'), 'existing declaration retained');
+            assert.strictEqual(drifted.length, 1, 'drift callback fired once');
+        } finally {
+            ext.onDrift = undefined;
+        }
+    });
+
+    test('#355: clean validation (no drift) fires no callback', async () => {
+        await indexer.buildIndex(tmpDir);
+        indexer.clearCache();
+
+        const ext = indexer as unknown as {
+            whenValidated?: (projectPath: string) => Promise<void>;
+            onDrift?: (projectPath: string) => void;
+        };
+        const drifted: string[] = [];
+        ext.onDrift = p => drifted.push(p);
+        try {
+            const trusted = await indexer.buildIndex(tmpDir);
+            assert.ok(trusted.byName.has('myclass'));
+            await ext.whenValidated!(tmpDir);
+            assert.ok(trusted.byName.has('myclass'), 'index unchanged after clean validation');
+            assert.strictEqual(drifted.length, 0, 'no drift → no callback');
+        } finally {
+            ext.onDrift = undefined;
         }
     });
 

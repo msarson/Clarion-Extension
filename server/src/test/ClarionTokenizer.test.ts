@@ -434,4 +434,75 @@ TestProc PROCEDURE()
             assert.ok(struct, 'Attribute-only TOOLBAR must still tokenize as Structure');
         });
     });
+
+    // PR #378 — a named-instance structure keyword (FILE/QUEUE/GROUP/RECORD/CLASS/
+    // INTERFACE/WINDOW/REPORT/APPLICATION/VIEW) used as a plain variable/label name
+    // must NOT be classified as opening a structure. A DATA-section declaration like
+    // "Report &STRING" declares a reference-to-STRING variable literally named Report;
+    // misclassifying it as a REPORT structure produced a false "structure not
+    // terminated" diagnostic that cascaded across the procedure. A Clarion label must
+    // start at column 0, and a real structure declaration always has its type in
+    // second position (after a label) — so a match at column 0 can only be the label.
+    suite('PR #378 - named-instance structure keyword used as a label', () => {
+
+        test('"Report &STRING" at col0 is a Label, not a REPORT structure', () => {
+            const code = `Report          &STRING\n`;
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const reportStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'REPORT');
+            assert.strictEqual(reportStruct, undefined, '"Report" at col0 must NOT open a REPORT structure');
+
+            const label = tokens.find(t => t.type === TokenType.Label && t.value === 'Report');
+            assert.ok(label, '"Report" must tokenize as a Label');
+            assert.strictEqual(label!.start, 0, 'Label "Report" must be at column 0');
+        });
+
+        test('a second bare use of the same keyword-named variable also never opens a structure (no cascade)', () => {
+            // The original bug: a first "Report &STRING" plus a later bare reference
+            // pushed two bogus REPORT openers, desyncing structure-balance tracking.
+            const code = [
+                `MyProc PROCEDURE()`,
+                `Report          &STRING`,
+                `  CODE`,
+                `  Report &= NEW STRING(10)`,
+                `  IF Report &= NULL`,
+                `    RETURN`,
+                `  END`,
+            ].join('\n');
+            const tokenizer = new ClarionTokenizer(code);
+            const tokens = tokenizer.tokenize();
+
+            const reportStructs = tokens.filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'REPORT');
+            assert.strictEqual(reportStructs.length, 0, 'No use of the variable "Report" may tokenize as a REPORT structure');
+
+            // The genuine IF/END pair must survive unharmed.
+            const ifStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'IF');
+            assert.ok(ifStruct, 'The real IF structure must still tokenize as a Structure');
+        });
+
+        test('other gated keywords as labels (GROUP/QUEUE/FILE) are Labels, not structures', () => {
+            for (const name of ['Group', 'Queue', 'File']) {
+                const code = `${name}    &STRING\n`;
+                const tokens = new ClarionTokenizer(code).tokenize();
+
+                const struct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === name.toUpperCase());
+                assert.strictEqual(struct, undefined, `"${name}" at col0 must NOT open a ${name.toUpperCase()} structure`);
+
+                const label = tokens.find(t => t.type === TokenType.Label && t.value === name);
+                assert.ok(label, `"${name}" must tokenize as a Label`);
+            }
+        });
+
+        test('a genuine labeled REPORT declaration still tokenizes its type as a Structure (regression guard)', () => {
+            // Here the label is in first position and REPORT is in second position —
+            // the fix only fires at column 0, so this is untouched.
+            const code = `MyReport REPORT,AT(,,200,100)\n  DETAIL\n  END\nEND\n`;
+            const tokens = new ClarionTokenizer(code).tokenize();
+
+            const reportStruct = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'REPORT');
+            assert.ok(reportStruct, 'A labeled REPORT declaration must still tokenize REPORT as a Structure');
+            assert.ok(reportStruct!.start > 0, 'The REPORT type must be in second position (after its label)');
+        });
+    });
 });

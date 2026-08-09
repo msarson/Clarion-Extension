@@ -11,6 +11,61 @@ import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
  */
 export class TokenHelper {
     /**
+     * #337 — module-header lookup: the file's `MEMBER('parent.clw')` token.
+     * No line cap: comment banners above the header are legal Clarion (license
+     * headers, file docs) and the previous hardcoded `t.line < 5` guards
+     * silently disabled every MEMBER-parent tier for such files. The tokenizer
+     * only sets `referencedFile` on the real header form, so the first match
+     * is the header.
+     */
+    public static findMemberHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.value !== undefined &&
+            t.value.toUpperCase() === 'MEMBER' &&
+            t.referencedFile !== undefined);
+    }
+
+    /** #337 — PROGRAM header lookup (ClarionDocument-typed, no line cap). */
+    public static findProgramHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument &&
+            t.value.toUpperCase() === 'PROGRAM');
+    }
+
+    /** #337 — either module header (PROGRAM or MEMBER), no line cap. */
+    public static findDocumentHeaderToken(tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.type === TokenType.ClarionDocument &&
+            (t.value.toUpperCase() === 'PROGRAM' || t.value.toUpperCase() === 'MEMBER'));
+    }
+
+    /**
+     * #350 — Language Reference, Field Qualification: "You must use this Field
+     * Qualification syntax to reference any field in a complex structure that
+     * does not have a PRE attribute." A Label inside a data-structure chain
+     * (QUEUE/GROUP/FILE/RECORD/VIEW/REPORT) with NO prefixed ancestor is only
+     * addressable as Structure.Field — no unqualified word may bind to it,
+     * even one textually equal to a compound label (the generated browse
+     * queue's 'JCA:StartedDate LIKE(...)' shadowing the FILE,PRE(JCA) field).
+     * CLASS/INTERFACE/MAP members are excluded (their scoping is separate).
+     */
+    private static readonly DOT_ONLY_STRUCTURES = new Set(['QUEUE', 'GROUP', 'FILE', 'RECORD', 'VIEW', 'REPORT']);
+    public static requiresDotQualification(t: Token): boolean {
+        let anc = t.parent;
+        let sawDataStructure = false;
+        while (anc) {
+            if (anc.structurePrefix) return false;
+            if (anc.type === TokenType.Structure) {
+                const v = anc.value.toUpperCase();
+                if (v === 'CLASS' || v === 'INTERFACE' || v === 'MAP' || v === 'MODULE') return false;
+                if (TokenHelper.DOT_ONLY_STRUCTURES.has(v)) sawDataStructure = true;
+            }
+            anc = anc.parent;
+        }
+        return sawDataStructure;
+    }
+
+    /**
      * Gets the innermost scope at a line (optimized version using DocumentStructure)
      * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
      * @param structure DocumentStructure instance
@@ -117,6 +172,78 @@ export class TokenHelper {
     }
 
     /**
+     * #321 — resolve a GOTO target: a statement label visible from `cursorLine`
+     * under GOTO's scope rule (Language Reference): the target must be the
+     * label of another EXECUTABLE statement inside the currently executing
+     * ROUTINE or PROCEDURE — exactly one unit, no chain, and never a ROUTINE
+     * or PROCEDURE label. For a procedure unit the executable region ends
+     * where its first ROUTINE begins (routine bodies are separate GOTO units).
+     */
+    public static findScopedStatementLabelToken(
+        structure: DocumentStructure,
+        tokens: Token[],
+        labelName: string,
+        cursorLine: number
+    ): Token | undefined {
+        const node = structure.getScopeResolver().resolveScopeAt(cursorLine);
+        const unit = (node.kind === ScopeKind.Routine ||
+                      node.kind === ScopeKind.Procedure ||
+                      node.kind === ScopeKind.Method)
+            ? node.token : null;
+        if (!unit) return undefined;
+
+        // Executable region: after the unit's CODE marker (a routine without a
+        // DATA/CODE split starts at its header line).
+        const execStart = unit.executionMarker?.line ?? unit.line;
+        let execEnd = unit.finishesAt ?? Number.MAX_SAFE_INTEGER;
+        if (node.kind !== ScopeKind.Routine) {
+            const firstRoutine = tokens.find(t =>
+                t.subType === TokenType.Routine &&
+                t.line > unit.line &&
+                t.line <= execEnd);
+            if (firstRoutine) execEnd = firstRoutine.line - 1;
+        }
+
+        const nameLower = labelName.toLowerCase();
+        return tokens.find(t =>
+            t.type === TokenType.Label &&
+            t.start === 0 &&
+            t.line > execStart &&
+            t.line <= execEnd &&
+            t.value.toLowerCase() === nameLower &&
+            // statement label only — never a ROUTINE/PROCEDURE label
+            !tokens.some(s =>
+                s.line === t.line &&
+                (s.subType === TokenType.Routine ||
+                 s.type === TokenType.Procedure ||
+                 s.type === TokenType.Function))
+        );
+    }
+
+    /**
+     * #321 stretch — resolve a BREAK/CYCLE label: the label of the INNERMOST
+     * enclosing labelled LOOP or ACCEPT structure with that name (BREAK/CYCLE
+     * docs: the label must name an enclosing loop — lexical nesting, so the
+     * range check alone excludes same-name labels in other procedures).
+     * Returns the column-0 Label token on the loop line (the navigation
+     * target — the same token the statement-label lookup returns for it).
+     */
+    public static findEnclosingLoopLabelToken(tokens: Token[], labelName: string, line: number): Token | undefined {
+        const lower = labelName.toLowerCase();
+        let best: Token | undefined;
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure) continue;
+            const v = t.value.toUpperCase();
+            if (v !== 'LOOP' && v !== 'ACCEPT') continue;
+            if (!t.label || t.label.toLowerCase() !== lower) continue;
+            if (t.finishesAt === undefined || line < t.line || line > t.finishesAt) continue;
+            if (!best || t.line > best.line) best = t;
+        }
+        if (!best) return undefined;
+        return tokens.find(s => s.line === best!.line && s.type === TokenType.Label && s.start === 0) ?? best;
+    }
+
+    /**
      * The chain of PROCEDURE / METHOD scopes that can host a ROUTINE visible from `line`, innermost
      * first. A ROUTINE cannot itself host a routine (routines don't nest), so a routine-body line
      * starts from its owning scope. A local derived METHOD's visible chain climbs through its
@@ -202,7 +329,7 @@ export class TokenHelper {
             start = wordStart - 1; // Include the dot
             while (start > 0) {
                 const char = line.charAt(start - 1);
-                if (this.isWordCharacter(char)) {
+                if (this.isWordCharacter(char) || (includeColons && char === ':')) {
                     start--;
                 } else {
                     break;
@@ -245,12 +372,38 @@ export class TokenHelper {
     }
 
     public static isPositionInString(tokens: Token[], line: number, character: number): boolean {
-        return tokens.some(t =>
+        if (tokens.some(t =>
             t.line === line &&
             t.type === TokenType.String &&
             t.start <= character &&
             character <= t.start + t.value.length
+        )) {
+            return true;
+        }
+
+        // #373: a string literal swallowed inside a composite token (e.g. the
+        // FunctionArgumentParameter token "command ('/netnolog')") never surfaces
+        // as a TokenType.String token, so the check above misses it and hover/F12
+        // ran the full resolver chain on string contents. Scan the covering
+        // token's source text for quoted spans instead — '' is an escaped quote,
+        // not a terminator.
+        const covering = tokens.find(t =>
+            t.line === line &&
+            t.type !== TokenType.Comment &&
+            t.start <= character &&
+            character < t.start + t.value.length
         );
+        if (!covering || !covering.value.includes("'")) return false;
+
+        let inString = false;
+        for (let i = 0; i < covering.value.length; i++) {
+            if (covering.value[i] === "'") {
+                if (inString && covering.value[i + 1] === "'") { i++; continue; } // '' escape
+                inString = !inString;
+            }
+            if (covering.start + i >= character) return inString;
+        }
+        return false;
     }
 
     /**
@@ -304,6 +457,37 @@ export class TokenHelper {
                 character <= firstStringAfter.start + firstStringAfter.value.length
             ) {
                 return firstStringAfter;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * #343 — the SECTION argument of `INCLUDE('file','section')`: the SECOND
+     * string after an INCLUDE file-ref token on the line, with the cursor
+     * inside it. Only INCLUDE carries a section argument (LINK's second arg
+     * is a flag, MODULE/MEMBER are single-arg), so this is INCLUDE-scoped.
+     * Returns the section string token plus the include's filename.
+     */
+    public static getIncludeSectionArgStringToken(
+        tokens: Token[],
+        line: number,
+        character: number
+    ): { section: Token; includeFile: string } | null {
+        const includeTokens = tokens.filter(t =>
+            t.line === line &&
+            t.value?.toUpperCase() === 'INCLUDE' &&
+            t.referencedFile !== undefined &&
+            t.referencedFile.length > 0
+        );
+        for (const inc of includeTokens) {
+            const strings = tokens
+                .filter(t => t.line === line && t.type === TokenType.String && t.start > inc.start)
+                .sort((a, b) => a.start - b.start);
+            if (strings.length < 2) continue;
+            const second = strings[1];
+            if (second.start <= character && character <= second.start + second.value.length) {
+                return { section: second, includeFile: inc.referencedFile! };
             }
         }
         return null;

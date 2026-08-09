@@ -17,13 +17,30 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
-import { cooperativeCheckpoint } from './cooperativeScan';
+import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
+import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
+import { getCrossFileEpoch } from './crossFileEpoch';
+import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
+
+/**
+ * #361 — walk-RESULT cache for findDeclarationInMapIncludes, keyed by
+ * host+procName. The walk recursively reads + tokenizes the reachable MAP
+ * include chain; on IBSCommon.clw a hover over a NetTalk procedure (NetDebugTrace)
+ * cost ~89s, and hovering repeatedly around a block re-paid it every time. The
+ * walk result (including a NEGATIVE "no declaration reachable") is memoized here
+ * and reused until the cross-file epoch bumps (the #340 watcher / #355 drift path
+ * — the same invalidation every other cross-file memo uses). Module-level so it
+ * survives across the per-request resolver instances.
+ */
+interface MapDeclWalkHit { docUri: string; declLine: number; }
+const mapDeclWalkCache = new Map<string, MapDeclWalkHit | null>();
+let mapDeclWalkEpoch = -1;
 
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
@@ -55,36 +72,97 @@ export class MapProcedureResolver {
         // every reachable INC before concluding "not a MAP procedure").
         if (procName.includes('.')) return null;
 
+        // #361 — result cache (positive + NEGATIVE), epoch-invalidated. The walk
+        // below is ~89s on a big NetTalk PROGRAM file; without this, hovering
+        // repeatedly around a block re-pays it every time. A NEGATIVE result
+        // (NetDebugTrace is not a reachable MAP proc) is exactly what needs
+        // remembering — it's the common, most expensive case.
+        const epoch = getCrossFileEpoch();
+        if (epoch !== mapDeclWalkEpoch) {
+            mapDeclWalkCache.clear();
+            mapDeclWalkEpoch = epoch;
+        }
+        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}`;
+        if (mapDeclWalkCache.has(cacheKey)) {
+            const cached = mapDeclWalkCache.get(cacheKey)!;
+            if (!cached) return null;
+            // Re-derive the live doc/tokens (CrossFileCache makes this cheap) so a
+            // stale document object is never handed out.
+            const reloaded = await this.loadDocForWalk(
+                decodeURIComponent(cached.docUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
+            if (reloaded) return { doc: reloaded.document, tokens: reloaded.tokens, declLine: cached.declLine };
+            // Reload failed (file gone) — fall through to a fresh walk.
+        }
+
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
-        const memberToken = tokens.find(t =>
-            t.line < 5 && t.value.toUpperCase() === 'MEMBER' && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, pathUtil.dirname(currentPath));
+            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, currentPath);
             if (parentPath) startPaths.push(parentPath);
+        }
+
+        // #362 — index-first POSITIVE fast-path. If the procedure index (built by a
+        // cheap regex scan, a superset of the reachable includes) knows this proc
+        // UNAMBIGUOUSLY, load just that ONE file and confirm it with the SAME
+        // module-scoped check the walk uses — parity by construction — instead of
+        // tokenizing the whole include chain. A unique hit is safe: this only runs on
+        // a proc-CALL hover, so the proc is reachable, and a unique declaration IS the
+        // target. Anything else (0, or >1 ambiguous, or the candidate isn't a
+        // MODULE-scoped prototype) falls through to the unchanged walk — so this can
+        // only speed up, never change an answer. (The negative "skip walk when the
+        // index is empty" gate is deliberately NOT taken: a prototype could live in an
+        // INCLUDEd .clw the SDI doesn't scan, and the walk must still find it.)
+        const procHits = StructureDeclarationIndexer.getInstance().findProcedure(procName);
+        if (procHits.length === 1) {
+            const loaded = await this.loadDocForWalk(procHits[0].filePath);
+            if (loaded) {
+                const fastLine = this.findModuleScopedProcDeclLine(loaded.tokens, procName.toLowerCase());
+                if (fastLine !== null) {
+                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(procHits[0].filePath)}:${fastLine}`);
+                    mapDeclWalkCache.set(cacheKey, { docUri: loaded.document.uri, declLine: fastLine });
+                    return { doc: loaded.document, tokens: loaded.tokens, declLine: fastLine };
+                }
+            }
         }
 
         const visited = new Set<string>();
         for (const start of startPaths) {
             const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
-            if (hit) return hit;
+            if (hit) {
+                mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine });
+                return hit;
+            }
         }
+        mapDeclWalkCache.set(cacheKey, null);
         return null;
     }
 
-    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename. */
-    private resolveIncludeTarget(fileName: string, fromDir: string): string | null {
-        const sameDir = pathUtil.join(fromDir, fileName);
+    /**
+     * #362 — the walk's declaration test, extracted so the index fast-path and the
+     * walk agree by construction: a MapProcedure/Function token named `nameLower`
+     * that sits INSIDE a MODULE block. Returns the 0-based line, or null.
+     */
+    private findModuleScopedProcDeclLine(tokens: Token[], nameLower: string): number | null {
+        const moduleRanges = tokens
+            .filter(t => t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        if (moduleRanges.length === 0) return null;
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
+            moduleRanges.some(r => t.line > r.start && t.line < r.end)
+        );
+        return decl ? decl.line : null;
+    }
+
+    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
+    private resolveIncludeTarget(fileName: string, fromPath: string): string | null {
+        const sameDir = pathUtil.join(pathUtil.dirname(fromPath), fileName);
         if (fsSync.existsSync(sameDir)) return sameDir;
-        const sm = SolutionManager.getInstance();
-        if (sm?.solution) {
-            for (const project of sm.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(fileName);
-                if (resolved?.path && fsSync.existsSync(resolved.path)) return resolved.path;
-            }
-        }
-        return null;
+        return resolveViaProjectRedirection(fileName, fromPath);
     }
 
     /** Load a file's document + tokens, via CrossFileCache when available. */
@@ -138,6 +216,12 @@ export class MapProcedureResolver {
         const nameLower = procName.toLowerCase();
         let match: RegExpExecArray | null;
 
+        // #361 — the inner loop below loads (and, cold, tokenizes) EVERY include of
+        // this file with no yield between them; a big NetTalk chain blocked the event
+        // loop ~38s in one stretch. Yield whenever a time budget elapses so the
+        // editor stays responsive even on a cold, slow walk.
+        const timeSlice = makeTimeSlicer();
+
         // Offset→line lookup for the MAP-range filter (built once, binary-searched).
         let lineStarts: number[] | null = null;
         if (mapRanges) {
@@ -160,27 +244,18 @@ export class MapProcedureResolver {
                 const matchLine = offsetToLine(match.index);
                 if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
             }
-            const incPath = this.resolveIncludeTarget(match[1], pathUtil.dirname(fromPath));
+            const incPath = this.resolveIncludeTarget(match[1], fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
 
+            await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);
             if (!inc) continue;
 
             // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const moduleRanges = inc.tokens
-                .filter(t => t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
-                .map(t => ({ start: t.line, end: t.finishesAt! }));
-            if (moduleRanges.length > 0) {
-                const decl = inc.tokens.find(t =>
-                    (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
-                    (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
-                    moduleRanges.some(r => t.line > r.start && t.line < r.end)
-                );
-                if (decl) {
-                    logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${decl.line}`);
-                    return { doc: inc.document, tokens: inc.tokens, declLine: decl.line };
-                }
+            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower);
+            if (declLine !== null) {
+                logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
+                return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
             const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
@@ -434,31 +509,19 @@ export class MapProcedureResolver {
         containingProcedure?: string
     ): Location | null {
         logger.info(`Looking for MAP declaration for procedure: ${procName}`);
-        logger.info(`📊 Total tokens in document: ${tokens.length}`);
-
-        // Debug: Find any tokens with value 'MAP' regardless of type
-        const anyMapTokens = TokenHelper.findTokens(tokens, { value: 'MAP' });
-        logger.info(`🔍 Found ${anyMapTokens.length} token(s) with value 'MAP' (any type)`);
-        if (anyMapTokens.length > 0) {
-            anyMapTokens.forEach((t, i) => {
-                logger.info(`   MAP token #${i + 1}: line ${t.line}, type=${t.type}, subType=${t.subType}, value="${t.value}"`);
-            });
-        }
 
         if (!tokens || tokens.length === 0) {
             logger.info(`No tokens available`);
             return null;
         }
 
-        // Find all MAP structures
+        // #353/#354 — the former debug block here ran a full-document
+        // TokenHelper.findTokens({value:'MAP'}) scan (O(token count)) plus a
+        // per-token log forEach, purely to feed logger.info calls the "error"
+        // log level discards. On a 68k-token program that scan + string-building
+        // ran on EVERY hover/F12 — part of the ~700ms per-interaction floor. The
+        // authoritative lookup below (findMapStructures) is the only scan needed.
         const mapStructures = TokenHelper.findMapStructures(tokens);
-
-        logger.info(`📋 Found ${mapStructures.length} MAP structure(s) in document "${document.uri.split('/').pop()}"`);
-        if (mapStructures.length > 0) {
-            mapStructures.forEach((map, i) => {
-                logger.info(`   MAP #${i + 1}: line ${map.line}, finishesAt ${map.finishesAt}`);
-            });
-        }
 
         if (mapStructures.length === 0) {
             logger.info(`No MAP blocks found`);
@@ -910,6 +973,8 @@ export class MapProcedureResolver {
             const solutionManager = SolutionManager.getInstance();
             
             let resolvedPath: string | null = null;
+            // #328: owner-first base for every redirection lookup in this walk
+            const fromFsPath328 = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
 
             // #299: MODULE('X.DLL') / MODULE('X.LIB') is an external-library identifier (docs:
             // "may contain any unique identifier"), typically another project in this solution.
@@ -931,13 +996,7 @@ export class MapProcedureResolver {
             let isSourceModule = ['.clw', '.inc', '.equ', '.eq', '.int'].includes(moduleExt);
             if (moduleExt === '') {
                 const clwCandidate = `${moduleFile}.clw`;
-                let clwResolved = false;
-                if (solutionManager?.solution) {
-                    for (const project of solutionManager.solution.projects) {
-                        const resolved = project.getRedirectionParser().findFile(clwCandidate);
-                        if (resolved?.path && fs.existsSync(resolved.path)) { clwResolved = true; break; }
-                    }
-                }
+                let clwResolved = resolveViaProjectRedirection(clwCandidate, fromFsPath328) !== null; // #328 owner-first
                 if (!clwResolved) {
                     const currentDir = path.dirname(decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\'));
                     clwResolved = fs.existsSync(path.join(currentDir, clwCandidate));
@@ -970,12 +1029,12 @@ export class MapProcedureResolver {
 
             // Try solution-wide redirection first
             if (!resolvedPath && solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
+                for (const project of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(effectiveModuleFile);
                     logger.info(`RedirectionParser.findFile('${effectiveModuleFile}') returned:`, resolved);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
+                    if (resolved && typeof resolved.path === 'string' && fs.existsSync(resolved.path)) {
+                        resolvedPath = String(resolved.path);
                         logger.info(`✅ Resolved MODULE file via redirection: ${resolvedPath}`);
                         
                         // Check immediately if this is a DLL/LIB (before any file operations)
@@ -1076,7 +1135,7 @@ export class MapProcedureResolver {
                     
                     const solutionManager = SolutionManager.getInstance();
                     if (solutionManager && solutionManager.solution) {
-                        for (const proj of solutionManager.solution.projects) {
+                        for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                             const redirectionParser = proj.getRedirectionParser();
                             const resolved = redirectionParser.findFile(clwFile);
                             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
@@ -1160,7 +1219,7 @@ export class MapProcedureResolver {
                             // Resolve the CLW file
                             const solutionManager = SolutionManager.getInstance();
                             if (solutionManager && solutionManager.solution) {
-                                for (const proj of solutionManager.solution.projects) {
+                                for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                                     const redirectionParser = proj.getRedirectionParser();
                                     const resolved = redirectionParser.findFile(moduleTokenInMap.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
@@ -1307,7 +1366,7 @@ export class MapProcedureResolver {
                             
                             // Resolve the CLW file path using solutionManager
                             if (solutionManager && solutionManager.solution) {
-                                for (const proj of solutionManager.solution.projects) {
+                                for (const proj of projectsOwnerFirst(fromFsPath328)) { // #328 owner-first
                                     const redirectionParser = proj.getRedirectionParser();
                                     const resolved = redirectionParser.findFile(moduleToken.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {

@@ -10,8 +10,134 @@ import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
 import { SolutionManager } from '../../solution/solutionManager';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
+import { getCrossFileEpoch } from '../../utils/crossFileEpoch';
+
+// #345 phase 4 — cross-pass RVD memos (see the per-pass → module-level note
+// inside validateDiscardedReturnValues). Keys carry (docUri, docVersion);
+// the epoch guard clears them on any watched cross-file change.
+const rvdTypeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
+const rvdClassMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+let rvdMemoEpoch = -1;
+
+// #358: per-entry contributing-file mtimes for rvdClassMembersMemo. On a cross-file
+// epoch bump we validate each class enumeration against the mtimes of the file(s) that
+// actually declared its members instead of wiping the whole map — so a warm re-validation
+// no longer re-walks unchanged library classes (StringTheory 1394 members, ErrorClass 184).
+// The map is keyed identically to rvdClassMembersMemo (`${rvdDocKey}|${classKey}`):
+//   value = Map<lowercased fsPath, mtimeMs>  — empty means only the open doc contributed
+//   value = null                              — no reusable provenance → drop on the next bump
+// The open doc's own contribution is deliberately excluded: its content is already pinned by
+// the rvdDocKey content-hash below, which is the dirty-doc guard (unsaved edits change the
+// key, not the disk mtime).
+const rvdClassMembersFiles = new Map<string, Map<string, number> | null>();
+
+// #358: the same treatment for the receiver-TYPE memo. resolveVariableType now reports the
+// file(s) whose content determined a type (declaring file + any LIKE-alias file) via an
+// optional provenance Set; we mtime-validate each entry on an epoch bump instead of clearing
+// wholesale — the GlobalErrors 1.3s resolution survives a warm re-validation. Keyed identically
+// to rvdTypeMemo (`${rvdDocKey}|${objUpper}`); same value semantics as rvdClassMembersFiles.
+const rvdTypeMemoFiles = new Map<string, Map<string, number> | null>();
+
+// ─── #358-cold: persist the resolved memos across restarts ────────────────────
+// The warm fix above (per-entry contributing-file mtimes) made re-validation
+// cheap WITHIN a session, but a fresh server still paid the full cold walk —
+// thisStartup's enumeration alone was ~3.2-6.3s on the real PROGRAM file. The
+// entries are pure JSON ({typeName,...} / OverloadCandidate[]) and each already
+// carries exactly the provenance the #295 disk-cache envelope validates, so the
+// two shipped patterns compose directly: persist per open doc (bucket 'rvdmemo',
+// key = doc fs path), signature = the doc's own content hash (the rvdDocKey
+// minus uri/version — version resets across sessions), contributing = the union
+// of every entry's declaring-file mtimes. Entries with null provenance are not
+// persisted (same "can't validate → don't trust" rule as the epoch path).
+interface RvdMemoDiskPayload {
+    types: Array<{ k: string; v: { typeName: string; isClass: boolean; isReference: boolean } | null; files: [string, number][] }>;
+    classes: Array<{ k: string; members: [string, OverloadCandidate[]][] | null; files: [string, number][] }>;
+}
+const RVD_MEMO_BUCKET = 'rvdmemo';
+// One disk-load attempt per doc content (rvdDocKey); bounded for hygiene.
+const rvdDiskSeedAttempted = new Set<string>();
+
+/** Seed the in-memory memos from the persisted envelope (first pass per doc content). */
+async function seedRvdMemosFromDisk(rvdDocKey: string, openDocPathLower: string, liveSignature: string): Promise<void> {
+    if (rvdDiskSeedAttempted.has(rvdDocKey)) return;
+    if (rvdDiskSeedAttempted.size > 64) rvdDiskSeedAttempted.clear();
+    rvdDiskSeedAttempted.add(rvdDocKey);
+    try {
+        const env = loadIncludeIndex<RvdMemoDiskPayload>(RVD_MEMO_BUCKET, openDocPathLower);
+        if (!env || !(await includeIndexFresh(env, liveSignature))) return;
+        let seeded = 0;
+        for (const e of env.payload.types) {
+            const key = `${rvdDocKey}|${e.k}`;
+            if (!rvdTypeMemo.has(key)) {
+                rvdTypeMemo.set(key, Promise.resolve(e.v));
+                rvdTypeMemoFiles.set(key, new Map(e.files));
+                seeded++;
+            }
+        }
+        for (const e of env.payload.classes) {
+            const key = `${rvdDocKey}|${e.k}`;
+            if (!rvdClassMembersMemo.has(key)) {
+                rvdClassMembersMemo.set(key, Promise.resolve(e.members ? new Map(e.members) : null));
+                rvdClassMembersFiles.set(key, new Map(e.files));
+                seeded++;
+            }
+        }
+        if (seeded > 0) {
+            perfLogger.perf("RVD memo disk-seed", { entries: seeded, uri: openDocPathLower });
+        }
+    } catch { /* best-effort — a failed load just means a cold pass */ }
+}
+
+/** Persist this doc's resolved memo entries (await is cheap: promises are settled by pass end). */
+async function persistRvdMemos(rvdDocKey: string, openDocPathLower: string, liveSignature: string): Promise<void> {
+    try {
+        const prefix = `${rvdDocKey}|`;
+        const payload: RvdMemoDiskPayload = { types: [], classes: [] };
+        const contributing: Record<string, number> = {};
+        const collectFiles = (fp: Map<string, number> | null | undefined): [string, number][] | null => {
+            if (!fp) return null; // null provenance → not persistable
+            const files: [string, number][] = [];
+            for (const [p, m] of fp) { files.push([p, m]); contributing[p] = m; }
+            return files;
+        };
+        for (const [key, promise] of rvdTypeMemo) {
+            if (!key.startsWith(prefix)) continue;
+            const files = collectFiles(rvdTypeMemoFiles.get(key));
+            if (!files) continue;
+            const v = await promise.catch(() => null);
+            payload.types.push({ k: key.slice(prefix.length), v, files });
+        }
+        for (const [key, promise] of rvdClassMembersMemo) {
+            if (!key.startsWith(prefix)) continue;
+            const files = collectFiles(rvdClassMembersFiles.get(key));
+            if (!files) continue;
+            const members = await promise.catch(() => null);
+            payload.classes.push({ k: key.slice(prefix.length), members: members ? [...members.entries()] : null, files });
+        }
+        // Nothing mtime-validatable → nothing worth persisting (and includeIndexFresh
+        // would refuse an empty contributing set anyway).
+        if (Object.keys(contributing).length === 0) return;
+        saveIncludeIndex<RvdMemoDiskPayload>(RVD_MEMO_BUCKET, openDocPathLower, {
+            signature: liveSignature,
+            contributing,
+            payload
+        });
+    } catch { /* best-effort — a failed save just means the next start is cold */ }
+}
+
+/** Test-only: clear the module-level memos + seed tracker (simulates a server restart). */
+export function __resetRvdMemosForTest(): void {
+    rvdTypeMemo.clear();
+    rvdTypeMemoFiles.clear();
+    rvdClassMembersMemo.clear();
+    rvdClassMembersFiles.clear();
+    rvdDiskSeedAttempted.clear();
+}
+
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
+import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from '../../services/IncludeIndexDiskCache';
 import * as path from 'path';
+import * as fs from 'fs';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
@@ -26,6 +152,57 @@ logger.setLevel("error");
 // always emits, even in a release VSIX — one line per validation, needed to diagnose slow-solution
 // reports.
 const perfLogger = LoggerManager.getLogger("ReturnValueDiagnostics.Perf", "perf");
+
+// ─── #358 RVD memo mtime validation (shared by class-members + receiver-type) ──
+
+/** #358: cheap mtime read (ms) for a declaring file; null if unstatable. */
+function rvdStatMtimeMs(fsPath: string): number | null {
+    try { return fs.statSync(fsPath).mtimeMs; } catch { return null; }
+}
+
+/**
+ * #358: fingerprint a set of contributing fs paths by mtime, excluding the open document
+ * (already pinned by rvdDocKey — the dirty-doc guard). Returns null when any path is missing
+ * or unstatable — such an entry can't be mtime-validated and is dropped on the next epoch
+ * bump rather than trusted. An empty map means every contribution came from the open doc.
+ */
+function rvdFingerprintPaths(
+    paths: Iterable<string | undefined>,
+    openDocPathLower: string
+): Map<string, number> | null {
+    const fp = new Map<string, number>();
+    for (const p of paths) {
+        if (!p) return null;
+        const pl = p.toLowerCase();
+        if (pl === openDocPathLower) continue; // open doc → pinned by rvdDocKey
+        if (!fp.has(pl)) {
+            const m = rvdStatMtimeMs(p);
+            if (m === null) return null;
+            fp.set(pl, m);
+        }
+    }
+    return fp;
+}
+
+/** #358: drop entries from a memo + its files map whose contributing files changed on disk. */
+function rvdRevalidateMemoByMtime(
+    memo: Map<string, unknown>,
+    filesMap: Map<string, Map<string, number> | null>
+): void {
+    for (const key of [...memo.keys()]) {
+        const fp = filesMap.get(key);
+        let fresh = !!fp; // null / unrecorded provenance → re-resolve
+        if (fp) {
+            for (const [p, mtime] of fp) {
+                if (rvdStatMtimeMs(p) !== mtime) { fresh = false; break; }
+            }
+        }
+        if (!fresh) {
+            memo.delete(key);
+            filesMap.delete(key);
+        }
+    }
+}
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
@@ -752,10 +929,70 @@ export async function validateDiscardedReturnValues(
     // findMemberInClass, which never filtered. A class that can't be enumerated
     // (interface receivers, GROUP/QUEUE types, unresolvable) falls back to the
     // #158 per-site path so decisions never regress.
-    const typeMemo = new Map<string, Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>>();
-    const classMembersMemo = new Map<string, Promise<Map<string, OverloadCandidate[]> | null>>();
+    //
+    // #345 phase 4: the memos were per-PASS — GlobalErrors re-resolved (2.5s)
+    // and ErrorClass re-enumerated (184 members) on every one of the 4 startup
+    // passes (cache_hits=0 measured on every pass). Module-level now, keyed by
+    // (docUri, docVersion) with the #340 watcher epoch clearing everything on
+    // any cross-file change.
+    const rvdEpochNow = getCrossFileEpoch();
+    if (rvdEpochNow !== rvdMemoEpoch || rvdTypeMemo.size > 500 || rvdTypeMemoFiles.size > 500 ||
+        rvdClassMembersMemo.size > 500 || rvdClassMembersFiles.size > 500) {
+        // #358: both memos are gated by their DECLARING files (recorded as contributing-file
+        // mtimes), not the open doc — on an epoch bump validate each entry against those mtimes
+        // instead of wiping wholesale. Library classes (StringTheory 1394 members) and stable
+        // receiver types (GlobalErrors, ~1.3s to resolve) whose files never changed survive the
+        // bump — the "warm was cold in disguise" cost this issue is about. The >500 ceiling
+        // hard-resets each memo+files pair together; that also reaps any fingerprint orphaned
+        // when an in-flight resolution's entry was dropped mid-build below.
+        if (rvdTypeMemo.size > 500 || rvdTypeMemoFiles.size > 500) {
+            rvdTypeMemo.clear();
+            rvdTypeMemoFiles.clear();
+        } else if (rvdEpochNow !== rvdMemoEpoch) {
+            rvdRevalidateMemoByMtime(rvdTypeMemo, rvdTypeMemoFiles);
+        }
+        if (rvdClassMembersMemo.size > 500 || rvdClassMembersFiles.size > 500) {
+            rvdClassMembersMemo.clear();
+            rvdClassMembersFiles.clear();
+        } else if (rvdEpochNow !== rvdMemoEpoch) {
+            rvdRevalidateMemoByMtime(rvdClassMembersMemo, rvdClassMembersFiles);
+        }
+        rvdMemoEpoch = rvdEpochNow;
+    }
+    // Content is part of the identity (the #340/#344 lesson) — same uri+version
+    // with different text (test fixtures, unsaved flows) must never share memos.
+    const rvdText = document.getText();
+    let rvdHash = 5381;
+    for (let i = 0; i < rvdText.length; i += 127) {
+        rvdHash = ((rvdHash * 33) ^ rvdText.charCodeAt(i)) >>> 0;
+    }
+    const rvdDocKey = `${document.uri.toLowerCase()}|${document.version}|${rvdText.length}|${rvdHash}`;
+    // #358: the open doc's own FS path, so class members enumerated from live tokens are
+    // excluded from the mtime fingerprint (their validity is pinned by rvdDocKey above).
+    const openDocPathLower = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\').toLowerCase();
+    // #358-cold: on the first pass for this doc content, seed the memos from the
+    // persisted envelope — a restart then skips the multi-second cold enumeration
+    // (thisStartup ~3.2s measured) instead of re-walking the include universe.
+    const rvdDiskSignature = `${rvdText.length}|${rvdHash}`;
+    await seedRvdMemosFromDisk(rvdDocKey, openDocPathLower, rvdDiskSignature);
+    const typeMemo = {
+        get: (k: string) => rvdTypeMemo.get(`${rvdDocKey}|${k}`),
+        set: (k: string, v: Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null>) =>
+            rvdTypeMemo.set(`${rvdDocKey}|${k}`, v),
+    };
+    const classMembersMemo = {
+        get: (k: string) => rvdClassMembersMemo.get(`${rvdDocKey}|${k}`),
+        set: (k: string, v: Promise<Map<string, OverloadCandidate[]> | null>) =>
+            rvdClassMembersMemo.set(`${rvdDocKey}|${k}`, v),
+    };
     let enumResolvedSites = 0;
     let fallbackSites = 0;
+    // #358 observability: module-level memo hit/miss per pass. A warm re-validation whose
+    // memos survived the epoch bump shows *_misses=0 (nothing re-resolved / re-enumerated);
+    // a cold pass shows misses>0. This makes the fix self-evident in one perf line, without
+    // eyeballing dotcall_loop deltas that TokenCache warmth confounds.
+    let typeMemoHits = 0, typeMemoMisses = 0;
+    let classMemoHits = 0, classMemoMisses = 0;
 
     const countParamsInSignature = (line: string): number => {
         const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
@@ -773,7 +1010,9 @@ export async function validateDiscardedReturnValues(
 
     const getClassMembers = (className: string): Promise<Map<string, OverloadCandidate[]> | null> => {
         const classKey = className.toLowerCase();
+        const fullKey = `${rvdDocKey}|${classKey}`; // #358: aligns with classMembersMemo's stored key
         let promise = classMembersMemo.get(classKey);
+        if (promise) classMemoHits++; else classMemoMisses++;
         if (!promise) {
             promise = (async () => {
                 try {
@@ -785,7 +1024,13 @@ export async function validateDiscardedReturnValues(
                             class: className, ms: enumMs, members: items?.length ?? 0
                         });
                     }
-                    if (!items || items.length === 0) return null;
+                    if (!items || items.length === 0) {
+                        rvdClassMembersFiles.set(fullKey, null); // #358: no provenance → drop on next bump
+                        return null;
+                    }
+                    // #358: record the declaring-file mtimes so this entry survives an epoch bump
+                    // when those files are unchanged (excludes the open doc, pinned by rvdDocKey).
+                    rvdClassMembersFiles.set(fullKey, rvdFingerprintPaths(items.map(it => it.file), openDocPathLower));
                     const byName = new Map<string, OverloadCandidate[]>();
                     for (const item of items) {
                         const nameKey = item.name.toLowerCase();
@@ -800,6 +1045,7 @@ export async function validateDiscardedReturnValues(
                     }
                     return byName;
                 } catch {
+                    rvdClassMembersFiles.set(fullKey, null); // #358: enumeration failure → drop on next bump
                     return null; // enumeration failure → per-site fallback, never a dead validator
                 }
             })();
@@ -875,18 +1121,26 @@ export async function validateDiscardedReturnValues(
             className = range.selfClassName!;
         } else {
             let typePromise = typeMemo.get(objUpper);
+            if (typePromise) typeMemoHits++; else typeMemoMisses++;
             if (!typePromise) {
                 // #310 follow-up: name slow receiver-type resolutions — the 8.5s→6.6s
                 // shortfall means the cost split (type resolution vs enumeration vs
                 // guard-skipped SDI) is not what the aggregate line suggests.
                 const typeStart = Date.now();
-                typePromise = memberLocator.resolveVariableType(objectName, tokens, document);
-                typePromise.then(() => {
+                const typeFullKey = `${rvdDocKey}|${objUpper}`; // #358: aligns with typeMemo's stored key
+                // #358: capture the file(s) whose content determined this type so the memo
+                // survives an unrelated epoch bump (GlobalErrors ~1.3s otherwise re-resolves).
+                const typeProvenance = new Set<string>();
+                typePromise = memberLocator.resolveVariableType(objectName, tokens, document, undefined, typeProvenance);
+                typePromise.then((info) => {
+                    rvdTypeMemoFiles.set(typeFullKey, info
+                        ? rvdFingerprintPaths(typeProvenance, openDocPathLower)
+                        : null); // #358: unresolved type → no provenance → drop on next bump
                     const typeMs = Date.now() - typeStart;
                     if (typeMs >= 250) {
                         perfLogger.perf("RVD slow receiver-type resolution", { object: objectName, ms: typeMs });
                     }
-                }).catch(() => { /* logged at source */ });
+                }).catch(() => { rvdTypeMemoFiles.set(typeFullKey, null); });
                 typeMemo.set(objUpper, typePromise);
             }
             const typeInfo = await typePromise;
@@ -956,17 +1210,30 @@ export async function validateDiscardedReturnValues(
     diagnostics.push(...crossFileDiags);
     const crossFileMs = Date.now() - crossFileStart;
 
+    // #358-cold: something new was resolved this pass — persist the doc's memo
+    // entries so the next session's first pass seeds from disk instead of
+    // re-enumerating. Awaiting is cheap: every promise is settled by pass end.
+    if (typeMemoMisses + classMemoMisses > 0) {
+        await persistRvdMemos(rvdDocKey, openDocPathLower, rvdDiskSignature);
+    }
+
     perfLogger.perf("validateDiscardedReturnValues complete", {
         total_ms: Date.now() - fnStart,
         dotcall_loop_ms: dotCallMs,
         crossfile_ms: crossFileMs,
         crossfile_files_scanned: lastCrossFileFilesScanned,
         dotcall_sites: dotCallSites,
-        enum_classes: classMembersMemo.size,
+        enum_classes: rvdClassMembersMemo.size,
         enum_resolved_sites: enumResolvedSites,
         fallback_sites: fallbackSites,
         cache_hits: cacheHits,
         cache_unique_keys: memberCache.size,
+        // #358: module-level memo reuse this pass — *_misses=0 on a warm re-validation whose
+        // memos survived the epoch bump; misses>0 cold. The direct proof of the #358 fix.
+        type_memo_hits: typeMemoHits,
+        type_memo_misses: typeMemoMisses,
+        class_memo_hits: classMemoHits,
+        class_memo_misses: classMemoMisses,
         diag_count: diagnostics.length,
         uri: document.uri
     });

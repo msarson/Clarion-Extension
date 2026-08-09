@@ -79,4 +79,53 @@ export class RoutineHoverResolver {
         logger.info(`❌ Routine not found: ${routineName}`);
         return null;
     }
+
+    /**
+     * #321 — hover for a GOTO target: resolves the statement label under
+     * GOTO's one-unit scope (same resolver FAR and F12 use, so all three
+     * agree) and shows the label with its source line.
+     */
+    resolveGotoLabelReference(
+        document: TextDocument,
+        position: Position,
+        line: string
+    ): Hover | null {
+        const gotoMatch = line.match(ClarionPatterns.GOTO_LABEL);
+        if (!gotoMatch) {
+            return null;
+        }
+
+        const labelName = gotoMatch[1];
+        const gotoPos = line.toUpperCase().indexOf('GOTO');
+        const nameStart = line.indexOf(labelName, gotoPos);
+        const nameEnd = nameStart + labelName.length;
+        if (position.character < nameStart || position.character > nameEnd) {
+            return null;
+        }
+
+        const tokens = TokenCache.getInstance().getTokens(document);
+        const structure = TokenCache.getInstance().getStructure(document);
+        const labelToken = TokenHelper.findScopedStatementLabelToken(structure, tokens, labelName, position.line);
+        if (!labelToken) {
+            logger.info(`❌ GOTO target label not found in unit: ${labelName}`);
+            return null;
+        }
+
+        const allLines = document.getText().split(/\r?\n/);
+        const sourceLine = (allLines[labelToken.line] ?? '').trimEnd();
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**Label:** \`${labelToken.value}\``,
+                    '',
+                    `📍 Line ${labelToken.line + 1}`,
+                    '',
+                    '```clarion',
+                    sourceLine,
+                    '```'
+                ].join('\n')
+            }
+        };
+    }
 }

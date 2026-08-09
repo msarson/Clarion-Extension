@@ -12,14 +12,18 @@
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
+import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
+import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
+import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,11 +33,37 @@ const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
 logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 
+/**
+ * #373 — walk-RESULT cache for findVariableTokenInParentChain, keyed by
+ * host+varName. The walk recursively reads + tokenizes the MEMBER parent's
+ * whole INCLUDE chain (a big NetTalk PROGRAM file → ~12.5s cold, measured as the
+ * `includesAndEquates` hover phase), and the first word to miss re-pays it in
+ * every fresh server process. The result — including the common NEGATIVE
+ * "not declared in any reachable include" — is memoized until the cross-file
+ * epoch bumps (the #340 watcher / #355 drift path, same invalidation as the
+ * #361 procedure-walk memo in MapProcedureResolver). Module-level so it
+ * survives across resolver instances.
+ */
+const varWalkCache = new Map<string, string | null>(); // value = file path where found, or null
+let varWalkEpoch = -1;
+
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
     private tokenCache = TokenCache.getInstance();
+    /** Lazily constructed — MethodOverloadResolver sits in a benign import cycle
+     *  (MethodOverloadResolver → ArgumentTypeResolver → MemberLocatorService). */
+    private overloadResolver: MethodOverloadResolver | null = null;
 
     constructor(private crossFileCache?: CrossFileCache) {}
+
+    private getOverloadResolver(): MethodOverloadResolver {
+        if (!this.overloadResolver) {
+            // Lazy require breaks the module-load cycle (usage is runtime-only).
+            const { MethodOverloadResolver } = require('../utils/MethodOverloadResolver');
+            this.overloadResolver = new MethodOverloadResolver();
+        }
+        return this.overloadResolver!;
+    }
 
     private trace(message: string, ...args: any[]): void {
         logger.test(`[DotAccessTrace] ${message}`, ...args);
@@ -81,29 +111,69 @@ export class MemberLocatorService {
         varName: string,
         document: TextDocument
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        // #373 — result cache (positive + NEGATIVE), epoch-invalidated. The walk
+        // below cold-loads the MEMBER parent's whole include chain (~12.5s on a
+        // big NetTalk PROGRAM file) before concluding "not found" — the common
+        // case for a word that isn't a cross-file global, and exactly what needs
+        // remembering.
+        const epoch = getCrossFileEpoch();
+        if (epoch !== varWalkEpoch) {
+            varWalkCache.clear();
+            varWalkEpoch = epoch;
+        }
+        const cacheKey = `${document.uri.toLowerCase()}|${varName.toLowerCase()}`;
+        if (varWalkCache.has(cacheKey)) {
+            const cachedPath = varWalkCache.get(cacheKey)!;
+            if (!cachedPath) return null;
+            // Re-derive the live doc/tokens from the remembered file (cheap — the
+            // cross-file cache holds it) so a stale token is never handed out.
+            const data = await this.loadDocument(cachedPath);
+            const found = data?.tokens.find(t =>
+                this.isVariableLookupCandidate(t, data!.doc, true) && this.tokenMatchesName(t, varName.toLowerCase())
+            );
+            if (data && found) return { token: found, tokens: data.tokens, doc: data.doc };
+            // File gone or declaration moved — fall through to a fresh walk.
+        }
+
+        const result = await this.findVariableTokenInParentChainUncached(varName, document);
+        varWalkCache.set(cacheKey, result
+            ? decodeURIComponent(result.doc.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\')
+            : null);
+        return result;
+    }
+
+    private async findVariableTokenInParentChainUncached(
+        varName: string,
+        document: TextDocument
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
         const tokens = this.tokenCache.getTokens(document);
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
 
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        // #373: ONE slicer across both walks below — the recursion loaded + cold-
+        // tokenized every reachable INCLUDE with no yield (same shape as #367's
+        // interface walk and #361's procedure walk).
+        const timeSlice = makeTimeSlicer();
+
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t, parentData.doc, true) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
-                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
+                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()]), timeSlice
                     );
                     if (incResult) return incResult;
                 }
             }
         }
 
-        return this.searchIncludesForToken(varName, tokens, currentDir, new Set());
+        return this.searchIncludesForToken(varName, tokens, currentDir, new Set(), timeSlice);
     }
 
     /**
@@ -136,7 +206,12 @@ export class MemberLocatorService {
         varName: string,
         tokens: Token[],
         document: TextDocument,
-        scopeLine?: number
+        scopeLine?: number,
+        // #358: when supplied, collects the fs path(s) whose CONTENT determined the
+        // resolved type — the declaring file of the variable, plus any LIKE-alias file
+        // dereferenced. RVD uses this to mtime-validate its receiver-type memo across
+        // epoch bumps instead of clearing it wholesale. Other callers omit it (no-op).
+        provenance?: Set<string>
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         const found = await this.findVariableTokenCrossFile(varName, tokens, document, scopeLine);
         if (!found) {
@@ -145,9 +220,16 @@ export class MemberLocatorService {
             }
             return null;
         }
+        // The file that declares the variable is the primary dependency of this resolution.
+        provenance?.add(this.uriToFsPath(found.doc.uri));
         const extracted = this.extractTypeFromToken(found.token, found.tokens);
         if (!extracted) return null;
-        return this.resolveTypeAlias(extracted, found.tokens, found.doc, scopeLine);
+        return this.resolveTypeAlias(extracted, found.tokens, found.doc, scopeLine, provenance);
+    }
+
+    /** #358: uri → native fs path (the conversion inlined throughout this file). */
+    private uriToFsPath(uri: string): string {
+        return decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
     }
 
     /**
@@ -158,7 +240,8 @@ export class MemberLocatorService {
         typeInfo: { typeName: string; isClass: boolean; isReference: boolean },
         tokens: Token[],
         document: TextDocument,
-        scopeLine?: number
+        scopeLine?: number,
+        provenance?: Set<string> // #358: records any alias file actually dereferenced
     ): Promise<{ typeName: string; isClass: boolean; isReference: boolean }> {
         let current = typeInfo;
         const visited = new Set<string>();
@@ -176,7 +259,7 @@ export class MemberLocatorService {
             // conclude "not an alias". A local declaration still takes the full check,
             // so same-file aliases keep exact semantics.
             const hasLocalDecl = tokens.some(t =>
-                this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, key));
+                this.isVariableLookupCandidate(t, document, false) && this.tokenMatchesName(t, key));
             if (!hasLocalDecl) {
                 await this.ensureIndexBuilt();
                 if (this.sdi.find(current.typeName).length > 0) break;
@@ -194,6 +277,8 @@ export class MemberLocatorService {
             if (!aliasType) break;
             if (aliasType.typeName.toLowerCase() === current.typeName.toLowerCase()) break;
 
+            // #358: this alias file's content also determined the final type.
+            provenance?.add(this.uriToFsPath(aliasDecl.doc.uri));
             current = {
                 typeName: aliasType.typeName,
                 isClass: aliasType.isClass,
@@ -313,9 +398,9 @@ export class MemberLocatorService {
         }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath));
+            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -452,16 +537,48 @@ export class MemberLocatorService {
      * @param document       The document requesting completion
      * @param callerClass    Optional: the class the caller belongs to (for access filtering).
      *                       Omit to show only public members (external call site).
+     * @param options.overloadAware  When true, a child method shadows a parent method
+     *                       only when their PROTOTYPES match (same name + param shape),
+     *                       so inherited *sibling* overloads survive a single derived
+     *                       override. Default false = shadow by name (completion/hover).
      * @returns Flat, deduped, access-filtered list of MemberEnumItem
      */
     async enumerateMembersInClass(
         className: string,
         document: TextDocument,
-        callerClass?: string
+        callerClass?: string,
+        options?: { overloadAware?: boolean }
     ): Promise<MemberEnumItem[]> {
         return this.collectInheritedMembers(
-            className, document, callerClass, new Set()
+            className, document, callerClass, new Set(), options?.overloadAware ?? false
         );
+    }
+
+    /**
+     * #358: ensure the MEMBER('...') parent of `document` is tokenized and in the TokenCache,
+     * OFF the felt path. Resolving a MEMBER module's globals (e.g. GlobalErrors, thisStartup)
+     * walks to their declarations in the parent — on IBSWorking that parent (IBSCommon.clw) is
+     * 873 KB / 68k tokens declaring globals ~9,500 lines deep, so the FIRST cold receiver-type
+     * resolution pays ~1.1s just to tokenize it. Warming it on the startup idle lane pays that
+     * once, in the background, so no interactive validation lands it. Best-effort: returns true
+     * when a parent was resolved (already-cached or freshly loaded).
+     */
+    public async warmMemberParent(document: TextDocument): Promise<boolean> {
+        const tokens = this.tokenCache.getTokens(document);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        if (!memberToken?.referencedFile) return false;
+
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+        if (!parentPath) return false;
+
+        // Already tokenized (open in the editor, or warmed by another member sharing this
+        // parent) → nothing to do. loadDocument keys by this same fs-path-derived uri.
+        const parentUri = `file:///${parentPath.replace(/\\/g, '/')}`;
+        if (this.tokenCache.getTokensByUri(parentUri)) return true;
+
+        await this.loadDocument(parentPath); // reads + tokenizes + caches
+        return true;
     }
 
     // -------------------------------------------------------------------------
@@ -516,7 +633,7 @@ export class MemberLocatorService {
 
         // 1. Current file (column 0 label or structure)
         const local = tokens.find(t =>
-            this.isVariableLookupCandidate(t) &&
+            this.isVariableLookupCandidate(t, document, false) &&
             this.tokenMatchesName(t, varNameLower) &&
             !isExcluded(t.line)
         );
@@ -526,14 +643,14 @@ export class MemberLocatorService {
         const currentDir = path.dirname(currentFilePath);
 
         // 2. MEMBER parent file (and its INCLUDE chain)
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
                     const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t) && this.tokenMatchesName(t, varName.toLowerCase())
+                        this.isVariableLookupCandidate(t, parentData.doc, true) && this.tokenMatchesName(t, varName.toLowerCase())
                     );
                     if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
                     const incResult = await this.searchIncludesForToken(
@@ -553,10 +670,15 @@ export class MemberLocatorService {
         varName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        // #373: ONE slicer threaded through the whole recursive walk (previously
+        // no yield at all — every reachable INCLUDE cold-loaded + tokenized in
+        // one synchronous stretch).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -565,12 +687,12 @@ export class MemberLocatorService {
             if (!data) continue;
 
             const found = data.tokens.find(t =>
-                this.isVariableLookupCandidate(t) &&
+                this.isVariableLookupCandidate(t, data.doc, true) &&
                 this.tokenMatchesName(t, varName.toLowerCase())
             );
             if (found) return { token: found, tokens: data.tokens, doc: data.doc };
 
-            const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited);
+            const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited, timeSlice);
             if (nested) return nested;
         }
         return null;
@@ -580,10 +702,14 @@ export class MemberLocatorService {
         ifaceName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        // #367: ONE slicer across the whole recursive include walk (this loaded +
+        // tokenized every reachable INC with no yield at all — an ifaceImpl freeze).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<Array<{ name: string; paramCount: number }> | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -596,7 +722,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
                 );
                 if (nested) return nested;
             }
@@ -623,7 +749,7 @@ export class MemberLocatorService {
         if (found) return { token: found, tokens, doc: document };
 
         // 2. MEMBER parent + its include chain
-        const memberToken = tokens.find(t => t.value?.toUpperCase() === 'MEMBER' && t.line < 5 && t.referencedFile);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
             if (parentPath) {
@@ -692,8 +818,50 @@ export class MemberLocatorService {
         return false;
     }
 
-    private isVariableLookupCandidate(t: Token): boolean {
-        return t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0;
+    /**
+     * @param crossFile True when `doc` is a file OTHER than the one the lookup started in
+     *   (a MEMBER parent or an INCLUDE). Required rather than defaulted: the two filters
+     *   below differ in reach, and silently getting it wrong is precisely how the bugs
+     *   this method exists to prevent were introduced.
+     */
+    private isVariableLookupCandidate(t: Token, doc: TextDocument, crossFile: boolean): boolean {
+        if (!(t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0)) {
+            return false;
+        }
+        // A CLASS/INTERFACE member (property or method prototype) is only reachable via
+        // qualified access (SELF.X / instance.X) — Clarion has no bare/global path to it,
+        // even though its declaration token is column-0 and procedure-shaped exactly like a
+        // real global procedure. Without this guard, an undeclared word that happens to share
+        // a name with some unrelated class's method resolves to that method instead of
+        // correctly reporting "not found" (e.g. hovering a stray/typo'd bare word elsewhere in
+        // the include chain matched `SomeClass.SomeMethod`).
+        const context = this.tokenCache.getStructure(doc).getStructureContextAt(t.line);
+        if (context.inClass || context.inInterface) return false;
+
+        // Same shape, one scope out — but only when looking into ANOTHER file. A declaration
+        // in a PROCEDURE/FUNCTION/ROUTINE's local data section carries a column-0 label
+        // indistinguishable from module-level global data, yet nothing outside that scope can
+        // name it. Both same-file siblings already stop at the module boundary
+        // (SymbolFinderService.findModuleVariable and .findGlobalVariableInCurrentFile each cut
+        // off at the first PROCEDURE); the cross-file walks had no boundary at all, so an
+        // undeclared bare word matched whatever unrelated procedure local happened to share its
+        // name — typically one thousands of lines deep in a large MEMBER parent, reported to the
+        // user as "📦 Module variable".
+        //
+        // NOT applied to same-file lookups: those legitimately see procedure locals, and the
+        // caller does its own, finer scope filtering (#304's excludedRanges deliberately keeps a
+        // ROUTINE's parent-procedure data and an ABC `ThisWindow CLASS(WindowManager)` method
+        // impl's host-procedure locals visible). Rejecting here would pre-empt that and make it
+        // dead code.
+        if (!crossFile) return true;
+
+        const scope = context.scope;
+        return !(scope && (
+            scope.subType === TokenType.Procedure ||
+            scope.subType === TokenType.GlobalProcedure ||
+            scope.subType === TokenType.MethodImplementation ||
+            scope.subType === TokenType.Routine
+        ));
     }
 
     /**
@@ -745,10 +913,13 @@ export class MemberLocatorService {
         tokens: Token[],
         fromDir: string,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        // #367: ONE slicer across the whole recursive include walk (previously no yield).
+        timeSlice: () => Promise<void> = makeTimeSlicer()
     ): Promise<MemberInfo | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -759,7 +930,7 @@ export class MemberLocatorService {
                 if (result) return result;
 
                 const nested = await this.findInterfaceInIncludeChain(
-                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited
+                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited, timeSlice
                 );
                 if (nested) return nested;
             }
@@ -870,7 +1041,7 @@ export class MemberLocatorService {
         document: TextDocument
     ): Promise<Set<string> | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const resolved = this.resolveFilePath(moduleFile, path.dirname(docPath));
+        const resolved = this.resolveFilePath(moduleFile, path.dirname(docPath), docPath);
         if (!resolved) return null;
         const data = await this.loadDocument(resolved);
         if (!data) return null;
@@ -975,7 +1146,7 @@ export class MemberLocatorService {
     ): Promise<Set<string> | null> {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         if (info.moduleName) {
-            const resolved = this.resolveFilePath(info.moduleName, path.dirname(info.filePath));
+            const resolved = this.resolveFilePath(info.moduleName, path.dirname(info.filePath), info.filePath);
             if (!resolved) return null;
             const data = await this.loadDocument(resolved);
             if (!data) return null;
@@ -1109,10 +1280,12 @@ export class MemberLocatorService {
         ifaceName: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        timeSlice: () => Promise<void> = makeTimeSlicer() // #367: shared across the recursion
     ): Promise<string[] | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
+            await timeSlice();
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -1123,7 +1296,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChain(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
                 );
                 if (nested) return nested;
             }
@@ -1364,15 +1537,22 @@ export class MemberLocatorService {
 
         const docLines = doc.getText().split(/\r?\n/);
         const results: MemberEnumItem[] = [];
+        // A class member is one declaration per line, but a named PROCEDURE parameter
+        // (e.g. `errCode` in `Foo PROCEDURE(LONG errCode)`) also tokenizes as a Variable
+        // on the same line — without this guard each parameterised overload emits a
+        // duplicate MemberEnumItem (an inherited overload set of N would surface as N+extras).
+        const seenLines = new Set<number>();
 
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (isInsideNested(token.line)) continue;
+            if (seenLines.has(token.line)) continue;
 
             const raw = docLines[token.line] ?? '';
             const memberMatch = raw.match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/);
             if (!memberMatch) continue;
+            seenLines.add(token.line);
 
             const name = memberMatch[1];
             const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
@@ -1544,13 +1724,13 @@ export class MemberLocatorService {
      * ImplementationProvider / MethodHoverResolver already do via their
      * direct-fix-sites.
      */
-    private resolveFilePath(filename: string, fromDir: string): string | null {
+    private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
-            for (const project of sm.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(filename);
-                if (resolved?.path && fs.existsSync(resolved.path)) return resolved.path;
-            }
+            // #328: owner-project-first when the caller knows the from FILE
+            // (a bare directory cannot identify the owning project).
+            const viaRedirection = resolveViaProjectRedirection(filename, fromFile ?? null);
+            if (viaRedirection) return viaRedirection;
             const relative = path.join(fromDir, filename);
             return fs.existsSync(relative) ? relative : null;
         }
@@ -1609,7 +1789,8 @@ export class MemberLocatorService {
         className: string,
         document: TextDocument,
         callerClass: string | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        overloadAware: boolean = false
     ): Promise<MemberEnumItem[]> {
         const key = className.toLowerCase();
         if (visited.has(key)) return [];
@@ -1641,12 +1822,27 @@ export class MemberLocatorService {
 
         // 4. Recurse into the parent
         const parentMembers = await this.collectInheritedMembers(
-            parentClassName, document, callerClass, visited
+            parentClassName, document, callerClass, visited, overloadAware
         );
 
-        // 5. Merge child-first: child members shadow parent members by name
+        // 5. Merge child-first: child members shadow parent members.
+        //    - default: a child member hides ALL same-named parent members (a single
+        //      completion/hover entry per name — the historical contract).
+        //    - overloadAware: a child METHOD hides a parent method only when their
+        //      prototypes match (same name + param shape). Inherited sibling overloads
+        //      survive a single derived override — required for signature-help overload
+        //      enumeration, e.g. a PWEE embed buffer that re-declares one inherited
+        //      overload as `,DERIVED` must not collapse the other overloads.
         const childNames = new Set(filtered.map(m => m.name.toLowerCase()));
-        const uniqueParent = parentMembers.filter(m => !childNames.has(m.name.toLowerCase()));
+        const uniqueParent = overloadAware
+            ? parentMembers.filter(pm => {
+                if (pm.kind !== 'method') return !childNames.has(pm.name.toLowerCase());
+                return !filtered.some(cm =>
+                    cm.kind === 'method' &&
+                    cm.name.toLowerCase() === pm.name.toLowerCase() &&
+                    this.getOverloadResolver().signaturesMatch(cm.signature, pm.signature));
+            })
+            : parentMembers.filter(m => !childNames.has(m.name.toLowerCase()));
 
         return [...filtered, ...uniqueParent];
     }

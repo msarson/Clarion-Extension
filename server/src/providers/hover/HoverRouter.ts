@@ -23,6 +23,7 @@ import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverRouter");
 logger.setLevel("error");
+const perfLogger = LoggerManager.getLogger("HoverRouter.Perf", "perf");
 
 /**
  * Routes hover requests to appropriate resolvers based on context
@@ -53,76 +54,112 @@ export class HoverRouter {
      * Route hover request to appropriate resolver
      */
     async route(context: HoverContext): Promise<Hover | null> {
-        const { word, wordRange, line, document, position, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore } = context;
+        const { word, wordRange, line, document, position, tokens, documentStructure, isInMapBlock, isInWindowContext, isInClassBlock, hasLabelBefore, isFollowedByIdentifier } = context;
 
-        // 1. Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
-        const keywordHover = this.handleSpecialKeywords(context);
-        if (keywordHover) return keywordHover;
+        // Per-step timing — the outer HoverProvider trace buckets this whole call as
+        // one `router` stage; this names WHICH router step is slow so the ~700ms
+        // per-hover floor can be fixed with data, not a guess. Emitted only when slow.
+        const routerStart = Date.now();
+        const stages: Array<[string, number]> = [];
+        let last = routerStart;
+        const mark = (name: string) => { const now = Date.now(); stages.push([name, now - last]); last = now; };
+        const emitIfSlow = () => {
+            const total = Date.now() - routerStart;
+            if (total < 300) return;
+            const top = stages.filter(([, ms]) => ms >= 20).sort((a, b) => b[1] - a[1]).slice(0, 6)
+                .map(([n, ms]) => `${n}=${ms}`).join(', ');
+            perfLogger.perf("Hover router breakdown", { total_ms: total, top: top || '(all stages <20ms)', word });
+        };
 
-        // 1.5 Handle IMPLEMENTS(InterfaceName) hover
-        const implementsHover = this.handleImplementsHover(line, position, tokens);
-        if (implementsHover) return implementsHover;
+        try {
+            // 1. Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
+            const keywordHover = this.handleSpecialKeywords(context);
+            mark('keywords');
+            if (keywordHover) return keywordHover;
 
-        // 2. Handle routine references (DO statements) - check early to handle namespace prefixes
-        const routineHover = await this.routineResolver.resolveRoutineReference(document, position, line);
-        if (routineHover) return routineHover;
+            // 1.5 Handle IMPLEMENTS(InterfaceName) hover
+            const implementsHover = this.handleImplementsHover(line, position, tokens);
+            mark('implements');
+            if (implementsHover) return implementsHover;
 
-        // 3. Handle procedure calls
-        const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
-        if (procedureCallHover) return procedureCallHover;
+            // 2. Handle routine references (DO statements) - check early to handle namespace prefixes
+            const routineHover = await this.routineResolver.resolveRoutineReference(document, position, line);
+            mark('routineRef');
+            if (routineHover) return routineHover;
 
-        // 4. Handle method implementations (BEFORE built-ins to handle methods named like keywords)
-        const methodImplHover = await this.methodResolver.resolveMethodImplementation(document, position, line);
-        if (methodImplHover) return methodImplHover;
+            // 2.1 Handle GOTO statement-label references (#321) — before the variable
+            // tiers, which would otherwise present the label as an UNKNOWN-typed local.
+            const gotoHover = this.routineResolver.resolveGotoLabelReference(document, position, line);
+            mark('gotoLabel');
+            if (gotoHover) return gotoHover;
 
-        // 5. Handle procedure implementations
-        const procImplHover = await this.procedureResolver.resolveProcedureImplementation(document, position, line, documentStructure);
-        if (procImplHover) return procImplHover;
+            // 3. Handle procedure calls
+            const procedureCallHover = await this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line);
+            mark('procedureCall');
+            if (procedureCallHover) return procedureCallHover;
 
-        // 6. Handle MAP declarations (check BEFORE method declarations to avoid confusion)
-        const mapDeclHover = await this.procedureResolver.resolveMapDeclaration(document, position, line, documentStructure);
-        if (mapDeclHover) return mapDeclHover;
+            // 4. Handle method implementations (BEFORE built-ins to handle methods named like keywords)
+            const methodImplHover = await this.methodResolver.resolveMethodImplementation(document, position, line);
+            mark('methodImpl');
+            if (methodImplHover) return methodImplHover;
 
-        // 7. Handle method declarations (BEFORE built-ins to avoid shadowing by keyword help)
-        if (!isInMapBlock) { // Skip if in MAP/MODULE block to prevent misidentification
-            const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
-            if (methodDeclHover) return methodDeclHover;
+            // 5. Handle procedure implementations
+            const procImplHover = await this.procedureResolver.resolveProcedureImplementation(document, position, line, documentStructure);
+            mark('procImpl');
+            if (procImplHover) return procImplHover;
+
+            // 6. Handle MAP declarations (check BEFORE method declarations to avoid confusion)
+            const mapDeclHover = await this.procedureResolver.resolveMapDeclaration(document, position, line, documentStructure);
+            mark('mapDecl');
+            if (mapDeclHover) return mapDeclHover;
+
+            // 7. Handle method declarations (BEFORE built-ins to avoid shadowing by keyword help)
+            if (!isInMapBlock) { // Skip if in MAP/MODULE block to prevent misidentification
+                const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
+                mark('methodDecl');
+                if (methodDeclHover) return methodDeclHover;
+            }
+
+            // 8. Handle data types and controls
+            const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
+            mark('symbol');
+            if (symbolHover) return symbolHover;
+
+            // 9. Handle attributes
+            const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock);
+            mark('attribute');
+            if (attributeHover) return attributeHover;
+
+            // 9.5 Handle PROP: runtime property equates
+            const propHover = this.handlePropEquate(word);
+            if (propHover) return propHover;
+
+            // 9.6 Handle EVENT: equates
+            const eventHover = this.handleEventEquate(word);
+            if (eventHover) return eventHover;
+
+            // 9.7 Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, etc.)
+            const directiveHover = this.handleDirective(word);
+            if (directiveHover) return directiveHover;
+
+            // 9.8 Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.) —
+            // entries previously living in clarion-builtins.json under issue #77
+            // moved to clarion-keywords.json. Routing intentionally sits next to
+            // directives and ahead of builtins so a misclassified entry can't be
+            // shadowed by an unrelated function with the same name.
+            const languageKeywordHover = this.handleKeyword(word);
+            if (languageKeywordHover) return languageKeywordHover;
+
+            // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
+            const builtinHover = await this.handleBuiltin(word, line, wordRange, document, position, tokens);
+            mark('builtin');
+            if (builtinHover) return builtinHover;
+
+            // 11. Variables handled by downstream logic (structure access, self.member, local/global vars)
+            return null; // Let calling code handle variable resolution
+        } finally {
+            emitIfSlow();
         }
-
-        // 8. Handle data types and controls
-        const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext });
-        if (symbolHover) return symbolHover;
-
-        // 9. Handle attributes
-        const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock);
-        if (attributeHover) return attributeHover;
-
-        // 9.5 Handle PROP: runtime property equates
-        const propHover = this.handlePropEquate(word);
-        if (propHover) return propHover;
-
-        // 9.6 Handle EVENT: equates
-        const eventHover = this.handleEventEquate(word);
-        if (eventHover) return eventHover;
-
-        // 9.7 Handle compiler directives (EQUATE, INCLUDE, COMPILE, OMIT, etc.)
-        const directiveHover = this.handleDirective(word);
-        if (directiveHover) return directiveHover;
-
-        // 9.8 Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.) —
-        // entries previously living in clarion-builtins.json under issue #77
-        // moved to clarion-keywords.json. Routing intentionally sits next to
-        // directives and ahead of builtins so a misclassified entry can't be
-        // shadowed by an unrelated function with the same name.
-        const languageKeywordHover = this.handleKeyword(word);
-        if (languageKeywordHover) return languageKeywordHover;
-
-        // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
-        const builtinHover = await this.handleBuiltin(word, line, wordRange, document, position, tokens);
-        if (builtinHover) return builtinHover;
-
-        // 11. Variables handled by downstream logic (structure access, self.member, local/global vars)
-        return null; // Let calling code handle variable resolution
     }
 
     /**
@@ -423,8 +460,28 @@ export class HoverRouter {
             return null;
         }
 
-        logger.info(`Found built-in function: ${word}`);
         const signatures = this.builtinService.getSignatures(word);
+
+        // Some built-ins (NULL is the prototypical case) are legitimately BOTH a function
+        // call (NULL(field) -> LONG) and a bare constant/keyword (a &= NULL, IF a &= NULL).
+        // Showing the function-call signature card for the bare usage is misleading — only
+        // render it when the word is actually immediately followed by '(' (skipping
+        // whitespace); otherwise fall back to a plain constant-style card using the same
+        // description text (clarion-builtins.json descriptions already cover both meanings).
+        const isActualCall = /^\s*\(/.test(line.slice(wordRange.end.character));
+        if (!isActualCall) {
+            logger.info(`Word ${word} matches a built-in but isn't called (no '(' follows) - showing constant hover`);
+            const doc = signatures[0]?.documentation;
+            const description = typeof doc === 'string' ? doc : (doc?.value ?? '');
+            return this.formatter.formatKeyword({
+                name: word.toUpperCase(),
+                category: 'Built-in constant',
+                description,
+                syntax: word.toUpperCase()
+            });
+        }
+
+        logger.info(`Found built-in function: ${word}`);
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Parameter count in call: ${paramCount}`);
 

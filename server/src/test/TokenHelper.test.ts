@@ -405,4 +405,70 @@ END`;
             );
         });
     });
+
+    // ── #373: string literals swallowed inside composite tokens ──────────────
+    // The tokenizer folds `command ('/netnolog')` into ONE FunctionArgumentParameter
+    // token — no TokenType.String token is emitted for the literal — so the
+    // String-token-only check missed these positions and hover/F12 ran the full
+    // resolver chain on string contents (12.5s cold walk, #373).
+    suite('isPositionInString (#373 — embedded literals)', () => {
+
+        // The exact #361/#373 repro line shape from IBSCommon.clw
+        const reproLine = "    if ~command ('/netnolog') and (command ('/nettalklog') or command ('/neterrors'))";
+
+        test('word inside a literal swallowed by a composite token → true', () => {
+            const tokens = new ClarionTokenizer(reproLine).tokenize();
+            const ch = reproLine.indexOf('netnolog') + 2; // inside the word, inside the quotes
+            assert.strictEqual(
+                TokenHelper.isPositionInString(tokens, 0, ch),
+                true,
+                `position ${ch} is inside '/netnolog' and must be recognised as in-string`
+            );
+        });
+
+        test('second literal on the same line → true', () => {
+            const tokens = new ClarionTokenizer(reproLine).tokenize();
+            const ch = reproLine.indexOf('nettalklog') + 3;
+            assert.strictEqual(TokenHelper.isPositionInString(tokens, 0, ch), true);
+        });
+
+        test('function name outside the quotes on the same token → false', () => {
+            const tokens = new ClarionTokenizer(reproLine).tokenize();
+            const ch = reproLine.indexOf('command') + 2; // on 'command', before its '('
+            assert.strictEqual(
+                TokenHelper.isPositionInString(tokens, 0, ch),
+                false,
+                'the function name itself is NOT inside a string — must not over-suppress'
+            );
+        });
+
+        test('plain String token in an assignment still detected → true', () => {
+            const code = "  Msg = 'hello world'";
+            const tokens = new ClarionTokenizer(code).tokenize();
+            const ch = code.indexOf('world') + 1;
+            assert.strictEqual(TokenHelper.isPositionInString(tokens, 0, ch), true);
+        });
+
+        test('doubled-quote escape inside a literal → still in-string after it', () => {
+            const code = "  x = foo('it''s here')";
+            const tokens = new ClarionTokenizer(code).tokenize();
+            const ch = code.indexOf('here') + 1;
+            assert.strictEqual(
+                TokenHelper.isPositionInString(tokens, 0, ch),
+                true,
+                "'' is an escaped quote, not a string terminator"
+            );
+        });
+
+        test('identifier after a closing quote on the same line → false', () => {
+            const code = "  if command ('/x') and MyVar";
+            const tokens = new ClarionTokenizer(code).tokenize();
+            const ch = code.indexOf('MyVar') + 1;
+            assert.strictEqual(
+                TokenHelper.isPositionInString(tokens, 0, ch),
+                false,
+                'a genuine identifier after the literal must still resolve'
+            );
+        });
+    });
 });

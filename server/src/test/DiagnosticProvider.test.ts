@@ -2184,6 +2184,33 @@ MyVar   LONG
         assert.strictEqual(diags.length, 0, 'Normal label should not be flagged');
     });
 
+    // ── #372: a reserved keyword as the PREFIX of a colon-qualified label ─────
+    // `Return:NotSet` is a valid prefixed label — `Return` is a qualifier, not the
+    // RETURN statement. A keyword-colliding prefix tokenizes as a bare keyword
+    // Label immediately followed by ':', which must NOT be flagged. The genuine
+    // "RETURN at col 0 as variable label → error" test above is the sentinel that
+    // this fix does not over-suppress.
+
+    test('#372: prefixed EQUATE labels whose prefix is a keyword → no error', () => {
+        const code = `return:notset          EQUATE(0)
+return:xml             EQUATE(2)
+return:json            EQUATE(1)`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'Prefixed equate labels (Return: prefix) must not be flagged');
+    });
+
+    test('#372: single keyword-prefixed EQUATE label → no error', () => {
+        const code = `return:notset  EQUATE(0)`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0);
+    });
+
+    test('#372: keyword-prefixed variable label (non-EQUATE) → no error', () => {
+        const code = `loop:counter   LONG`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'LOOP: prefix is a valid label qualifier, not the LOOP keyword');
+    });
+
     test('RETURN keyword in code body (not col 0) → no error', () => {
         const code = `TestProc  PROCEDURE()
   CODE
@@ -2217,6 +2244,14 @@ MyVar   LONG
   RETURN`;
         const diags = labelDiags(code);
         assert.strictEqual(diags.length, 1, 'Should flag QUEUE as PROCEDURE label');
+    });
+
+    test('GROUP as PROCEDURE label → no error', () => {
+        const code = `GROUP   PROCEDURE()
+  CODE
+  RETURN`;
+        const diags = labelDiags(code);
+        assert.strictEqual(diags.length, 0, 'GROUP is valid as a global PROCEDURE label (confirmed via the group-record-diagnostics-repro test fixture, case G)');
     });
 
     test('WINDOW as structure label (valid) → no error', () => {
@@ -2289,9 +2324,78 @@ End`;
 // Gap L follow-up — VIEW PROJECT(field) validation against FROM file
 // ─────────────────────────────────────────────────────────────────────────────
 import { validateViewProjectFields } from '../providers/diagnostics/StructureDiagnostics';
-import { validateUndeclaredVariables } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
+import { validateUndeclaredVariables, validateUndeclaredVariablesAsync } from '../providers/diagnostics/UndeclaredVariableDiagnostics';
 import { serverSettings } from '../serverSettings';
 import { TokenCache } from '../TokenCache';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #358 — dotted-member leaves must not be collected as cross-file candidates.
+// `TemplateHelper.Debug.DriverOptions = ''` tokenizes as StructureField
+// (`TemplateHelper.Debug`) + `.` + Variable(`DriverOptions`). The COLLECT pass
+// already skips the trailing Variable via isGluedNumberSuffix (prevChar '.'),
+// so it fires no diagnostic — but the AUGMENT pass only skipped colon-adjacent
+// fragments, so it spent a full cross-file findSymbol walk on each leaf. On the
+// real IBSCommon.clw, 51 such leaves cost ~9s (warm) / triggered the ~18.5s
+// chain-index cold build. The augment pass must use the SAME discriminator.
+// ─────────────────────────────────────────────────────────────────────────────
+suite('DiagnosticProvider - undeclaredVar dotted-member leaves (#358)', () => {
+    let savedEnabled = false;
+
+    setup(() => {
+        savedEnabled = serverSettings.undeclaredVariablesEnabled;
+        serverSettings.undeclaredVariablesEnabled = true;
+        StructureDeclarationIndexer.getInstance().clearCache();
+    });
+
+    teardown(() => {
+        serverSettings.undeclaredVariablesEnabled = savedEnabled;
+        StructureDeclarationIndexer.getInstance().clearCache();
+    });
+
+    test('the trailing leaf of a multi-level dotted assignment is never looked up cross-file', async () => {
+        const code = `SomeProc PROCEDURE()
+  CODE
+  TemplateHelper.Debug.DriverOptions = ''
+  RETURN`;
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+
+        const lookedUp: string[] = [];
+        const stubFinder = {
+            findSymbol: async (name: string) => { lookedUp.push(name.toUpperCase()); return null; }
+        } as unknown as import('../services/SymbolFinderService').SymbolFinderService;
+
+        const diags = await validateUndeclaredVariablesAsync(tokens, doc, stubFinder);
+
+        assert.ok(!lookedUp.includes('DRIVEROPTIONS'),
+            `dotted-member leaf must not be collected as a candidate; looked up: ${JSON.stringify(lookedUp)}`);
+        // And it must never fire a diagnostic (collect-pass contract, pinned here too).
+        assert.ok(!diags.some(d => d.message.includes("'DriverOptions'")),
+            'no diagnostic for the dotted-member leaf');
+    });
+
+    test('the leading scope of the dotted chain is still checked', async () => {
+        // TemplateHelper (the head) is genuinely undeclared here → it SHOULD be
+        // looked up (and, unresolved, flagged). Proves the fix narrows only the
+        // member portion, not the whole chain.
+        const code = `SomeProc PROCEDURE()
+  CODE
+  TemplateHelper.Debug.DriverOptions = ''
+  RETURN`;
+        const doc = createDocument(code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+
+        const lookedUp: string[] = [];
+        const stubFinder = {
+            findSymbol: async (name: string) => { lookedUp.push(name.toUpperCase()); return null; }
+        } as unknown as import('../services/SymbolFinderService').SymbolFinderService;
+
+        await validateUndeclaredVariablesAsync(tokens, doc, stubFinder);
+        assert.ok(lookedUp.includes('TEMPLATEHELPER'),
+            `the leading scope must still be checked; looked up: ${JSON.stringify(lookedUp)}`);
+    });
+});
 
 suite('DiagnosticProvider - VIEW PROJECT field validation (Gap L follow-up)', () => {
 
@@ -2362,6 +2466,53 @@ MyView VIEW(Customer)
         assert.strictEqual(viewProjectDiags(code).length, 0);
     });
 
+    test('BUG PIN #349 — fields nested in overlay GROUPs are valid PROJECT targets (JCA:StartedDate shape)', () => {
+        // Mark's IBSWorking: the dictionary generates MS-SQL date/time splits
+        // as GROUP,OVER overlays inside the RECORD. collectFieldNames only
+        // walked the RECORD's DIRECT Label children, so overlay-nested fields
+        // (and the overlay's own label) were flagged 'not a field on FILE'.
+        const code = `JCMaster FILE,DRIVER('MSSQL'),PRE(JCA),BINDABLE,CREATE,THREAD
+Record RECORD
+JobNumber      LONG
+StartedDateTime STRING(8)
+StartedDateTimeOverlay GROUP,OVER(StartedDateTime)
+StartedDate      DATE
+StartedTime      TIME
+               END
+       END
+       END
+
+MyView VIEW(JCMaster)
+       PROJECT(JCA:JobNumber)
+       PROJECT(JCA:StartedDate)
+       PROJECT(JCA:StartedDateTimeOverlay)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 0,
+            'overlay-GROUP-nested fields and the overlay label itself must be accepted; got: ' +
+            diags.map(d => d.message).join(' | '));
+    });
+
+    test('#349 REGRESSION GUARD — bogus name still flagged with nested groups present', () => {
+        const code = `JCMaster FILE,DRIVER('MSSQL'),PRE(JCA)
+Record RECORD
+StartedDateTime STRING(8)
+Overlay GROUP,OVER(StartedDateTime)
+StartedDate      DATE
+        END
+       END
+       END
+
+MyView VIEW(JCMaster)
+       PROJECT(JCA:StartedDate, JCA:Bogus)
+       END
+`;
+        const diags = viewProjectDiags(code);
+        assert.strictEqual(diags.length, 1, 'exactly the bogus name must be flagged');
+        assert.ok(diags[0].message.includes("'JCA:Bogus'"));
+    });
+
     test('FROM file declared in another doc — skipped silently (no false positive)', () => {
         // No FILE structure in this document — simulates the cross-file case.
         const code = `MyView VIEW(Customer)
@@ -2417,7 +2568,12 @@ MyView VIEW(Customer)
         assert.ok(diags[1].message.includes('Bogus2'));
     });
 
-    test('validateDocument includes the VIEW PROJECT diagnostic', () => {
+    // Pin flexed under #352: this asserted the diagnostic surfaced via the SYNC
+    // pass (validateDocument). The validator now lives in the async pass — its
+    // cold include-chain walk blocked onDidOpen ~4.4s on large solutions. The
+    // facade-level contract (diagnostic still produced, filterOmitted applied)
+    // is pinned via the async wrapper instead.
+    test('DiagnosticProvider facade surfaces the VIEW PROJECT diagnostic (async wrapper, #352)', async () => {
         const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
 Record RECORD
 Id   LONG
@@ -2429,9 +2585,10 @@ MyView VIEW(Customer)
        END
 `;
         const doc = createDocument(code);
-        const diags = DiagnosticProvider.validateDocument(doc);
+        const tokens = new ClarionTokenizer(code).tokenize();
+        const diags = await DiagnosticProvider.validateViewProjectFields(tokens, doc);
         const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
-        assert.ok(viewDiags.length >= 1, 'validateDocument should surface VIEW PROJECT diagnostic');
+        assert.ok(viewDiags.length >= 1, 'facade should surface VIEW PROJECT diagnostic via the async pass');
     });
 
     // d4fe847b — two extensions over v1.
@@ -2725,6 +2882,55 @@ MyView VIEW(Customer)
             assert.strictEqual(diags.length, 1, `expected only the genuine miss; got: ${JSON.stringify(diags.map(d => d.message))}`);
             assert.ok(diags[0].message.includes("'Ord:Missing'"), `expected missing field warning; got: ${diags[0].message}`);
         });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #352 — viewProjectFields moves from the sync pass to the async pass.
+// The sync pass runs inside the onDidOpen handler; the validator's cold
+// include-chain walk cost ~4.4s of event-loop block at first open on a real
+// solution, before the solution was even loaded. Bidirectional pin: the
+// diagnostic must be GONE from validateDocument and PRESENT via the async
+// wrapper.
+// ─────────────────────────────────────────────────────────────────────────────
+
+suite('DiagnosticProvider - viewProjectFields pass placement (#352)', () => {
+
+    const missingFieldCode = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+Record RECORD
+Id   LONG
+     END
+     END
+
+MyView VIEW(Customer)
+       PROJECT(Cus:Id, Cus:Bogus)
+       END
+`;
+
+    test('sync pass (validateDocument) does NOT emit VIEW PROJECT diagnostics', () => {
+        const doc = createDocument(missingFieldCode);
+        const diags = DiagnosticProvider.validateDocument(doc);
+        const vpf = diags.filter(d => d.message.includes("'Cus:Bogus'"));
+        assert.strictEqual(vpf.length, 0,
+            `viewProjectFields must not run in the sync/onDidOpen pass (#352); got: ${JSON.stringify(vpf.map(d => d.message))}`);
+    });
+
+    test('async wrapper (DiagnosticProvider.validateViewProjectFields) emits the diagnostic', async () => {
+        const doc = createDocument(missingFieldCode);
+        const tokens = new ClarionTokenizer(missingFieldCode).tokenize();
+        // Cast keeps this compiling before the wrapper exists (stash-RED pattern).
+        const provider = DiagnosticProvider as unknown as {
+            validateViewProjectFields?: (
+                tokens: unknown,
+                document: unknown,
+                getOpenDocumentContent?: (absPath: string) => string | null
+            ) => Promise<Array<{ message: string }>>
+        };
+        assert.ok(typeof provider.validateViewProjectFields === 'function',
+            'DiagnosticProvider.validateViewProjectFields async wrapper must exist (#352)');
+        const diags = await provider.validateViewProjectFields!(tokens, doc);
+        assert.strictEqual(diags.length, 1, 'the moved validator still fires on a bogus PROJECT field');
+        assert.ok(diags[0].message.includes("'Cus:Bogus'"));
     });
 });
 

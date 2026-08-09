@@ -91,6 +91,16 @@ const CUSTOM_PROFILE_RED =
     '[Profile]\n' +
     '*.clw = .\\profile-only\n';
 
+// #331 — cwproj with a custom configuration's conditioned PropertyGroup
+function cwprojWithConfig(configName: string, debugSymbols: boolean): string {
+    return '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">\n' +
+        `  <PropertyGroup Condition=" '$(Configuration)' == '${configName}' ">\n` +
+        `    <DebugSymbols>${debugSymbols ? 'True' : 'False'}</DebugSymbols>\n` +
+        `    <DebugType>${debugSymbols ? 'Full' : 'None'}</DebugType>\n` +
+        '  </PropertyGroup>\n' +
+        '</Project>\n';
+}
+
 suite('RedirectionParser.BuildConfigFilter (bd7e4a29)', () => {
 
     let fixtures: Fixture[] = [];
@@ -509,5 +519,139 @@ suite('RedirectionParser.BuildConfigFilter (bd7e4a29)', () => {
             path.normalize(path.join(fix.projDir, 'common-only', 'Foo.clw')),
             'expected <projDir>/common-only/Foo.clw; got ' + (result && result.path)
         );
+    });
+});
+
+/**
+ * #331 — [Debug]/[Release] activate by the configuration's MODE, not its name.
+ *
+ * Per the docs (redirection_file.htm), sections correspond to the Project
+ * System's Debug/Release Mode switches. A custom-named configuration (e.g.
+ * "Test") still drives one of the two sections through its debug-mode
+ * property — expressed in the cwproj's config-conditioned PropertyGroup
+ * (DebugSymbols/DebugType, verified against real generated cwprojs). When no
+ * mode can be determined at all, both sections activate for lookups (with a
+ * one-time warning) — silently losing them kills generated-source resolution
+ * (`*.clw = genfiles\src` lives ONLY under [Debug]/[Release] in real reds).
+ */
+suite('RedirectionParser custom-configuration mode mapping (#331)', () => {
+
+    let fixtures: Fixture[] = [];
+    let savedRedirectionFile = '';
+    let savedRedirectionPaths: string[] = [];
+    let savedLibsrcPaths: string[] = [];
+    let savedConfiguration = '';
+
+    setup(() => {
+        fixtures = [];
+        savedRedirectionFile = serverSettings.redirectionFile;
+        savedRedirectionPaths = serverSettings.redirectionPaths;
+        savedLibsrcPaths = serverSettings.libsrcPaths;
+        savedConfiguration = serverSettings.configuration;
+        serverSettings.redirectionFile = 'Clarion110.red';
+        serverSettings.libsrcPaths = [];
+    });
+
+    teardown(() => {
+        serverSettings.redirectionFile = savedRedirectionFile;
+        serverSettings.redirectionPaths = savedRedirectionPaths;
+        serverSettings.libsrcPaths = savedLibsrcPaths;
+        serverSettings.configuration = savedConfiguration;
+        for (const f of fixtures) { teardownFixture(f); }
+        fixtures = [];
+    });
+
+    function setupCase(spec: FixtureSpec & { cwproj?: string }): Fixture {
+        const fix = buildFixture(spec);
+        fixtures.push(fix);
+        serverSettings.redirectionPaths = [fix.binDir];
+        if (spec.cwproj) {
+            fs.writeFileSync(path.join(fix.projDir, 'TestApp.cwproj'), spec.cwproj);
+        }
+        return fix;
+    }
+
+    test('custom config with DebugSymbols=True activates [Debug] entries', () => {
+        serverSettings.configuration = 'Test';
+        const fix = setupCase({
+            redContents: MULTI_SECTION_RED,
+            filesAtProj: [path.join('debug-only', 'Foo.clw')],
+            cwproj: cwprojWithConfig('Test', true)
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.ok(result?.path,
+            'custom debug-mode config must see [Debug] entries (docs: sections follow the MODE switch)');
+        assert.strictEqual(
+            path.normalize(result!.path),
+            path.normalize(path.join(fix.projDir, 'debug-only', 'Foo.clw')));
+    });
+
+    test('custom config with DebugSymbols=False activates [Release], not [Debug]', () => {
+        serverSettings.configuration = 'Test';
+        const fix = setupCase({
+            redContents: MULTI_SECTION_RED,
+            filesAtProj: [
+                path.join('debug-only', 'DebugFoo.clw'),
+                path.join('release-only', 'RelFoo.clw')
+            ],
+            cwproj: cwprojWithConfig('Test', false)
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+
+        assert.strictEqual(parser.findFile('DebugFoo.clw'), null,
+            'release-mode custom config must NOT see [Debug] entries');
+        const rel = parser.findFile('RelFoo.clw');
+        assert.ok(rel?.path, 'release-mode custom config must see [Release] entries');
+    });
+
+    test('custom config with Config|Platform form maps through the cwproj', () => {
+        serverSettings.configuration = 'Test|Win32';
+        const fix = setupCase({
+            redContents: MULTI_SECTION_RED,
+            filesAtProj: [path.join('debug-only', 'Foo.clw')],
+            cwproj: cwprojWithConfig('Test', true)
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.ok(result?.path, 'Config|Platform custom config must map via its configuration segment');
+    });
+
+    test('unknown-mode config (no cwproj) activates BOTH sections for lookup resilience', () => {
+        serverSettings.configuration = 'Nightly';
+        const fix = setupCase({
+            redContents: MULTI_SECTION_RED,
+            filesAtProj: [path.join('debug-only', 'Foo.clw')]
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+        const result = parser.findFile('Foo.clw');
+
+        assert.ok(result?.path,
+            'an unmappable configuration must not silently lose [Debug]/[Release] entries (lookup union)');
+    });
+
+    test('known modes stay strict: Release with a cwproj present still skips [Debug]', () => {
+        serverSettings.configuration = 'Release';
+        const fix = setupCase({
+            redContents: MULTI_SECTION_RED,
+            filesAtProj: [path.join('debug-only', 'Foo.clw')],
+            cwproj: cwprojWithConfig('Test', true)
+        });
+
+        const parser = new RedirectionFileParserServer();
+        parser.parseRedFile(fix.projDir);
+
+        assert.strictEqual(parser.findFile('Foo.clw'), null,
+            'mode mapping must not loosen the strict Debug/Release filtering');
     });
 });

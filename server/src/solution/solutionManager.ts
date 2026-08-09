@@ -26,6 +26,15 @@ export class SolutionManager {
     private equatesTokens: Token[] | null = null;
     private equatesPath: string | null = null;
 
+    // #365: findProjectForFile is called on the hot path (twice per code-action request, in
+    // the ClassConstantsCodeActionProvider prefix — before any of its memos). It scans every
+    // project's source files calling getAbsolutePath() (an fs.existsSync per file), so on a
+    // 3016-file solution one lookup is thousands of disk stats — measured as the ~120-290ms
+    // classConstants storm on Mark's VM. A file's owning project is stable for the loaded
+    // solution, so memoize positive lookups by normalized path; cleared on every solution
+    // (re)assignment below.
+    private projectForFileCache: Map<string, ClarionProjectServer> = new Map();
+
     // Static in-memory cache to store solution data by file path (similar to client-side implementation)
     private static inMemoryCache: Map<string, {
         version: number,
@@ -127,6 +136,7 @@ export class SolutionManager {
             
             this.solution = await this.parseSolution();
             this.equatesTokens = null; // reset so equates.clw is re-resolved with new project paths
+            this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
             this.equatesPath = null;
             
             // Log memory usage after parsing
@@ -278,6 +288,7 @@ export class SolutionManager {
 
                 // Save the parsed solution to cache
                 this.solution = solution;
+                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
                 const saveCacheStart = performance.now();
                 await this.saveToCache();
                 mark('saveToCache', saveCacheStart);
@@ -361,6 +372,16 @@ export class SolutionManager {
 
     public findProjectForFile(filePath: string): ClarionProjectServer | undefined {
         const normalizedPath = path.normalize(filePath).toLowerCase();
+
+        // #365: positive lookups are stable for the loaded solution — serve the hot path
+        // (code-action prefix, twice per request) from the memo instead of re-stat'ing
+        // every project's source files. The cache is cleared on each solution reassignment.
+        // Lazy-init: some call sites (and tests) construct via Object.create, bypassing the
+        // field initializer, so the map may not exist yet.
+        const cache = (this.projectForFileCache ??= new Map());
+        const cached = cache.get(normalizedPath);
+        if (cached) return cached;
+
         const baseName = path.basename(normalizedPath);
 
         // Prefer exact absolute path match (handles duplicate basenames across projects)
@@ -368,15 +389,20 @@ export class SolutionManager {
             for (const f of project.sourceFiles) {
                 const abs = f.getAbsolutePath();
                 if (abs && path.normalize(abs).toLowerCase() === normalizedPath) {
+                    cache.set(normalizedPath, project);
                     return project;
                 }
             }
         }
 
         // Fall back to basename match (for files resolved via redirection)
-        return this.solution.projects.find(project =>
+        const byBaseName = this.solution.projects.find(project =>
             project.sourceFiles.some(f => f.name.toLowerCase() === baseName)
         );
+        // Only positive results are memoized — a miss may become a hit once the solution
+        // finishes loading, so misses must re-scan rather than cache a stale negative.
+        if (byBaseName) cache.set(normalizedPath, byBaseName);
+        return byBaseName;
     }
 
     /**
@@ -448,20 +474,29 @@ export class SolutionManager {
     private negativeFindCache: Map<string, number> = new Map();
     private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
 
-    public async findFileWithExtension(filename: string): Promise<{ path: string, source: string }> {
+    /**
+     * #329: `fromFsPath` is the source file this lookup acts on behalf of. When
+     * present, the owning project's answer is tried before the solution-order
+     * walk (same rule as #328/#315), and all three caches (positive, negative,
+     * in-flight) are PARTITIONED by owning project — a filename-alone key would
+     * let the first caller's project poison the answer for every other
+     * project's callers (Edin's same-named per-app `w_[name]_rc.inc` layout).
+     */
+    public async findFileWithExtension(filename: string, fromFsPath?: string): Promise<{ path: string, source: string }> {
         if (!filename) {
             logger.warn(`⚠️ Filename is undefined or null`);
             return { path: '', source: "" };
         }
-        const key = filename.toLowerCase();
+        const owner = fromFsPath ? this.findProjectForFile(fromFsPath) : undefined;
+        const key = `${filename.toLowerCase()}|${owner?.path?.toLowerCase() ?? ''}`;
 
         // Positive cache (existence revalidated via the runtime index — cheap)
-        if (this.fileCache.has(filename)) {
-            const cachedPath = this.fileCache.get(filename)!;
+        if (this.fileCache.has(key)) {
+            const cachedPath = this.fileCache.get(key)!;
             if (DirectoryFileIndex.getRuntime().existsPath(cachedPath)) {
                 return { path: cachedPath, source: "cache" };
             }
-            this.fileCache.delete(filename);
+            this.fileCache.delete(key);
         }
 
         // Negative cache — a name that just missed will miss again; don't re-run the search
@@ -475,7 +510,7 @@ export class SolutionManager {
         if (inflight) {
             return inflight;
         }
-        const search = this.findFileWithExtensionInner(filename, key);
+        const search = this.findFileWithExtensionInner(filename, key, owner);
         this.inflightFinds.set(key, search);
         try {
             return await search;
@@ -484,21 +519,26 @@ export class SolutionManager {
         }
     }
 
-    private async findFileWithExtensionInner(filename: string, key: string): Promise<{ path: string, source: string }> {
+    private async findFileWithExtensionInner(filename: string, key: string, owner?: ClarionProjectServer): Promise<{ path: string, source: string }> {
         try {
-            logger.info(`🔍 Searching for file: ${filename}`);
+            logger.info(`🔍 Searching for file: ${filename}${owner ? ` (owner-first: ${owner.name})` : ''}`);
             const ext = path.extname(filename).toLowerCase();
             const runtimeIndex = DirectoryFileIndex.getRuntime();
             const baseNameLower = path.basename(filename).toLowerCase();
 
+            // #329: owner project first in every tier; solution order as fallback.
+            const projects = owner
+                ? [owner, ...this.solution.projects.filter(p => p !== owner)]
+                : this.solution.projects;
+
             // 1. Project source-file lists (authoritative post-#293) — first hit wins.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 if (!project.sourceFiles || project.sourceFiles.length === 0) continue;
                 const sourceFile = project.sourceFiles.find(sf => sf?.name && sf.name.toLowerCase() === baseNameLower);
                 if (sourceFile?.relativePath) {
                     const fullPath = path.join(project.path, sourceFile.relativePath);
                     if (runtimeIndex.existsPath(fullPath)) {
-                        this.fileCache.set(filename, fullPath);
+                        this.fileCache.set(key, fullPath);
                         return { path: fullPath, source: "project" };
                     }
                 }
@@ -506,20 +546,20 @@ export class SolutionManager {
 
             // 2. Redirection resolution per project — findFile already answers existence from the
             //    runtime index, so this is a memory walk; first hit wins.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 const redResult = project.getRedirectionParser().findFile(filename);
                 if (redResult?.path && runtimeIndex.existsPath(redResult.path)) {
-                    this.fileCache.set(filename, redResult.path);
+                    this.fileCache.set(key, redResult.path);
                     return { path: redResult.path, source: "redirected" };
                 }
             }
 
             // 3. Raw search-path joins as the last tier — memory lookups via the index.
-            for (const project of this.solution.projects) {
+            for (const project of projects) {
                 for (const searchPath of project.getSearchPaths(ext)) {
                     const fullPath = path.join(searchPath, filename);
                     if (runtimeIndex.existsPath(fullPath)) {
-                        this.fileCache.set(filename, fullPath);
+                        this.fileCache.set(key, fullPath);
                         return { path: fullPath, source: "project-search-path" };
                     }
                 }
@@ -954,6 +994,7 @@ export class SolutionManager {
                 // Cache is valid, use it
                 logger.info(`✅ Using solution from in-memory cache`);
                 this.solution = cache.solution;
+                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
                 return true;
             } catch (error) {
                 logger.error(`❌ Error checking file timestamps: ${error instanceof Error ? error.message : String(error)}`);

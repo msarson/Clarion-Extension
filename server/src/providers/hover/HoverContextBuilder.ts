@@ -32,6 +32,7 @@ export interface HoverContext {
     isInWindowContext: boolean;
     isInClassBlock: boolean;
     hasLabelBefore: boolean;
+    isFollowedByIdentifier: boolean;
 }
 
 /**
@@ -93,6 +94,17 @@ export class HoverContextBuilder {
             t.start < wordRange.start.character
         );
         
+        // Check if the word is immediately followed (after whitespace) by ANOTHER identifier
+        // — e.g. "Toolbar              ToolbarClass" (a plain label declaration with an
+        // explicit type). A genuine structure/control keyword used bare (e.g.
+        // "TOOLBAR,USE(?Toolbar1)") is always followed by '(', ',', '!' (comment) or
+        // end-of-line — never by a second bare identifier. This distinguishes "this word
+        // IS the label" from "this word is a real keyword/control reference", mirroring
+        // the same fix already applied in ClarionTokenizer.ts (PR #378),
+        // ModernEmbeditorDiagnostics.cs, and clarion-language.js.
+        const afterWord = line.slice(wordRange.end.character);
+        const isFollowedByIdentifier = /^\s*[A-Za-z_]/.test(afterWord);
+
         // Check if we're in a WINDOW/REPORT/APPLICATION structure (indicates control context)
         const isInWindowContext = documentStructure.isInWindowStructure(position.line);
         
@@ -121,7 +133,8 @@ export class HoverContextBuilder {
             isInMapBlock,
             isInWindowContext,
             isInClassBlock,
-            hasLabelBefore
+            hasLabelBefore,
+            isFollowedByIdentifier
         };
     }
 }

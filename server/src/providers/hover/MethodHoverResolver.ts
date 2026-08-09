@@ -7,6 +7,7 @@ import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
+import { projectsOwnerFirst } from '../../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../../solution/findFileNoSolution';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureUtils } from '../../utils/ProcedureUtils';
@@ -89,8 +90,6 @@ export class MethodHoverResolver {
             );
             if (classToken) {
                 const typeStr = SymbolFinderService.extractTypeInfo(classToken, tokens);
-                const fileName = path.basename(document.uri.replace(/file:\/\/\//i, '').replace(/\//g, '\\'));
-                const lineNumber = classToken.line + 1;
                 const lineTokens = tokens.filter(t => t.line === classToken.line);
                 const declaration = lineTokens.map(t => t.value).join(' ');
                 const markdown = [
@@ -101,7 +100,7 @@ export class MethodHoverResolver {
                     '```clarion',
                     declaration,
                     '```',
-                    `${fileName}:${lineNumber}`
+                    this.formatter.locationLink(document.uri, classToken.line)
                 ];
                 return { contents: { kind: 'markdown', value: markdown.join('\n') } };
             }
@@ -557,7 +556,7 @@ export class MethodHoverResolver {
             
             const solutionManager = SolutionManager.getInstance();
             if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
+                for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
                     const resolved = redirectionParser.findFile(moduleFile);
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {

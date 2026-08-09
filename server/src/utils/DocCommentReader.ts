@@ -64,9 +64,12 @@ export class DocCommentReader {
         }
 
         // Fallback: inline ! comment on the declaration line (e.g., "MyProc PROCEDURE() ! does X")
-        // Only match single ! or !! — not !!! (which would have been caught above)
+        // Only match single ! or !! — not !!! (which would have been caught above).
+        // Lookaround instead of a consumed `[^!]` character class — the latter silently ate the
+        // first character of the comment whenever it wasn't a space (e.g. "!Name of file..." lost
+        // the "N"), because that character was matched but never included in the captured group.
         const declLine = fileLines[declarationLine] || '';
-        const inlineMatch = declLine.match(/![^!](.+)$/);
+        const inlineMatch = declLine.match(/(?<!!)!{1,2}(?!!)(.+)$/);
         if (inlineMatch) {
             const text = inlineMatch[1].trim();
             if (text) {

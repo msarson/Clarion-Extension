@@ -146,7 +146,12 @@ END`;
             assert.strictEqual(memberFile, 'MyParent.CLW', 'Should find MEMBER even with comments');
         });
         
-        test('should only look in first 10 lines for MEMBER', () => {
+        test('finds MEMBER below a long comment banner (#337 pin-flex)', () => {
+            // Pin FLEXED by #337: this test previously asserted MEMBER past line
+            // 10 is NOT found — but comment banners of any length above the
+            // module header are legal Clarion, and the line-capped lookup was
+            // exactly the bug (19 sites; caught live on a 6-line banner during
+            // the v1.0.1 smoke). The header lookup now has no line cap.
             const code = `! Line 0
 ! Line 1
 ! Line 2
@@ -158,7 +163,7 @@ END`;
 ! Line 8
 ! Line 9
 ! Line 10
-  MEMBER('TooLate.CLW')
+  MEMBER('BannerParent.CLW')
 
 TestProc PROCEDURE()
 CODE
@@ -168,10 +173,10 @@ END`;
             const tokens = tokenizer.tokenize();
             const structure = new DocumentStructure(tokens);
             structure.process();
-            
+
             const memberFile = structure.getMemberParentFile();
-            
-            assert.strictEqual(memberFile, null, 'Should not find MEMBER after line 10');
+
+            assert.strictEqual(memberFile, 'BannerParent.CLW', 'MEMBER below a banner must be found (#337)');
         });
     });
     

@@ -8,7 +8,6 @@ import { failInitializationStatusBar, hideConfigurationStatusBar, hideBuildProje
 import { disposeLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
-import { DocumentManager } from '../documentManager';
 import { shouldMarkExplicitlyClosed, SolutionCloseReason } from '../utils/SolutionFallbackPolicy';
 import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache, configNameFromFull } from '../utils/SlnCacheUtils';
@@ -434,12 +433,10 @@ export async function openClarionSolution(
  * Closes the currently open Clarion solution
  * @param context - Extension context
  * @param reinitializeEnvironment - Function to reinitialize environment
- * @param documentManager - Document manager instance
  */
 export async function closeClarionSolution(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<DocumentManager>,
-    documentManager: DocumentManager | undefined,
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<void>,
     reason: SolutionCloseReason = 'user'
 ) {
     try {
@@ -503,7 +500,7 @@ export async function closeClarionSolution(
         
         
         // Dispose of any file watchers
-        await createSolutionFileWatchers(context, reinitializeEnvironment, documentManager);
+        await createSolutionFileWatchers(context, reinitializeEnvironment);
         
         vscodeWindow.showInformationMessage("Clarion solution closed successfully.");
     } catch (error) {

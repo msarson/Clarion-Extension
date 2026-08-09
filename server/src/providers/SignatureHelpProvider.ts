@@ -11,6 +11,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { DocumentStructure } from '../DocumentStructure';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
@@ -341,23 +342,49 @@ export class SignatureHelpProvider {
             className, methodName, document, tokens
         );
 
-        // Fallback for legacy paths (e.g. SELF inside a class where the substrate
-        // returns empty because the class is in the same file but accessed differently):
-        // if the substrate finds nothing, keep the pre-#126 behaviour so we don't
-        // regress SELF-in-class hover/signature for files the substrate doesn't cover.
-        if (candidates.length === 0) {
-            const allMembers = await this.memberLocator.enumerateMembersInClass(className, document, className);
+        // The substrate walker (#126/#128) is inheritance-BLIND: it only finds overloads
+        // declared directly on the receiver class (current file + INCLUDE scope), never on
+        // an ancestor. So we consult the inheritance-aware enumerator when the substrate:
+        //   - finds NOTHING (the common generated-module case — the CLASS decl lives in an
+        //     INCLUDE'd .inc and the inherited method is on an ancestor), OR
+        //   - finds ONLY current-file declarations. A Clarion Assistant PWEE embed buffer
+        //     shadows the real module (didChange) and re-expands one inherited overload as a
+        //     local `,DERIVED` prototype; that single local hit must not suppress the other
+        //     inherited overloads (the "1 signature instead of 3" bug). Cross-file substrate
+        //     hits are trusted as-is (they already cross files correctly, e.g. #128 StringTheory).
+        const currentUri = this.normalizeUriForCompare(document.uri);
+        const substrateAllCurrentFile = candidates.length > 0 &&
+            candidates.every(c => this.normalizeUriForCompare(c.file) === currentUri);
+
+        if (candidates.length === 0 || substrateAllCurrentFile) {
+            const allMembers = await this.memberLocator.enumerateMembersInClass(
+                className, document, className, { overloadAware: true });
             const matchingMembers = allMembers.filter(m => m.name.toLowerCase() === methodName.toLowerCase());
-            logger.info(`Fallback enumeration: found ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
-            return matchingMembers.map(m =>
-                this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
-            );
+            // Only adopt the enumerator's result when it is at least as complete as the
+            // substrate's — never regress a substrate hit to fewer overloads.
+            if (matchingMembers.length >= Math.max(1, candidates.length)) {
+                logger.info(`Inheritance enumeration: ${matchingMembers.length} overload(s) for ${className}.${methodName}`);
+                return matchingMembers.map(m =>
+                    this.createSignatureInformation(methodName, m.signature, this.overloadResolver.countParametersInDeclaration(m.signature))
+                );
+            }
         }
+
+        if (candidates.length === 0) return [];
 
         logger.info(`Found ${candidates.length} overload(s) for ${className}.${methodName} via substrate walker`);
         return candidates.map(c =>
             this.createSignatureInformation(methodName, c.signature, this.overloadResolver.countParametersInDeclaration(c.signature))
         );
+    }
+
+    /**
+     * Normalises a file URI for path-equality comparison (drive-colon encoding and
+     * slash/case drift). Current-file substrate candidates carry the document's own
+     * `file: document.uri`; cross-file scope candidates carry a canonical-encoded URI.
+     */
+    private normalizeUriForCompare(uri: string): string {
+        return decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\\/g, '/').toLowerCase();
     }
 
     /**
@@ -566,19 +593,8 @@ export class SignatureHelpProvider {
             const filePath = decodeURIComponent(document.uri.replace('file:///', '')).replace(/\//g, '\\');
             let resolvedPath: string | null = null;
             
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        logger.info(`Resolved via solution: ${resolvedPath}`);
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
             
             // Fallback to relative path
             if (!resolvedPath) {

@@ -11,6 +11,8 @@ import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
+import { resolveViaProjectRedirection } from '../../utils/RedirectionResolution';
+import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -172,7 +174,7 @@ export class StructureFieldResolver {
         } else {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             // or typed class variable access (e.g., st.GetValue() where st is StringTheory)
-            const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+            const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
             if (structureNameMatch) {
                 const structureName = structureNameMatch[1];
                 logger.info(`Detected structure field access: ${structureName}.${word}`);
@@ -318,14 +320,13 @@ export class StructureFieldResolver {
         const declaration = lineTokens.map(t => t.value).join('  ').trim();
         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
         const fieldType = typeToken?.value ?? 'UNKNOWN';
-        const fileName = path.basename(decodeURIComponent(sourceUri.replace(/^file:\/\/\//, '')).replace(/\//g, path.sep));
         const markdown = [
             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
             ``,
             `\`\`\`clarion`,
             declaration,
             `\`\`\``,
-            `${fileName}:${fieldToken.line + 1}`
+            this.formatter.locationLink(sourceUri, fieldToken.line)
         ].join('\n');
         return { contents: { kind: 'markdown', value: markdown } };
     }
@@ -335,9 +336,23 @@ export class StructureFieldResolver {
      * Finds the structure declaration in INCLUDE files and shows the type definition.
      */
     async resolveTypeNameHover(typeName: string, document: TextDocument): Promise<Hover | null> {
+        // #361 — GATE the include walk on the SDI. findTypeDeclarationInIncludes
+        // does a recursive fs.readFileSync + tokenize of EVERY reachable INCLUDE;
+        // on IBSCommon.clw a hover over a word that isn't a type (NetDebugTrace,
+        // dll_mode, a word inside a string) walked the whole ABC/NetTalk/libsrc
+        // universe synchronously — a 38s frozen editor. The SDI already indexes
+        // every declared type across the redirection search paths, which is a
+        // SUPERSET of this document's reachable includes: if it has no entry, the
+        // walk cannot find one either. So skip the walk on an SDI miss. (This runs
+        // only after checkClassTypeHover's SDI lookup already missed, so the walk
+        // was pure wasted work for non-types.) The cheap direct equates.clw token
+        // check below stays — it's a single bounded file, not a chain walk.
+        const sdiKnowsType = StructureDeclarationIndexer.getInstance().find(typeName).length > 0;
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const result = await this.findTypeDeclarationInIncludes(typeName, filePath, new Set());
-        if (result) return result;
+        if (sdiKnowsType) {
+            const result = await this.findTypeDeclarationInIncludes(typeName, filePath, new Set());
+            if (result) return result;
+        }
 
         // Fallback: check equates.clw directly (FILE:Queue etc. are defined there, not in INCLUDEs)
         const solutionManager = SolutionManager.getInstance();
@@ -356,7 +371,6 @@ export class StructureFieldResolver {
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
                     const structKind = structToken?.value.toUpperCase() ?? 'TYPE';
                     const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                    const incFileName = path.basename(equatesPath);
                     let structureEndLine = Number.MAX_VALUE;
                     if (structToken?.finishesAt !== undefined) structureEndLine = structToken.finishesAt;
                     const fieldCount = equatesTokens.filter(t =>
@@ -373,13 +387,17 @@ export class StructureFieldResolver {
                         `\`\`\`clarion`,
                         declaration,
                         `\`\`\``,
-                        `${incFileName}:${labelToken.line + 1}`
+                        this.formatter.locationLink(equatesPath, labelToken.line)
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
             }
-            // Also walk any INCLUDEs in equates.clw
-            return this.findTypeDeclarationInIncludes(typeName, equatesPath, new Set());
+            // Also walk any INCLUDEs in equates.clw — but only when the SDI
+            // knows the type (same #361 gate; otherwise this is another full
+            // chain walk that finds nothing).
+            if (sdiKnowsType) {
+                return this.findTypeDeclarationInIncludes(typeName, equatesPath, new Set());
+            }
         }
         return null;
     }
@@ -402,16 +420,8 @@ export class StructureFieldResolver {
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;
@@ -440,7 +450,6 @@ export class StructureFieldResolver {
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
                     const structKind = structToken?.value.toUpperCase() ?? 'TYPE';
                     const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                    const incFileName = path.basename(resolvedPath);
 
                     // Count fields in the structure
                     let structureEndLine = Number.MAX_VALUE;
@@ -461,7 +470,7 @@ export class StructureFieldResolver {
                         `\`\`\`clarion`,
                         declaration,
                         `\`\`\``,
-                        `${incFileName}:${labelToken.line + 1}`
+                        this.formatter.locationLink(resolvedPath, labelToken.line)
                     ].join('\n');
                     return { contents: { kind: 'markdown', value: markdown } };
                 }
@@ -492,16 +501,8 @@ export class StructureFieldResolver {
             const includeFile = match[1];
 
             let resolvedPath: string | null = null;
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFile);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFile, fromPath);
             if (!resolvedPath) {
                 const candidate = path.join(path.dirname(fromPath), includeFile);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;
@@ -557,14 +558,13 @@ export class StructureFieldResolver {
                         const declaration = lineTokens.map(t => t.value).join('  ').trim();
                         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
                         const fieldType = typeToken?.value ?? 'UNKNOWN';
-                        const incFileName = path.basename(resolvedPath);
                         const markdown = [
                             `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
                             ``,
                             `\`\`\`clarion`,
                             declaration,
                             `\`\`\``,
-                            `${incFileName}:${fieldToken.line + 1}`
+                            this.formatter.locationLink(resolvedPath, fieldToken.line)
                         ].join('\n');
                         return { contents: { kind: 'markdown', value: markdown } };
                     }

@@ -1,6 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { SolutionManager } from '../solution/solutionManager';
+import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ClarionPatterns } from './ClarionPatterns';
 import { TokenHelper } from './TokenHelper';
@@ -426,16 +427,8 @@ export class MethodOverloadResolver {
             const includeFileName = m[1];
             let resolvedPath: string | null = null;
 
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager?.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const resolved = project.getRedirectionParser().findFile(includeFileName);
-                    if (resolved?.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, fromPath);
 
             if (!resolvedPath) {
                 const currentDir = path.dirname(fromPath);
@@ -531,18 +524,8 @@ export class MethodOverloadResolver {
             const includeFileName = includeMatch[1];
             let resolvedPath: string | null = null;
 
-            // Try solution-wide redirection
-            const solutionManager = SolutionManager.getInstance();
-            if (solutionManager && solutionManager.solution) {
-                for (const project of solutionManager.solution.projects) {
-                    const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(includeFileName);
-                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                        resolvedPath = resolved.path;
-                        break;
-                    }
-                }
-            }
+            // #328: owner-project-first redirection
+            resolvedPath = resolveViaProjectRedirection(includeFileName, filePath);
 
             // Fallback to relative path
             if (!resolvedPath) {
@@ -561,15 +544,43 @@ export class MethodOverloadResolver {
             if (!resolvedPath) continue;
 
             const includeContent = fs.readFileSync(resolvedPath, 'utf8');
-            const includeLines = includeContent.split('\n');
+            // Split on both line-ending styles — a bare '\n' split leaves a trailing '\r' on
+            // every line of a CRLF file, which silently breaks the comment-strip regex below
+            // (its '$' anchor can never reach past a leftover '\r').
+            const includeLines = includeContent.split(/\r?\n/);
 
             for (let j = 0; j < includeLines.length; j++) {
                 const classMatch = includeLines[j].match(new RegExp(`^${className}\\s+CLASS`, 'i'));
                 if (!classMatch) continue;
 
+                // Track nesting depth so an inline GROUP/QUEUE/RECORD class member's OWN
+                // "END" doesn't prematurely terminate the scan of the enclosing CLASS body
+                // (mirrors the established pattern in ClassMemberResolver.scanClassBodyForMember).
+                let nestDepth = 0;
                 for (let k = j + 1; k < includeLines.length; k++) {
                     const methodLine = includeLines[k];
-                    if (methodLine.match(/^\s*END\s*$/i) || methodLine.match(/^END\s*$/i)) break;
+                    const stripped = methodLine.replace(/!.*$/, '').trim();
+
+                    if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
+                        /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
+                        // Self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END" or the
+                        // period form "...,DIM(2).") is a net no-op. Attributes between the type arg
+                        // and the terminator are legal (GitHub #97 in ClarionAssistant's CodeGraph hit
+                        // the same shape: a combined regex trying to capture attrs+terminator together
+                        // let the attrs alternative swallow the terminator). Checking end-of-line
+                        // independently of the opening match — as done here — sidesteps that class of
+                        // bug entirely, but still must recognize BOTH terminator spellings: "." is fully
+                        // interchangeable with END for closing any Clarion structure.
+                        if (!/(\bEND|\.)\s*$/i.test(stripped)) {
+                            nestDepth++;
+                        }
+                        continue;
+                    }
+                    if (/^(END|\.)\s*$/i.test(stripped)) {
+                        if (nestDepth > 0) { nestDepth--; continue; }
+                        break;
+                    }
+                    if (nestDepth > 0) continue;
 
                     const methodMatch = methodLine.match(new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i'));
                     if (methodMatch) {

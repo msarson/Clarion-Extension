@@ -153,6 +153,24 @@ suite('DocCommentReader', () => {
             const doc = DocCommentReader.read(lines, 0);
             assert.strictEqual(doc, null);
         });
+
+        test('does not drop the first character when there is no space after !', () => {
+            const lines = [
+                'bulkfileName        STRING(256)   !Name of file to read from'
+            ];
+            const doc = DocCommentReader.read(lines, 0);
+            assert.ok(doc);
+            assert.strictEqual(doc!.summary, 'Name of file to read from');
+        });
+
+        test('inline fallback works after a double-bang (!!) comment', () => {
+            const lines = [
+                'MyProc   PROCEDURE()  !!something'
+            ];
+            const doc = DocCommentReader.read(lines, 0);
+            assert.ok(doc);
+            assert.strictEqual(doc!.summary, 'something');
+        });
     });
 
     suite('read() - edge cases', () => {

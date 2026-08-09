@@ -1,8 +1,7 @@
-import { workspace, window as vscodeWindow, ExtensionContext, Location, Position, commands } from 'vscode';
+import { workspace, window as vscodeWindow, ExtensionContext, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings, globalSolutionFile } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
-import { DocumentManager } from '../documentManager';
 import { StructureViewProvider } from '../views/StructureViewProvider';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
@@ -13,13 +12,11 @@ logger.setLevel("error");
 /**
  * Initializes and starts the Clarion Language Server
  * @param context - Extension context
- * @param documentManager - Document manager instance for middleware
  * @param structureViewProvider - Structure view provider for refresh notifications
  * @returns Language client instance or undefined if failed
  */
 export async function startLanguageServer(
     context: ExtensionContext,
-    documentManager: DocumentManager | undefined,
     structureViewProvider: StructureViewProvider | undefined
 ): Promise<LanguageClient | undefined> {
     try {
@@ -88,59 +85,11 @@ export async function startLanguageServer(
                 workspace.createFileSystemWatcher(projectFileWatcherPattern)
             ],
         },
-        middleware: {
-            provideDefinition: async (document, position, token, next) => {
-                
-                // First check if we're on a PROCEDURE implementation - if so, find MAP declaration
-                // This handles reverse navigation: implementation → declaration
-                if (documentManager) {
-                    const line = document.lineAt(position.line);
-                    const lineText = line.text;
-                    
-                    // Match: ProcName PROCEDURE(...) or Class.MethodName PROCEDURE(...)
-                    const procMatch = lineText.match(/^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s+PROCEDURE/i);
-                    if (procMatch) {
-                        const fullName = procMatch[1];
-                        const simpleName = fullName.includes('.') ? fullName.split('.').pop()! : fullName;
-                        
-                        logger.info(`Detected PROCEDURE implementation: ${fullName} (simple: ${simpleName})`);
-                        
-                        // Search for MAP declaration
-                        const content = document.getText();
-                        const lines = content.split('\n');
-                        
-                        for (let i = 0; i < lines.length; i++) {
-                            const mapLine = lines[i].trim().toUpperCase();
-                            
-                            if (mapLine === 'MAP') {
-                                logger.info(`Found MAP block at line ${i}`);
-                                logger.info(`End of MAP block searching for: ${simpleName}`);
-                                
-                                for (let j = i + 1; j < lines.length; j++) {
-                                    const declLine = lines[j].trim();
-                                    logger.info(`Checking MAP declaration: ${declLine} against ${simpleName}`);
-                                    
-                                    if (declLine.toUpperCase().startsWith('END')) {
-                                        break;
-                                    }
-                                    
-                                    // Match procedure name at start of line, possibly followed by whitespace and PROCEDURE keyword
-                                    const declMatch = declLine.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(PROCEDURE|FUNCTION|CLASS)/i);
-                                    if (declMatch && declMatch[1].toUpperCase() === simpleName.toUpperCase()) {
-                                        logger.info(`Found MAP declaration for ${simpleName} at line ${j} - returning location`);
-                                        return [new Location(document.uri, new Position(j, 0))];
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                // Not a PROCEDURE implementation, let server handle it
-                return next(document, position, token);
-            }
-        },
+        // #341: the provideDefinition middleware that lived here intercepted F12
+        // on any `X PROCEDURE` line with a naive textual first-MAP scan (no MODULE
+        // blocks, no signatures) and BYPASSED the server, which handles
+        // implementation->declaration navigation properly (#330 tiers). Removed
+        // with the DocumentManager sweep - the server answers all definitions.
         // Add error handling options.
         // #276 — vscode-languageclient@8 changed the ErrorHandler contract: `error` returns an
         // `ErrorHandlerResult` and `closed` a `CloseHandlerResult` (a `{ action }` object), not the

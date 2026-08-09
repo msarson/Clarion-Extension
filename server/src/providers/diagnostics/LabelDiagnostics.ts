@@ -29,10 +29,19 @@ const FULLY_RESERVED = new Set([
  * CODE and DATA are execution-marker keywords — valid standalone at col 0,
  * and valid as method/field names inside a structure (e.g. CLASS), but
  * invalid as the label of a global PROCEDURE/FUNCTION declaration.
+ *
+ * GROUP is deliberately excluded from this set: unlike the rest, a global
+ * (non-nested) `Group PROCEDURE()` is valid, compiling, runnable Clarion —
+ * confirmed by compiling and running the ClarionAssistant
+ * `group-record-diagnostics-repro` test fixture's case G. This diagnostic
+ * previously false-flagged it. The remaining keywords below are UNVERIFIED
+ * for this same global-scope validity (some, e.g. SELF/PARENT, seem unlikely
+ * to share it) — do not remove any of them without independently confirming
+ * each one compiles as a global PROCEDURE/FUNCTION label first.
  */
 const STRUCTURE_ONLY = new Set([
     'APPLICATION', 'CLASS', 'CODE', 'DATA', 'DETAIL', 'FILE', 'FOOTER',
-    'FORM', 'GROUP', 'HEADER', 'ITEM', 'ITEMIZE',
+    'FORM', 'HEADER', 'ITEM', 'ITEMIZE',
     'JOIN', 'MAP', 'MENU', 'MENUBAR', 'MODULE',
     'OLE', 'OPTION', 'QUEUE', 'PARENT', 'RECORD',
     'REPORT', 'SELF', 'SHEET', 'TAB', 'TOOLBAR',
@@ -61,6 +70,13 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
 
         const upper = token.value.toUpperCase();
 
+        // #372: a reserved word used as the PREFIX of a colon-qualified label
+        // (e.g. `Return:NotSet EQUATE(0)`) is a valid label — the keyword is a
+        // qualifier, not a standalone label. A keyword-colliding prefix tokenizes
+        // as a bare keyword Label immediately followed by ':', so skip any reserved
+        // Label whose next source character is ':'.
+        if (isColonQualifiedPrefix(token, document)) continue;
+
         if (FULLY_RESERVED.has(upper)) {
             // Reserved words are valid as field names and method names inside structures
             // (e.g. `Code LONG` inside GROUP, or `Code PROCEDURE()` inside CLASS)
@@ -88,6 +104,23 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
     }
 
     return diagnostics;
+}
+
+/**
+ * True when this token is the prefix segment of a colon-qualified label — i.e.
+ * the next source character after the token is ':'. A reserved keyword in that
+ * position (e.g. `Return` in `Return:NotSet`) is a valid label qualifier, not a
+ * standalone label. (#372 — a keyword-colliding prefix tokenizes as a bare
+ * keyword Label + ':' rather than a single `prefix:suffix` Label, so this reads
+ * the source directly instead of relying on adjacent-token shape.)
+ */
+function isColonQualifiedPrefix(token: Token, document: TextDocument): boolean {
+    const after = token.start + token.value.length;
+    const nextChar = document.getText({
+        start: { line: token.line, character: after },
+        end: { line: token.line, character: after + 1 },
+    });
+    return nextChar === ':';
 }
 
 function findNextOnLine(tokens: Token[], from: number, line: number): Token | undefined {

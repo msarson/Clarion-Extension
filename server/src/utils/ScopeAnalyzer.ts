@@ -7,6 +7,7 @@ import { TokenHelper } from './TokenHelper';
 import { ScopeKind } from '../scope/ScopeTypes';
 import { RedirectionFileParserServer } from '../solution/redirectionFileParserServer';
 import { pathToCanonicalUri } from './UriUtils';
+import { getCrossFileEpoch } from './crossFileEpoch';
 import LoggerManager from '../logger';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -34,6 +35,14 @@ export class ScopeAnalyzer {
     private redirectionParser: RedirectionFileParserServer;
     // Cache for INCLUDE file tokens with modification time tracking
     private includeFileCache: Map<string, { tokens: Token[], mtime: number }> = new Map();
+    // hover-floor — result cache for getMapTokensWithIncludes. Building it runs a
+    // per-include statSync + redirection-resolution loop over (on a generated
+    // module) dozens of callout INCs, and it is called TWICE per proc-call hover
+    // (findMapDeclaration + findProcedureImplementation) and re-ran the whole disk
+    // loop every hover — ~180ms each on a taxed VM disk (the ~700ms floor). Keyed
+    // by host uri+version+MAP line; the cross-file epoch (#340 watcher / #355 drift)
+    // clears it on any workspace change, the contract every other cross-file memo uses.
+    private mapIncludesCache: Map<string, { tokens: Token[]; epoch: number }> = new Map();
 
     constructor(
         private tokenCache: TokenCache,
@@ -243,7 +252,18 @@ export class ScopeAnalyzer {
             if (declScope.type === 'global' && declScope.isProgramFile) {
                 return true;
             }
-            
+
+            // Rule 1b (#339): a global-scope declaration in a HEADER-LESS file
+            // (no PROGRAM, no MEMBER — a pure data include like Globals.inc, or
+            // equates.clw-style implicit-global files) takes the scope of its
+            // inclusion site. Resolvers only reach such declarations through a
+            // legal data-scope include chain (#334), so the reachability is
+            // already established — and hover surfaces them, so F12/FAR must
+            // agree (#319 rule).
+            if (declScope.type === 'global' && !declScope.isProgramFile && !declScope.memberModuleName) {
+                return true;
+            }
+
             // Rule 2: Module-local symbols are NOT visible cross-file
             if (declScope.type === 'module') {
                 return false;
@@ -430,6 +450,22 @@ export class ScopeAnalyzer {
             return [];
         }
 
+        // hover-floor — serve the memoized merge when the host is unchanged and no
+        // cross-file edit has bumped the epoch, so the expensive per-include statSync
+        // loop runs once instead of twice-per-hover, every hover. Content is part of
+        // the identity (the #340/#344 lesson: a reused uri+version with different text
+        // — test fixtures, unsaved flows — must never serve the old merge).
+        const epoch = getCrossFileEpoch();
+        const hostText = document.getText();
+        let hostHash = 5381;
+        for (let i = 0; i < hostText.length; i += 64) hostHash = ((hostHash * 33) ^ hostText.charCodeAt(i)) >>> 0;
+        const cacheKey = `${document.uri.toLowerCase()}|${document.version}|${hostText.length}|${hostHash}|${mapStartLine}`;
+        const cachedMerge = this.mapIncludesCache.get(cacheKey);
+        if (cachedMerge && cachedMerge.epoch === epoch) {
+            return cachedMerge.tokens;
+        }
+        if (this.mapIncludesCache.size > 200) this.mapIncludesCache.clear();
+
         // Get tokens directly in the MAP block
         const mapTokens = TokenHelper.findTokens(tokens, {
             afterLine: mapStartLine,
@@ -467,6 +503,7 @@ export class ScopeAnalyzer {
         }
 
         logger.info(`   📊 Total MAP tokens (with INCLUDEs): ${mapTokens.length}`);
+        this.mapIncludesCache.set(cacheKey, { tokens: mapTokens, epoch });
         return mapTokens;
     }
 
@@ -525,8 +562,15 @@ export class ScopeAnalyzer {
         
         // Initialize redirection parser with project path if available
         if (solutionManager && solutionManager.solution) {
-            // Try each project's redirection parser (like other resolvers do)
-            for (const project of solutionManager.solution.projects) {
+            // Try each project's redirection parser — owner project first (#328).
+            // Local reorder (not the shared util) to honour this class's injected
+            // solutionManager instance.
+            const orderedProjects = (() => {
+                const list = [...solutionManager.solution.projects];
+                const owner = solutionManager.findProjectForFile?.(sourceFilePath);
+                return owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
+            })();
+            for (const project of orderedProjects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename);
@@ -579,8 +623,15 @@ export class ScopeAnalyzer {
         
         // Initialize redirection parser with project path if available
         if (solutionManager && solutionManager.solution) {
-            // Try each project's redirection parser (like other resolvers do)
-            for (const project of solutionManager.solution.projects) {
+            // Try each project's redirection parser — owner project first (#328).
+            // Local reorder (not the shared util) to honour this class's injected
+            // solutionManager instance.
+            const orderedProjects = (() => {
+                const list = [...solutionManager.solution.projects];
+                const owner = solutionManager.findProjectForFile?.(sourceFilePath);
+                return owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
+            })();
+            for (const project of orderedProjects) {
                 logger.info(`      🏗️ Trying project: ${project.name}`);
                 const redirectionParser = project.getRedirectionParser();
                 const resolved = redirectionParser.findFile(filename);

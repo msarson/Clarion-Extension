@@ -2,7 +2,6 @@ import { workspace, ExtensionContext, Uri, FileSystemWatcher } from 'vscode';
 import { window as vscodeWindow } from 'vscode';
 import { globalSettings, globalSolutionFile } from '../globals';
 import { SolutionCache } from '../SolutionCache';
-import { DocumentManager } from '../documentManager';
 import { refreshSolutionTreeView } from '../views/ViewManager';
 import { registerLanguageFeatures } from './LanguageFeatureManager';
 import { getLanguageClient } from '../LanguageClientManager';
@@ -20,7 +19,7 @@ logger.setLevel("error");
 // registerLanguageFeatures + a toast + (for cwproj) a server notification that
 // re-validated all open docs — all x40. One coalescer per handler collapses a
 // burst into a single refresh; they're re-created on each watcher (re)build so
-// they always capture the latest context/documentManager.
+// they always capture the latest context.
 let projectChangeCoalescer: TrailingCoalescer | null = null;
 let redirectionChangeCoalescer: TrailingCoalescer | null = null;
 
@@ -28,12 +27,10 @@ let redirectionChangeCoalescer: TrailingCoalescer | null = null;
  * Creates file watchers for solution-specific files
  * @param context - Extension context
  * @param reinitializeEnvironment - Function to reinitialize environment
- * @param documentManager - Document manager instance
  */
 export async function createSolutionFileWatchers(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>
 ) {
     // Dispose any existing watchers
     const fileWatchers = context.subscriptions.filter(d => (d as any)._isFileWatcher);
@@ -53,9 +50,9 @@ export async function createSolutionFileWatchers(
     // a regeneration writes the cwproj/red files over a stretch, and every event
     // restarts the clock, so the refresh runs once after the writer goes quiet.
     projectChangeCoalescer = new TrailingCoalescer(1000, () =>
-        handleProjectFileChange(context, reinitializeEnvironment, documentManager));
+        handleProjectFileChange(context, reinitializeEnvironment));
     redirectionChangeCoalescer = new TrailingCoalescer(1000, () =>
-        handleRedirectionFileChange(context, reinitializeEnvironment, documentManager));
+        handleRedirectionFileChange(context, reinitializeEnvironment));
 
     // Create watchers for the solution file itself
     const solutionWatcher = workspace.createFileSystemWatcher(globalSolutionFile);
@@ -65,7 +62,7 @@ export async function createSolutionFileWatchers(
 
     solutionWatcher.onDidChange(async (uri) => {
         logger.info(`🔄 Solution file changed: ${uri.fsPath}`);
-        await handleSolutionFileChange(context, reinitializeEnvironment, documentManager);
+        await handleSolutionFileChange(context, reinitializeEnvironment);
     });
 
     context.subscriptions.push(solutionWatcher);
@@ -175,8 +172,7 @@ export async function createSolutionFileWatchers(
  */
 async function handleRedirectionFileChange(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>
 ) {
     logger.info("🔄 Redirection file changed. Refreshing environment...");
 
@@ -187,7 +183,7 @@ async function handleRedirectionFileChange(
     await refreshSolutionTreeView();
 
     // Re-register language features
-    registerLanguageFeatures(context, documentManager);
+    registerLanguageFeatures(context);
 
     vscodeWindow.showInformationMessage("Redirection file updated. Solution cache refreshed.");
 }
@@ -198,8 +194,7 @@ async function handleRedirectionFileChange(
  */
 async function handleSolutionFileChange(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>
 ) {
     logger.info("🔄 Solution file changed. Refreshing environment...");
 
@@ -212,7 +207,7 @@ async function handleSolutionFileChange(
         await refreshSolutionTreeView();
 
         // Re-register language features
-        registerLanguageFeatures(context, documentManager);
+        registerLanguageFeatures(context);
 
         vscodeWindow.showInformationMessage("Solution file updated. Solution cache refreshed.");
     }
@@ -224,8 +219,7 @@ async function handleSolutionFileChange(
  */
 async function handleProjectFileChange(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>
 ) {
     logger.info(`🔄 Project file(s) changed. Refreshing environment...`);
 
@@ -243,7 +237,7 @@ async function handleProjectFileChange(
     await refreshSolutionTreeView();
 
     // Re-register language features
-    registerLanguageFeatures(context, documentManager);
+    registerLanguageFeatures(context);
 
     vscodeWindow.showInformationMessage("Project file updated. Solution cache refreshed.");
 }
@@ -254,8 +248,7 @@ async function handleProjectFileChange(
  */
 export async function handleSettingsChange(
     context: ExtensionContext,
-    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>,
-    documentManager: DocumentManager | undefined
+    reinitializeEnvironment: (refreshDocs: boolean) => Promise<any>
 ) {
     logger.info("🔄 Updating settings from workspace...");
 
@@ -270,7 +263,7 @@ export async function handleSettingsChange(
     await refreshSolutionTreeView();
 
     // Re-register language features (ensuring links update properly)
-    registerLanguageFeatures(context, documentManager);
+    registerLanguageFeatures(context);
 
     vscodeWindow.showInformationMessage("Clarion configuration updated. Solution cache refreshed.");
 }

@@ -10,6 +10,16 @@ import { DeclaredValueParser } from './tokenizer/DeclaredValueParser';
 const logger = LoggerManager.getLogger("Tokenizer");
 logger.setLevel("error"); // Only show errors and PERF
 
+// #353: per-token logging and per-regex-exec profiling in the tokenize hot loop
+// cost real CPU even when suppressed — the template-literal arguments (including
+// the full source line) are constructed BEFORE the logger's level check, and the
+// pattern profiler paired performance.now() calls with Map updates around every
+// exec. On the real 873KB/68k-token program file that overhead measured ~4.3s —
+// which blocked the event loop wherever the first cross-file consumer (RVD
+// receiver-type resolution) forced the parent tokenize. Everything per-token or
+// per-exec is now gated behind this env flag; per-tokenize phase logs stay live.
+const TOKENIZER_TRACE = process.env.CLARION_TOKENIZER_TRACE === '1';
+
 // Re-export types for backward compatibility
 export { TokenType, Token } from './tokenizer/TokenTypes';
 
@@ -179,7 +189,8 @@ export class ClarionTokenizer {
             }
             
             // 🚀 PERF: Check if this line enters CODE section (structures are declarations, not execution)
-            if (line.match(/^\s*code\s*$/i)) {
+            // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
+            if (line.match(/^\s*code\s*(!.*)?$/i)) {
                 inCodeSection = true;
             } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
                 inCodeSection = false; // DATA/ROUTINE sections can have structures
@@ -283,14 +294,45 @@ export class ClarionTokenizer {
                         
                         // Test each structure pattern individually
                         for (const [structName, structPattern] of Object.entries(STRUCTURE_PATTERNS)) {
-                            const testStart = performance.now();
+                            const testStart = TOKENIZER_TRACE ? performance.now() : 0;
                             const match = structPattern.exec(substring);
-                            const testTime = performance.now() - testStart;
-                            
-                            patternTiming.set(tokenType, (patternTiming.get(tokenType) || 0) + testTime);
-                            patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
-                            
+                            if (TOKENIZER_TRACE) {
+                                patternTiming.set(tokenType, (patternTiming.get(tokenType) || 0) + (performance.now() - testStart));
+                                patternTests.set(tokenType, (patternTests.get(tokenType) || 0) + 1);
+                            }
+
                             if (match && match.index === 0) {
+                                // ✅ FIX: structures that declare a NAMED INSTANCE (FILE/QUEUE/GROUP/RECORD/
+                                // CLASS/INTERFACE/WINDOW/REPORT/APPLICATION) always require a preceding label
+                                // — "Label STRUCTURETYPE,attrs". These keywords are NOT reserved words in
+                                // Clarion; they're fully legal variable/label names (e.g. "Report &STRING"
+                                // declares a reference-to-STRING variable named Report). A Clarion label must
+                                // start at column 0 (confirmed directly against the compiler: indenting a
+                                // label desyncs the parser and produces unrelated errors on the following
+                                // tokens) — so if this match is at column 0, it can only be the label itself,
+                                // never a structure type in second position (which always has a label before
+                                // it). Let it fall through to Label/Variable instead of misclassifying it as
+                                // an (unterminated) structure declaration.
+                                // Deliberately narrow — do NOT extend this to isDeclarationStructure's full
+                                // list. MAP, MODULE, ITEMIZE, JOIN, HEADER/FOOTER/FORM/DETAIL, and
+                                // MENU/MENUBAR/TOOLBAR/SHEET/TAB/OPTION are namespace-like or nested-body
+                                // constructs that are legitimately written BARE, with no preceding label
+                                // (e.g. "MAP ... MODULE('') ... END ... END"). Gating on the full list here
+                                // caused a confirmed regression in the analogous fix in ClarionAssistant's
+                                // own per-slot structure-balance heuristic (ModernEmbeditorDiagnostics.cs) —
+                                // MAP/MODULE stopped being tracked as openers, desyncing END matching.
+                                // Execution structures (IF/LOOP/CASE/...) were never gated — they
+                                // legitimately have no preceding label either.
+                                const requiresLabel =
+                                    structName === 'FILE' || structName === 'QUEUE' || structName === 'GROUP' ||
+                                    structName === 'RECORD' || structName === 'CLASS' || structName === 'INTERFACE' ||
+                                    structName === 'WINDOW' || structName === 'REPORT' || structName === 'APPLICATION' ||
+                                    structName === 'VIEW';
+                                if (requiresLabel && position === 0) {
+                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at column 0 - a Clarion label always starts at column 0, so this word is being used as a label`);
+                                    continue; // Try next structure pattern
+                                }
+
                                 // ✅ CRITICAL FIX: Check if structure keyword is inside optional parameters or qualified identifiers or parameter lists
                                 // This prevents matching keywords that are:
                                 // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
@@ -300,27 +342,27 @@ export class ClarionTokenizer {
                                     const prevChar = line[position - 1];
                                     // Skip if preceded by qualifier characters or comma (parameter separator)
                                     if (prevChar === ':' || prevChar === '.' || prevChar === ',' || prevChar === '<') {
-                                        logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
+                                        if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
                                         continue; // Try next structure pattern
                                     }
                                 }
-                                
+
                                 // ✅ FIX: Check if followed by colon (prefix notation like Queue:FileDrop)
                                 // If the structure keyword is immediately followed by ':', it's a prefix, not a structure
                                 const endPosition = position + match[0].length;
                                 if (endPosition < line.length && line[endPosition] === ':') {
-                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - followed by ':' (prefix notation)`);
+                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - followed by ':' (prefix notation)`);
                                     continue; // Try next structure pattern
                                 }
-                                
+
                                 // Check if inside parentheses or optional parameters
                                 if (isInsideParamsOrTemplate(position)) {
-                                    logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or optional params`);
+                                    if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or optional params`);
                                     continue; // Try next structure pattern
                                 }
                                 
-                                patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
-                                
+                                if (TOKENIZER_TRACE) patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
+
                                 // ✅ Trim leading whitespace from token value (some patterns like FILE, QUEUE, VIEW include \s)
                                 const tokenValue = match[0].trimStart();
                                 
@@ -342,7 +384,7 @@ export class ClarionTokenizer {
                                 matched = true;
                                 tokensOnCurrentLine++; // 🚀 PERF: Track tokens on line
                                 
-                                logger.info(`✅ Matched Structure '${structName}': ${tokenValue} at line ${lineNumber}`);
+                                if (TOKENIZER_TRACE) logger.info(`✅ Matched Structure '${structName}': ${tokenValue} at line ${lineNumber}`);
                                 break; // Found a match, stop testing other structure patterns
                             }
                         }
@@ -380,14 +422,14 @@ export class ClarionTokenizer {
                         }
                     }
 
-                    // 🔬 PROFILING: Time each pattern test
-                    const testStart = performance.now();
+                    // 🔬 PROFILING: Time each pattern test (only when tracing — #353)
+                    const testStart = TOKENIZER_TRACE ? performance.now() : 0;
                     let match = pattern.exec(substring);
-                    const testTime = performance.now() - testStart;
-                    
-                    patternTiming.set(tokenType, patternTiming.get(tokenType)! + testTime);
-                    patternTests.set(tokenType, patternTests.get(tokenType)! + 1);
-                    
+                    if (TOKENIZER_TRACE) {
+                        patternTiming.set(tokenType, patternTiming.get(tokenType)! + (performance.now() - testStart));
+                        patternTests.set(tokenType, patternTests.get(tokenType)! + 1);
+                    }
+
                     if (match && match.index === 0) {
                         // ✅ CRITICAL FIX: For Keyword tokens, check if preceded by : or . in original line
                         // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
@@ -395,12 +437,12 @@ export class ClarionTokenizer {
                             const prevChar = line[position - 1];
                             if (prevChar === ':' || prevChar === '.') {
                                 // Skip this match - it's part of a qualified identifier
-                                logger.debug(`⏭️ Skipping keyword '${match[0]}' at position ${position} - preceded by '${prevChar}'`);
+                                if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping keyword '${match[0]}' at position ${position} - preceded by '${prevChar}'`);
                                 continue;
                             }
                         }
-                        
-                        patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
+
+                        if (TOKENIZER_TRACE) patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
                         
                         // ✅ Structure tokens are handled above in special block
                         let newTokenType = tokenType;
@@ -421,7 +463,7 @@ export class ClarionTokenizer {
                         if (tokenType === TokenType.StructureField) {
                             // Extract structure and field parts from dot notation (e.g., Invoice.Customer or Queue:Browse:1.ViewPosition)
                             const dotIndex = match[0].lastIndexOf('.');
-                            if (dotIndex > 0) {
+                            if (TOKENIZER_TRACE && dotIndex > 0) {
                                 const structurePart = match[0].substring(0, dotIndex);
                                 const fieldPart = match[0].substring(dotIndex + 1);
                                 logger.info(`🔍 Detected structure field reference: ${structurePart}.${fieldPart}`);
@@ -430,7 +472,7 @@ export class ClarionTokenizer {
                             // Extract prefix and field parts from prefix notation (e.g., INV:Customer)
                             // For complex cases like Queue:Browse:1:Field, we need to find the last colon
                             const colonIndex = match[0].lastIndexOf(':');
-                            if (colonIndex > 0) {
+                            if (TOKENIZER_TRACE && colonIndex > 0) {
                                 const prefixPart = match[0].substring(0, colonIndex);
                                 const fieldPart = match[0].substring(colonIndex + 1);
                                 logger.info(`🔍 Detected structure prefix reference: ${prefixPart}:${fieldPart}`);
@@ -476,7 +518,7 @@ export class ClarionTokenizer {
                                             maxLabelLength: 0
                                         });
                                         
-                                        logger.info(`🌈 COLOR param tokenized: ${param} ${column}`);
+                                        if (TOKENIZER_TRACE) logger.info(`🌈 COLOR param tokenized: ${param} ${column}`);
                                         
                                     }
 
@@ -485,15 +527,17 @@ export class ClarionTokenizer {
 
                                 // Store as custom metadata
                                 newToken.colorParams = rawParams;
-                                logger.info(`🎨 Parsed COLOR params at line ${lineNumber}: ${rawParams.join(", ")}`);
+                                if (TOKENIZER_TRACE) logger.info(`🎨 Parsed COLOR params at line ${lineNumber}: ${rawParams.join(", ")}`);
                             }
                         }
-                        else if (match[0].toUpperCase() === "COLOR") {
+                        else if (TOKENIZER_TRACE && match[0].toUpperCase() === "COLOR") {
                             logger.info(`🌈 COLOR name detected at line ${lineNumber} ${tokenType}`);
                         }
-                        
-                        logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
-                        logger.info(`Line: ${line}`);
+
+                        if (TOKENIZER_TRACE) {
+                            logger.info(`Detected: Token Type: ${newToken.type} Token Value: '${newToken.value}' at Line ${newToken.line}, Column ${newToken.start}`);
+                            logger.info(`Line: ${line}`);
+                        }
 
                         position += match[0].length;
                         column += match[0].length;
@@ -541,9 +585,10 @@ export class ClarionTokenizer {
             }
         }
 
-        // 🔬 PROFILING: Report pattern timing statistics
+        // 🔬 PROFILING: Report pattern timing statistics (counters only populate under the trace flag — #353)
+        if (!TOKENIZER_TRACE) return;
         logger.info('🔬 [PROFILING] Pattern performance analysis:');
-        
+
         // Sort by time spent (descending)
         const sortedByTime = Array.from(patternTiming.entries())
             .sort((a, b) => b[1] - a[1])
@@ -610,14 +655,14 @@ export class ClarionTokenizer {
                 const line = this.lines[lineNum];
                 if (!line) continue;
                 
-                // Check for DATA keyword
-                if (line.match(/^\s*data\s*$/i)) {
+                // Check for DATA keyword (#333: tolerate trailing ! comment)
+                if (line.match(/^\s*data\s*(!.*)?$/i)) {
                     inDataSection = true;
                     continue;
                 }
-                
+
                 // Check for CODE keyword (ends DATA section)
-                if (line.match(/^\s*code\s*$/i)) {
+                if (line.match(/^\s*code\s*(!.*)?$/i)) {
                     inDataSection = false;
                     break;
                 }
@@ -737,11 +782,25 @@ export class ClarionTokenizer {
 
     /** ✅ Tokenize local variables in procedures/methods/functions */
     private tokenizeProcedureLocalVariables(): void {
-        // Find all procedures/methods/functions
-        const procedures = this.tokens.filter(t => 
-            t.type === TokenType.Procedure || 
-            t.type === TokenType.Function ||
-            t.subType === TokenType.MethodImplementation
+        // Find all procedure/method IMPLEMENTATIONS. Declarations — MAP/MODULE
+        // prototypes, CLASS method declarations, INTERFACE methods — have no body
+        // and no local data section, and they never open a scope so they have no
+        // finishesAt: the EOF fallback below made each of them scan from its line
+        // to the first CODE statement. #353: a program file's MAP holds hundreds
+        // of prototypes ~10k lines above CODE — a quadratic that measured >400ms
+        // per tokenize on the real 873KB program file. Any column-0 declaration
+        // in those ranges already carries a Label token, so nothing was ever
+        // collected from them anyway.
+        const declarationSubTypes = new Set([
+            TokenType.MapProcedure,
+            TokenType.MethodDeclaration,
+            TokenType.InterfaceMethod
+        ]);
+        const procedures = this.tokens.filter(t =>
+            (t.type === TokenType.Procedure ||
+                t.type === TokenType.Function ||
+                t.subType === TokenType.MethodImplementation) &&
+            (t.subType === undefined || !declarationSubTypes.has(t.subType))
         );
 
         // 🚀 PERF: Skip if no procedures found
@@ -772,7 +831,7 @@ export class ClarionTokenizer {
             // 🚀 PERF: Early exit if procedure has no local data section
             // Procedures without local variables have CODE on the next non-blank line
             const nextLine = this.lines[proc.line + 1]?.trim();
-            if (nextLine && nextLine.match(/^code\s*$/i)) {
+            if (nextLine && nextLine.match(/^code\s*(!.*)?$/i)) {
                 proc.localVariablesAnalyzed = true;
                 continue; // No local variables, skip this procedure
             }
@@ -782,8 +841,8 @@ export class ClarionTokenizer {
                 const line = this.lines[lineNum];
                 if (!line) continue;
                 
-                // Stop at CODE keyword
-                if (line.match(/^\s*code\s*$/i)) {
+                // Stop at CODE keyword (#333: tolerate trailing ! comment)
+                if (line.match(/^\s*code\s*(!.*)?$/i)) {
                     break;
                 }
                 

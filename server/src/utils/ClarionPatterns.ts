@@ -150,7 +150,18 @@ export class ClarionPatterns {
      * [1] = Full routine name (including prefix)
      */
     public static readonly DO_ROUTINE = /\bDO\s+([A-Za-z_][A-Za-z0-9_:]*)/i;
-    
+
+    /**
+     * #321 — Matches a GOTO statement with its target label.
+     * The target is an executable-statement label (never a ROUTINE or
+     * PROCEDURE label) within the current ROUTINE-or-PROCEDURE unit.
+     *
+     * Capture groups:
+     * [1] = target label name
+     */
+    public static readonly GOTO_LABEL = /\bGOTO\s+([A-Za-z_][A-Za-z0-9_:]*)/i;
+
+
     // ===================================================================
     // CLASS PATTERNS
     // ===================================================================
