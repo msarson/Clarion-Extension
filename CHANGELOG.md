@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.2] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **False-positive "missing END" on a WINDOW when a control's attribute references a structure keyword on a continuation line** ([#415](https://github.com/msarson/Clarion-Extension/issues/415)): a generated `LIST` whose multi-line `FORMAT(...)` picture string closed with `...'),FROM(QUEUE)` made the tokenizer read the `QUEUE` in `FROM(QUEUE)` as a *structure opener* — it consumed an `END`, leaving the enclosing `WINDOW` unterminated and flagged. The guard that skips structure keywords used as attribute arguments only counted parentheses on the current physical line (missing the `FORMAT(` opened on the previous continuation line — the leading `)` drove its count negative) and counted parentheses inside string literals. It is now string-aware and recognises a leading unmatched `)` as a group carried in from a continuation line, so `FROM(QUEUE)` is correctly treated as an in-parentheses reference.
+
 ---
 
 ### [1.0.1] - 2026-08-09
