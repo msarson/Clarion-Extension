@@ -380,7 +380,28 @@ export class ClarionTokenizer {
                                 // Check if inside parentheses or optional parameters
                                 if (isInsideParamsOrTemplate(position)) {
                                     if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - inside parameters or optional params`);
-                                    continue; // Try next structure pattern
+                                    // #416: this is a structure keyword used as an attribute argument /
+                                    // parameter type (e.g. FROM(QUEUE), PROCEDURE(FILE,KEY)), NOT a
+                                    // structure opener. Emit it as a KEYWORD reference token and advance —
+                                    // otherwise it falls through to the Variable pattern, which EXCLUDES
+                                    // structure keywords, and the leading character is dropped
+                                    // (QUEUE -> "UEUE"). Keyword (not Variable) is deliberate: the
+                                    // document-symbol/structure builders ignore keywords, so a keyword-named
+                                    // parameter type does not become a spurious outline declaration.
+                                    const refValue = match[0].trimStart();
+                                    const refLead = match[0].length - refValue.length;
+                                    this.tokens.push({
+                                        type: TokenType.Keyword,
+                                        value: refValue,
+                                        line: lineNumber,
+                                        start: position + refLead,
+                                        maxLabelLength: 0
+                                    });
+                                    position += match[0].length;
+                                    column += match[0].length;
+                                    matched = true;
+                                    tokensOnCurrentLine++;
+                                    break; // stop testing other structure patterns
                                 }
                                 
                                 if (TOKENIZER_TRACE) patternMatches.set(tokenType, (patternMatches.get(tokenType) || 0) + 1);
