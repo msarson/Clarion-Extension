@@ -1357,7 +1357,7 @@
   "devDependencies": {
     "@types/mocha": "^8.2.2",
     "@types/node": "^22.20.1",
-    "@types/vscode": "^1.125.0",
+    "@types/vscode": "~1.97.0",
     "@types/xml2js": "^0.4.14",
     "@typescript-eslint/parser": "^8.66.0",
     "@vscode/test-electron": "^2.5.2",
@@ -1377,7 +1377,7 @@
     "mkdirp": "^3.0.1",
     "vscode-languageclient": "^8.1.0",
     "vscode-languageserver": "^8.1.0",
-    "vscode-languageserver-protocol": "^3.18.2",
+    "vscode-languageserver-protocol": "3.17.5",
     "vscode-languageserver-textdocument": "^1.0.12",
     "xml2js": "^0.6.2"
   },
