@@ -30,3 +30,9 @@ updates:
       # Majors are deliberate, tested migrations — never an auto-PR.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Pinned to 3.17.x: 3.18+ is exports-only and needs tsconfig
+      # moduleResolution node16/bundler — deferred to the LSP migration (#405).
+      - dependency-name: "vscode-languageserver-protocol"
+      # Must track engines.vscode (the declared minimum VS Code) — bumping it
+      # ahead of engines fails `vsce package`. Move it only when raising engines.
+      - dependency-name: "@types/vscode"
