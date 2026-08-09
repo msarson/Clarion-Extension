@@ -1,12 +1,16 @@
 # Dependabot configuration.
 #
-# Dependabot reads this from the DEFAULT branch (master); it takes effect once a
-# release merges version-x.y.z into master.
+# Dependabot reads this from the DEFAULT branch (master). It is also carried on
+# the active version-x.y.z branch so a release merge doesn't revert it.
 #
-# Rationale (see #390 / #405): a routine transitive security patch was bundled
-# with a breaking `vscode-languageclient` 8->10 major. We keep security/patch/minor
-# updates flowing automatically, but LSP client/server MAJORS are excluded — those
-# are deliberate, tested migrations done in their own PR/feature release.
+# Posture (tiered — see #390 / #405 for the why):
+#   - Security updates: always on (repo setting; fire regardless of schedule).
+#   - Routine minor/patch: grouped into one PR per directory, monthly — low-risk,
+#     keeps drift down without a firehose.
+#   - Majors: never auto-proposed. Breaking upgrades (e.g. vscode-languageclient
+#     8->10, #405) are deliberate, tested migrations done in their own PR.
+#   - antlr-grammar/ is a shelved experiment kept for reference only — not built
+#     or shipped — so it is intentionally NOT listed below (no dependency churn).
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -15,19 +19,14 @@ updates:
       - "/client"
       - "/server"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 5
     groups:
-      # One PR per directory for routine minor/patch bumps instead of a swarm.
       minor-and-patch:
         update-types:
           - "minor"
           - "patch"
     ignore:
-      # LSP client/server majors are a breaking migration, not an auto-PR (#405).
-      - dependency-name: "vscode-languageclient"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "vscode-languageserver"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "vscode-languageserver-textdocument"
+      # Majors are deliberate, tested migrations — never an auto-PR.
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
