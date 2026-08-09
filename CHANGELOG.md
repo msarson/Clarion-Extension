@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.1] - 2026-08-09
 
+**Security**
+
+- 🔒 **`brace-expansion` DoS advisories patched** (GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895): the transitive `brace-expansion` used via `minimatch`/`glob` (and the dev toolchain) is bumped to patched releases within its existing major line (e.g. `2.1.0 → 2.1.4`), clearing all high-severity `npm audit` findings. No API/runtime behaviour change; the LSP client major upgrade Dependabot bundled alongside these (`vscode-languageclient` 8→10, [#390](https://github.com/msarson/Clarion-Extension/pull/390)) is deliberately **not** included and is tracked separately. Practical exposure was low regardless — the affected code path globs the user's own local solution/redirection files, not untrusted input.
+
 **New Features**
 
 - ✨ **`?Ctrl` field-equate completion is now scoped to the current procedure** ([#385](https://github.com/msarson/Clarion-Extension/pull/385), thanks [@geircodes](https://github.com/geircodes)): typing `?` offers only the field equates of the WINDOW/APPLICATION/REPORT in the procedure under the cursor (resolved via the scope resolver, so it works inside ROUTINEs too), instead of every control in the file. A leading `?` triggers the list and is stripped from the inserted text.
