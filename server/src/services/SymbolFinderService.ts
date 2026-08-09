@@ -1285,11 +1285,22 @@ export class SymbolFinderService {
                     // URI is canonical (#251) — hand-built file:/// shapes keep causing
                     // cache-identity bugs.
                     const solutionManager = SolutionManager.getInstance();
-                    const viaRedirection = solutionManager
-                        ? await solutionManager.findFileWithExtension(parentFile, currentFilePath)
-                        : null;
+                    // #396: converge on the SAME owner-project redirection resolver hover uses
+                    // (resolveViaProjectRedirection → the owning project's .red parser) FIRST, so
+                    // the diagnostic and hover can't disagree on the parent's location. In a
+                    // generated multi-DLL app the member lives in a DLL project's genfiles\src while
+                    // the PROGRAM (holding .app global data) lives in the exe project; hover's .red
+                    // lookup finds it but findFileWithExtension's sourceFiles-first search missed —
+                    // flagging a global hover resolves. findFileWithExtension stays as the secondary
+                    // fallback for shapes the .red parser doesn't cover.
+                    const viaProjectRed = resolveViaProjectRedirection328(parentFile, currentFilePath);
+                    const viaRedirection = viaProjectRed
+                        ? { path: viaProjectRed }
+                        : solutionManager
+                            ? await solutionManager.findFileWithExtension(parentFile, currentFilePath)
+                            : null;
                     if (viaRedirection?.path && fs.existsSync(viaRedirection.path)) {
-                        logger.info(`✅ #300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
+                        logger.info(`✅ #396/#300: MEMBER parent '${parentFile}' resolved via redirection: ${viaRedirection.path}`);
                         resolvedPath = viaRedirection.path;
                         parentUri = pathToCanonicalUri(resolvedPath);
                         // The redirected target may itself be cached (open in the editor)
