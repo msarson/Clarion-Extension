@@ -148,6 +148,86 @@ suite('scanSourceForProcedures (#362)', () => {
         assert.ok(byName.has('GlobalAfter2'), 'a real global procedure after the CLASS close is still indexed');
     });
 
+    test('a trailing `.` on the last member line closes the structure (period-terminated CLASS)', () => {
+        // Clarion closes a structure with a `.` terminator as often as with END —
+        // commonly as a TRAILING terminator on the last member line. If that form
+        // doesn't pop the stack, the CLASS stays "open" to EOF and every genuine
+        // global procedure declared later in the same file is dropped from the
+        // proc index (F12/hover fast-path regression).
+        const src = [
+            'PClass      CLASS,TYPE',
+            'Method1       PROCEDURE()',
+            'LastField       STRING(10).',
+            '',
+            'GlobalAfter3 PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\p1.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Method1'), 'CLASS member still excluded in a period-terminated class');
+        assert.ok(byName.has('GlobalAfter3'), 'a global procedure after a period-terminated CLASS must be indexed');
+    });
+
+    test('a trailing `.` on a member PROCEDURE line closes the structure', () => {
+        // The terminator can sit on a member *prototype* line too. That line is
+        // still INSIDE the class it terminates (must be excluded from the bare-name
+        // index) — the close takes effect for the lines after it.
+        const src = [
+            'PClass2     CLASS,TYPE',
+            'Done          PROCEDURE().',
+            '',
+            'GlobalAfter4 PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\p2.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Done'), 'the period-terminated member prototype itself is still a member, not a global');
+        assert.ok(byName.has('GlobalAfter4'), 'a global procedure after the close must be indexed');
+    });
+
+    test('collapsed `. .` closes multiple structures (nested GROUP + CLASS on one line)', () => {
+        const src = [
+            'PClass3     CLASS,TYPE',
+            'Rec           GROUP',
+            'Field1          STRING(10)',
+            '. .',
+            '',
+            'GlobalAfter5 PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\p3.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(byName.has('GlobalAfter5'), 'a `. .` line must pop BOTH the GROUP and the CLASS');
+    });
+
+    test('a one-line `Rec GROUP,PRE(R1).` inside a CLASS opens and closes on the same line', () => {
+        const src = [
+            'PClass4     CLASS,TYPE',
+            'Rec           GROUP,PRE(R1).',
+            'Method1       PROCEDURE()',
+            '            END',
+            '',
+            'GlobalAfter6 PROCEDURE()',
+            '  CODE',
+            '  RETURN'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\p4.inc');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Method1'), 'member after the self-closing GROUP is still inside the CLASS — excluded');
+        assert.ok(byName.has('GlobalAfter6'), 'the CLASS END must not have been consumed by the self-closing GROUP');
+    });
+
     test('finds real procedures in IBSCommon.clw when present', function () {
         const real = 'F:\\TestApps\\Direct10Source\\IBSCommon.clw';
         if (!fs.existsSync(real)) { this.skip(); return; }
