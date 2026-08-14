@@ -920,23 +920,44 @@ export class SymbolFinderService {
     }
     
     /**
-     * Resolves the MEMBER token for a file, falling through into its own direct INCLUDE
-     * targets when no literal MEMBER statement is present locally — mirrors
+     * Resolves the MEMBER token for a file, following its FIRST statement into an
+     * INCLUDE'd shim when no literal MEMBER statement is present locally — mirrors
      * MemberLocatorService.resolveMemberHeaderToken (same project convention: MEMBER('program')
      * often lives in a small generated shim reached via INCLUDE('member.clw') rather than being
      * written directly in each member module, so a shared source tree can belong to different
      * PROGRAMs across projects by swapping just that shim). TokenHelper.findMemberHeaderToken()
      * only sees literal tokens in the tokens it's given, so it can never find a MEMBER hidden
-     * behind that indirection on its own. Only looks one INCLUDE hop deep.
+     * behind that indirection on its own.
+     *
+     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream (see
+     * TokenHelper.findShimIncludeToken), only the FIRST statement of each file is consulted:
+     * a non-INCLUDE first statement is an instant miss with zero file reads, each hop reads
+     * exactly one file, MAX_SHIM_HOPS bounds the rare chained-shim case, and a visited set
+     * stops include cycles.
+     *
+     * The shim include is resolved redirection-first (`resolveViaProjectRedirection`, threaded
+     * with `fromFile` for #328 owner-project-first) with a plain relative-path probe as the
+     * fallback — the same order MemberLocatorService.resolveFilePath uses — so a shim reachable
+     * only via a .red mapping resolves identically for hover (MemberLocatorService) and for the
+     * definition/global-variable paths that come through here.
      */
-    private async resolveMemberHeaderToken(tokens: Token[], currentDir: string): Promise<Token | undefined> {
-        const direct = TokenHelper.findMemberHeaderToken(tokens);
-        if (direct) return direct;
+    private static readonly MAX_SHIM_HOPS = 3;
+    private async resolveMemberHeaderToken(tokens: Token[], currentDir: string, fromFile?: string): Promise<Token | undefined> {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= SymbolFinderService.MAX_SHIM_HOPS; hop++) {
+            const direct = TokenHelper.findMemberHeaderToken(tokens);
+            if (direct) return direct;
 
-        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
-        for (const inc of includeTokens) {
-            const resolvedPath = path.resolve(currentDir, inc.referencedFile!);
-            if (!fs.existsSync(resolvedPath)) continue;
+            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
+            if (!shimInclude) return undefined;
+            const viaRedirection = resolveViaProjectRedirection328(shimInclude.referencedFile!, fromFile ?? null);
+            const relative = path.resolve(currentDir, shimInclude.referencedFile!);
+            const resolvedPath = viaRedirection ?? (fs.existsSync(relative) ? relative : null);
+            if (!resolvedPath) return undefined;
+            const key = resolvedPath.toLowerCase();
+            if (visited.has(key)) return undefined;
+            visited.add(key);
+
             const incUri = pathToCanonicalUri(resolvedPath);
             let incTokens = this.tokenCache.getTokensByUriCaseInsensitive(incUri);
             if (!incTokens) {
@@ -944,25 +965,18 @@ export class SymbolFinderService {
                     const content = await fs.promises.readFile(resolvedPath, 'utf-8');
                     const incDoc = TextDocument.create(incUri, 'clarion', 1, content);
                     incTokens = this.tokenCache.getTokens(incDoc);
-                } catch { continue; }
+                } catch { return undefined; }
             }
-            const nested = TokenHelper.findMemberHeaderToken(incTokens);
-            if (nested) return nested;
+            tokens = incTokens;
+            currentDir = path.dirname(resolvedPath);
+            fromFile = resolvedPath;
         }
         return undefined;
     }
 
-    /**
-     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
-     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`. INCLUDE/LINK/MODULE targets
-     * always carry an explicit extension, so this is deliberately only applied to MEMBER targets.
-     * Both the redirection parser (matches by extension mask) and SolutionManager.findFileWithExtension
-     * (matches by exact source-file basename) silently fail to resolve an extension-less name:
-     * `resolveViaProjectRedirection('TargetProgram', ...)` -> null,
-     * `resolveViaProjectRedirection('TargetProgram.clw', ...)` -> the correct path.
-     */
+    /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */
     private normalizeMemberFilename(name: string): string {
-        return path.extname(name) ? name : `${name}.clw`;
+        return TokenHelper.normalizeMemberFilename(name);
     }
 
     /**
@@ -984,7 +998,7 @@ export class SymbolFinderService {
 
         // If MEMBER file, search the parent PROGRAM file
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePath));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePath), currentFilePath);
         if (memberToken?.referencedFile) {
             try {
                 const memberFile = this.normalizeMemberFilename(memberToken.referencedFile);
@@ -1181,7 +1195,7 @@ export class SymbolFinderService {
 
         // Step 2: If not found and current file has MEMBER token, search parent file
         const currentFilePathForMember = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePathForMember));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePathForMember), currentFilePathForMember);
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
