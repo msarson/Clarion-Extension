@@ -771,8 +771,8 @@ export class IncludeVerifier {
     }
 
     /**
-     * Resolves the MEMBER token for a file, falling through into its own direct INCLUDE
-     * targets when no literal MEMBER statement is present locally.
+     * Resolves the MEMBER token for a file, following its FIRST statement into an
+     * INCLUDE'd shim when no literal MEMBER statement is present locally.
      *
      * Project convention seen across many member modules: the real MEMBER('program')
      * statement lives in a small shared shim file reached via e.g. INCLUDE('member.clw')
@@ -784,53 +784,57 @@ export class IncludeVerifier {
      * using the shim, so an include that's only reachable through the real PROGRAM/MEMBER
      * file's chain is reported as missing even though it compiles fine.
      *
-     * Same one-hop convention MemberLocatorService.resolveMemberHeaderToken() already
-     * applies for hover/F12/completion — mirrored here for the diagnostic path.
+     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream (see
+     * TokenHelper.findShimIncludeToken), only the FIRST statement of each file is consulted.
+     * This is what keeps the common cases free: a definition .inc (first statement is a
+     * data/CLASS declaration) or a PROGRAM file is an instant miss with ZERO file reads —
+     * the pre-fallback behavior of returning null immediately is preserved exactly. Each
+     * hop reads exactly one file, MAX_SHIM_HOPS bounds the legal-but-rare chained-shim
+     * case, and a visited set stops include cycles.
      *
-     * Only looks one INCLUDE hop deep — matches the shim-file convention; a MEMBER
-     * statement buried deeper than that would be unusual. Takes the first MEMBER token
-     * found across the direct includes, in document order.
+     * Same first-statement walk MemberLocatorService.resolveMemberHeaderToken() applies for
+     * hover/F12/completion — mirrored here for the diagnostic path, sharing the convention
+     * logic via TokenHelper.findShimIncludeToken / TokenHelper.normalizeMemberFilename.
      */
+    private static readonly MAX_SHIM_HOPS = 3;
     private async findMemberHeaderTokenWithFallback(
         tokens: Token[],
         fromDir: string,
         fromFile: string
     ): Promise<Token | undefined> {
-        const direct = TokenHelper.findMemberHeaderToken(tokens);
-        if (direct) return direct;
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= IncludeVerifier.MAX_SHIM_HOPS; hop++) {
+            const direct = TokenHelper.findMemberHeaderToken(tokens);
+            if (direct) return direct;
 
-        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
-        for (const inc of includeTokens) {
-            let resolvedPath: string | null = resolveViaProjectRedirection(inc.referencedFile!, fromFile);
+            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
+            if (!shimInclude) return undefined;
+            let resolvedPath: string | null = resolveViaProjectRedirection(shimInclude.referencedFile!, fromFile);
             if (!resolvedPath) {
-                const candidate = path.resolve(fromDir, inc.referencedFile!);
+                const candidate = path.resolve(fromDir, shimInclude.referencedFile!);
                 if (fs.existsSync(candidate)) resolvedPath = candidate;
             }
-            if (!resolvedPath) continue;
+            if (!resolvedPath) return undefined;
+            const key = resolvedPath.toLowerCase();
+            if (visited.has(key)) return undefined;
+            visited.add(key);
 
             try {
                 const contents = await fs.promises.readFile(resolvedPath, 'utf-8');
                 const doc = TextDocument.create(pathToCanonicalUri(resolvedPath), 'clarion', 1, contents);
-                const nestedTokens = this.tokenCache.getTokens(doc);
-                const nested = TokenHelper.findMemberHeaderToken(nestedTokens);
-                if (nested) return nested;
+                tokens = this.tokenCache.getTokens(doc);
             } catch {
-                // Unreadable — skip
+                return undefined; // Unreadable — the chain is broken, nothing further can be legal
             }
+            fromDir = path.dirname(resolvedPath);
+            fromFile = resolvedPath;
         }
         return undefined;
     }
 
-    /**
-     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
-     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`. INCLUDE/LINK/MODULE targets
-     * always carry an explicit extension, so this is deliberately only applied to MEMBER targets.
-     * `resolveViaProjectRedirection`'s redirection lookup matches by extension mask (e.g. the `*.clw
-     * = ...` line in a .red file), so an extension-less name never matches any rule and silently
-     * fails to resolve. Mirrors MemberLocatorService.normalizeMemberFilename().
-     */
+    /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */
     private normalizeMemberFilename(name: string): string {
-        return path.extname(name) ? name : `${name}.clw`;
+        return TokenHelper.normalizeMemberFilename(name);
     }
 
     /**

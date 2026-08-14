@@ -101,4 +101,56 @@ suite('IncludeVerifier — MEMBER resolved via INCLUDE shim (member.clw conventi
         assert.strictEqual(await iv.isClassIncluded('NotAnywhere.inc', childDoc()), false,
             'a genuinely unreachable class must still be reported as not included');
     });
+
+    test('a CHAINED shim (first-statement INCLUDE -> INCLUDE -> MEMBER) resolves', async () => {
+        // Legal-but-rare: the shim's own first statement is another INCLUDE carrying the
+        // MEMBER. Still one file read per hop, still first-statement-only.
+        fs.writeFileSync(path.join(tmpRoot, 'member1.clw'), "  INCLUDE('member2.clw')\r\n");
+        fs.writeFileSync(path.join(tmpRoot, 'member2.clw'), "  MEMBER('parent')\r\n");
+        const p = path.join(tmpRoot, 'chained.clw');
+        fs.writeFileSync(p, [
+            "  INCLUDE('member1.clw')",
+            'MyProc PROCEDURE',
+            '  CODE',
+            '  RETURN',
+            '',
+        ].join('\r\n'));
+        const doc = TextDocument.create(fileUri(p), 'clarion', 1, fs.readFileSync(p, 'utf-8'));
+
+        const iv = IncludeVerifier.getInstance();
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', doc), true,
+            'the MEMBER parent must resolve through a two-hop shim chain');
+    });
+
+    test('a MEMBER behind a NON-first-statement INCLUDE does NOT resolve (no all-includes sweep)', async () => {
+        // The file's first statement is a data declaration, so it cannot be a member
+        // module — MEMBER (or the shim INCLUDE carrying it) must be the FIRST statement
+        // of the compiled token stream. An all-includes sweep would tokenize member.clw
+        // and "find" the MEMBER anyway: wrong (the compiler rejects this file), and the
+        // reason a plain definition include used to cost a cold tokenize of every
+        // direct include instead of returning null instantly.
+        const p = path.join(tmpRoot, 'notmember.clw');
+        fs.writeFileSync(p, [
+            'SomeVar  LONG',
+            "  INCLUDE('member.clw')",
+            'MyProc PROCEDURE',
+            '  CODE',
+            '  RETURN',
+            '',
+        ].join('\r\n'));
+        const doc = TextDocument.create(fileUri(p), 'clarion', 1, fs.readFileSync(p, 'utf-8'));
+
+        const iv = IncludeVerifier.getInstance();
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', doc), false,
+            'the shim INCLUDE is not the first statement — no MEMBER parent may be inferred');
+    });
+
+    test('a self-including shim terminates without resolving (cycle guard)', async () => {
+        fs.writeFileSync(path.join(tmpRoot, 'member.clw'), "  INCLUDE('member.clw')\r\n");
+
+        const iv = IncludeVerifier.getInstance();
+        // Twofold: it returns at all (no infinite include loop), and finds nothing.
+        assert.strictEqual(await iv.isClassIncluded('SharedThings.inc', childDoc()), false,
+            'a cyclic shim chain must not resolve a MEMBER parent');
+    });
 });

@@ -25,6 +25,45 @@ export class TokenHelper {
             t.referencedFile !== undefined);
     }
 
+    /**
+     * The first non-comment token of a compiled module, if it is an INCLUDE
+     * carrying a file reference — i.e. the only place a MEMBER-via-INCLUDE shim
+     * can legally live.
+     *
+     * Language rule: MEMBER (or PROGRAM) must be the FIRST statement in the
+     * compiled token stream — only comments and blank lines may precede it. So
+     * when a file has no literal MEMBER header, the sole legal way for it to be
+     * a MEMBER module is that its first statement is an INCLUDE whose target
+     * (or, transitively, the target's own first-statement INCLUDE) starts with
+     * MEMBER. A MEMBER found in any LATER include would not compile — sweeping
+     * all INCLUDE tokens is therefore not just wasted I/O on the miss-path, it
+     * can invent a parent the compiler would reject.
+     *
+     * Returns undefined when the first statement is anything else (MEMBER and
+     * PROGRAM included — callers already handled the literal-header case via
+     * findMemberHeaderToken / findProgramHeaderToken).
+     */
+    public static findShimIncludeToken(tokens: Token[]): Token | undefined {
+        const first = tokens.find(t =>
+            t.type !== TokenType.Comment &&
+            t.type !== TokenType.LineContinuation);
+        if (first?.value?.toUpperCase() === 'INCLUDE' && first.referencedFile) return first;
+        return undefined;
+    }
+
+    /**
+     * MEMBER/PROGRAM references conventionally omit the file extension (e.g.
+     * `MEMBER('TargetProgram')`) — the Clarion compiler infers `.clw`.
+     * INCLUDE/LINK/MODULE targets always carry an explicit extension, so this is
+     * deliberately only applied to MEMBER targets. Both the redirection parser
+     * (matches by extension mask, e.g. the `*.clw = ...` line in a .red file) and
+     * SolutionManager.findFileWithExtension (matches by exact source-file
+     * basename) silently fail to resolve an extension-less name.
+     */
+    public static normalizeMemberFilename(name: string): string {
+        return /\.[^\\/.]+$/.test(name) ? name : `${name}.clw`;
+    }
+
     /** #337 — PROGRAM header lookup (ClarionDocument-typed, no line cap). */
     public static findProgramHeaderToken(tokens: Token[]): Token | undefined {
         return tokens.find(t =>
