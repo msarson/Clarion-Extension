@@ -920,6 +920,66 @@ export class SymbolFinderService {
     }
     
     /**
+     * Resolves the MEMBER token for a file, following its FIRST statement into an
+     * INCLUDE'd shim when no literal MEMBER statement is present locally — mirrors
+     * MemberLocatorService.resolveMemberHeaderToken (same project convention: MEMBER('program')
+     * often lives in a small generated shim reached via INCLUDE('member.clw') rather than being
+     * written directly in each member module, so a shared source tree can belong to different
+     * PROGRAMs across projects by swapping just that shim). TokenHelper.findMemberHeaderToken()
+     * only sees literal tokens in the tokens it's given, so it can never find a MEMBER hidden
+     * behind that indirection on its own.
+     *
+     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream (see
+     * TokenHelper.findShimIncludeToken), only the FIRST statement of each file is consulted:
+     * a non-INCLUDE first statement is an instant miss with zero file reads, each hop reads
+     * exactly one file, MAX_SHIM_HOPS bounds the rare chained-shim case, and a visited set
+     * stops include cycles.
+     *
+     * The shim include is resolved redirection-first (`resolveViaProjectRedirection`, threaded
+     * with `fromFile` for #328 owner-project-first) with a plain relative-path probe as the
+     * fallback — the same order MemberLocatorService.resolveFilePath uses — so a shim reachable
+     * only via a .red mapping resolves identically for hover (MemberLocatorService) and for the
+     * definition/global-variable paths that come through here.
+     */
+    private static readonly MAX_SHIM_HOPS = 3;
+    private async resolveMemberHeaderToken(tokens: Token[], currentDir: string, fromFile?: string): Promise<Token | undefined> {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= SymbolFinderService.MAX_SHIM_HOPS; hop++) {
+            const direct = TokenHelper.findMemberHeaderToken(tokens);
+            if (direct) return direct;
+
+            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
+            if (!shimInclude) return undefined;
+            const viaRedirection = resolveViaProjectRedirection328(shimInclude.referencedFile!, fromFile ?? null);
+            const relative = path.resolve(currentDir, shimInclude.referencedFile!);
+            const resolvedPath = viaRedirection ?? (fs.existsSync(relative) ? relative : null);
+            if (!resolvedPath) return undefined;
+            const key = resolvedPath.toLowerCase();
+            if (visited.has(key)) return undefined;
+            visited.add(key);
+
+            const incUri = pathToCanonicalUri(resolvedPath);
+            let incTokens = this.tokenCache.getTokensByUriCaseInsensitive(incUri);
+            if (!incTokens) {
+                try {
+                    const content = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const incDoc = TextDocument.create(incUri, 'clarion', 1, content);
+                    incTokens = this.tokenCache.getTokens(incDoc);
+                } catch { return undefined; }
+            }
+            tokens = incTokens;
+            currentDir = path.dirname(resolvedPath);
+            fromFile = resolvedPath;
+        }
+        return undefined;
+    }
+
+    /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */
+    private normalizeMemberFilename(name: string): string {
+        return TokenHelper.normalizeMemberFilename(name);
+    }
+
+    /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
      * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
      * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
@@ -937,11 +997,12 @@ export class SymbolFinderService {
         if (result) return result;
 
         // If MEMBER file, search the parent PROGRAM file
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePath), currentFilePath);
         if (memberToken?.referencedFile) {
             try {
-                const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
-                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberToken.referencedFile);
+                const memberFile = this.normalizeMemberFilename(memberToken.referencedFile);
+                let resolvedPath = path.resolve(path.dirname(currentFilePath), memberFile);
                 let parentUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
 
                 // #119 — cache-first parity with findGlobalVariableInParentFile (:816-838):
@@ -964,7 +1025,7 @@ export class SymbolFinderService {
                         // without it, prefixed fields of parent-inline FILEs dead-end here.
                         const solutionManager = SolutionManager.getInstance();
                         const viaRedirection = solutionManager
-                            ? await solutionManager.findFileWithExtension(memberToken.referencedFile, currentFilePath)
+                            ? await solutionManager.findFileWithExtension(memberFile, currentFilePath)
                             : null;
                         if (!viaRedirection?.path || !fs.existsSync(viaRedirection.path)) {
                             return null;
@@ -1133,11 +1194,14 @@ export class SymbolFinderService {
         }
 
         // Step 2: If not found and current file has MEMBER token, search parent file
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const currentFilePathForMember = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '').replace(/\//g, '\\'));
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(currentFilePathForMember), currentFilePathForMember);
 
         if (memberToken && memberToken.referencedFile) {
             logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);
-            const parentResult = await this.findGlobalVariableInParentFile(word, memberToken.referencedFile, document);
+            const parentResult = await this.findGlobalVariableInParentFile(
+                word, this.normalizeMemberFilename(memberToken.referencedFile), document
+            );
             if (parentResult) return parentResult;
             // Fall through to equates.clw check
         }

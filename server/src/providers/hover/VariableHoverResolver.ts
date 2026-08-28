@@ -268,12 +268,25 @@ export class VariableHoverResolver {
         const isProcedure = ProcedureUtils.isProcedureKeyword(typeInfo); // #247: PROCEDURE ≡ FUNCTION
         const isEquate = typeInfo === 'EQUATE';
 
+        // #350-adjacent — a PRE:Field reference (e.g. EVL:Lic) resolves through the same
+        // global-variable path as a true global scalar, but the token is actually a field of a
+        // PRE()'d FILE/QUEUE/GROUP (StructureProcessor stamps isStructureField/structureParent on
+        // it). Label it as a structure field — matching the "`X` Field:" wording
+        // StructureFieldResolver already uses for dot-notation access to the same field — instead
+        // of the generic "🌍 Global variable", which loses exactly the context the developer needs
+        // to tell a real global apart from a structure field reached via its PRE prefix.
+        const structureParentName = (globalVar as any).isStructureField
+            ? ((globalVar as any).structureParent?.label ?? (globalVar as any).structureParent?.value)
+            : undefined;
+
         if (isClassProperty) {
             const classLabel = containingClassName ? `Class property of \`${containingClassName}\`` : 'Class property';
             markdown.push(`🔷 ${classLabel}`);
         } else if (isInterfaceMethod) {
             const ifaceLabel = containingInterfaceName ? `Interface method of \`${containingInterfaceName}\`` : 'Interface method';
             markdown.push(`🔌 ${ifaceLabel}`);
+        } else if (structureParentName) {
+            markdown.push(`🔷 \`${structureParentName}\` field`);
         } else if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
             const scopeLabel = isProcedure

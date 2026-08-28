@@ -155,9 +155,9 @@ export class MemberLocatorService {
         // interface walk and #361's procedure walk).
         const timeSlice = makeTimeSlicer();
 
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -398,9 +398,9 @@ export class MemberLocatorService {
         }
 
         // 1.5 MEMBER parent file + its INCLUDE chain (common libsrc .clw layout)
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -565,11 +565,11 @@ export class MemberLocatorService {
      */
     public async warmMemberParent(document: TextDocument): Promise<boolean> {
         const tokens = this.tokenCache.getTokens(document);
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
         if (!memberToken?.referencedFile) return false;
 
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const parentPath = this.resolveFilePath(memberToken.referencedFile, path.dirname(docPath), docPath);
+        const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
         if (!parentPath) return false;
 
         // Already tokenized (open in the editor, or warmed by another member sharing this
@@ -643,9 +643,9 @@ export class MemberLocatorService {
         const currentDir = path.dirname(currentFilePath);
 
         // 2. MEMBER parent file (and its INCLUDE chain)
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -749,9 +749,9 @@ export class MemberLocatorService {
         if (found) return { token: found, tokens, doc: document };
 
         // 2. MEMBER parent + its include chain
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
-            const parentPath = this.resolveFilePath(memberToken.referencedFile, currentDir);
+            const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
                 const parentData = await this.loadDocument(parentPath);
                 if (parentData) {
@@ -772,6 +772,30 @@ export class MemberLocatorService {
     private findPrefixFieldInTokens(prefix: string, fieldName: string, tokens: Token[]): Token | undefined {
         const prefixUpper = prefix.toUpperCase();
         const fieldUpper = fieldName.toUpperCase();
+
+        // Prefer an actual FIELD of the structure over the structure's own PRE()'d declaration
+        // token. A field can coincidentally share its name with the enclosing structure (e.g. a
+        // FILE named `Evl` containing a field also named `Evl` — real shape in this codebase's
+        // event-log dictionary entry) — StructureProcessor stamps `structurePrefix` on the
+        // declaring structure token ITSELF as well as on its fields, so without this the
+        // declaration token wins the search below simply by appearing first in document order.
+        //
+        // `t.line > t.structureParent.line` additionally excludes a DocumentStructure quirk: the
+        // structure is pushed onto its structure-stack the moment its own keyword token (FILE,
+        // QUEUE, ...) is seen, so any later Variable/StructurePrefix-type token on THAT SAME
+        // declaration line — e.g. the `GLOB:Owner` in `OWNER(GLOB:Owner)`, or the `Evl` argument
+        // inside `PRE(Evl)` on the FILE's own line — gets mistagged isStructureField=true with the
+        // structure's own prefix too, even though it's an attribute argument, not a real field.
+        // Real fields are always declared on later lines, so this line comparison cleanly excludes
+        // that noise without touching the tokenizer's core (widely-depended-on) structure walker.
+        const fieldMatch = tokens.find(t =>
+            t.isStructureField &&
+            t.structurePrefix?.toUpperCase() === prefixUpper &&
+            t.value.toUpperCase() === fieldUpper &&
+            t.structureParent !== undefined && t.line > t.structureParent.line
+        );
+        if (fieldMatch) return fieldMatch;
+
         return tokens.find(t =>
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
@@ -1724,6 +1748,60 @@ export class MemberLocatorService {
      * ImplementationProvider / MethodHoverResolver already do via their
      * direct-fix-sites.
      */
+    /**
+     * Resolves the MEMBER token for a file, following its FIRST statement into an
+     * INCLUDE'd shim when no literal MEMBER statement is present locally.
+     *
+     * Project convention seen across many member modules: the real MEMBER('program')
+     * statement lives in a small generated shim file reached via e.g. INCLUDE('member.clw')
+     * rather than being written directly in each member — this lets the same shared source
+     * files belong to different PROGRAMs across projects by swapping just that one shim.
+     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
+     * so it can never find a MEMBER hidden behind that indirection on its own.
+     *
+     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream
+     * (see TokenHelper.findShimIncludeToken), only the FIRST statement of each file is
+     * ever consulted: if it isn't an INCLUDE, the file cannot be a shim-headed member
+     * module and the walk stops immediately — the common miss (a definition include, a
+     * PROGRAM file, plain data) costs zero file reads. Each hop reads exactly one file;
+     * MAX_SHIM_HOPS bounds the legal-but-rare chained-shim case and a visited set stops
+     * include cycles.
+     *
+     * `fromFile` (the CURRENT file's own path, not the include target) must be threaded through
+     * to resolveFilePath's owner-project-first redirection (#328) — some projects use a DIFFERENT
+     * same-named shim per project (e.g. many `member.clw` files, one per project, each redirecting
+     * to a different MEMBER target so the same shared source tree can belong to different PROGRAMs).
+     * Omitting it makes redirection fall back to an unscoped solution-wide walk that can resolve to
+     * the WRONG project's shim.
+     */
+    private static readonly MAX_SHIM_HOPS = 3;
+    private async resolveMemberHeaderToken(tokens: Token[], fromDir: string, fromFile?: string): Promise<Token | undefined> {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= MemberLocatorService.MAX_SHIM_HOPS; hop++) {
+            const direct = TokenHelper.findMemberHeaderToken(tokens);
+            if (direct) return direct;
+
+            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
+            if (!shimInclude) return undefined;
+            const resolvedPath = this.resolveFilePath(shimInclude.referencedFile!, fromDir, fromFile);
+            if (!resolvedPath) return undefined;
+            const key = resolvedPath.toLowerCase();
+            if (visited.has(key)) return undefined;
+            visited.add(key);
+            const data = await this.loadDocument(resolvedPath);
+            if (!data) return undefined;
+            tokens = data.tokens;
+            fromDir = path.dirname(resolvedPath);
+            fromFile = resolvedPath;
+        }
+        return undefined;
+    }
+
+    /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */
+    private normalizeMemberFilename(name: string): string {
+        return TokenHelper.normalizeMemberFilename(name);
+    }
+
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
