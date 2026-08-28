@@ -414,22 +414,22 @@ export class ClarionDocumentSymbolProvider {
                 
                 // Special handling for MAP and MODULE structures
                 if (value.toUpperCase() === "MAP" || value.toUpperCase() === "MODULE") {
-                    // Look ahead for procedure declarations inside this structure
+                    // Look ahead for procedure declarations inside this structure.
+                    // Bound the scan with the structure's own finishesAt — already computed by the
+                    // tokenizer with correct nesting depth — instead of re-deriving the end here.
+                    // The previous approach accepted an END only if no Structure token had been seen
+                    // since: a nested MODULE inside a MAP (or any nested structure) is itself a
+                    // Structure token, so that condition could never become true again once one
+                    // appeared, and the scan ran unbounded through the rest of the file — mis-marking
+                    // later identifier-followed-by-paren tokens (e.g. WINDOW attributes like FONT(...),
+                    // VALUE(...), FROM(...)) as MAP/MODULE procedures.
                     let j = i + 1;
-                    let endFound = false;
                     let lastProcedureLine = -1; // Track the line of the last identified procedure
-                    
-                    while (j < tokens.length && !endFound) {
+                    const scanEndLine = finishesAt ?? line;
+
+                    while (j < tokens.length && tokens[j].line <= scanEndLine) {
                         const nextToken = tokens[j];
-                        
-                        // Stop if we hit an END statement for this structure
-                        if (nextToken.type === TokenType.EndStatement &&
-                            nextToken.line > line &&
-                            !tokens.slice(i+1, j).some(t => t.type === TokenType.Structure)) {
-                            endFound = true;
-                            break;
-                        }
-                        
+
                         // If we find a procedure declaration with PROCEDURE or FUNCTION keyword, mark it
                         if (nextToken.type === TokenType.Keyword &&
                             ProcedureUtils.isProcedureKeyword(nextToken.value)) {
