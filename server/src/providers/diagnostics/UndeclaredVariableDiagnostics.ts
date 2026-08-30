@@ -4,6 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { KeywordService } from '../../utils/KeywordService';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
+import { CompilerFlagService } from '../../utils/CompilerFlagService'; // #420
 import { SymbolFinderService, resetSymbolFinderPerfStats, readSymbolFinderPerfStats } from '../../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CLARION_STRUCTURAL_WORDS } from '../../services/ReferenceCountIndex';
@@ -224,6 +225,9 @@ async function augmentDeclaredViaSymbolFinder(
         // the 40-entry keyword list — 'OPEN' alone triggered the full include-
         // chain cold build (32s measured) hunting a declaration that can't exist.
         if (BuiltinFunctionService.getInstance().isBuiltin(candidate.name)) continue;
+        // #420: predefined compiler flags (DLL_MODE, _DEBUG_, _C80_ …) are set by the
+        // compiler — never declared, never flagged, never worth a cross-file lookup.
+        if (CompilerFlagService.getInstance().isCompilerFlag(candidate.name)) continue;
         // #351/#358: skip tokens that are FRAGMENTS of a larger compound the
         // tokenizer split — the same discriminator the COLLECT pass uses
         // (isGluedNumberSuffix). Covers colon-adjacent prefix chains
@@ -453,6 +457,8 @@ function detectCheckableName(token: Token): CheckableName | null {
             // #345 — built-in statements/functions (OPEN, GET, CLEAR, ...) are
             // runtime-provided; never flag and never spend lookups on them.
             if (BuiltinFunctionService.getInstance().isBuiltin(token.value)) return null;
+            // #420 — predefined compiler flags are compiler-provided, see the augment pass.
+            if (CompilerFlagService.getInstance().isCompilerFlag(token.value)) return null;
             return { name: token.value, length: token.value.length };
         }
     }

@@ -46,6 +46,11 @@ logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
  */
 const varWalkCache = new Map<string, string | null>(); // value = file path where found, or null
 let varWalkEpoch = -1;
+// #420: per-file column-0 label set + INCLUDE targets, one regex pass per file per
+// cross-file epoch (see the walk's note). null = unreadable. Tiny: labels only.
+interface LabelScan { labels: Set<string>; includes: string[] }
+const labelScanCache = new Map<string, LabelScan | null>();
+let labelScanEpoch = -1;
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -159,21 +164,13 @@ export class MemberLocatorService {
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
-                const parentData = await this.loadDocument(parentPath);
-                if (parentData) {
-                    const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t, parentData.doc, true) && this.tokenMatchesName(t, varName.toLowerCase())
-                    );
-                    if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
-                    const incResult = await this.searchIncludesForToken(
-                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()]), timeSlice
-                    );
-                    if (incResult) return incResult;
-                }
+                const incResult = await this.searchParentChainForToken(varName, parentPath, timeSlice);
+                if (incResult) return incResult;
             }
         }
-
-        return this.searchIncludesForToken(varName, tokens, currentDir, new Set(), timeSlice);
+        return this.searchIncludeTargetsForToken(
+            varName, MemberLocatorService.includeTargetsFromTokens(tokens), currentDir, new Set(), timeSlice
+        );
     }
 
     /**
@@ -642,57 +639,196 @@ export class MemberLocatorService {
         const currentFilePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const currentDir = path.dirname(currentFilePath);
 
+                // #420: same pre-filtered walk as findVariableTokenInParentChainUncached.
+        // Deliberately NOT time-sliced: this path is reached from the deferred
+        // diagnostics pipeline (ReturnValueDiagnostics -> resolveVariableType) while
+        // a hover is in flight, and adding yields here let that background work
+        // interleave with the hover (NetDebugTrace cold hover 1.06s -> 2.5s on the
+        // ap1.sln rig). With the label pre-filter a miss no longer tokenizes, so the
+        // walk is short enough to run without yielding, exactly as it did before.
+        const timeSlice = async (): Promise<void> => { /* no yield — see above */ };
+
         // 2. MEMBER parent file (and its INCLUDE chain)
         const memberToken = await this.resolveMemberHeaderToken(tokens, currentDir, currentFilePath);
         if (memberToken?.referencedFile) {
             const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), currentDir, currentFilePath);
             if (parentPath) {
-                const parentData = await this.loadDocument(parentPath);
-                if (parentData) {
-                    const parentVar = parentData.tokens.find(t =>
-                        this.isVariableLookupCandidate(t, parentData.doc, true) && this.tokenMatchesName(t, varName.toLowerCase())
-                    );
-                    if (parentVar) return { token: parentVar, tokens: parentData.tokens, doc: parentData.doc };
-                    const incResult = await this.searchIncludesForToken(
-                        varName, parentData.tokens, path.dirname(parentPath), new Set([parentPath.toLowerCase()])
-                    );
-                    if (incResult) return incResult;
-                }
+                const incResult = await this.searchParentChainForToken(varName, parentPath, timeSlice);
+                if (incResult) return incResult;
             }
         }
 
         // 3. Current file INCLUDE chain
-        return this.searchIncludesForToken(varName, tokens, currentDir, new Set());
+        return this.searchIncludeTargetsForToken(
+            varName, MemberLocatorService.includeTargetsFromTokens(tokens), currentDir, new Set(), timeSlice
+        );
     }
 
-    /** Recursively searches INCLUDE files for a label token. */
+    // ---------------------------------------------------------------------------
+    // #420 — the cross-file INCLUDE walk, with a column-0 LABEL pre-filter.
+    //
+    // The walk's candidate predicate (isVariableLookupCandidate + tokenMatchesName)
+    // can only ever match a token whose LABEL sits at column 0 of some line — a
+    // Label token, or the label of a Structure/PROCEDURE line. So a file with no
+    // line beginning with the name (case-insensitive, whole label) cannot possibly
+    // declare it, and there is no reason to tokenize it. The tokenize is the
+    // expensive part: cold-loading the include universe of an 11K-line generated
+    // PROGRAM module cost ~10.5s per NEW undeclared word (`DLL(dll_mode)` in
+    // IBSCommon.clw), all of it in this walk, to return null.
+    //
+    // Each reachable file is scanned ONCE per cross-file epoch for its column-0
+    // labels and its INCLUDE targets (one regex pass over the text; the text is
+    // not kept), and that tiny record is cached module-wide. A miss-walk is then
+    // a Set lookup per file — no I/O, no allocation. That matters because the
+    // undeclared-variable diagnostic's augment pass runs hundreds of such
+    // lookups in the background: re-reading the universe per word (the first
+    // cut of this fix) churned enough garbage to double an unrelated
+    // synchronous hover through GC pauses. Invalidation is the cross-file
+    // epoch — the same guarantee the #373 result cache above already relies on.
+    //
+    // Recursion still follows every file's INCLUDEs — a skipped file's targets
+    // come from the cached scan (same `INCLUDE('name'…)` shape the tokenizer
+    // recognises), so nothing reachable is lost. Files already cached fresh in
+    // CrossFileCache are used as before. Positive results are unchanged: a file
+    // whose label set contains the name is loaded and searched exactly as it
+    // always was.
+    // ---------------------------------------------------------------------------
+
+    private static includeTargetsFromTokens(tokens: Token[]): string[] {
+        return tokens
+            .filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile)
+            .map(t => t.referencedFile!);
+    }
+
+    /** One pass over raw text: every column-0 label (lower-cased) and every INCLUDE target. */
+    private static scanLabelsAndIncludes(text: string): LabelScan {
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        const labels = new Set<string>();
+        const includes: string[] = [];
+        const labelRe = /^[A-Za-z_][\w:]*/gm;
+        let m: RegExpExecArray | null;
+        while ((m = labelRe.exec(text)) !== null) labels.add(m[0].toLowerCase());
+        const incRe = /^[ \t]*INCLUDE[ \t]*\([ \t]*'([^']+)'/gim;
+        while ((m = incRe.exec(text)) !== null) includes.push(m[1]);
+        return { labels, includes };
+    }
+
+    /** Cached per-file label/include scan for the current cross-file epoch (see the #420 note). */
+    private async getLabelScan(filePath: string): Promise<LabelScan | null> {
+        const epoch = getCrossFileEpoch();
+        if (epoch !== labelScanEpoch) {
+            labelScanCache.clear();
+            labelScanEpoch = epoch;
+        }
+        const key = filePath.toLowerCase();
+        const cached = labelScanCache.get(key);
+        if (cached !== undefined) return cached;
+        let text: string;
+        try {
+            text = await fs.promises.readFile(filePath, 'utf-8');
+        } catch {
+            labelScanCache.set(key, null);
+            return null;
+        }
+        const scan = MemberLocatorService.scanLabelsAndIncludes(text);
+        labelScanCache.set(key, scan);
+        return scan;
+    }
+
+    /**
+     * Cheap answer to "could `filePath` declare the label?": returns the loaded
+     * doc+tokens when the file is already cached fresh or its label set contains
+     * the name (the file is then loaded and cached exactly as before); otherwise
+     * just its INCLUDE targets so the walk can keep recursing. `null` = unreadable.
+     */
+    private async probeFileForLabel(
+        filePath: string,
+        nameLower: string
+    ): Promise<{ loaded: { doc: TextDocument; tokens: Token[] } | null; includes: string[] } | null> {
+        if (this.crossFileCache?.hasFresh(filePath)) {
+            const loaded = await this.loadDocument(filePath);
+            return loaded ? { loaded, includes: [] } : null;
+        }
+        const scan = await this.getLabelScan(filePath);
+        if (!scan) return null;
+        if (scan.labels.has(nameLower)) {
+            const loaded = await this.loadDocument(filePath);
+            return { loaded, includes: scan.includes };
+        }
+        return { loaded: null, includes: scan.includes };
+    }
+
+    /** MEMBER parent file + its INCLUDE chain, pre-filtered. Does NOT search the current file. */
+    private async searchParentChainForToken(
+        varName: string,
+        parentPath: string,
+        timeSlice: () => Promise<void>
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        const nameLower = varName.toLowerCase();
+        const probe = await this.probeFileForLabel(parentPath, nameLower);
+        if (!probe) return null;
+        let targets: string[];
+        if (probe.loaded) {
+            const { doc, tokens } = probe.loaded;
+            const parentVar = tokens.find(t =>
+                this.isVariableLookupCandidate(t, doc, true) && this.tokenMatchesName(t, nameLower)
+            );
+            if (parentVar) return { token: parentVar, tokens, doc };
+            targets = MemberLocatorService.includeTargetsFromTokens(tokens);
+        } else {
+            targets = probe.includes;
+        }
+        return this.searchIncludeTargetsForToken(
+            varName, targets, path.dirname(parentPath), new Set([parentPath.toLowerCase()]), timeSlice
+        );
+    }
+
+    /** Recursively searches INCLUDE files for a label token (token-list entry point; see the #420 note above). */
     private async searchIncludesForToken(
         varName: string,
         tokens: Token[],
         fromDir: string,
         visited: Set<string>,
+        timeSlice: () => Promise<void> = makeTimeSlicer()
+    ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
+        return this.searchIncludeTargetsForToken(
+            varName, MemberLocatorService.includeTargetsFromTokens(tokens), fromDir, visited, timeSlice
+        );
+    }
+
+    private async searchIncludeTargetsForToken(
+        varName: string,
+        includeTargets: string[],
+        fromDir: string,
+        visited: Set<string>,
         // #373: ONE slicer threaded through the whole recursive walk (previously
         // no yield at all — every reachable INCLUDE cold-loaded + tokenized in
         // one synchronous stretch).
-        timeSlice: () => Promise<void> = makeTimeSlicer()
+        timeSlice: () => Promise<void>
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
-        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
-        for (const inc of includeTokens) {
+        const nameLower = varName.toLowerCase();
+        for (const target of includeTargets) {
             await timeSlice();
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(target, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
-
-            const data = await this.loadDocument(resolvedPath);
-            if (!data) continue;
-
-            const found = data.tokens.find(t =>
-                this.isVariableLookupCandidate(t, data.doc, true) &&
-                this.tokenMatchesName(t, varName.toLowerCase())
+            const probe = await this.probeFileForLabel(resolvedPath, nameLower);
+            if (!probe) continue;
+            let nestedTargets: string[];
+            if (probe.loaded) {
+                const { doc, tokens } = probe.loaded;
+                const found = tokens.find(t =>
+                    this.isVariableLookupCandidate(t, doc, true) &&
+                    this.tokenMatchesName(t, nameLower)
+                );
+                if (found) return { token: found, tokens, doc };
+                nestedTargets = MemberLocatorService.includeTargetsFromTokens(tokens);
+            } else {
+                nestedTargets = probe.includes;
+            }
+            const nested = await this.searchIncludeTargetsForToken(
+                varName, nestedTargets, path.dirname(resolvedPath), visited, timeSlice
             );
-            if (found) return { token: found, tokens: data.tokens, doc: data.doc };
-
-            const nested = await this.searchIncludesForToken(varName, data.tokens, path.dirname(resolvedPath), visited, timeSlice);
             if (nested) return nested;
         }
         return null;

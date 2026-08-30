@@ -48,8 +48,12 @@ suite('MemberLocatorService - findVariableTokenInParentChain result cache (#373)
         let loads = 0;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const anySvc = svc as any;
-        const origLoad = anySvc.loadDocument.bind(svc);
-        anySvc.loadDocument = async (p: string) => { loads++; return origLoad(p); };
+        // #420: a NEGATIVE walk no longer tokenizes anything — each reachable file is
+        // probed by text (probeFileForLabel) and skipped when it cannot declare the
+        // label. That probe is the walk's per-file step now, so it is what the memo
+        // must save on the repeat call.
+        const origProbe = anySvc.probeFileForLabel.bind(svc);
+        anySvc.probeFileForLabel = async (...args: unknown[]) => { loads++; return origProbe(...args); };
 
         const doc = memberDoc();
 
@@ -59,7 +63,7 @@ suite('MemberLocatorService - findVariableTokenInParentChain result cache (#373)
         const r1 = await svc.findVariableTokenInParentChain('NoSuchGlobal', doc);
         assert.strictEqual(r1, null, 'word is not declared anywhere reachable');
         const afterFirst = loads;
-        assert.ok(afterFirst > 0, 'the first walk actually loaded files');
+        assert.ok(afterFirst > 0, 'the first walk actually probed files');
 
         const r2 = await svc.findVariableTokenInParentChain('NoSuchGlobal', doc);
         assert.strictEqual(r2, null);
