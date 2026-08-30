@@ -29,6 +29,7 @@ import { ReferenceCountIndex } from './ReferenceCountIndex';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import { resolveViaProjectRedirection as resolveViaProjectRedirection328 } from '../utils/RedirectionResolution';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
+import { CompilerFlagService } from '../utils/CompilerFlagService'; // #420
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1744,6 +1745,12 @@ export class SymbolFinderService {
                 logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers (no-scope)`);
                 return null;
             }
+            // #420: a predefined compiler flag (DLL_MODE, _DEBUG_, _C80_ …) has no source
+            // declaration anywhere — same reasoning, same bail point.
+            if (CompilerFlagService.getInstance().isCompilerFlag(word)) {
+                logger.info(`⏭️ [#420] "${word}" is a predefined compiler flag — skipping cross-file tiers (no-scope)`);
+                return null;
+            }
 
             // #319 (reopen): global BEFORE the sibling walk. Globals like
             // GlobalResponse occur in EVERY member module, so the index prune
@@ -1821,6 +1828,12 @@ export class SymbolFinderService {
         // build").
         if (BuiltinFunctionService.getInstance().isBuiltin(word)) {
             logger.info(`⏭️ [#374] "${word}" is a built-in — skipping cross-file tiers`);
+            return null;
+        }
+        // #420: a predefined compiler flag (DLL_MODE, _DEBUG_, _C80_ …) has no source
+        // declaration anywhere — same reasoning, same bail point.
+        if (CompilerFlagService.getInstance().isCompilerFlag(word)) {
+            logger.info(`⏭️ [#420] "${word}" is a predefined compiler flag — skipping cross-file tiers`);
             return null;
         }
 

@@ -9,6 +9,7 @@ import { CrossFileCache } from './CrossFileCache';
 import { SymbolFinderService } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenHelper } from '../../utils/TokenHelper';
+import { CompilerFlagService } from '../../utils/CompilerFlagService'; // #420
 import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
@@ -163,8 +164,16 @@ export class VariableHoverResolver {
 
         // When shallowOnly=true (e.g. checking a MEMBER parent doc), skip the recursive
         // cross-file include chain traversal — the caller will handle includes separately.
-        if (shallowOnly) return null;
-        
+                if (shallowOnly) return null;
+
+        // #420: a predefined compiler flag (DLL_MODE, _DEBUG_, _C80_ …) is set by the
+        // compiler/project system and declared in NO source file — the cross-file walk
+        // below would cold-load the whole include universe (10.5s on IBSCommon.clw) to
+        // return null. Checked AFTER the current-file tiers so a user declaration of
+        // the same name still wins.
+        const flagHover = this.compilerFlagHover(searchWord);
+        if (flagHover) return flagHover;
+
         // Check MEMBER parent + its INCLUDE chain, plus current file's INCLUDE chain
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
@@ -199,12 +208,29 @@ export class VariableHoverResolver {
             }
         }
 
+        // #420: see findGlobalVariableHover — never walk the include chain for a compiler flag.
+        const flagHover = this.compilerFlagHover(searchWord);
+        if (flagHover) return flagHover;
+
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
             logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(crossFileResult.doc.uri)}`);
             return this.buildGlobalVariableHover(crossFileResult.token, crossFileResult.tokens, crossFileResult.doc);
         }
         return await this.searchEquatesFile(searchWord);
+    }
+
+    /** #420: documentation card for a predefined compiler flag, or null. */
+    private compilerFlagHover(word: string): Hover | null {
+        const flag = CompilerFlagService.getInstance().getFlag(word);
+        if (!flag) return null;
+        logger.info(`⏭️ [#420] "${word}" is a predefined compiler flag — no source declaration to find`);
+        return this.formatter.formatKeyword({
+            name: flag.name,
+            category: 'Predefined compiler flag',
+            description: flag.description,
+            syntax: `COMPILE('***', ${flag.name})   ! or OMIT('***', ${flag.name}), DLL(${flag.name.toLowerCase()})`
+        });
     }
 
     /**

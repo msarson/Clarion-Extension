@@ -25,6 +25,22 @@ export class CrossFileCache {
     constructor(tokenCache: TokenCache) {
         this.tokenCache = tokenCache;
     }
+
+    /**
+     * #420: is `filePath` already cached AND still fresh (mtime unchanged)? A cheap
+     * `stat` — never reads or tokenizes. Lets a caller decide whether a text-level
+     * pre-check is worth doing before paying for a full load.
+     */
+    hasFresh(filePath: string): boolean {
+        const normalizedPath = path.normalize(filePath);
+        const cached = this.documentCache.get(normalizedPath);
+        if (!cached) return false;
+        try {
+            return fs.statSync(normalizedPath).mtimeMs === cached.lastModified;
+        } catch {
+            return false;
+        }
+    }
     
     /**
      * Get or load a document from the cache.
