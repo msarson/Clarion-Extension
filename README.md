@@ -172,6 +172,12 @@ Productivity features to write code faster.
 
 ---
 
+## 🧪 Related
+
+The ANTLR4 grammar / folding-provider exploration (2025–Jan 2026) was split out to the archived repo [Clarion-ANTLR-Grammar](https://github.com/msarson/Clarion-ANTLR-Grammar); tag `antlr-experiment` marks the last commit here that carried `antlr-grammar/`.
+
+---
+
 ## 🆕 What's New
 
 ### Latest: v1.0.1 — Maintenance: performance follow-ups & correctness fixes
