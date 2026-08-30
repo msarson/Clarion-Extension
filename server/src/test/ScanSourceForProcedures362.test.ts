@@ -228,6 +228,46 @@ suite('scanSourceForProcedures (#362)', () => {
         assert.ok(byName.has('GlobalAfter6'), 'the CLASS END must not have been consumed by the self-closing GROUP');
     });
 
+    test('a class member named Map is not a MAP opener (libsrc ablwinr.clw shape)', () => {
+        // MAP_OPEN_PATTERN once matched any line whose first word is `Map`, so this
+        // member bumped mapDepth and the class END was consumed by the MAP close
+        // instead of popping the CLASS — every later Class.Method implementation
+        // in the file was then dropped as a member prototype.
+        const src = [
+            '   MEMBER',
+            '   MAP',
+            '   END',
+            '',
+            'EventMapper             CLASS',
+            'Construct                 PROCEDURE()',
+            'Map                       PROCEDURE(ASTRING name),SIGNED',
+            'TieH                      SIGNED',
+            '                        END',
+            '',
+            'Event                   CLASS(Element)',
+            'EventNo                   UNSIGNED',
+            '                        END',
+            '',
+            'EventMapper.Construct   PROCEDURE()',
+            '  CODE',
+            '',
+            'EventMapper.Map         PROCEDURE(ASTRING name)',
+            '  CODE',
+            '',
+            'GlobalAfterMap          PROCEDURE()',
+            '  CODE'
+        ].join('\n');
+
+        const procs = scanSourceForProcedures(src, 'C:\\x\\ablwinr.clw');
+        const byName = new Map(procs.map(p => [p.name, p]));
+
+        assert.ok(!byName.has('Construct'), 'member prototype Construct is not a bare global');
+        assert.ok(!byName.has('Map'), 'member prototype Map is not a bare global');
+        assert.ok(byName.has('EventMapper.Construct'), 'implementation before the leak point indexed');
+        assert.ok(byName.has('EventMapper.Map'), 'Class.Method implementation after a Map member is still indexed');
+        assert.ok(byName.has('GlobalAfterMap'), 'global after a Map member is still indexed');
+    });
+
     test('finds real procedures in IBSCommon.clw when present', function () {
         const real = 'F:\\TestApps\\Direct10Source\\IBSCommon.clw';
         if (!fs.existsSync(real)) { this.skip(); return; }

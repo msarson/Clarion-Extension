@@ -24,7 +24,7 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
 // v2 (#362): entries now also carry procedure declarations (`procs`).
-// v3: scanSourceForProcedures now excludes CLASS/INTERFACE member prototypes
+// v4 (#392): scanSourceForProcedures now excludes CLASS/INTERFACE member prototypes
 // from the bare-name procedure index (previously indexed identically to a
 // global procedure — see the structureStack tracking in that function).
 const DISK_CACHE_VERSION = 4;
@@ -166,7 +166,13 @@ const PROCEDURE_PATTERN =
 // MODULE('...') and a MAP structure both open a prototype context; inside it a
 // keyword-less `Name(...)` (or indented `Name PROCEDURE`) is a declaration.
 const MODULE_OPEN_PATTERN = /^MODULE\s*\(/i;
-const MAP_OPEN_PATTERN = /^(?:[A-Za-z_][\w:]*\s+)?MAP\b/i;
+// MAP takes no attributes, so the keyword must END the (comment-stripped) line.
+// A bare `\b` here matched any line whose first word is `Map` — e.g. a class
+// MEMBER named Map (`Map PROCEDURE(ASTRING name),SIGNED` in libsrc ablwinr.clw):
+// that bumped mapDepth, the class's END was then eaten by the mapDepth close
+// above instead of popping structureStack, and every Class.Method implementation
+// later in the file was dropped as "inside a CLASS".
+const MAP_OPEN_PATTERN = /^(?:[A-Za-z_][\w:]*\s+)?MAP\s*$/i;
 const SHORTHAND_PROTO_PATTERN =
     /^([A-Za-z_][\w.:]*)\s*(?:\(|PROCEDURE\b|FUNCTION\b)/i;
 // Names that take a `(` inside a MAP/MODULE but are NOT procedures.
