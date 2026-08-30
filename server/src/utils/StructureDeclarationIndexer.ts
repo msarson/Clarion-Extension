@@ -24,7 +24,10 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
  * Bump DISK_CACHE_VERSION whenever StructureDeclarationInfo or the scanner semantics change.
  */
 // v2 (#362): entries now also carry procedure declarations (`procs`).
-const DISK_CACHE_VERSION = 3;
+// v3: scanSourceForProcedures now excludes CLASS/INTERFACE member prototypes
+// from the bare-name procedure index (previously indexed identically to a
+// global procedure — see the structureStack tracking in that function).
+const DISK_CACHE_VERSION = 4;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -142,6 +145,17 @@ const EQUATE_PATTERN =
     /^([A-Za-z_][\w:]*)\s+EQUATE\b/i;
 const END_PATTERN =
     /^END\b/i;
+// A structure closes with a `.` terminator as often as with END — including a
+// TRAILING terminator on the last member line (`Field1 STRING(10).`) and
+// collapsed multi-closes (`. .` or `..` = two ENDs). One close per period.
+// Safe on comment-stripped lines: a period inside a string literal is always
+// followed by at least the closing quote, so it can never be line-trailing.
+const PERIODS_ONLY_PATTERN = /^\.[.\s]*$/;
+const TRAILING_TERMINATORS_PATTERN = /(?:\s*\.)+\s*$/;
+function countTrailingTerminators(t: string): number {
+    const m = TRAILING_TERMINATORS_PATTERN.exec(t);
+    return m ? (m[0].match(/\./g) as RegExpMatchArray).length : 0;
+}
 // #362 — a column-0 label followed by PROCEDURE or FUNCTION. Captures the label
 // (bare or dotted `Class.Method`), the keyword, and the trailing signature.
 // PROCEDURE and FUNCTION are equivalent in modern Clarion (both return values),
@@ -321,6 +335,21 @@ export function scanSourceForProcedures(
     // without this the library MODULE prototypes (NetTalk et al.) never index, so
     // the hover/definition fast-paths can never fire for them.
     let mapDepth = 0;
+    // Tracks currently-open TYPE_PATTERN structures (CLASS/INTERFACE/QUEUE/GROUP/
+    // RECORD/FILE/VIEW) so a column-0 `Name PROCEDURE/FUNCTION` line found while a
+    // CLASS or INTERFACE is open is recognised as a member prototype, not a global
+    // procedure. Clarion class bodies are often written unindented (member labels
+    // at column 0, same shape as a real top-level declaration) — without this, a
+    // line like `Test PROCEDURE(...)` inside `SomeClass CLASS,TYPE...END` indexes
+    // identically to a real global procedure, and the bare name then resolves via
+    // SymbolFinderService.findProcedureViaIndex (and so the undeclared-variable
+    // diagnostic's cross-file augmentation) to an unrelated class's member. Same
+    // defect class fixed for hover in PR #391 (MemberLocatorService
+    // .isVariableLookupCandidate) — a separate, tokenizer-free code path that fix
+    // never touched. Non-CLASS/INTERFACE kinds are tracked too, purely so their own
+    // END pops correctly instead of prematurely closing an outer CLASS/INTERFACE
+    // (e.g. an inline GROUP field declared inside a class).
+    const structureStack: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
         const rawLine = lines[i];
@@ -351,9 +380,49 @@ export function scanSourceForProcedures(
             continue;
         }
 
+        // --- CLASS/INTERFACE/QUEUE/GROUP/... structure tracking -----------------
+        // Innermost-first: a nested structure's own close pops it before any
+        // enclosing CLASS/INTERFACE is affected. A structure closes with a `.`
+        // terminator as often as with END — including a TRAILING terminator on
+        // the last member line (`Field1 STRING(10).`) and collapsed multi-closes
+        // (`. .` = two ENDs). Every form must pop: a period-closed CLASS that
+        // stays on the stack keeps `inClassOrInterface` true to EOF, silently
+        // dropping every later genuine global procedure in the file from the
+        // index (F12/hover fast-path regression).
+        if (structureStack.length > 0 && END_PATTERN.test(t)) {
+            structureStack.pop();
+            continue;
+        }
+        if (structureStack.length > 0 && PERIODS_ONLY_PATTERN.test(t)) {
+            let closes = (t.match(/\./g) as RegExpMatchArray).length;
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
+            continue;
+        }
+        const typeMatch = TYPE_PATTERN.exec(t);
+        if (typeMatch) {
+            structureStack.push(typeMatch[2].toUpperCase());
+            // `Rec GROUP,PRE(R1).` — opens and closes on the same line.
+            let closes = countTrailingTerminators(t);
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
+            continue;
+        }
+        const inClassOrInterface = structureStack.some(
+            k => k === 'CLASS' || k === 'INTERFACE'
+        );
+        // A trailing `.` on a member line closes its structure AFTER the line
+        // itself — a `LastField LONG.` or `Done PROCEDURE().` line is still
+        // INSIDE the class it terminates, so `inClassOrInterface` above is
+        // deliberately the pre-pop snapshot used to classify THIS line.
+        if (structureStack.length > 0) {
+            let closes = countTrailingTerminators(t);
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
+        }
+
         // --- Column-0 explicit form: `Name PROCEDURE/FUNCTION ...` --------------
-        // Global implementations and `Class.Method` bodies live at column 0.
-        if (atColumnZero) {
+        // Global implementations and `Class.Method` bodies live at column 0 — but
+        // so do class/interface MEMBER prototypes in many real codebases
+        // (unindented style), which must NOT be indexed as bare global names.
+        if (atColumnZero && !inClassOrInterface) {
             const m = PROCEDURE_PATTERN.exec(t);
             if (m) {
                 const name = m[1];
