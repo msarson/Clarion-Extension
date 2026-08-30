@@ -1,10 +1,10 @@
 import {
-    TextDocument,
     Range,
     CodeAction,
     CodeActionKind,
     Command
 } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { TokenType } from '../tokenizer/TokenTypes';

@@ -1,5 +1,4 @@
 import {
-    TextDocument,
     Range,
     CodeAction,
     CodeActionKind,
@@ -8,6 +7,7 @@ import {
     Position,
     CodeActionContext
 } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { TokenType } from '../tokenizer/TokenTypes';
