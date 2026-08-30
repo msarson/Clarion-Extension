@@ -16,6 +16,10 @@ All notable changes to the Clarion Extension are documented here.
 - 🐛 **A structure keyword used as an attribute argument / parameter type no longer loses its first character** ([#416](https://github.com/msarson/Clarion-Extension/issues/416)): when a structure keyword was correctly skipped as an in-parentheses reference (e.g. `FROM(QUEUE)`, or a param type in `PROCEDURE(FILE,KEY)`), the skipped token fell through to the Variable pattern — which excludes structure keywords — and was mangled (`QUEUE` → `UEUE`), degrading hover/go-to-definition on that word. It is now emitted as a clean keyword reference token. (Keyword, not a variable, so a keyword-named parameter type doesn't turn into a spurious outline declaration.)
 - 🐛 **False-positive "missing END" on a WINDOW when a control's attribute references a structure keyword on a continuation line** ([#415](https://github.com/msarson/Clarion-Extension/issues/415)): a generated `LIST` whose multi-line `FORMAT(...)` picture string closed with `...'),FROM(QUEUE)` made the tokenizer read the `QUEUE` in `FROM(QUEUE)` as a *structure opener* — it consumed an `END`, leaving the enclosing `WINDOW` unterminated and flagged. The guard that skips structure keywords used as attribute arguments only counted parentheses on the current physical line (missing the `FORMAT(` opened on the previous continuation line — the leading `)` drove its count negative) and counted parentheses inside string literals. It is now string-aware and recognises a leading unmatched `)` as a group carried in from a continuation line, so `FROM(QUEUE)` is correctly treated as an in-parentheses reference.
 
+**Maintenance**
+
+- 🧹 **The shelved ANTLR grammar experiment has been split out of this repository** into the archived [Clarion-ANTLR-Grammar](https://github.com/msarson/Clarion-ANTLR-Grammar) repo (full history preserved; tag `antlr-experiment` marks the last commit here that carried `antlr-grammar/`). It was never built or shipped, but its lockfile on the default branch kept raising Dependabot security alerts against a toolchain the extension does not use. No change to the packaged extension.
+
 ---
 
 ### [1.0.1] - 2026-08-09
