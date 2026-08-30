@@ -3,6 +3,15 @@
 # Dependabot reads this from the DEFAULT branch (master). It is also carried on
 # the active version-x.y.z branch so a release merge doesn't revert it.
 #
+# target-branch: master only ever receives the release merge of a version branch,
+# so Dependabot's PRs must go to the ACTIVE version-x.y.z branch. The release
+# workflow rewrites this value on master when it creates the next version branch
+# (the one non-release commit master receives, as release machinery). Note:
+# GitHub raises automatic SECURITY-update PRs only against the default branch, so
+# with target-branch set those stop — security ALERTS still fire and are handled
+# by hand on the version branch (same as #419's group, which needed a hand-fix
+# anyway).
+#
 # Posture (tiered — see #390 / #405 for the why):
 #   - Security updates: always on (repo setting; fire regardless of schedule).
 #   - Routine minor/patch: grouped into one PR per directory, monthly — low-risk,
@@ -16,6 +25,7 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
+    target-branch: "version-1.0.2"
     directories:
       - "/"
       - "/client"

@@ -105,6 +105,13 @@ jobs:
           HUSKY: 0
         run: |
           git checkout master
+          # Dependabot reads .github/dependabot.yml from master, so master must carry the
+          # NEW active version branch as target-branch (see the comment in that file).
+          # Release machinery: the only non-release-merge commit master ever receives.
+          sed -i 's/^\([[:space:]]*target-branch:[[:space:]]*\).*/\1"version-${{ inputs.next_version }}"/' .github/dependabot.yml
+          git add .github/dependabot.yml
+          git commit -m "chore(dependabot): target version-${{ inputs.next_version }}"
+          git push origin master
           git checkout -b version-${{ inputs.next_version }}
           npm version ${{ inputs.next_version }} --no-git-tag-version
           node -e "
