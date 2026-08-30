@@ -58,7 +58,7 @@ suite('Predefined compiler flags (#420)', () => {
         const svc = CompilerFlagService.getInstance();
 
         test('recognises the documented named flags, case-insensitively', () => {
-            for (const name of ['DLL_MODE', 'dll_mode', 'Dll_Mode', 'LIB_MODE', '_DEBUG_', '_debug_', '_WIDTH32_']) {
+            for (const name of ['DLL_MODE', 'dll_mode', 'Dll_Mode', 'LIB_MODE', '_DEBUG_', '_debug_', '_WIDTH32_', '_USTRING_', '_ustring_']) {
                 assert.ok(svc.isCompilerFlag(name), `${name} must be a compiler flag`);
             }
         });

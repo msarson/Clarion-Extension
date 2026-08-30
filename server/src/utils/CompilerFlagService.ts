@@ -46,6 +46,16 @@ const NAMED_FLAGS: CompilerFlagInfo[] = [
     {
         name: '_WIDTH32_',
         description: 'On for 32-bit applications (deprecated).'
+    },
+    {
+        // Clarion 12 Unicode preview (Tester Guide, build 14234): ON after the
+        // 08-08-2026 build, for gating wide code paths in shared source with
+        // COMPILE('u', _USTRING_) / OMIT('u', _USTRING_). See #404.
+        name: '_USTRING_',
+        description:
+            'On when the compiler supports the USTRING Unicode type (Clarion 12 Unicode preview, ' +
+            'builds after 08-08-2026). Use to gate wide code paths in shared source: ' +
+            '`COMPILE(\'\'u\'\', _USTRING_)` / `OMIT(\'\'u\'\', _USTRING_)`.'
     }
 ];
 
