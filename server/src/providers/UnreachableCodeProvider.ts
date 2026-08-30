@@ -12,7 +12,8 @@
  * - Top-level RETURN (outside any structure) always terminates the procedure
  */
 
-import { TextDocument, Range } from 'vscode-languageserver/node';
+import { Range } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenCache } from '../TokenCache';
 import LoggerManager from '../logger';

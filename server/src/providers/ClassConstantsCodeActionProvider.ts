@@ -1,5 +1,4 @@
 import {
-    TextDocument,
     Range,
     CodeActionContext,
     CancellationToken,
@@ -7,6 +6,7 @@ import {
     CodeActionKind,
     Command
 } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClassConstantParser } from '../utils/ClassConstantParser';

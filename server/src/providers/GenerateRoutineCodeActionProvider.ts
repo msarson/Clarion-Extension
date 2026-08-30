@@ -1,6 +1,7 @@
 import {
-    TextDocument, Range, Position, CodeAction, CodeActionKind, TextEdit, WorkspaceEdit
+    Range, Position, CodeAction, CodeActionKind, TextEdit, WorkspaceEdit
 } from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { Token } from '../tokenizer/TokenTypes';
 import { TokenHelper } from '../utils/TokenHelper';
