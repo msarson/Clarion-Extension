@@ -9,8 +9,10 @@
 #     keeps drift down without a firehose.
 #   - Majors: never auto-proposed. Breaking upgrades (e.g. vscode-languageclient
 #     8->10, #405) are deliberate, tested migrations done in their own PR.
-#   - antlr-grammar/ is a shelved experiment kept for reference only — not built
-#     or shipped — so it is intentionally NOT listed below (no dependency churn).
+#   - The ANTLR grammar experiment was split out to the archived repo
+#     https://github.com/msarson/Clarion-ANTLR-Grammar (tag antlr-experiment marks
+#     the last commit here that carried antlr-grammar/), so no manifest for it
+#     lives in this tree any more.
 version: 2
 updates:
   - package-ecosystem: "npm"

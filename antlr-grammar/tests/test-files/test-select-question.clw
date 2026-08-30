@@ -1,4 +1,0 @@
-  PROGRAM
-
-  CODE
-  SELECT(? + 1)
