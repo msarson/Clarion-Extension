@@ -1,6 +1,7 @@
 import { Hover } from 'vscode-languageserver-protocol';
 import { DataTypeService } from '../../utils/DataTypeService';
 import { ControlService } from '../../utils/ControlService';
+import { HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("SymbolHoverResolver");
@@ -70,6 +71,15 @@ export class SymbolHoverResolver {
      * Check if word is a Clarion data type
      */
     private checkDataType(word: string): Hover | null {
+        // MODULE is BOTH a data-type-ish structure keyword AND (outside a MAP
+        // block) a CLASS attribute — HoverRouter.handleSpecialKeywords already
+        // makes the authoritative, context-aware call for it (dotted/nested
+        // reference vs. genuine usage vs. plain unrelated variable). Reaching
+        // here means that call already ran and came back null; matching it
+        // again via the plain data-type lookup would silently overrule it.
+        if (HANDLED_BY_SPECIAL_KEYWORDS.has(word.toUpperCase())) {
+            return null;
+        }
         if (this.dataTypeService.hasDataType(word)) {
             logger.info(`Found Clarion data type: ${word}`);
             const dataType = this.dataTypeService.getDataType(word);
