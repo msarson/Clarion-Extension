@@ -105,6 +105,28 @@ export class TokenHelper {
     }
 
     /**
+     * Finds the nearest enclosing GROUP/QUEUE/FILE/RECORD/VIEW/REPORT ancestor of
+     * `t`, for DISPLAY purposes (e.g. a hover noting "field of GROUP `Filter`").
+     * Unlike {@link requiresDotQualification} this doesn't stop early at a
+     * `structurePrefix` (PRE) or bail out on CLASS/INTERFACE/MAP/MODULE — it's
+     * answering a different question ("what data structure, if any, directly
+     * contains this field") rather than "can a bare word legally bind here".
+     */
+    public static getEnclosingDataStructure(t: Token): { label: string; type: string } | undefined {
+        let anc = t.parent;
+        while (anc) {
+            if (anc.type === TokenType.Structure) {
+                const v = anc.value.toUpperCase();
+                if (TokenHelper.DOT_ONLY_STRUCTURES.has(v) && anc.label) {
+                    return { label: anc.label, type: v };
+                }
+            }
+            anc = anc.parent;
+        }
+        return undefined;
+    }
+
+    /**
      * Gets the innermost scope at a line (optimized version using DocumentStructure)
      * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
      * @param structure DocumentStructure instance

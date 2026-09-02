@@ -59,13 +59,14 @@ export class VariableHoverResolver {
      * Find and format hover for a local variable
      */
     async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string, hoverLine?: number): Promise<Hover | null> {
-        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord);
+        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord, hoverLine);
         
         if (symbolInfo) {
             logger.info(`✅ Found variable info for ${word}: type=${symbolInfo.type}, line=${symbolInfo.location.line}`);
             const variableInfo: VariableInfo = {
                 type: symbolInfo.type,
-                line: symbolInfo.location.line
+                line: symbolInfo.location.line,
+                parentStructure: symbolInfo.parentStructure
             };
             // #302 follow-up (Mark): no class-definition appendix — the declaration line and
             // location already carry everything the hover needs; F12 on the type covers "where

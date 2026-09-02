@@ -119,12 +119,20 @@ export interface SymbolInfo {
     
     /** Full declaration if available (e.g., "Counter LONG,AUTO") */
     declaration?: string;
-    
+
     /** Original search word (before any prefix stripping) */
     originalWord: string;
-    
+
     /** Search word used to find this symbol (may be stripped) */
     searchWord: string;
+
+    /**
+     * Set when this symbol is a field directly inside a GROUP/QUEUE/FILE/RECORD/
+     * VIEW/REPORT (see TokenHelper.getEnclosingDataStructure) — lets the hover
+     * formatter note "field of GROUP `Filter`" instead of showing a bare local
+     * variable card indistinguishable from a genuinely standalone variable.
+     */
+    parentStructure?: { label: string; type: string };
 }
 
 /**
@@ -334,21 +342,69 @@ export class SymbolFinderService {
         tokens: Token[],
         scopeToken: Token,
         document: TextDocument,
-        originalWord?: string
+        originalWord?: string,
+        hoverLine?: number
     ): SymbolInfo | null {
         logger.info(`Finding local variable: "${word}" in scope: ${scopeToken.value} at line ${scopeToken.line}`);
-        
+
+        const searchText = originalWord || word;
+
+        // Fast path: the cursor is literally ON a declaration token for this name
+        // (column 0, Label/Variable, this exact line) — that IS the answer, with
+        // no ambiguity left to resolve. Without this, two things go wrong for a
+        // field of a PRE()-less GROUP/QUEUE:
+        //   1. The name-based symbol-tree search below has no line awareness, so
+        //      a DIFFERENT same-named symbol elsewhere (e.g. a top-level `Name`
+        //      variable) wins over the GROUP field the cursor is actually on.
+        //   2. Even when the token-fallback further down IS reached, the #350
+        //      "PRE-less fields are dot-only" rule — correct for a bare
+        //      REFERENCE elsewhere in code — wrongly excludes the DECLARATION
+        //      token itself; you were never doing a bare-name lookup, you're
+        //      already looking straight at it.
+        // Real repro: `Filter GROUP` with sibling fields `Name`/`Type`/`Flag` and
+        // no PRE() — hovering the GROUP's own `Name` field showed the unrelated
+        // top-level `Name` variable's declaration instead, and `Type`/`Flag`
+        // (no name collision to mask the miss) got no hover at all.
+        if (hoverLine !== undefined) {
+            const wordLower = searchText.toLowerCase();
+            const declToken = tokens.find(t =>
+                t.line === hoverLine &&
+                t.start === 0 &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === wordLower);
+            // Same exclusion the token-fallback further down applies: a MAP/global
+            // procedure or method declaration sharing this line is handled by
+            // findProcedureDeclaration with the correct scope/type, not here.
+            const isProcDecl = declToken !== undefined && tokens.some(t =>
+                t.line === declToken.line &&
+                (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
+                (t.subType === TokenType.MapProcedure ||
+                 t.subType === TokenType.GlobalProcedure ||
+                 t.subType === TokenType.MethodDeclaration));
+            if (declToken && !isProcDecl) {
+                logger.info(`✅ Found "${searchText}" via direct declaration-line match at line ${declToken.line}`);
+                return {
+                    token: declToken,
+                    type: SymbolFinderService.extractTypeInfo(declToken, tokens),
+                    scope: { token: scopeToken, type: 'local' },
+                    location: { uri: document.uri, line: declToken.line, character: declToken.start },
+                    originalWord: originalWord || word,
+                    searchWord: word,
+                    parentStructure: TokenHelper.getEnclosingDataStructure(declToken)
+                };
+            }
+        }
+
         // Get the symbol tree (pass document for better results)
         const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri, document);
-        
+
         // Find the procedure/method symbol containing this scope
         const procedureSymbol = this.findProcedureContainingLine(symbols, scopeToken.line);
         if (!procedureSymbol) {
             logger.info(`❌ No procedure symbol found for scope at line ${scopeToken.line} — falling back to token scan`);
         }
-        
+
         // Search for the variable in the symbol tree (if we have a procedure symbol)
-        const searchText = originalWord || word;
         // #265: a bare search word must never bind to a field of a PRE()'d
         // structure — those are only addressable as Pre:Field or Structure.Field
         // (Language Reference, PRE attribute). Qualified searches resolve via
@@ -1789,7 +1845,7 @@ export class SymbolFinderService {
         }
         
         // 2. Try as local variable
-        result = this.findLocalVariable(word, tokens, currentScope, document);
+        result = this.findLocalVariable(word, tokens, currentScope, document, undefined, position.line);
         if (result) {
             logger.info(`✅ Found as local variable: ${word}`);
             return result;
@@ -1889,7 +1945,7 @@ export class SymbolFinderService {
             }
             
             // Try local variable with stripped word
-            result = this.findLocalVariable(searchWord, tokens, currentScope, document, word);
+            result = this.findLocalVariable(searchWord, tokens, currentScope, document, word, position.line);
             if (result) {
                 logger.info(`✅ Found as local variable (stripped): ${searchWord}`);
                 return result;

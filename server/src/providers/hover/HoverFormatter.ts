@@ -31,6 +31,11 @@ logger.setLevel("error");
 export interface VariableInfo {
     type: string;
     line: number;
+    /** Set when this variable is a field directly inside a GROUP/QUEUE/FILE/
+     * RECORD/VIEW/REPORT — lets formatVariable note the containing structure
+     * instead of showing a bare local-variable card indistinguishable from a
+     * genuinely standalone variable. */
+    parentStructure?: { label: string; type: string };
 }
 
 export interface ParameterInfo {
@@ -97,31 +102,48 @@ export class HoverFormatter {
         if (document) {
             const position = { line: info.line, character: 0 };
             const detailedScope = this.scopeAnalyzer.getTokenScope(document, position);
-            
+
             if (detailedScope) {
-                const scopeIcon = detailedScope.type === 'routine' ? '🔐' : 
-                                  detailedScope.type === 'procedure' ? '🔧' : 
+                const scopeIcon = detailedScope.type === 'routine' ? '🔐' :
+                                  detailedScope.type === 'procedure' ? '🔧' :
                                   detailedScope.type === 'module' ? '📦' : '🌍';
-                
+
                 // Check if this is a method
                 const procedureName = detailedScope.containingProcedure?.label || detailedScope.containingProcedure?.value;
                 const isMethod = procedureName?.includes('.');
-                
-                let scopeLabel = '';
-                if (detailedScope.type === 'routine') {
-                    scopeLabel = `${scopeIcon} Local routine ${typeNoun}`;
-                } else if (detailedScope.type === 'procedure') {
-                    scopeLabel = isMethod ? `${scopeIcon} Local method ${typeNoun}` : `${scopeIcon} Local procedure ${typeNoun}`;
-                } else if (detailedScope.type === 'module') {
-                    scopeLabel = `${scopeIcon} Module ${typeNoun}`;
+
+                if (info.parentStructure) {
+                    // The procedure/routine/module-local-ness belongs to the
+                    // CONTAINING structure, not to this field — `Flag` isn't
+                    // itself "a local procedure variable", `Filter` is; `Flag`
+                    // is merely an offset into `Filter`'s storage. State that as
+                    // ONE accurate line rather than two adjacent, partially-wrong
+                    // claims ("local procedure variable" + "field of GROUP Filter").
+                    const scopeDescriptor =
+                        detailedScope.type === 'routine' ? 'local routine' :
+                        detailedScope.type === 'procedure' ? (isMethod ? 'local method' : 'local procedure') :
+                        detailedScope.type === 'module' ? 'module' : 'global';
+                    markdown.push(`${scopeIcon} Field of ${scopeDescriptor} ${info.parentStructure.type} \`${info.parentStructure.label}\``);
                 } else {
-                    scopeLabel = `${scopeIcon} Global ${typeNoun}`;
+                    let scopeLabel = '';
+                    if (detailedScope.type === 'routine') {
+                        scopeLabel = `${scopeIcon} Local routine ${typeNoun}`;
+                    } else if (detailedScope.type === 'procedure') {
+                        scopeLabel = isMethod ? `${scopeIcon} Local method ${typeNoun}` : `${scopeIcon} Local procedure ${typeNoun}`;
+                    } else if (detailedScope.type === 'module') {
+                        scopeLabel = `${scopeIcon} Module ${typeNoun}`;
+                    } else {
+                        scopeLabel = `${scopeIcon} Global ${typeNoun}`;
+                    }
+                    markdown.push(scopeLabel);
                 }
-                
-                markdown.push(scopeLabel);
+            } else if (info.parentStructure) {
+                // No detailedScope resolved, but the containing structure is
+                // still known — better than nothing.
+                markdown.push(`📦 Field of ${info.parentStructure.type} \`${info.parentStructure.label}\``);
             }
         }
-        
+
         if (document) {
             // Add the actual source code line
             const content = document.getText();
