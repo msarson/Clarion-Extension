@@ -899,7 +899,11 @@ export async function validateDiscardedReturnValues(
         return diagnostics;
     }
 
-    const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/;
+    // Receiver AND method names can legally contain ':' (e.g. `My:StringTheory`,
+    // `My:My:Method` — see the tokenizer's own Label pattern), so both groups
+    // must allow it, or a colon-named local/member silently falls out of this
+    // whole diagnostic.
+    const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_:]*)\.([A-Za-z_][A-Za-z0-9_:]*)/;
 
     // #158 Phase B Priority 1 — per-call-site memoization. Pre-#158 this loop
     // called `memberLocator.findMemberInClass` / `resolveDotAccess` once PER
