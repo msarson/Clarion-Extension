@@ -195,8 +195,10 @@ export class SignatureHelpProvider {
         // Extract the method name and prefix (if any) before the opening paren
         const beforeParen = line.substring(0, lastOpenParen).trim();
         
-        // Match pattern: [prefix.]methodName
-        const match = beforeParen.match(/(\w+\.)?(\w+)\s*$/);
+        // Match pattern: [prefix.]methodName — [\w:] so a colon-containing prefix
+        // (SELF is fine, but a chained "SELF.Order.") or method name (My:My:Method)
+        // doesn't get truncated at the colon.
+        const match = beforeParen.match(/([\w:]+\.)?([\w:]+)\s*$/);
         if (!match) {
             return null;
         }
@@ -315,7 +317,7 @@ export class SignatureHelpProvider {
                     const content = document.getText();
                     const lines = content.split('\n');
                     const scopeLine = lines[currentScope.line];
-                    const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
+                    const classMethodMatch = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
                     if (classMethodMatch) {
                         className = classMethodMatch[1];
                         logger.info(`Extracted class name from line: ${className}`);

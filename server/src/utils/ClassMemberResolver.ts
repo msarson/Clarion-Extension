@@ -297,7 +297,10 @@ export class ClassMemberResolver {
             const content = document.getText();
             const lines = content.split('\n');
             const scopeLine = lines[currentScope.line];
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(?:\w+\.)?(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
+            // Clarion labels may contain ':' (MyOwn:CLASS.My:My:Method) — \w alone stops at the
+            // colon, the match fails, and every SELF.member hover inside such a method dies here
+            // with "Could not determine className" regardless of what member is hovered.
+            const classMethodMatch = scopeLine.match(/^([\w:]+)\.(?:[\w:]+\.)?([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
             }
@@ -613,7 +616,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
+            const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;
@@ -677,7 +680,7 @@ export class ClassMemberResolver {
         } else {
             const lines = document.getText().split('\n');
             const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
+            const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (m) className = m[1];
         }
         if (!className) return null;

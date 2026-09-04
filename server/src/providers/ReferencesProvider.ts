@@ -341,7 +341,7 @@ export class ReferencesProvider {
 
         // ── Route A: 3-part method implementation (Class.Interface.Method PROCEDURE) ──
         // Must run before word.includes('.') to intercept the dot-prefixed word.
-        const threePartImplMatch = fullLine.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+        const threePartImplMatch = fullLine.match(/^([\w:]+)\.([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i);
         if (threePartImplMatch) {
             const [, clsName, ifacePart, methPart] = threePartImplMatch;
             const ifaceStart = clsName.length + 1;
