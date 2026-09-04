@@ -390,7 +390,9 @@ export class SymbolFinderService {
                     location: { uri: document.uri, line: declToken.line, character: declToken.start },
                     originalWord: originalWord || word,
                     searchWord: word,
-                    parentStructure: TokenHelper.getEnclosingDataStructure(declToken)
+                    // Pass the structure so a CLASS property (never `.parent`-linked, see
+                    // getEnclosingDataStructure) still gets its "field of CLASS `X`" note.
+                    parentStructure: TokenHelper.getEnclosingDataStructure(declToken, this.tokenCache.getStructure(document))
                 };
             }
         }
