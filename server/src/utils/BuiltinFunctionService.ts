@@ -56,6 +56,50 @@ interface BuiltinDefinitions {
 }
 
 /**
+ * A signature as authored in the *alternate* JSON shape used by ~60 of the entries
+ * (the later doc-import batches): `label` / `documentation` / `parameters[{label}]`,
+ * with `returnType` hoisted onto the function instead of onto each signature.
+ *
+ * Both shapes are legitimate authored data, so normalize on load rather than
+ * rewriting the file. A signature missing `params`/`description` otherwise reached
+ * the hover formatter with zero parameters and an undefined description, rendering
+ * as "Keyword: <name>" followed by the literal text "undefined" (INRANGE, INLIST,
+ * CHOICE, RUN, POPUP, … — see BuiltinSignatureShapes.test.ts).
+ */
+interface AlternateSignatureShape {
+    label?: string;
+    documentation?: string;
+    parameters?: { label: string; documentation?: string }[];
+}
+
+/**
+ * Coerces a function entry from either authored shape into `BuiltinFunction`.
+ * Entries already in the documented `params`/`description` shape pass through
+ * untouched.
+ */
+function normalizeBuiltin(func: BuiltinFunction): BuiltinFunction {
+    const fallbackReturnType = (func as { returnType?: string }).returnType;
+    const fallbackDescription = (func as { description?: string }).description;
+
+    const signatures = (func.signatures ?? []).map(sig => {
+        if (sig.params && sig.description) {
+            return sig;
+        }
+
+        const alt = sig as unknown as AlternateSignatureShape;
+        return {
+            ...sig,
+            params: sig.params ?? (alt.parameters ?? []).map(p => ({ name: p.label })),
+            returnType: sig.returnType ?? fallbackReturnType ?? '',
+            description: sig.description ?? alt.documentation ?? fallbackDescription ?? '',
+            syntax: sig.syntax ?? alt.label
+        } as BuiltinSignature;
+    });
+
+    return { ...func, signatures };
+}
+
+/**
  * Service for managing and querying Clarion built-in functions
  * Singleton pattern - use getInstance()
  */
@@ -93,7 +137,7 @@ export class BuiltinFunctionService {
             
             for (const func of definitions.functions) {
                 // Store with uppercase key for case-insensitive lookup
-                this.builtins.set(func.name.toUpperCase(), func);
+                this.builtins.set(func.name.toUpperCase(), normalizeBuiltin(func));
             }
             
             this.loaded = true;
