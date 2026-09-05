@@ -435,7 +435,7 @@ export class ImplementationProvider {
                 const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                     const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^(\w+)/);
+                    const methodMatch = afterDot.match(/^([\w:]+)/);
                     if (methodMatch) {
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
@@ -469,7 +469,7 @@ export class ImplementationProvider {
                 // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
                 if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                     const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^(\w+)/);
+                    const methodMatch = afterDot.match(/^([\w:]+)/);
                     if (methodMatch) {
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');

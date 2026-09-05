@@ -34,20 +34,20 @@ export class ClarionPatterns {
      * 
      * Use getMethodImplParts() for a unified API.
      */
-    public static readonly METHOD_IMPLEMENTATION = /^\s*(\w+)\.(\w+)(?:\.(\w+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
-    
+    public static readonly METHOD_IMPLEMENTATION = /^\s*([\w:]+)\.([\w:]+)(?:\.([\w:]+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
+
     /**
      * Matches a method implementation line (strict - must be at start of line)
      * Same as METHOD_IMPLEMENTATION but enforces no leading whitespace
      */
-    public static readonly METHOD_IMPLEMENTATION_STRICT = /^(\w+)\.(\w+)(?:\.(\w+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
-    
+    public static readonly METHOD_IMPLEMENTATION_STRICT = /^([\w:]+)\.([\w:]+)(?:\.([\w:]+))?\s+(?:PROCEDURE|FUNCTION)\s*(?:\(([^)]*)\))?/i;
+
     /**
      * Matches a method implementation line (legacy - requires parentheses)
      * This pattern is deprecated - use METHOD_IMPLEMENTATION instead
      * @deprecated Use METHOD_IMPLEMENTATION which supports optional parens
      */
-    public static readonly METHOD_IMPLEMENTATION_LEGACY = /^(\w+)\.(\w+)\s+PROCEDURE\s*\((.*?)\)/i;
+    public static readonly METHOD_IMPLEMENTATION_LEGACY = /^([\w:]+)\.([\w:]+)\s+PROCEDURE\s*\((.*?)\)/i;
     
     /**
      * Tests if a line is a method implementation (2-part or 3-part)

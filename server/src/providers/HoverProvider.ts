@@ -206,7 +206,7 @@ export class HoverProvider {
 
             // ✅ Hover on 3-part method line (ClassName.InterfaceName.MethodName PROCEDURE)
             // When cursor is on the interface-name segment, show the INTERFACE hover
-            const threePartMatch = line.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+            const threePartMatch = line.match(/^([\w:]+)\.([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i);
             if (threePartMatch) {
                 const [, cls, iface, meth] = threePartMatch;
                 const ifaceStart = line.indexOf(iface, cls.length + 1);

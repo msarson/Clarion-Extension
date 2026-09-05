@@ -161,7 +161,7 @@ export class DefinitionProvider {
                 const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
                 const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
                 const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                const methodMatch = afterDot.match(/^(\w+)/);
+                const methodMatch = afterDot.match(/^([\w:]+)/);
                 const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
                 const isSelfParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
                 
@@ -386,7 +386,7 @@ export class DefinitionProvider {
 
             // ✅ 3-part method implementation: ClassName.InterfaceName.MethodName PROCEDURE
             // When cursor is on the InterfaceName segment, navigate to the INTERFACE declaration
-            const threePartMatch = line.match(/^(\w+)\.(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i);
+            const threePartMatch = line.match(/^([\w:]+)\.([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i);
             if (threePartMatch) {
                 const [, clsName, ifacePart, methodPart] = threePartMatch;
                 const ifaceStart = line.indexOf(ifacePart, clsName.length + 1);
@@ -818,8 +818,8 @@ export class DefinitionProvider {
             const afterDot = line.substring(dotIndex + 1).trim();
 
             // Extract structure name and field name
-            const structureMatch = beforeDot.match(/(\w+)\s*$/);
-            const fieldMatch = afterDot.match(/^(\w+)/);
+            const structureMatch = beforeDot.match(/([\w:]+)\s*$/);
+            const fieldMatch = afterDot.match(/^([\w:]+)/);
             
             if (structureMatch && fieldMatch) {
                 const structureName = structureMatch[1];
@@ -1268,7 +1268,7 @@ export class DefinitionProvider {
             logger.info(`Scope line text: "${scopeLine}"`);
             
             // Match ClassName.MethodName PROCEDURE pattern
-            const classMethodMatch = scopeLine.match(/^(\w+)\.(\w+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
+            const classMethodMatch = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
             if (classMethodMatch) {
                 className = classMethodMatch[1];
                 logger.info(`Extracted class name from line: ${className}`);
