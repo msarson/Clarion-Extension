@@ -2,6 +2,7 @@ import { Hover } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
+import { KeywordService } from '../../utils/KeywordService';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("ContextualHoverHandler");
@@ -12,6 +13,8 @@ logger.setLevel("error");
  * that have different meanings depending on where they appear
  */
 export class ContextualHoverHandler {
+    private keywordService = KeywordService.getInstance();
+
     constructor(
         private builtinService: BuiltinFunctionService,
         private attributeService: AttributeService
@@ -49,14 +52,12 @@ export class ContextualHoverHandler {
      */
     handleModuleKeyword(isInMapBlock: boolean): Hover | null {
         if (isInMapBlock) {
-            // MODULE in MAP context - it's a builtin keyword
-            const signatures = this.builtinService.getSignatures('MODULE');
-            if (signatures.length > 0) {
-                const sig = signatures[0];
-                const docText = typeof sig.documentation === 'string' 
-                    ? sig.documentation 
-                    : (sig.documentation as any)?.value || '';
-                const formattedDoc = `**MODULE** (Keyword)\n\n${docText}\n\n**Syntax:** \`${sig.label}\``;
+            // MODULE in MAP context - it's a language keyword (clarion-keywords.json),
+            // NOT a builtin function — BuiltinFunctionService has no MODULE entry at
+            // all, so looking it up there always returned null here.
+            const entry = this.keywordService.getKeyword('MODULE');
+            if (entry) {
+                const formattedDoc = `**MODULE** (Keyword)\n\n${entry.description}\n\n**Syntax:** \`${entry.syntax}\``;
                 return {
                     contents: {
                         kind: 'markdown',

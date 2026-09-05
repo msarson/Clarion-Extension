@@ -3,6 +3,7 @@ import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver/nod
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { AttributeService } from '../../utils/AttributeService';
+import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs } from '../../utils/AttributeContextGuards';
 
 const attributeService = AttributeService.getInstance();
 
@@ -112,11 +113,14 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
             continue;
         }
 
-        // Dot-suffix guard: skip Attribute tokens used as member names in dot access,
-        // e.g. SELF.Sectors.Type or Obj.Item.Type. In these contexts TYPE/ITEM/etc.
-        // are identifiers, not Clarion attribute applications.
+        // Dot-suffix / dot-base guards (shared with HoverRouter's identical attribute-
+        // vs-variable ambiguity — see AttributeContextGuards.ts): skip Attribute
+        // tokens used as either end of a dotted member-access chain, e.g. the `Type`
+        // in `SELF.Sectors.Type` (suffix) or the `Filter` in `USE(Filter.Item[1])`
+        // (base). In these contexts the token is an identifier/variable reference,
+        // not a Clarion attribute application.
         const lineText = lines[token.line] ?? '';
-        if (token.start > 0 && lineText[token.start - 1] === '.') {
+        if (isDotSuffix(lineText, token.start) || isDotBase(lineText, token.start, token.value.length)) {
             continue;
         }
 
@@ -145,6 +149,18 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
 
         const controlType = ctx.controlType.toUpperCase();
         if (!VALIDATABLE_CONTROLS.has(controlType)) continue; // Ambiguous context — skip
+
+        // Paren-nesting guard (shared with HoverRouter — see AttributeContextGuards.ts):
+        // skip Attribute tokens that sit inside the argument parentheses of a
+        // PRECEDING attribute in this same control's declaration — e.g. the `Filter`
+        // in `USE(Filter.Item[1])`, or a bare `USE(Filter)` with no dotted suffix at
+        // all. Either way, `Filter` here is the VALUE passed to USE(), not a second,
+        // standalone attribute application. Subsumes the dot-base guard above for
+        // the control-declaration case, but is kept alongside it since the dot-base
+        // guard also covers dotted access with no enclosing parens at all.
+        if (ctx.controlToken && isNestedInsideAttributeArgs(tokens, i, ctx.controlToken)) {
+            continue;
+        }
 
         const isValid = isAttributeValidForControl(attrName, controlType, attrDef.applicableTo);
         if (isValid) continue;

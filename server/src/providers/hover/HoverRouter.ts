@@ -8,6 +8,7 @@ import { RoutineHoverResolver } from './RoutineHoverResolver';
 import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
+import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
@@ -126,7 +127,7 @@ export class HoverRouter {
             if (symbolHover) return symbolHover;
 
             // 9. Handle attributes
-            const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock);
+            const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
             mark('attribute');
             if (attributeHover) return attributeHover;
 
@@ -151,7 +152,7 @@ export class HoverRouter {
             if (languageKeywordHover) return languageKeywordHover;
 
             // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
-            const builtinHover = await this.handleBuiltin(word, line, wordRange, document, position, tokens);
+            const builtinHover = await this.handleBuiltin(word, line, wordRange, document, position, tokens, documentStructure);
             mark('builtin');
             if (builtinHover) return builtinHover;
 
@@ -166,7 +167,7 @@ export class HoverRouter {
      * Handle special keywords (MODULE, TO, ELSE, PROCEDURE, HIDE, DISABLE, TYPE)
      */
     private handleSpecialKeywords(context: HoverContext): Hover | null {
-        const { word, line, tokens, position, isInMapBlock, isInClassBlock, isInWindowContext, documentStructure } = context;
+        const { word, line, tokens, position, isInMapBlock, isInClassBlock, documentStructure, currentLineTokens } = context;
         const upperWord = word.toUpperCase();
 
         if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
@@ -184,7 +185,25 @@ export class HoverRouter {
         }
 
         if (upperWord === 'MODULE') {
-            return this.contextHandler.handleModuleKeyword(isInMapBlock);
+            // MODULE (a CLASS-only attribute) is ALSO a MAP-block builtin keyword.
+            // In a MAP block it's unambiguous. Outside one, only treat it as the
+            // CLASS attribute when it's genuinely on/beside a CLASS structure's own
+            // declaration line — a dotted/nested reference (`Module.Something`,
+            // `SomeCall(Module)`) or a plain unrelated variable must fall through
+            // to variable resolution instead.
+            if (isInMapBlock) {
+                return this.contextHandler.handleModuleKeyword(true);
+            }
+            if (this.isDottedOrNestedKeywordReference(context)) {
+                return null;
+            }
+            const lineHasClassKeyword = currentLineTokens.some(t =>
+                (t.type === TokenType.Structure || t.type === TokenType.WindowElement) &&
+                t.value.toUpperCase() === 'CLASS');
+            if (!lineHasClassKeyword) {
+                return null;
+            }
+            return this.contextHandler.handleModuleKeyword(false);
         }
 
         if (upperWord === 'TO') {
@@ -200,16 +219,106 @@ export class HoverRouter {
         }
 
         if (upperWord === 'HIDE' || upperWord === 'DISABLE') {
-            // Attribute when inside a window/control declaration; builtin when in code section
-            return this.contextHandler.handleWindowBuiltin(word, isInWindowContext);
+            // HIDE/DISABLE (applicableTo: CONTROL) are ALSO builtin runtime
+            // functions. A dotted/nested reference is neither. Otherwise: show
+            // the attribute card only when genuinely inside a control/class
+            // declaration; show the builtin card only when actually CALLED
+            // (`HIDE(?List)`) — a bare, uncalled, non-declaration word is a
+            // plain variable, not either of these.
+            if (this.isDottedOrNestedKeywordReference(context)) {
+                return null;
+            }
+            const controlContext = documentStructure.getControlContextAt(position.line, position.character);
+            const inDeclarationContext = isInClassBlock || controlContext.structureType !== null || controlContext.controlType !== null;
+            if (inDeclarationContext) {
+                return this.contextHandler.handleWindowBuiltin(word, true);
+            }
+            const isActualCall = /^\s*\(/.test(line.slice(context.wordRange.end.character));
+            if (isActualCall) {
+                return this.contextHandler.handleWindowBuiltin(word, false);
+            }
+            return null;
         }
 
         if (upperWord === 'TYPE') {
-            // Attribute on GROUP/QUEUE/CLASS (outside window); builtin TYPE(string) inside REPORT
-            return this.contextHandler.handleWindowBuiltin(word, !isInWindowContext);
+            // TYPE (applicableTo: GROUP/QUEUE/CLASS/INTERFACE) is ALSO the
+            // TYPE(string) report builtin. A dotted/nested reference is neither.
+            // Otherwise: show the attribute card only when genuinely on a
+            // GROUP/QUEUE/CLASS/INTERFACE structure's own declaration line; show
+            // the builtin card only when actually CALLED (`TYPE('text')`) — a
+            // bare, uncalled, unrelated word (e.g. a local variable named Type)
+            // is neither.
+            if (this.isDottedOrNestedKeywordReference(context)) {
+                return null;
+            }
+            const lineHasStructureKeyword = currentLineTokens.some(t =>
+                (t.type === TokenType.Structure || t.type === TokenType.WindowElement) &&
+                ['GROUP', 'QUEUE', 'CLASS', 'INTERFACE'].includes(t.value.toUpperCase()));
+            if (lineHasStructureKeyword) {
+                return this.contextHandler.handleWindowBuiltin(word, true);
+            }
+            const isActualCall = /^\s*\(/.test(line.slice(context.wordRange.end.character));
+            if (isActualCall) {
+                return this.contextHandler.handleWindowBuiltin(word, false);
+            }
+            return null;
         }
 
         return null;
+    }
+
+    /**
+     * Shared suppression check for the HIDE/DISABLE/TYPE/MODULE branches above:
+     * true when `word` is being used as the BASE of a dotted member-access chain
+     * (e.g. the `Hide` in `Hide.Something`) or is nested inside another
+     * attribute's argument list (e.g. the `Type` in `USE(Type)`) — either way
+     * it's a variable/field reference, not a keyword/attribute/builtin
+     * application, and callers should fall through to variable resolution.
+     *
+     * Mirrors handleAttribute/handleBuiltin's guards (see
+     * AttributeContextGuards.ts) but anchors the paren-nesting walk on the
+     * FIRST TOKEN OF THE CURRENT LINE when there's no recognised control token
+     * (e.g. QUEUE/CLASS/INTERFACE aren't in ControlService's control set, unlike
+     * GROUP) — sufficient for the common single-line case; a multi-line
+     * `|`-continued declaration falls back to the pre-existing behavior.
+     */
+    private isDottedOrNestedKeywordReference(context: HoverContext): boolean {
+        const { word, line, wordRange, tokens, position, documentStructure } = context;
+
+        if (isDotBase(line, wordRange.start.character, word.length)) {
+            return true;
+        }
+
+        // A word immediately followed by '(' is making its OWN call (e.g. the
+        // TYPE in `STRING(TYPE('x'))`) — that's a legitimate nested builtin
+        // call, not a bare value passed to the enclosing attribute/call (e.g.
+        // the Filter in `USE(Filter)`), so paren-nesting suppression must not
+        // apply to it.
+        if (/^\s*\(/.test(line.slice(wordRange.end.character))) {
+            return false;
+        }
+
+        const tokenIndex = tokens.findIndex(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        if (tokenIndex < 0) return false;
+
+        const controlContext = documentStructure.getControlContextAt(position.line, position.character);
+        const anchor = controlContext.controlToken ?? tokens.find(t => t.line === position.line);
+        if (!anchor) return false;
+
+        // The anchor must actually precede the token, or the backward walk can
+        // never terminate on it and instead runs its full step bound across
+        // earlier, unrelated statements. That happens when the hovered word IS
+        // the first token on its line (fallback anchor === the token itself),
+        // in which case there is nothing before it on this line to be nested in.
+        if (anchor.line > position.line ||
+            (anchor.line === position.line && anchor.start >= tokens[tokenIndex].start)) {
+            return false;
+        }
+
+        return isNestedInsideAttributeArgs(tokens, tokenIndex, anchor);
     }
 
     /**
@@ -380,10 +489,31 @@ export class HoverRouter {
         wordRange: any,
         document: any,
         position: { line: number; character: number },
-        documentStructure: { getControlContextAt(line: number, character: number): { structureType: string | null; controlType: string | null } },
-        isInClassBlock: boolean
+        documentStructure: { getControlContextAt(line: number, character: number): { structureType: string | null; controlType: string | null; controlToken: Token | null } },
+        isInClassBlock: boolean,
+        tokens: Token[]
     ): Hover | null {
         if (!this.attributeService.isAttribute(word)) {
+            return null;
+        }
+
+        // Declaration-label guard (shared with handleBuiltin below — see
+        // AttributeContextGuards.ts): a field/variable being DECLARED with a name
+        // that happens to match an attribute keyword (e.g. a `Create` field inside
+        // a CLASS body) is not an attribute application — inDeclarationContext
+        // below only checks "is this line inside a declaration", not "is this word
+        // the thing being declared", so it doesn't catch this on its own.
+        if (isDeclarationLabel(tokens, position.line, position.character)) {
+            return null;
+        }
+
+        // Dot-suffix / dot-base guards (shared with AttributeDiagnostics — see
+        // AttributeContextGuards.ts): a word that matches an attribute keyword but
+        // is actually one end of a dotted member-access chain (e.g. the `Filter`
+        // in `USE(Filter.Type)`) is a variable/field reference, not an attribute
+        // application — let downstream variable/member-access hover handle it
+        // instead of showing the unrelated builtin attribute's doc card.
+        if (isDotSuffix(line, wordRange.start.character) || isDotBase(line, wordRange.start.character, word.length)) {
             return null;
         }
 
@@ -391,6 +521,21 @@ export class HoverRouter {
         const inDeclarationContext = isInClassBlock || controlContext.structureType !== null || controlContext.controlType !== null;
         if (!inDeclarationContext) {
             return null;
+        }
+
+        // Paren-nesting guard (shared with AttributeDiagnostics): a word matching an
+        // attribute keyword but sitting inside another attribute's argument list
+        // (e.g. a bare `USE(Filter)` with no dotted suffix at all) is the VALUE
+        // passed to that attribute, not a second, standalone attribute application.
+        if (controlContext.controlToken) {
+            const tokenIndex = tokens.findIndex(t =>
+                t.line === position.line &&
+                position.character >= t.start &&
+                position.character <= t.start + t.value.length
+            );
+            if (tokenIndex >= 0 && isNestedInsideAttributeArgs(tokens, tokenIndex, controlContext.controlToken)) {
+                return null;
+            }
         }
 
         logger.info(`Found Clarion attribute: ${word}`);
@@ -435,6 +580,7 @@ export class HoverRouter {
      * Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.).
      */
     private handleKeyword(word: string): Hover | null {
+        if (HANDLED_BY_SPECIAL_KEYWORDS.has(word.toUpperCase())) return null;
         const entry = this.keywordService.getKeyword(word);
         if (!entry) return null;
         logger.info(`Found language keyword: ${word}`);
@@ -444,8 +590,28 @@ export class HoverRouter {
     /**
      * Handle built-in functions
      */
-    private async handleBuiltin(word: string, line: string, wordRange: any, document: any, position: any, tokens: Token[]): Promise<Hover | null> {
+    private async handleBuiltin(
+        word: string,
+        line: string,
+        wordRange: any,
+        document: any,
+        position: any,
+        tokens: Token[],
+        documentStructure: { getControlContextAt(line: number, character: number): { controlToken: Token | null } }
+    ): Promise<Hover | null> {
         if (!this.builtinService.isBuiltin(word)) {
+            return null;
+        }
+
+        if (HANDLED_BY_SPECIAL_KEYWORDS.has(word.toUpperCase())) return null;
+
+        // Declaration-label guard (shared with handleAttribute above — see
+        // AttributeContextGuards.ts): a variable being DECLARED with a name that
+        // happens to match a builtin function (e.g. `Name LONG`, `Clip STRING(10)`)
+        // is not a call to that builtin. Without this, the "not an actual call"
+        // fallback below had no context check at all and showed the builtin's
+        // bare-constant card for the declaration itself.
+        if (isDeclarationLabel(tokens, position.line, position.character)) {
             return null;
         }
 
@@ -458,6 +624,34 @@ export class HoverRouter {
         if (textBeforeWord.trimEnd().endsWith('.')) {
             logger.info(`Word ${word} is preceded by dot - treating as class method, not built-in`);
             return null;
+        }
+
+        // Dot-base guard (shared with AttributeDiagnostics/handleAttribute — see
+        // AttributeContextGuards.ts): a word matching a builtin function name but
+        // immediately followed by '.' is the BASE of a dotted member-access chain
+        // (e.g. the `Name` in `Name.First`), not a call to the builtin.
+        if (isDotBase(line, wordRange.start.character, word.length)) {
+            logger.info(`Word ${word} is the base of a dotted reference - treating as a variable, not built-in`);
+            return null;
+        }
+
+        // Paren-nesting guard (shared with AttributeDiagnostics/handleAttribute):
+        // a word matching a builtin function name (e.g. NAME, which is both the
+        // NAME attribute AND the NAME(file) builtin) but sitting inside another
+        // attribute's argument list on a control declaration (e.g. `USE(Name)`
+        // with no dotted suffix at all) is the VALUE passed to that attribute,
+        // not a call to the builtin.
+        const controlContext = documentStructure.getControlContextAt(position.line, position.character);
+        if (controlContext.controlToken) {
+            const tokenIndex = tokens.findIndex(t =>
+                t.line === position.line &&
+                position.character >= t.start &&
+                position.character <= t.start + t.value.length
+            );
+            if (tokenIndex >= 0 && isNestedInsideAttributeArgs(tokens, tokenIndex, controlContext.controlToken)) {
+                logger.info(`Word ${word} is nested inside another attribute's argument list - treating as a variable, not built-in`);
+                return null;
+            }
         }
 
         const signatures = this.builtinService.getSignatures(word);

@@ -792,4 +792,111 @@ suite('validateAttributeApplicability', () => {
                 `Expected no invalid-attribute-context for PROCEDURE parameter name "Type"; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
         });
     });
+
+    suite('dot-base guard and paren-nesting guard — attribute-keyword-named variable used as another attribute\'s argument', () => {
+        test('no diagnostic for USE(Filter.Item[1]) where Filter is a GROUP variable, not the FILTER attribute', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('X'),AT(10,10,50,14),USE(Filter.Item[1])",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected no invalid-attribute-context for USE(Filter.Item[1]); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        test('no diagnostic for bare USE(Filter) with no dotted suffix at all', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('X'),AT(10,10,50,14),USE(Filter)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected no invalid-attribute-context for bare USE(Filter); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        test('no diagnostic for USE(Filter) on an ENTRY field (same bug family, different control)', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  ENTRY(@s20),AT(10,10,50,10),USE(Filter)",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.strictEqual(attrDiags.length, 0,
+                `Expected no invalid-attribute-context for USE(Filter) on ENTRY; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+        });
+
+        test('misapplied FILTER attribute (no dotted suffix, not nested in another attribute) still fires on CHECK', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('X'),AT(10,10,50,14),FILTER",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'a genuine bare FILTER attribute on CHECK must STILL fire');
+        });
+
+        test('misapplied FILTER attribute still fires on ENTRY (negative sentinel for the ENTRY case)', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  ENTRY(@s20),AT(10,10,50,10),FILTER",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'a genuine bare FILTER attribute on ENTRY must STILL fire');
+        });
+
+        // Clarion's `.` is the END-shorthand terminator as well as the member-access
+        // separator, so `...,FILTER.` closing a structure is NOT `Filter.member`.
+        // An earlier version of the dot-base guard keyed purely on a following `.`
+        // and silently swallowed this genuine warning; member access requires an
+        // identifier after the dot.
+        test('misapplied attribute followed by a period END-terminator still fires', () => {
+            const doc = makeDoc([
+                'MyWin WINDOW',
+                "  CHECK('X'),AT(10,10,50,14),FILTER.",
+                'END',
+            ]);
+            const tokens = tokenize(doc);
+            const diagnostics = validateAttributeApplicability(tokens, doc);
+            const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+            assert.ok(attrDiags.length > 0,
+                'a bare FILTER attribute closed by a period terminator must STILL fire — `.` here is END, not member access');
+        });
+
+        // The guard is keyword-agnostic — it fires on paren-nesting position, not on
+        // which attribute name matched. These cover other VIEW/DATA_TYPE/GROUP-only
+        // keywords (ORDER, NAME, TYPE) that double as plausible field/variable names,
+        // confirming the fix isn't specific to FILTER.
+        test('no diagnostic for other attribute-keyword-shaped variable names used as USE() arguments', () => {
+            const cases: [string, string][] = [
+                ["  ENTRY(@s20),AT(10,10,50,10),USE(Order.CustNo)", 'Order (VIEW-only attr) dotted base on ENTRY'],
+                ["  ENTRY(@s20),AT(10,10,50,10),USE(Order)", 'bare Order on ENTRY'],
+                ["  BUTTON('X'),AT(10,10,50,10),USE(Name.First)", 'Name (DATA_TYPE/FILE_FIELD attr) dotted base on BUTTON'],
+                ["  BUTTON('X'),AT(10,10,50,10),USE(Name)", 'bare Name on BUTTON'],
+                ["  CHECK('X'),AT(10,10,50,10),USE(Type.Code)", 'Type dotted base on CHECK'],
+            ];
+            for (const [line, label] of cases) {
+                const doc = makeDoc(['MyWin WINDOW', line, 'END']);
+                const tokens = tokenize(doc);
+                const diagnostics = validateAttributeApplicability(tokens, doc);
+                const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
+                assert.strictEqual(attrDiags.length, 0,
+                    `${label}: expected no invalid-attribute-context; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+            }
+        });
+    });
 });
