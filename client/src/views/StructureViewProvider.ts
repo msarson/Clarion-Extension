@@ -20,6 +20,7 @@ import * as path from 'path';
 import { DocumentSymbol, SymbolKind as LSPSymbolKind } from 'vscode-languageserver-types';
 import LoggerManager from '../utils/LoggerManager';
 import { SymbolElementRegistry } from '../utils/SymbolElementRegistry';
+import { markSymbolVisibility } from '../utils/SymbolFilter';
 import { globalSettings } from '../globals';
 const logger = LoggerManager.getLogger("StructureViewProvider");
 logger.setLevel("error"); // Enable debug logging to troubleshoot follow cursor
@@ -1096,149 +1097,22 @@ export class StructureViewProvider implements TreeDataProvider<DocumentSymbol> {
         logger.debug(`getParent called for ${element.name}, returning: ${parent ? parent.name : 'null'}`);
         return Promise.resolve(parent);
     }
-    // Helper method to filter nodes based on text
-    private filterNodes(nodes: DocumentSymbol[], filterText: string): DocumentSymbol[] {
-        if (!nodes || nodes.length === 0) {
-            return [];
-        }
-        
-        const normalizedFilter = filterText.toLowerCase();
-        
-        // Mark all nodes as visible or hidden based on the filter
-        const markVisibility = (nodeList: DocumentSymbol[]) => {
-            // First, mark all nodes as not visible
-            for (const node of nodeList) {
-                const key = this.registry.getElementKey(node);
-                this.registry.setVisible(key, false);
-                
-                if (node.children && node.children.length > 0) {
-                    markVisibility(node.children);
-                }
-            }
-        };
-        
-        // Mark nodes that match the filter or have matching descendants as visible
-        const markMatchingVisible = (node: DocumentSymbol): boolean => {
-            const key = this.registry.getElementKey(node);
-            
-            // Check if this node matches
-            const nodeMatches = this.symbolOrDescendantsMatch(node, normalizedFilter);
-            
-            // Check if any children match
-            let hasMatchingChildren = false;
-            if (node.children && node.children.length > 0) {
-                for (const child of node.children) {
-                    if (markMatchingVisible(child)) {
-                        hasMatchingChildren = true;
-                    }
-                }
-            }
-            
-            // Mark this node as visible if it matches or has matching children
-            const isVisible = nodeMatches || hasMatchingChildren;
-            this.registry.setVisible(key, isVisible);
-            
-            return isVisible;
-        };
-        
-        // Apply visibility marking
-        markVisibility(nodes);
-        for (const node of nodes) {
-            markMatchingVisible(node);
-        }
-        
-        // Return only the visible nodes
-        return nodes.filter(node => {
-            const key = this.registry.getElementKey(node);
-            return this.registry.isVisible(key) === true;
-        });
-    }
-
-    // Helper method for substring matching
-    private substringMatch(text: string, filter: string): boolean {
-        // Convert both strings to lowercase for case-insensitive matching
-        const textLower = text.toLowerCase();
-        const filterLower = filter.toLowerCase();
-        
-        // Check if filter is a substring of text
-        return textLower.indexOf(filterLower) !== -1;
-    }
-    
-    // Helper method to check if a symbol or any of its descendants match the filter
-    private symbolOrDescendantsMatch(symbol: DocumentSymbol, normalizedFilter: string): boolean {
-        // Check if this symbol matches
-        if (this.substringMatch(symbol.name, normalizedFilter) ||
-            (symbol.detail && this.substringMatch(symbol.detail, normalizedFilter))) {
-            return true;
-        }
-        
-        // Check if any children match
-        if (symbol.children && symbol.children.length > 0) {
-            for (const child of symbol.children) {
-                if (this.symbolOrDescendantsMatch(child, normalizedFilter)) {
-                    return true;
-                }
-            }
-        }
-        
-        return false;
-    }
-    
-    // Helper method to filter symbols recursively
+    /**
+     * Marks Structure View symbols visible/hidden against the filter box.
+     *
+     * Delegates to the vscode-free `markSymbolVisibility` so the walk can be unit
+     * tested; see that function for why an ancestor match now propagates to its
+     * subtree (#418/#426 removed the `in <Parent>` detail this filter matched on).
+     * Returns the visible roots; callers wanting only the registry side effect can
+     * ignore the result.
+     */
     private filterSymbols(symbols: DocumentSymbol[], filterText: string): DocumentSymbol[] {
         if (!symbols || symbols.length === 0) {
             return [];
         }
-        
-        const normalizedFilter = filterText.toLowerCase();
-        
-        // Clear visibility state when starting a new filter operation
-        this.registry.getAllKeys().forEach(key => this.registry.setVisible(key, false));
-        
-        // Mark all symbols as visible or hidden based on the filter
-        const markVisibility = (symbolList: DocumentSymbol[]) => {
-            // First, mark all symbols as not visible
-            for (const symbol of symbolList) {
-                const key = this.registry.getElementKey(symbol);
-                this.registry.setVisible(key, false);
-                
-                if (symbol.children && symbol.children.length > 0) {
-                    markVisibility(symbol.children);
-                }
-            }
-        };
-        
-        // Mark symbols that match the filter or have matching descendants as visible
-        const markMatchingVisible = (symbol: DocumentSymbol): boolean => {
-            const key = this.registry.getElementKey(symbol);
-            
-            // Check if this symbol matches
-            const symbolMatches = this.symbolOrDescendantsMatch(symbol, normalizedFilter);
-            
-            // Check if any children match
-            let hasMatchingChildren = false;
-            if (symbol.children && symbol.children.length > 0) {
-                for (const child of symbol.children) {
-                    if (markMatchingVisible(child)) {
-                        hasMatchingChildren = true;
-                    }
-                }
-            }
-            
-            // Mark this symbol as visible if it matches or has matching children
-            const isVisible = symbolMatches || hasMatchingChildren;
-            this.registry.setVisible(key, isVisible);
-            
-            return isVisible;
-        };
-        
-        // Apply visibility marking
-        markVisibility(symbols);
-        for (const symbol of symbols) {
-            markMatchingVisible(symbol);
-        }
-        
-        // Return only the visible symbols
+
+        markSymbolVisibility(symbols, filterText, this.registry);
+
         return symbols.filter(symbol => {
             const key = this.registry.getElementKey(symbol);
             return this.registry.isVisible(key) === true;
