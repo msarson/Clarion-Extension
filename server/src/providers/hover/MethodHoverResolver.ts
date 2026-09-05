@@ -470,31 +470,24 @@ export class MethodHoverResolver {
         // Search backwards from the method line to find the CLASS token
         for (let i = tokens.length - 1; i >= 0; i--) {
             const token = tokens[i];
-            
+
             // Stop if we've gone past the method line
             if (token.line > methodLine) {
                 continue;
             }
-            
+
             // Look for CLASS structure
             if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Check if this class contains our method line
-                let classEndLine = -1;
-                for (let j = i + 1; j < tokens.length; j++) {
-                    const endToken = tokens[j];
-                    if (endToken.value.toUpperCase() === 'END' && endToken.start === 0 && endToken.line > token.line) {
-                        classEndLine = endToken.line;
-                        break;
-                    }
-                }
-                
-                // Check if method is within this class
-                if (classEndLine === -1 || methodLine < classEndLine) {
+                // Use the tokenizer's own nesting-aware finishesAt (stack-based, END-marker
+                // driven — not indentation) instead of hand-scanning for a column-0 END.
+                // A local/anonymous CLASS declared inside a procedure's DATA section is
+                // closed by an indented END, which a column-0 scan would skip right past.
+                if (token.finishesAt === undefined || methodLine <= token.finishesAt) {
                     return token;
                 }
             }
         }
-        
+
         return null;
     }
 
