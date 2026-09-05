@@ -105,6 +105,56 @@ export class TokenHelper {
     }
 
     /**
+     * Finds the nearest enclosing GROUP/QUEUE/FILE/RECORD/VIEW/REPORT/CLASS ancestor
+     * of `t`, for DISPLAY purposes (e.g. a hover noting "field of GROUP `Filter`").
+     * Unlike {@link requiresDotQualification} this doesn't stop early at a
+     * `structurePrefix` (PRE) or bail out on INTERFACE/MAP/MODULE — it's
+     * answering a different question ("what data structure, if any, directly
+     * contains this field") rather than "can a bare word legally bind here".
+     *
+     * CLASS is found differently from the others. DocumentStructure only
+     * `.parent`-links member tokens of RECORD/GROUP/QUEUE/FILE/VIEW/WINDOW/REPORT
+     * (its "Add label tokens as children" branch) — class members are deliberately
+     * left unlinked because their resolution lives in ClassMemberResolver, and
+     * several resolvers rely on `parent === undefined` / `isStructureField` to
+     * tell a bare label from a structure field. So the parent walk can never see
+     * a CLASS; when `structure` is supplied, fall back to its CLASS index instead
+     * (the same `isInClassBlock` + `getClasses` pair VariableHoverResolver already
+     * uses for global class properties). Display-only: nothing is stamped on the
+     * token, so no other consumer's view of it changes.
+     */
+    public static getEnclosingDataStructure(t: Token, structure?: DocumentStructure): { label: string; type: string } | undefined {
+        let anc = t.parent;
+        while (anc) {
+            if (anc.type === TokenType.Structure) {
+                const v = anc.value.toUpperCase();
+                if (TokenHelper.DOT_ONLY_STRUCTURES.has(v) && anc.label) {
+                    return { label: anc.label, type: v };
+                }
+            }
+            anc = anc.parent;
+        }
+
+        if (structure && structure.isInClassBlock(t.line)) {
+            // Nearest CLASS opening above `t` whose extent still covers it. CLASSes don't
+            // nest, so "nearest preceding that contains" is the unique owner.
+            let owner: Token | undefined;
+            for (const cls of structure.getClasses()) {
+                if (cls.line < t.line &&
+                    (cls.finishesAt === undefined || cls.finishesAt >= t.line) &&
+                    (!owner || cls.line > owner.line)) {
+                    owner = cls;
+                }
+            }
+            const label = owner?.label ?? owner?.value;
+            if (owner && label) {
+                return { label, type: 'CLASS' };
+            }
+        }
+        return undefined;
+    }
+
+    /**
      * Gets the innermost scope at a line (optimized version using DocumentStructure)
      * 🚀 PERFORMANCE: O(log n) using document structure instead of O(n) filter
      * @param structure DocumentStructure instance
