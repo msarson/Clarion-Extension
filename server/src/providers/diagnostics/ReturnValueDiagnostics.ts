@@ -382,7 +382,13 @@ function validateCrossFilePlainCalls(
         if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
 
         const rawLine = docLines[lineIdx];
-        const stripped = rawLine.replace(/!.*$/, '').trim();
+        // CRLF: `docLines` comes from a plain split('\n'), so a CRLF file leaves
+        // a trailing '\r' on every line. `.` never matches '\r' and `$` (no /m)
+        // demands the literal string end, so on a line ending in a trailing
+        // comment `!.*$` never matches at all — the comment silently survives
+        // into `stripped`. Dropping the `$` fixes it: `.` already stops at any
+        // line terminator, so `!.*` strips to end-of-line either way.
+        const stripped = rawLine.replace(/!.*/, '').trim();
         if (!stripped) continue;
 
         if (ASSIGN_RE.test(stripped)) continue;
@@ -838,7 +844,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
         if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
 
         const rawLine = docLines[lineIdx];
-        const stripped = rawLine.replace(/!.*$/, '').trim();
+        const stripped = rawLine.replace(/!.*/, '').trim(); // CRLF-safe — see comment above the first occurrence
         if (!stripped) continue;
 
         if (ASSIGN_RE.test(stripped)) continue;
@@ -1070,7 +1076,7 @@ export async function validateDiscardedReturnValues(
         if (!range) continue;
 
         const rawLine = docLines[lineIdx];
-        const stripped = rawLine.replace(/!.*$/, '').trim();
+        const stripped = rawLine.replace(/!.*/, '').trim(); // CRLF-safe — see comment above the first occurrence
         if (!stripped) continue;
 
         const prefixMatch = stripped.match(DOTCALL_PREFIX);
