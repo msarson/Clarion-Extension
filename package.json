@@ -712,6 +712,10 @@
           "when": "true"
         },
         {
+          "command": "clarion.openDetectedSolution",
+          "when": "false"
+        },
+        {
           "command": "clarion.openSolutionMenu",
           "when": "false"
         }
