@@ -12,6 +12,7 @@
  */
 
 import * as path from 'path';
+import { clarionSourceCandidates } from './utils/ClarionSourceNaming';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
@@ -983,6 +984,19 @@ export class FileRelationshipGraph {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
 
+        // #449 — MEMBER, INCLUDE and MODULE all infer `.CLW` when the extension is
+        // omitted (the Language Reference says so for each). Without the retry an
+        // extension-less target resolved to nothing and NO EDGE was added, leaving
+        // everything built on this graph blind to that file: class-method hover,
+        // findModuleVariableInSiblingMembers, references, signature help,
+        // implementations, document links. Redirection cannot cover for it — its
+        // masks are extension-based, so `*.clw` never matches a bare name.
+        //
+        // Name as given first, so nothing that resolves today changes. A MODULE
+        // naming an external library rather than a file (`MODULE('Win32')`) simply
+        // matches neither candidate and falls through, as before.
+        const candidates = clarionSourceCandidates(filename);
+
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
             // #315 (review finding): try the FROM file's own project first — the
@@ -991,23 +1005,29 @@ export class FileRelationshipGraph {
             // project's redirection, mis-targeting the edge.
             const owner = this.ownerProjectByFile?.get(this.normalizePath(_fromFile));
             if (owner) {
-                const ownResolved = owner.getRedirectionParser().findFile(filename);
-                if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
-                    return ownResolved.path;
+                for (const candidate of candidates) {
+                    const ownResolved = owner.getRedirectionParser().findFile(candidate);
+                    if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
+                        return ownResolved.path;
+                    }
                 }
             }
             for (const project of solutionManager.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(filename);
-                if (resolved?.path && fs.existsSync(resolved.path)) {
-                    return resolved.path;
+                for (const candidate of candidates) {
+                    const resolved = project.getRedirectionParser().findFile(candidate);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        return resolved.path;
+                    }
                 }
             }
         }
 
         const sourceUri = this.pathToUri(this.denormalizePath(this.normalizePath(_fromFile)));
-        const noSolutionHit = resolveFileInNoSolutionMode(filename, sourceUri);
-        if (noSolutionHit?.path && fs.existsSync(noSolutionHit.path)) {
-            return noSolutionHit.path;
+        for (const candidate of candidates) {
+            const noSolutionHit = resolveFileInNoSolutionMode(candidate, sourceUri);
+            if (noSolutionHit?.path && fs.existsSync(noSolutionHit.path)) {
+                return noSolutionHit.path;
+            }
         }
 
         return null;

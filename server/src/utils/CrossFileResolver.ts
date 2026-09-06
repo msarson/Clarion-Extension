@@ -16,6 +16,7 @@ import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { clarionSourceCandidates } from './ClarionSourceNaming';
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -122,9 +123,10 @@ export class CrossFileResolver {
         // Candidates are tried in order, the name AS GIVEN first, so nothing that
         // resolves today changes. Both callers of this method resolve a MEMBER
         // parent, which is why `.clw` is the right inference here.
-        const candidates = path.extname(filename)
-            ? [filename]
-            : [filename, filename + '.clw'];
+        //
+        // #449 — moved onto the shared rule once the same defect turned up in the
+        // relationship graph and the MAP self-declaration check.
+        const candidates = clarionSourceCandidates(filename);
 
         // Try solution-wide redirection first - owner project first (#328).
         // Local reorder (not the shared util) to honour the injected manager.

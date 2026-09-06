@@ -10,6 +10,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
+import { moduleTargetMatchesFile } from '../../utils/ClarionSourceNaming';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
@@ -91,7 +92,7 @@ export async function validateMissingMapDeclarations(
                 const parent = t.parent;
                 if (!parent || parent.type !== TokenType.Structure) return false;
                 if (parent.value.toUpperCase() !== 'MODULE' || !parent.referencedFile) return false;
-                return nodePath.basename(parent.referencedFile).toLowerCase() === currentBasename;
+                return moduleTargetMatchesFile(parent.referencedFile, currentBasename);
             })
             .map(t => [t.label!.toUpperCase(), t] as [string, Token])
     );
@@ -189,7 +190,7 @@ export async function validateMissingMapDeclarations(
                 for (const t of incTokens) {
                     if (t.subType === TokenType.MapProcedure && t.label && t.parent) {
                         const moduleRef = t.parent.referencedFile;
-                        if (moduleRef && nodePath.basename(moduleRef).toLowerCase() === currentClwBasename) {
+                        if (moduleRef && moduleTargetMatchesFile(moduleRef, currentClwBasename)) {
                             incDeclaredTokens.set(t.label.toUpperCase(), t);
                         }
                     }
