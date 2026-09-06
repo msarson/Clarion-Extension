@@ -55,7 +55,49 @@ export function isUnrepresentableInAnsi(codePoint: number): boolean {
     return !getRepresentableCodePoints().has(codePoint);
 }
 
+/**
+ * True when the file opens with the Clarion 12 `!UTF8` directive.
+ *
+ * Per the Unicode Tester Guide a source file declares its encoding one of three
+ * ways — a UTF-8/UTF-16 LE BOM, a first-line `!UTF8`, or `module(encoding=>utf8)`
+ * — and *"Files with none of these stay ANSI — existing sources compile
+ * byte-identically."* So an undecorated file is ANSI even on Clarion 12, which is
+ * why the contamination warning is correct by default and only a declared file
+ * should silence it.
+ *
+ * `!UTF8` is itself a Clarion comment, so it is inert on a pre-Unicode compiler —
+ * SoftVelocity chose a marker old compilers ignore rather than syntax that would
+ * break them.
+ *
+ * Matched strictly: the whole of the first line, bar surrounding whitespace. A
+ * looser test would swallow ordinary prose (`! UTF8 support added today`) and
+ * silence a genuine problem. Erring strict means an unrecognised variant still
+ * warns, which is the safe direction.
+ */
+export function declaresUtf8Directive(document: TextDocument): boolean {
+    // Bounded read — the directive is line 1 and short; never pull the whole file.
+    const firstLine = document.getText({
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 64 }
+    });
+    return /^\s*!UTF8\s*$/i.test(firstLine);
+}
+
 export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] {
+    // #403 — the file has declared itself UTF-8, so its non-ANSI characters are
+    // deliberate. Checked before the scan: one short line beats walking the text.
+    //
+    // KNOWN GAP: this trusts the declaration without asking whether the selected
+    // compiler can honour it. A pre-Unicode Clarion reads the bytes as ANSI
+    // regardless of the directive, so a `!UTF8` file on Clarion 10 will now stay
+    // silent where a warning would have been right. Accepted deliberately: the
+    // directive is an explicit statement of intent by the author, and second-
+    // guessing it is worse than trusting it. Closing the gap needs the
+    // compiler-capability probe tracked in #402.
+    if (declaresUtf8Directive(document)) {
+        return [];
+    }
+
     const diagnostics: Diagnostic[] = [];
     const text = document.getText();
 
