@@ -5,6 +5,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
+import { unsupportedPlatformNotice } from './platformUtils';
 import { globalSolutionFile, activateClarionVersionState } from './globals';
 import LoggerManager from './utils/LoggerManager';
 import { LoggingConfig } from '../../common/LoggingConfig';
@@ -60,6 +61,21 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
     context.subscriptions.push(clientOutputChannel);
     LoggerManager.setOutputChannel(clientOutputChannel);
+
+    // #446 — say so once when the host cannot run Clarion at all. Deliberately
+    // non-blocking: activation continues, because syntax highlighting and plain
+    // editing DO work and are a legitimate reason to open Clarion source on a
+    // Mac. Aborting would remove the only part that functions. Once per
+    // activation, not per command — this is information, not an error to be
+    // dismissed repeatedly.
+    const platformNotice = unsupportedPlatformNotice();
+    if (platformNotice) {
+        // Logged at error, not warn: this logger is pinned to "error" (above), so
+        // a warn would not reach the log file at all — see #440. The user sees the
+        // toast either way; the log line is what a support request can quote.
+        logger.error(platformNotice);
+        window.showWarningMessage(platformNotice);
+    }
 
     // #297 (revised): perf channels are opt-in — clarion.log.performance.enabled gates
     // their OUTPUT on both sides (server reads it from initializationOptions.settings).
