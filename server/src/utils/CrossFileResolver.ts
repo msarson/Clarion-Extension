@@ -110,6 +110,22 @@ export class CrossFileResolver {
     public async resolveFile(filename: string, currentDocumentUri: string): Promise<string | null> {
         logger.info(`Resolving file: ${filename}`);
 
+        // #447 — `MEMBER('TestUString')` without an extension is the idiomatic form;
+        // the compiler infers `.clw`. Neither route below could resolve it: the
+        // redirection masks are extension-based, so `*.clw` cannot match a bare
+        // name, and the relative probe looks for a literal extension-less file. The
+        // whole of findMapDeclarationInMemberFile then bailed at its first step and
+        // every procedure in the module was reported as undeclared — while F12,
+        // which has other strategies, navigated to the very declaration the warning
+        // denied. Same defect as #395 fixed in IncludeVerifier, in a second site.
+        //
+        // Candidates are tried in order, the name AS GIVEN first, so nothing that
+        // resolves today changes. Both callers of this method resolve a MEMBER
+        // parent, which is why `.clw` is the right inference here.
+        const candidates = path.extname(filename)
+            ? [filename]
+            : [filename, filename + '.clw'];
+
         // Try solution-wide redirection first - owner project first (#328).
         // Local reorder (not the shared util) to honour the injected manager.
         if (this.solutionManager && this.solutionManager.solution) {
@@ -119,10 +135,12 @@ export class CrossFileResolver {
             const orderedProjects = owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
             for (const project of orderedProjects) {
                 const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(filename);
-                if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                    logger.info(`✅ Resolved via redirection: ${resolved.path}`);
-                    return resolved.path;
+                for (const candidate of candidates) {
+                    const resolved = redirectionParser.findFile(candidate);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        logger.info(`✅ Resolved via redirection: ${resolved.path}`);
+                        return resolved.path;
+                    }
                 }
             }
         }
@@ -131,11 +149,13 @@ export class CrossFileResolver {
         const currentDir = path.dirname(
             decodeURIComponent(currentDocumentUri.replace('file:///', '')).replace(/\//g, '\\')
         );
-        const relativePath = path.join(currentDir, filename);
-        if (fs.existsSync(relativePath)) {
-            const resolvedPath = path.resolve(relativePath);
-            logger.info(`✅ Resolved via relative path: ${resolvedPath}`);
-            return resolvedPath;
+        for (const candidate of candidates) {
+            const relativePath = path.join(currentDir, candidate);
+            if (fs.existsSync(relativePath)) {
+                const resolvedPath = path.resolve(relativePath);
+                logger.info(`✅ Resolved via relative path: ${resolvedPath}`);
+                return resolvedPath;
+            }
         }
 
         logger.info(`❌ Could not resolve file: ${filename}`);
