@@ -37,6 +37,32 @@ export class UnreachableCodeProvider {
             const lines = document.getText().split(/\r?\n/);
             const ranges: Range[] = [];
 
+            // #445 — true iff a physical line ends with a `|` continuation marker,
+            // so the NEXT line continues its statement rather than starting one.
+            // Mirrors DocumentStructure.lineEndsWithContinuation (private there):
+            // walk back over Comment tokens and test the last significant one.
+            // Deliberately token-based, not a text scan. Two reasons a naive
+            // "does the trimmed line end with |" test gets this wrong:
+            //   1. A `|` inside a string literal is not a continuation, and the
+            //      tokenizer already knows that — it emits no LineContinuation
+            //      there. Clarion uses the same character as the redirection stop
+            //      marker, so quoted pipes do occur.
+            //   2. Text is allowed AFTER the `|` on the same line and is treated
+            //      as a comment, so the line does not end with the character at
+            //      all. The tokenizer absorbs that trailing text into the
+            //      LineContinuation token's own value (`"|  note to self"`), which
+            //      is why this matches on the token TYPE and not on its text.
+            const lineEndsWithContinuation = (line: number): boolean => {
+                const lt = tokensByLine.get(line);
+                if (!lt || lt.length === 0) return false;
+                for (let i = lt.length - 1; i >= 0; i--) {
+                    const t = lt[i];
+                    if (t.type === TokenType.Comment) continue;
+                    return t.type === TokenType.LineContinuation || t.value === '|';
+                }
+                return false;
+            };
+
             // Build line-to-tokens index for fast lookup
             const tokensByLine = new Map<number, Token[]>();
             for (const token of tokens) {
@@ -154,11 +180,20 @@ export class UnreachableCodeProvider {
                         }
                     }
 
+                    // #445 — a physical line whose predecessor ended with `|` is a
+                    // CONTINUATION of that statement, not a new one. The walk is
+                    // physical-line based, so without this a RETURN split across
+                    // lines terminated the procedure on its first line and then
+                    // greyed out its own remaining lines as "code after a RETURN".
+                    // Idiomatic in real source: a long formatted expression as a
+                    // procedure's final statement.
+                    const isContinuationLine = lineEndsWithContinuation(lineNum - 1);
+
                     // Check if current line is unreachable (BEFORE checking for terminators)
-                    const currentlyTerminated = structureStack.length > 0 && 
+                    const currentlyTerminated = structureStack.length > 0 &&
                                                structureStack[structureStack.length - 1].terminated;
 
-                    if (currentlyTerminated && lines[lineNum]) {
+                    if (!isContinuationLine && currentlyTerminated && lines[lineNum]) {
                         const line = lines[lineNum];
                         const trimmed = line.trim();
                         
@@ -180,8 +215,11 @@ export class UnreachableCodeProvider {
                     }
 
                     // Check for terminators (RETURN/EXIT/HALT)
-                    const terminator = lineTokens.find(t => 
-                        t.type === TokenType.Keyword && 
+                    // #445 — skipped on a continuation line for the same reason: any
+                    // RETURN/EXIT/HALT text there belongs to the statement that began
+                    // on an earlier line and was already accounted for there.
+                    const terminator = isContinuationLine ? undefined : lineTokens.find(t =>
+                        t.type === TokenType.Keyword &&
                         /^(RETURN|EXIT|HALT)$/i.test(t.value)
                     );
 

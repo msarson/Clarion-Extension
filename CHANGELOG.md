@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.3] - Unreleased
 
+**Bug Fixes**
+
+- 🐛 **A `RETURN` split across lines with `|` no longer greys out its own continuation lines as unreachable code** ([#445](https://github.com/msarson/Clarion-Extension/issues/445)): the detector walks physical lines, so a `RETURN` spanning four of them registered the procedure as terminated on the first and then flagged the remaining three as “code after a RETURN” — when they *are* the RETURN. A long formatted expression as a procedure’s final statement is idiomatic Clarion, so this was visible on ordinary source. Continuation lines are now recognised from the tokenizer’s own `LineContinuation` token rather than by scanning text, which matters because Clarion uses the same `|` character as the redirection stop marker and inside a string literal it is not a continuation at all. Genuine unreachable code after a terminator is still detected — pinned by a sentinel test, since the bug-pin alone would pass if the detector were simply switched off.
+
 ---
 
 ### [1.0.2] - 2026-09-06
