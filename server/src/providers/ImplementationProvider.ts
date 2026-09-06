@@ -9,6 +9,7 @@
  */
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { clarionSourceCandidates } from '../utils/ClarionSourceNaming';
 import { Location, Position, Range } from 'vscode-languageserver-protocol';
 import { CancellationToken } from 'vscode-languageserver';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -869,7 +870,11 @@ export class ImplementationProvider {
             if (solutionManager && solutionManager.solution) {
                 for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile);
+                    // #450 — MODULE('x') may omit the extension; the compiler infers
+                    // .clw and redirection masks cannot match a bare name.
+                    const resolved = clarionSourceCandidates(moduleFile)
+                        .map(c => redirectionParser.findFile(c))
+                        .find(r => r?.path && fs.existsSync(r.path));
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLocation = this.searchFileForMethodImplementation(
@@ -1010,7 +1015,10 @@ export class ImplementationProvider {
             if (sm?.solution) {
                 for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(implFileName);
+                    // #450 — same inference for an extension-less implementation target.
+                    const resolved = clarionSourceCandidates(implFileName)
+                        .map(c => redirectionParser.findFile(c))
+                        .find(r => r?.path && fs.existsSync(r.path));
                     if (resolved?.path && fs.existsSync(resolved.path)) {
                         logger.info(`Redirection resolved ${implFileName} → ${resolved.path}`);
                         const implLocation = this.searchFileForMethodImplementation(

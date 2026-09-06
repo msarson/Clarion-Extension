@@ -16,7 +16,7 @@ import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
-import { clarionSourceCandidates } from './ClarionSourceNaming';
+import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -261,9 +261,11 @@ export class CrossFileResolver {
                         t.referencedFile
                     );
 
-                    // Check if this MODULE points to our current file
+                    // Check if this MODULE points to our current file.
+                    // #450 — `MODULE('member')` names member.clw; the comparison has to
+                    // infer the extension or the parent's MAP never matches this file.
                     if (moduleToken?.referencedFile &&
-                        path.basename(moduleToken.referencedFile).toLowerCase() === currentFileName.toLowerCase()) {
+                        moduleTargetMatchesFile(moduleToken.referencedFile, currentFileName)) {
                         logger.info(`✅ Found MODULE('${moduleToken.referencedFile}') pointing to current file`);
 
                         // Find procedure declaration in this MODULE block
@@ -540,7 +542,8 @@ export class CrossFileResolver {
                         t.referencedFile
                     );
                     if (!moduleToken?.referencedFile) continue;
-                    if (path.basename(moduleToken.referencedFile).toLowerCase() !== currentFileName.toLowerCase()) continue;
+                    // #450 — same inference as the sibling check above.
+                    if (!moduleTargetMatchesFile(moduleToken.referencedFile, currentFileName)) continue;
 
                     const moduleStart = moduleBlock.line;
                     const moduleEnd = moduleBlock.finishesAt;

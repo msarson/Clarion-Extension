@@ -1,4 +1,5 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
+import { clarionSourceCandidates } from '../../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
@@ -612,7 +613,13 @@ export class MethodHoverResolver {
             if (solutionManager && solutionManager.solution) {
                 for (const project of projectsOwnerFirst(currentPath)) { // #328 owner-first
                     const redirectionParser = project.getRedirectionParser();
-                    const resolved = redirectionParser.findFile(moduleFile);
+                    // #450 — a CLASS's MODULE('x') attribute may omit the extension;
+                    // the compiler infers .clw. Redirection masks are extension-based,
+                    // so a bare name matches nothing and the implementation half of the
+                    // hover footer silently goes missing. Name as given first.
+                    const resolved = clarionSourceCandidates(moduleFile)
+                        .map(c => redirectionParser.findFile(c))
+                        .find(r => r?.path && fs.existsSync(r.path));
                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                         logger.info(`Found module file via redirection: ${resolved.path} (source: ${resolved.source})`);
                         const implLine = this.searchFileForImplementation(resolved.path, className, methodName, paramCount, declarationSignature);

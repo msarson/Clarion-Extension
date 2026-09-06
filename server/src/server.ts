@@ -105,6 +105,7 @@ import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
+import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -1346,8 +1347,11 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
                 const openMemberToken = openTokens.find(t =>
                     t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
                 );
+                // #450 — MEMBER('name') without an extension names name.clw, so this
+                // comparison must infer it or an edit to the PROGRAM never revalidates
+                // its member modules.
                 if (openMemberToken?.referencedFile &&
-                    path.basename(openMemberToken.referencedFile).toLowerCase() === changedBasename) {
+                    moduleTargetMatchesFile(openMemberToken.referencedFile, changedBasename)) {
                     validateTextDocument(openDoc, 'crossFileUpdate');
                 }
             }
@@ -1361,7 +1365,9 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
             for (const openDoc of documents.all()) {
                 if (openDoc.uri === changedDocument.uri) continue;
                 const openPath = decodeURIComponent(openDoc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                if (path.basename(openPath).toLowerCase() === programBasename) {
+                // #450 — the MEMBER target may carry no extension, so compare through
+                // the same rule or an open PROGRAM is never matched back.
+                if (moduleTargetMatchesFile(programBasename, path.basename(openPath))) {
                     validateTextDocument(openDoc, 'crossFileUpdate');
                 }
             }
