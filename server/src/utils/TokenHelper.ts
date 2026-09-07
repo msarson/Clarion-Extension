@@ -592,6 +592,31 @@ export class TokenHelper {
     }
 
     /**
+     * The `?Name` field-equate token at `line`/`character`, or null.
+     *
+     * Read from the token stream rather than re-scanned off the line, which buys
+     * two things for free. The span INCLUDES the leading `?`, so a cursor on the
+     * sigil itself resolves the control instead of returning nothing —
+     * `getWordRangeAtPosition` classifies `?` as a non-word character, so it
+     * collapses to an empty range there and its caller bails. And a `?` inside a
+     * string literal or a comment is never a `FieldEquateLabel` token, so those
+     * positions can't match without a separate guard.
+     *
+     * The bare `?` anonymous-control marker (`BUTTON('OK'),USE(?)`) is excluded:
+     * it names nothing, so there is no control to resolve.
+     */
+    public static getFieldEquateTokenAt(tokens: Token[], line: number, character: number): Token | null {
+        for (const t of tokens) {
+            if (t.line !== line || t.type !== TokenType.FieldEquateLabel) continue;
+            if (t.value.length <= 1) continue; // bare `?` — anonymous control marker
+            if (t.start <= character && character <= t.start + t.value.length) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    /**
      * True for any callable declaration token (Procedure or Function).
      * In modern Clarion both can return values; the distinction is a legacy
      * tokenizer artifact, so callers asking "is this a callable declaration?"

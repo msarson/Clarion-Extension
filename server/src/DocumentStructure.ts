@@ -2620,6 +2620,35 @@ export class DocumentStructure {
     }
 
     /**
+     * Every control DECLARATION of `?Name` in this document, paired with the
+     * container that owns it.
+     *
+     * Distinct from {@link findControlAll}, which reads the flat token index and so
+     * also returns every *reference* to the name — that index cannot tell a
+     * `USE(?Name)` declaration from a `SELECT(?Name)` use. This walks the
+     * per-structure maps instead, where only tokens inside a container's body are
+     * recorded.
+     *
+     * A control declared in a TOOLBAR or MENUBAR nested inside a WINDOW is recorded
+     * under both containers, so results are de-duplicated by control token; the
+     * outer container wins, since `linkUsesPass` indexes WINDOW/APPLICATION/REPORT
+     * before the nested keywords.
+     */
+    public findControlDeclarations(name: string): Array<{ control: Token; container: Token }> {
+        const key = name.toUpperCase();
+        const out: Array<{ control: Token; container: Token }> = [];
+        const seen = new Set<Token>();
+        for (const [container, perName] of this.fieldEquatesByStructure) {
+            const hit = perName.get(key);
+            if (hit && !seen.has(hit)) {
+                seen.add(hit);
+                out.push({ control: hit, container });
+            }
+        }
+        return out;
+    }
+
+    /**
      * What does this USE keyword token's argument resolve to? Returns the linked
      * FieldEquateLabel / Label / Variable / StructurePrefix-qualified field token
      * set by `linkUsesPass`. Returns undefined for the `USE(?)` empty-arg idiom
