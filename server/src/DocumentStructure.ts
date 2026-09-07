@@ -1997,9 +1997,14 @@ export class DocumentStructure {
         let isMethodImpl = false;
         let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        // Check if prevToken is a label, variable, attribute, or structure field that might be part of a method name
+        // Check if prevToken is a label, variable, attribute, or structure field that might be part of a method name.
+        // StructurePrefix counts too: a method name carrying a SINGLE colon (e.g. `Free:qLegend` in
+        // `GraphLegendClass.Free:qLegend PROCEDURE`) is captured whole by StructurePrefix's
+        // `Prefix:Field` pattern, so it arrives here as the prevToken. Without it such a line never
+        // enters this block at all and falls through to GlobalProcedure named just the colon segment.
         if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable ||
-            prevToken?.type === TokenType.Attribute || prevToken?.type === TokenType.StructureField) {
+            prevToken?.type === TokenType.Attribute || prevToken?.type === TokenType.StructureField ||
+            prevToken?.type === TokenType.StructurePrefix) {
             // Check if the previous token contains dots (entire qualified name in one token)
             if (prevToken.value.includes(".")) {
                 // The previous token itself contains dots (e.g., "IConnection.CloseSocket" for 3-part)
@@ -2015,27 +2020,48 @@ export class DocumentStructure {
                 // Build the full name by looking back at previous tokens on the same line
                 // Collect all tokens before PROCEDURE that are part of the qualified name
                 const nameParts: string[] = [prevToken.value];
+                let segmentStart = prevToken.start;
                 let lookbackIndex = index - 2;
-                
+
+                const isNamePartToken = (t: Token) =>
+                    t.type === TokenType.Label || t.type === TokenType.Variable ||
+                    t.type === TokenType.Attribute || t.type === TokenType.StructurePrefix;
+
                 // Look back to collect ClassName.InterfaceName.MethodName pattern
                 while (lookbackIndex >= 0) {
                     const lookbackToken = this.tokens[lookbackIndex];
-                    
+
                     // Stop if we're on a different line
                     if (lookbackToken.line !== token.line) break;
-                    
-                    // Stop if we hit a non-name token
-                    if (lookbackToken.type !== TokenType.Label && 
-                        lookbackToken.type !== TokenType.Variable && 
-                        lookbackToken.type !== TokenType.Attribute) {
+
+                    // A bare ':' immediately touching the segment being built continues a
+                    // chained colon-qualified identifier (e.g. "My:My:Method") rather than
+                    // ending the name. StructurePrefix's own pattern only captures ONE colon
+                    // segment ("Prefix:Field"), so a second colon in the chain gets tokenized
+                    // as a stray Delimiter — glue it (and the piece before it) back onto the
+                    // segment instead of letting it stop the walk.
+                    if (lookbackToken.type === TokenType.Delimiter && lookbackToken.value === ':' &&
+                        lookbackToken.start + 1 === segmentStart) {
+                        const before = lookbackIndex >= 1 ? this.tokens[lookbackIndex - 1] : undefined;
+                        if (before && before.line === token.line && isNamePartToken(before) &&
+                            before.start + before.value.length === lookbackToken.start) {
+                            nameParts[0] = before.value + ':' + nameParts[0];
+                            segmentStart = before.start;
+                            lookbackIndex -= 2;
+                            continue;
+                        }
                         break;
                     }
-                    
+
+                    // Stop if we hit a non-name token
+                    if (!isNamePartToken(lookbackToken)) break;
+
                     // Add this part to the beginning
                     nameParts.unshift(lookbackToken.value);
+                    segmentStart = lookbackToken.start;
                     lookbackIndex--;
                 }
-                
+
                 // If we collected more than one part, it's a method implementation
                 if (nameParts.length > 1) {
                     fullProcedureName = nameParts.join('.');
