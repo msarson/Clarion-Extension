@@ -35,14 +35,32 @@ export class ChainedPropertyResolver {
     private memberLocator = new MemberLocatorService();
 
     /**
-     * Extracts the rightmost SELF/PARENT chain from a full line prefix.
-     * Handles assignment expressions like "SELF.Order.X &= SELF.Primary"
-     * where we only want "SELF.Primary" (the rightmost chain).
+     * Extracts the rightmost member-access chain from a full line prefix.
+     *
+     * Anchors on SELF/PARENT when one is present, so an assignment expression
+     * like "SELF.Order.X &= SELF.Primary" yields only "SELF.Primary" (the
+     * rightmost chain).
+     *
+     * Without such an anchor the rightmost run of dot-separated identifiers is
+     * taken instead, so a chain rooted on an ordinary typed variable survives
+     * whatever statement context sits to its left ("rc = Obj.Prop" -> "Obj.Prop",
+     * "Foo(Obj.Prop" -> "Obj.Prop"). Callers gate the chained-resolution path on
+     * the result being a pure chain, so leaving that context attached silently
+     * routes a multi-segment access to the single-segment fallback, where it
+     * cannot resolve. The character class deliberately mirrors that caller-side
+     * pure-chain test, so anything extracted here is guaranteed to satisfy it.
+     *
+     * Anchored at end-of-string and requiring an identifier start character, so a
+     * prefix not ending in an identifier (e.g. "CLIP(a.b)") is returned unchanged
+     * rather than mangled.
      */
     public static extractChain(rawBeforeDot: string): string {
         const matches = [...rawBeforeDot.matchAll(/\b(self|parent)\b/gi)];
-        if (matches.length === 0) return rawBeforeDot;
-        return rawBeforeDot.substring(matches[matches.length - 1].index!);
+        if (matches.length > 0) {
+            return rawBeforeDot.substring(matches[matches.length - 1].index!);
+        }
+        const chain = rawBeforeDot.match(/[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/);
+        return chain ? chain[0] : rawBeforeDot;
     }
 
     /**
