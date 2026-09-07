@@ -37,6 +37,7 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
+import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -173,6 +174,22 @@ export class HoverProvider {
                 const sectionArg = TokenHelper.getIncludeSectionArgStringToken(preTokens, position.line, position.character);
                 if (sectionArg) {
                     return this.buildSectionRefHover(sectionArg.section, sectionArg.includeFile, document);
+                }
+
+                // A `?Name` field equate — a window control's own label. Like the two
+                // above, this must run BEFORE the context builder: `?` is a non-word
+                // character, so `getWordRangeAtPosition` either drops the sigil (leaving
+                // a bare `Cancel`, which the ladder below then matches against any
+                // unrelated EQUATE or keyword of that name) or, with the cursor on the
+                // `?` itself, returns an empty range and no hover at all. Resolving from
+                // the token keeps both cases on the control.
+                const feqToken = TokenHelper.getFieldEquateTokenAt(preTokens, position.line, position.character);
+                if (feqToken) {
+                    // Deliberately terminal: a `?Name` resolving to no control in scope
+                    // returns null rather than falling through. Nothing in the ladder
+                    // below models controls, so any match it finds on the bare name is a
+                    // coincidence rather than an answer.
+                    return this.buildFieldEquateHover(feqToken, document, position);
                 }
             }
 
@@ -921,6 +938,158 @@ export class HoverProvider {
                 sectionStr.line, sectionStr.start,
                 sectionStr.line, sectionStr.start + sectionStr.value.length)
         };
+    }
+
+    /**
+     * Hover card for a `?Name` field equate: the control's own type keyword, the
+     * structure that owns it, its declaration line, and a link to it.
+     *
+     * Scoped to the WINDOW/APPLICATION/REPORT structures declared in the CURRENT
+     * procedure, the same scope `?` completion offers — a field equate belongs to
+     * the procedure whose window declares it, so a same-named control elsewhere in
+     * the file is a different control, not this one. Returns null when the name
+     * resolves to nothing in that scope; that reference doesn't compile, and
+     * pointing at some other procedure's control instead would be a guess.
+     */
+    private buildFieldEquateHover(feqToken: Token, document: TextDocument, position: Position): Hover | null {
+        const structure = this.tokenCache.getStructure(document);
+
+        // 1. The usual case: a window declared in the enclosing procedure. The same
+        //    `?Name` — `?Cancel` above all — recurs across unrelated windows, so the
+        //    procedure's own window is the only reading that is certain.
+        for (const proc of this.enclosingProcedures(structure, position.line)) {
+            for (const win of structure.getContainerStructuresInProcedure(proc)) {
+                const hit = structure.findControl(feqToken.value, win);
+                if (hit) {
+                    return this.renderFieldEquateCard(feqToken, hit, win, document, structure);
+                }
+            }
+        }
+
+        // 2. Not the enclosing procedure's — but a window can be declared in a class
+        //    or in another source entirely, so absence here is not absence. A
+        //    declaration found elsewhere in THIS file is offered as a candidate and
+        //    labelled with its owner, never as the current procedure's control.
+        const declarations = structure.findControlDeclarations(feqToken.value);
+        if (declarations.length === 1) {
+            return this.renderFieldEquateCard(feqToken, declarations[0].control, null, document, structure);
+        }
+        if (declarations.length > 1) {
+            // The same name across several windows is ordinary Clarion. Listing the
+            // candidates is the honest answer; picking one would be a coin toss.
+            const lines: string[] = [
+                `**${feqToken.value}** — \`FIELD EQUATE\``,
+                `Declared in ${declarations.length} windows in this file — none in this procedure:`
+            ];
+            for (const { control } of declarations) {
+                const { controlType } = structure.getControlContextAt(control.line, control.start);
+                const owner = this.enclosingScopeName(structure, control.line);
+                const what = [controlType, owner ? `in \`${owner}\`` : null].filter(Boolean).join(' ');
+                lines.push(`- ${what ? what + ' — ' : ''}${this.formatter.locationLink(document.uri, control.line)}`);
+            }
+            return {
+                contents: { kind: 'markdown', value: lines.join('\n\n') },
+                range: Range.create(
+                    feqToken.line, feqToken.start,
+                    feqToken.line, feqToken.start + feqToken.value.length)
+            };
+        }
+
+        // 3. Declared in another source, or not at all. Either way this file cannot
+        //    say which — and no card beats a confident wrong one.
+        return null;
+    }
+
+    /**
+     * Procedure/method tokens whose windows a `?Name` on `line` could refer to,
+     * innermost first.
+     *
+     * The scope chain matters because of the ABC shape: a generated procedure holds
+     * its WINDOW in local data and its event handling in the methods of a locally
+     * declared `WindowManager` subclass. A `?Name` inside one of those methods is
+     * outside the method's own line range, so the method alone never resolves it —
+     * `ScopeResolver` links the method to the procedure whose local data declared
+     * its CLASS, and that is the procedure holding the window.
+     */
+    private enclosingProcedures(structure: ReturnType<TokenCache['getStructure']>, line: number): Token[] {
+        const out: Token[] = [];
+        const seen = new Set<Token>();
+        const push = (t: Token | null | undefined) => {
+            if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+        };
+
+        let node: ScopeNode | null;
+        try {
+            node = structure.getScopeResolver().resolveScopeAt(line);
+        } catch {
+            return out;
+        }
+        for (let n: ScopeNode | null = node; n; n = n.parent) {
+            if (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method) {
+                push(n.token);
+            }
+            push(n.declaringProcedure?.token);
+        }
+        return out;
+    }
+
+    /**
+     * The card itself. `container` is the owning WINDOW/APPLICATION/REPORT when the
+     * control was resolved inside the current procedure; null when it was found
+     * elsewhere in the file, which the card then says outright.
+     */
+    private renderFieldEquateCard(
+        feqToken: Token,
+        declToken: Token,
+        container: Token | null,
+        document: TextDocument,
+        structure: ReturnType<TokenCache['getStructure']>
+    ): Hover {
+        // The control keyword (BUTTON/ENTRY/LIST/…) is read at the DECLARATION's
+        // position, not the cursor's — the cursor is usually on a reference, where
+        // there is no control keyword to find.
+        const { controlType } = structure.getControlContextAt(declToken.line, declToken.start);
+
+        const lines: string[] = [
+            controlType ? `**${declToken.value}** — \`${controlType}\`` : `**${declToken.value}**`
+        ];
+
+        if (container) {
+            lines.push(`🔷 ${container.value.toUpperCase()} control`);
+        } else {
+            const owner = this.enclosingScopeName(structure, declToken.line);
+            lines.push(owner
+                ? `🔷 Control declared in \`${owner}\`, not in this procedure`
+                : '🔷 Control declared elsewhere in this file, not in this procedure');
+        }
+
+        const declLine = document.getText({
+            start: { line: declToken.line, character: 0 },
+            end: { line: declToken.line, character: Number.MAX_VALUE }
+        }).trim();
+        if (declLine) {
+            lines.push('```clarion\n' + declLine + '\n```');
+        }
+        lines.push(this.formatter.locationLink(document.uri, declToken.line));
+
+        return {
+            contents: { kind: 'markdown', value: lines.join('\n\n') },
+            range: Range.create(
+                feqToken.line, feqToken.start,
+                feqToken.line, feqToken.start + feqToken.value.length)
+        };
+    }
+
+    /** Name of the procedure/method enclosing `line`, for labelling a control found outside the current one. */
+    private enclosingScopeName(structure: ReturnType<TokenCache['getStructure']>, line: number): string | null {
+        try {
+            // A scope node's token is the PROCEDURE keyword; `label` carries the name
+            // (dotted, for a method implementation) — same accessor CodeLens uses.
+            const t = structure.getScopeResolver().resolveScopeAt(line).token;
+            return t ? (t.label ?? t.value) : null;
+        } catch {
+            return null;
+        }
     }
 
     /**
