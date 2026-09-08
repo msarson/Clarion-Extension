@@ -93,6 +93,14 @@ suite('Issue #343 — INCLUDE section-argument navigation', () => {
         assert.ok(text.includes(':4'), `card must carry the 1-based section line; got ${text.slice(0, 200)}`);
     });
 
+    test('hover on the section name renders the location as a clickable link, not plain text', async () => {
+        const hover = await new HoverProvider().provideHover(makeDoc(), posOn(1, 'SmokeSection'));
+        assert.ok(hover, 'expected a hover card');
+        const text = JSON.stringify(hover!.contents);
+        assert.ok(/\[sections\.clw:4\]\(file:\/\/\/.*sections\.clw#L4\)/i.test(text),
+            `section location must be a clickable markdown link, not plain text; got ${text.slice(0, 300)}`);
+    });
+
     test('hover on an unknown section still shows a card with the not-found note', async () => {
         const hover = await new HoverProvider().provideHover(makeDoc(), posOn(2, 'NoSuchSection'));
         assert.ok(hover, 'expected a hover card');

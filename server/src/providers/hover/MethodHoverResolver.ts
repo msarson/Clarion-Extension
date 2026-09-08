@@ -258,15 +258,15 @@ export class MethodHoverResolver {
         if (implLocation) {
             logger.info(`✅ Found implementation at ${implLocation}`);
             const lastColon = implLocation.lastIndexOf(':');
-            const implFile = path.basename(implLocation.substring(0, lastColon));
-            const implLine = parseInt(implLocation.substring(lastColon + 1)) + 1;
+            const implUri = implLocation.substring(0, lastColon);
+            const implLine0 = parseInt(implLocation.substring(lastColon + 1));
             return {
                 contents: {
                     kind: 'markdown',
                     value: [
                         `**${className}.${currentToken.label}** (Method Declaration)`,
                         ``,
-                        `${implFile}:${implLine}`
+                        this.formatter.locationLink(implUri, implLine0)
                     ].join('\n')
                 }
             };
