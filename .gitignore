@@ -38,3 +38,8 @@ server/src/generated/
 # local diagnostic captures
 *.cpuprofile
 *.cpuprofile.txt
+
+# ViewJoinTest fixture build output (compiler-verified fixture; artifacts are not source)
+test-programs/ViewJoinTest/obj/
+test-programs/ViewJoinTest/map/
+test-programs/ViewJoinTest/*.exe
