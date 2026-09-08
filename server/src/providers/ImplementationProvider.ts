@@ -368,13 +368,9 @@ export class ImplementationProvider {
         const routineToken = TokenHelper.findScopedRoutineToken(structure, routineName, position.line);
         if (routineToken) {
             logger.info(`✅ Found routine at line ${routineToken.line}`);
-            return Location.create(
-                document.uri,
-                {
-                    start: { line: routineToken.line, character: 0 },
-                    end: { line: routineToken.line, character: routineToken.value.length }
-                }
-            );
+            // `routineToken.value` is "ROUTINE"; the routine's name is on `.label`. See
+            // TokenHelper.getRoutineLabelRange.
+            return Location.create(document.uri, TokenHelper.getRoutineLabelRange(routineToken));
         }
 
         return null;

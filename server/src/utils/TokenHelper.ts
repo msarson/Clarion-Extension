@@ -261,6 +261,28 @@ export class TokenHelper {
     }
 
     /**
+     * The range of a ROUTINE's LABEL, given the routine token.
+     *
+     * `findScopedRoutineToken` and `DocumentStructure.findRoutines` return the ROUTINE **keyword**
+     * token, whose `value` is `"ROUTINE"` and whose `label` is the routine's name. Building a range
+     * from `routineToken.value.length` therefore measures the keyword, not the label — and the three
+     * providers that navigate to a routine had each open-coded it slightly differently, producing
+     * three different wrong ranges for `PrepareProcedure ROUTINE`:
+     *
+     *     ReferencesProvider       cols 17-24   "ROUTINE"            (start and length both the keyword)
+     *     DefinitionProvider       cols  0-7    "Prepare"            (start right, length the keyword)
+     *     ImplementationProvider   cols  0-7    "Prepare"            (same)
+     *     correct                  cols  0-16   "PrepareProcedure"
+     *
+     * A Clarion label must begin in column 1, so the label starts at character 0 by language rule
+     * rather than by observation.
+     */
+    public static getRoutineLabelRange(routineToken: Token): Range {
+        const labelLength = (routineToken.label ?? routineToken.value).length;
+        return Range.create(routineToken.line, 0, routineToken.line, labelLength);
+    }
+
+    /**
      * #321 — resolve a GOTO target: a statement label visible from `cursorLine`
      * under GOTO's scope rule (Language Reference): the target must be the
      * label of another EXECUTABLE statement inside the currently executing
