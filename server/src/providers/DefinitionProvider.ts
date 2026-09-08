@@ -1695,7 +1695,9 @@ export class DefinitionProvider {
         }
 
         logger.info(`✅ Found ROUTINE "${routineName}" at line ${routineToken.line}`);
-        return Location.create(document.uri, Range.create(routineToken.line, 0, routineToken.line, routineToken.value.length));
+        // `routineToken.value` is "ROUTINE"; the routine's name is on `.label`. See
+        // TokenHelper.getRoutineLabelRange.
+        return Location.create(document.uri, TokenHelper.getRoutineLabelRange(routineToken));
     }
 
 }
