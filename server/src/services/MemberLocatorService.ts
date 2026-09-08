@@ -988,6 +988,19 @@ export class MemberLocatorService {
         if (!(t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0)) {
             return false;
         }
+
+        // A field nested inside a GROUP/QUEUE/FILE/RECORD (t.parent set) is only
+        // reachable via its PRE()/dot qualifier — never as a bare name. Mirrors
+        // SymbolFinderService.findGlobalVariableInCurrentFile's `t.parent === undefined`
+        // exclusion for the exact same reason. Without this, a same-file lookup for a
+        // GROUP,TYPE field correctly comes up empty (fields need qualification) and falls
+        // through to this cross-file/include-chain walk — which had no such guard, so it
+        // matched the first same-named field in ANY unrelated structure reachable via the
+        // INCLUDE chain. Reported live: hovering a field's own declaration inside one
+        // GROUP,TYPE resolved to an unrelated same-named field of a completely different
+        // GROUP,TYPE several includes away.
+        if (t.parent !== undefined) return false;
+
         // A CLASS/INTERFACE member (property or method prototype) is only reachable via
         // qualified access (SELF.X / instance.X) — Clarion has no bare/global path to it,
         // even though its declaration token is column-0 and procedure-shaped exactly like a

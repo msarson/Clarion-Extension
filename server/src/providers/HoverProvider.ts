@@ -269,6 +269,14 @@ export class HoverProvider {
                 mark('globalVar(noScope)');
                 if (globalVarHover) return globalVarHover;
 
+                // Cursor may be ON the declaration line of a module/global-scope
+                // structure field (e.g. a field inside a file-scope `GROUP,TYPE` in
+                // an .inc) — not a bare-name reference, so findGlobalVariableHover's
+                // PRE()/dot-qualifier exclusion above correctly doesn't match it.
+                const structureFieldHover = this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
+                mark('structureFieldDecl(noScope)');
+                if (structureFieldHover) return structureFieldHover;
+
                 logger.info('No scope found and no global variable found - cannot provide hover');
 
                 const classTypeHover = await this.checkClassTypeHover(word, document);

@@ -77,6 +77,32 @@ export class VariableHoverResolver {
     }
 
     /**
+     * Find and format hover for a module/global-scope structure field's OWN
+     * declaration line — a col-0 Label whose parent token is a GROUP/QUEUE/FILE/
+     * RECORD, declared outside any PROCEDURE (e.g. a field inside a module-level
+     * `SomeGroupType GROUP,TYPE` in an .inc file). `findLocalVariable`'s
+     * "exact token under the cursor wins" fast path only fires when a
+     * `currentScope` (PROCEDURE/ROUTINE) exists, so a field declared at true
+     * file scope never reaches it; `findGlobalVariableHover` also correctly
+     * excludes it from BARE-name lookups (structure fields need their
+     * PRE()/dot qualifier), but the cursor here is ON the declaration, not
+     * doing a bare-name reference. Without this, hovering such a field's own
+     * declaration showed nothing.
+     */
+    findStructureFieldDeclarationHover(word: string, tokens: Token[], document: TextDocument, hoverLine: number): Hover | null {
+        const symbolInfo = this.symbolFinder.findStructureField(word, tokens, hoverLine, document);
+        if (!symbolInfo) return null;
+
+        logger.info(`✅ Found structure field declaration for ${word} at line ${symbolInfo.location.line}`);
+        const variableInfo: VariableInfo = {
+            type: symbolInfo.type,
+            line: symbolInfo.location.line,
+            parentStructure: TokenHelper.getEnclosingDataStructure(symbolInfo.token, this.tokenCache.getStructure(document))
+        };
+        return this.formatter.formatVariable(word, variableInfo, symbolInfo.token, document, hoverLine);
+    }
+
+    /**
      * Find and format hover for a module-local variable
      */
     findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Hover | null {
