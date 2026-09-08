@@ -1759,18 +1759,25 @@ export class DocumentStructure {
         // Find the END statement for this MAP
         let endIndex = -1;
         let depth = 1;
+        // Innermost enclosing structure, so a declaration inside MODULE('x.clw') is
+        // parented to that MODULE and not to the outer MAP. Consumers rely on the
+        // distinction: a bare entry parented to the MAP is a self-declaration (#338),
+        // one parented to a MODULE is implemented in the file that MODULE names.
+        const structureStack: Token[] = [mapToken];
         
         for (let i = mapIndex + 1; i < this.tokens.length; i++) {
             const token = this.tokens[i];
             
             if (token.type === TokenType.Structure) {
                 depth++;
+                structureStack.push(token);
             } else if (token.type === TokenType.EndStatement) {
                 depth--;
                 if (depth === 0) {
                     endIndex = i;
                     break;
                 }
+                if (structureStack.length > 1) structureStack.pop();
             }
             
             // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
@@ -1809,6 +1816,43 @@ export class DocumentStructure {
                 token.label = token.value;
                 
                 if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
+            }
+            // Pattern 3: BARE declaration - a name alone on its line, with no parameter
+            // list at all. This is the shape template-generated apps emit for
+            // parameterless procedures:
+            //
+            //     MAP
+            //       MODULE('demoleg002.clw')
+            //         BrowseInvoice
+            //       END
+            //     END
+            //
+            // Patterns 1 and 2 both key off a '(', so a bare name matched neither and
+            // kept its tokenized type (Variable) with no subType. Every consumer that
+            // asks "is this a MAP declaration?" tests subType against MapProcedure, so
+            // the declaration was invisible to all of them: findMapDeclarationInMemberFile
+            // located the right MODULE block, found zero declarations inside it, and
+            // missing-map-declaration fired on a procedure that IS declared (#462).
+            // A MAP body holds only prototypes and MODULE blocks, so a lone identifier
+            // here is a prototype; requiring it to be alone on its line keeps attributes
+            // and multi-token forms out.
+            else if ((token.type === TokenType.Variable ||
+                      token.type === TokenType.Label ||
+                      token.type === TokenType.Function) &&
+                     token.subType === undefined &&
+                     !isAttributeKeyword(token.value) &&
+                     !/^(MODULE|MAP|END|PROCEDURE|FUNCTION)$/i.test(token.value) &&
+                     !token.value.startsWith("!") &&
+                     /^[A-Za-z_][A-Za-z0-9_:.]*$/.test(token.value) &&
+                     (this.tokens[i - 1] === undefined || this.tokens[i - 1].line !== token.line) &&
+                     (this.tokens[i + 1] === undefined || this.tokens[i + 1].line !== token.line)) {
+                const owner = structureStack[structureStack.length - 1];
+                token.subType = TokenType.MapProcedure;
+                token.label = token.value;
+                token.parent = owner;
+                this.addChildOnce(owner, token);
+
+                if (DOCSTRUCT_TRACE) logger.info(`Found MAP bare procedure declaration: ${token.value} at line ${token.line} inside ${owner.value.toUpperCase()}`);
             }
         }
     }
