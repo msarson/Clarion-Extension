@@ -19,6 +19,24 @@ Tests cross-file scope resolution, including:
 - `server/src/test/SolutionBased.CrossFileScope.test.ts`
 - `server/src/test/CrossFileScope.test.ts` (TEST 7 only)
 
+### UpdatePYAccount_IBSCommon.clw — a sample without its MEMBER parent
+
+This is a real generated ABC module copied in **without the PROGRAM it belongs to**.
+It declares `MEMBER('IBSCommon.clw')`, `IBSCommon.clw` is not in this suite, and the
+file is not listed in `CrossFileScope.cwproj`.
+
+So the 13 `'GlobalRequest' is not declared in this file.` /
+`'GlobalResponse' is not declared in this file.` diagnostics it produces are
+**expected and correct**: those are ABC framework globals declared in the real
+`IBSCommon` PROGRAM, and with no parent to resolve there is nothing for the
+undeclared-variable check's MEMBER-parent tier to find. They are not a regression of
+[#334](https://github.com/msarson/Clarion-Extension/issues/334) (globals pulled in via
+`INCLUDE(...),ONCE`, fixed separately) and not an instance of
+[#396](https://github.com/msarson/Clarion-Extension/issues/396).
+
+Written down because the file reads as an ordinary real-world sample, and working out
+that the missing parent *is* the point has cost more than one reader an hour.
+
 ## Structure
 
 Each test project has its own subfolder with:
