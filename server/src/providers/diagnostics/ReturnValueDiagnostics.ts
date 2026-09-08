@@ -4,7 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
-import { selectBestMemberOverload, OverloadCandidate } from '../../utils/ClassMemberResolver';
+import { selectBestMemberOverload, OverloadCandidate, ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -909,7 +909,16 @@ export async function validateDiscardedReturnValues(
     // `My:My:Method` — see the tokenizer's own Label pattern), so both groups
     // must allow it, or a colon-named local/member silently falls out of this
     // whole diagnostic.
-    const DOTCALL_PREFIX = /^([A-Za-z_][A-Za-z0-9_:]*)\.([A-Za-z_][A-Za-z0-9_:]*)/;
+    //
+    // Group 1 captures the WHOLE receiver chain (one or more "segment." runs),
+    // not just the first segment — a call reached through an intermediate field,
+    // e.g. a QUEUE holding a reference to a CLASS instance (`RecordQ.Item.Recalculate(...)`),
+    // used to parse as objectName="RecordQ", methodName="Item", leaving ".Recalculate(...)"
+    // as unconsumed text that failed the "anything after the closing paren?" guard
+    // below and silently skipped the entire line. See the chain walk after the root
+    // class is resolved, which mirrors ChainedPropertyResolver.resolveFinalClassName's
+    // hover-side handling of the same shape.
+    const DOTCALL_PREFIX = /^((?:[A-Za-z_][A-Za-z0-9_:]*\.)+)([A-Za-z_][A-Za-z0-9_:]*)/;
 
     // #158 Phase B Priority 1 — per-call-site memoization. Pre-#158 this loop
     // called `memberLocator.findMemberInClass` / `resolveDotAccess` once PER
@@ -1082,7 +1091,11 @@ export async function validateDiscardedReturnValues(
         const prefixMatch = stripped.match(DOTCALL_PREFIX);
         if (!prefixMatch) continue;
 
-        const objectName = prefixMatch[1];
+        // prefixMatch[1] is the chain-with-trailing-dot ("RecordQ.Item." or just "St.");
+        // drop the trailing dot and split to get every segment before the method name.
+        const chainSegments = prefixMatch[1].slice(0, -1).split('.');
+        const objectName = chainSegments[0];
+        const intermediateSegments = chainSegments.slice(1); // [] for a plain object.method call
         const methodName = prefixMatch[2];
         const afterMatch = stripped.substring(prefixMatch[0].length).trimStart();
 
@@ -1161,6 +1174,31 @@ export async function validateDiscardedReturnValues(
             className = typeInfo.typeName;
         }
 
+        // Chain walk: for `RecordQ.Item.Recalculate`, intermediateSegments=["Item"] sits
+        // between the resolved root class (RecordQ's QUEUE type) and the final method —
+        // walk each one to the class that actually owns the final member. Uncached
+        // (unlike the root/type and class-member memos above): only chains deeper than
+        // the common object.method case pay this, and findMemberInClass already handles
+        // CLASS/QUEUE/GROUP intermediate fields (proven by ChainedPropertyResolver's
+        // identical hover-side walk).
+        let chainBroken = false;
+        for (const segmentName of intermediateSegments) {
+            const segMemberInfo = await memberLocator.findMemberInClass(className, segmentName, document);
+            if (!segMemberInfo) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: chain segment "${segmentName}" not found in "${className}" (${objectName}.${methodName})`);
+                chainBroken = true;
+                break;
+            }
+            const nextClass = ClassMemberResolver.extractClassName(segMemberInfo.type);
+            if (!nextClass) {
+                logger.debug(`🔍 Line ${lineIdx + 1}: chain segment "${segmentName}" type "${segMemberInfo.type}" is not navigable`);
+                chainBroken = true;
+                break;
+            }
+            className = nextClass;
+        }
+        if (chainBroken) continue;
+
         let typeStr: string | null = null;
         const members = await getClassMembers(className);
         if (members) {
@@ -1176,7 +1214,10 @@ export async function validateDiscardedReturnValues(
             // GROUP/QUEUE types), memoized per (obj|method|paramCount|selfContext).
             fallbackSites++;
             const selfContext = isSelfOrParent ? (range.selfClassName ?? '') : '';
-            const cacheKey = `${objUpper}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
+            // Keyed by the resolved (possibly chain-walked) class, not objUpper: two
+            // chains can share a root name but end at different classes (e.g.
+            // Holder.RefA.Foo vs Holder.RefB.Foo), and objUpper alone would collide them.
+            const cacheKey = `${className.toUpperCase()}|${methodName.toUpperCase()}|${paramCount}|${selfContext}`;
 
             let memberInfoPromise = memberCache.get(cacheKey);
             if (!memberInfoPromise) {
@@ -1208,7 +1249,7 @@ export async function validateDiscardedReturnValues(
                 start: { line: lineIdx, character: colStart >= 0 ? colStart : 0 },
                 end: { line: lineIdx, character: colStart + stripped.length }
             },
-            message: `Return value of '${objectName}.${methodName}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
+            message: `Return value of '${prefixMatch[0]}' is discarded. Capture the return value or add the PROC attribute to the declaration to suppress this warning.`,
             source: 'clarion'
         });
     }
