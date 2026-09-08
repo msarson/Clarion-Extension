@@ -856,9 +856,7 @@ export class HoverProvider {
             const hoverMarkdown = [
                 `**${info.name}** — ${typeLabel}`,
                 ``,
-                `📦 Defined in \`${fileName}\` at line ${info.line + 1}${parentLine}`,
-                ``,
-                `*(F12 to navigate to definition)*`
+                `📦 Defined in ${this.formatter.locationLink(info.filePath, info.line)}${parentLine}`
             ].join('\n');
 
             return {
@@ -928,7 +926,7 @@ export class HoverProvider {
         const loc = findSectionLocation(includeFile, sectionName, document.uri);
         const lines: string[] = [`**SECTION** \`'${sectionName}'\` — \`${includeFile}\``];
         if (loc) {
-            lines.push(`Resolves to: \`${loc.path}:${loc.line + 1}\``);
+            lines.push(`Resolves to: ${this.formatter.locationLink(loc.path, loc.line)}`);
         } else {
             lines.push(`⚠️ Section not found in the resolved include`);
         }
@@ -1253,7 +1251,7 @@ export class HoverProvider {
             const implementors = this.tokenCache.getStructure(document).getImplementors(ifaceName);
             if (implementors.length > 0) {
                 const list = implementors
-                    .map(c => `- \`${c.label ?? c.value}\` (line ${c.line + 1})`)
+                    .map(c => `- \`${c.label ?? c.value}\` — ${this.formatter.locationLink(document.uri, c.line)}`)
                     .join('\n');
                 implementorsFooter =
                     `\n\n**${implementors.length} class${implementors.length === 1 ? '' : 'es'} implement${implementors.length === 1 ? 's' : ''} this interface in this file:**\n${list}`;

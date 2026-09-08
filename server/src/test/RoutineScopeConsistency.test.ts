@@ -58,12 +58,12 @@ suite('Routine scoping — hover + Ctrl+F12 agree with F12 (#264)', () => {
             ? (hover!.contents as { value: string }).value
             : String(hover!.contents);
         assert.ok(
-            text.includes('Line 11'),
-            `hover should point at OtherProc's routine (display Line 11); got: ${text.replace(/\n/g, ' | ')}`
+            text.includes('#L11'),
+            `hover should point at OtherProc's routine (display #L11); got: ${text.replace(/\n/g, ' | ')}`
         );
         assert.ok(
-            !text.includes('Line 4'),
-            `hover must NOT point at MyProc's routine (display Line 4); got: ${text.replace(/\n/g, ' | ')}`
+            !text.includes('#L4'),
+            `hover must NOT point at MyProc's routine (display #L4); got: ${text.replace(/\n/g, ' | ')}`
         );
     });
 
@@ -92,7 +92,7 @@ suite('Routine scoping — hover + Ctrl+F12 agree with F12 (#264)', () => {
         const text = typeof hover!.contents === 'object' && 'value' in hover!.contents
             ? (hover!.contents as { value: string }).value
             : String(hover!.contents);
-        assert.ok(text.includes('Line 4'), `MyProc's DO should show Line 4; got: ${text.replace(/\n/g, ' | ')}`);
+        assert.ok(text.includes('#L4'), `MyProc's DO should show #L4; got: ${text.replace(/\n/g, ' | ')}`);
 
         const impl = await new ImplementationProvider().provideImplementation(doc, { line: 2, character: 8 });
         assert.ok(impl, 'Ctrl+F12 in MyProc should resolve');

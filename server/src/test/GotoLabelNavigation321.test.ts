@@ -151,4 +151,17 @@ suite('GOTO statement labels — FAR/F12/hover (#321)', () => {
         assert.ok(text.includes(`${PROCA_LABEL_LINE + 1}`),
             `hover must cite the label's line ${PROCA_LABEL_LINE + 1}; got:\n${text}`);
     });
+
+    test('hover on the GOTO target renders its line as a clickable link, not plain text', async () => {
+        const doc = makeDoc();
+        const provider = new HoverProvider();
+        const hover = await provider.provideHover(doc, pos(PROCA_GOTO_LINE, SOURCE, 'Snag', 1));
+
+        assert.ok(hover, 'hover on GOTO target must resolve');
+        const contents = (hover as { contents: { value?: string } | string }).contents;
+        const text = typeof contents === 'string' ? contents : (contents.value ?? '');
+        const expectedLink = `[goto321.clw:${PROCA_LABEL_LINE + 1}](${URI}#L${PROCA_LABEL_LINE + 1})`;
+        assert.ok(text.includes(expectedLink),
+            `label location must be a clickable markdown link, not plain text; got:\n${text}`);
+    });
 });
