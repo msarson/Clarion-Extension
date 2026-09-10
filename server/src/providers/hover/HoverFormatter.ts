@@ -49,6 +49,36 @@ export interface ClassMemberInfo {
     line: number;
     file: string;
     isInterface?: boolean;
+    structureType?: 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
+}
+
+/**
+ * Names a member the way its owning structure does: a CLASS has properties and
+ * methods, an INTERFACE has methods, and a QUEUE/GROUP has fields — calling a
+ * queue field a "Class Property" misreports what the reader is looking at.
+ *
+ * "Field" matches the noun already used for structure members elsewhere in
+ * hover (`**<Type> Field:** <name>` in StructureFieldResolver).
+ *
+ * Falls back to the previous CLASS/INTERFACE-only wording when the owner kind
+ * is unknown, so producers that don't set it are unaffected.
+ */
+export function describeMemberOwner(
+    structureType: 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE' | undefined,
+    isInterface: boolean | undefined,
+    isMethod: boolean
+): { category: string; noun: string } {
+    const kind = structureType ?? (isInterface ? 'INTERFACE' : 'CLASS');
+    switch (kind) {
+        case 'QUEUE':
+            return { category: 'Queue', noun: isMethod ? 'Method' : 'Field' };
+        case 'GROUP':
+            return { category: 'Group', noun: isMethod ? 'Method' : 'Field' };
+        case 'INTERFACE':
+            return { category: 'Interface', noun: isMethod ? 'Method' : 'Property' };
+        default:
+            return { category: 'Class', noun: isMethod ? 'Method' : 'Property' };
+    }
 }
 
 export interface MethodDeclarationInfo {
@@ -183,8 +213,8 @@ export class HoverFormatter {
      */
     formatClassMember(name: string, info: ClassMemberInfo): Hover {
         const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
-        const memberType = isMethod ? 'Method' : 'Property';
-        const memberCategory = info.isInterface ? 'Interface' : 'Class';
+        const { category: memberCategory, noun: memberType } =
+            describeMemberOwner(info.structureType, info.isInterface, isMethod);
 
         const header = this.buildMethodHeader(name, info.type, memberCategory, memberType, info.className, isMethod);
         const markdown = [header, ``];
@@ -213,7 +243,8 @@ export class HoverFormatter {
      * Constructs hover for a method call (SELF.method) with both declaration and implementation
      */
     formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
-        const memberCategory = declarationInfo.isInterface ? 'Interface' : 'Class';
+        const { category: memberCategory } =
+            describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
         const markdown = [header, ``];
 

@@ -1076,7 +1076,7 @@ export class MemberLocatorService {
         const best = selectBestMemberOverload(candidates, paramCount);
         if (!best) return null;
         const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true };
+        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true, structureType: 'INTERFACE' };
     }
 
     /** Walks the INCLUDE chain searching for an INTERFACE method declaration. */
@@ -1795,7 +1795,9 @@ export class MemberLocatorService {
         const bestMatch = selectBestMemberOverload(candidates, paramCount);
         if (bestMatch) {
             const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+            // The structure token above was matched BY structureType, so it is the
+            // kind actually found here, not an assumption.
+            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType };
         }
         return null;
     }
