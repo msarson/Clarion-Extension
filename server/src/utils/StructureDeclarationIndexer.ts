@@ -58,6 +58,23 @@ export type StructureType =
     | 'ITEMIZE'
     | 'ITEMIZE_EQUATE';
 
+/**
+ * Structure kinds whose parenthesised parent contributes its members to the
+ * child, so a member miss on the child must continue into that parent:
+ * `CLASS(Base)` inherits methods and properties, and `QUEUE(Type)` /
+ * `GROUP(Type)` take the parent's field layout the same way.
+ *
+ * Kept as ONE predicate because the ascent is decided in two independent
+ * resolvers — two hand-maintained type lists drift, which is how a
+ * `QUEUE(Group)` field became silently unresolvable while `CLASS(Base)` worked.
+ *
+ * `VIEW(File)` is deliberately excluded: the parenthesised name there is a
+ * join's primary file, not a layout the VIEW inherits.
+ */
+export function inheritsMembersFromParent(structureType: StructureType | undefined): boolean {
+    return structureType === 'CLASS' || structureType === 'QUEUE' || structureType === 'GROUP';
+}
+
 /** A single declaration found during a file scan */
 export interface StructureDeclarationInfo {
     /** Original-case label as it appears in source (ITEMIZE_EQUATE names are PRE:Name expanded) */
