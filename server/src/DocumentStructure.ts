@@ -8,6 +8,21 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 
+/**
+ * The two structure keywords that can open a block inside a MAP body. Matched
+ * EXACTLY, never by prefix (#477): a procedure may legitimately be called
+ * `MapFields`, `Mapper` or `ModuleList`, and a prefix test rejects those as if
+ * they were the keyword, leaving a real prototype unmarked for good.
+ */
+const MAP_STRUCTURE_KEYWORD = /^(MODULE|MAP)$/i;
+
+/**
+ * Words that cannot themselves be the NAME of a prototype in a MAP body — the
+ * block keywords plus the procedure keywords, which introduce the other form
+ * (`name PROCEDURE ...`) rather than being a name.
+ */
+const MAP_PROTOTYPE_NON_NAME = /^(MODULE|MAP|END|PROCEDURE|FUNCTION)$/i;
+
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
 export type { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
@@ -1782,7 +1797,12 @@ export class DocumentStructure {
             
             // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
             // In shorthand syntax, the procedure name and opening parenthesis are in the same token
-            if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
+            if (token.value.includes("(") && token.value !== "(" &&
+                // #477: compare the NAME half exactly, not the whole fused value by
+                // prefix. `MODULE('f.clw')` must still be excluded — but `ModuleList(1)`
+                // is a prototype, and the old `startsWith("module")` rejected both.
+                !MAP_STRUCTURE_KEYWORD.test(token.value.split("(")[0].trim()) &&
+                !token.value.startsWith("!")) {
                 // This looks like a shorthand procedure declaration
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
@@ -1790,7 +1810,7 @@ export class DocumentStructure {
 
                 // Extract the procedure name (everything before the opening parenthesis)
                 const procName = token.value.split("(")[0].trim();
-                
+
                 // CRITICAL FIX: Set the token's label to the procedure name
                 // This ensures it will be displayed correctly in the outline view
                 token.label = procName;
@@ -1798,13 +1818,19 @@ export class DocumentStructure {
                 if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
             }
             // Pattern 2: Check if this token is followed by "(" (separate tokens)
-            else if ((token.type === TokenType.Function || 
-                      token.type === TokenType.Variable || 
+            else if ((token.type === TokenType.Function ||
+                      token.type === TokenType.Variable ||
                       token.type === TokenType.Label) &&
                      i + 1 < this.tokens.length &&
                      this.tokens[i + 1].value === "(" &&
-                     !token.value.toLowerCase().startsWith("module") &&
-                     !token.value.toLowerCase().startsWith("map") &&
+                     // #477: these were `startsWith("module")` / `startsWith("map")`,
+                     // meant to exclude the keywords themselves. They also excluded every
+                     // procedure whose NAME merely begins with those letters — MapFoo,
+                     // Mapper, ModuleList — so a real prototype was never marked, and
+                     // missing-map-declaration fired on it permanently, with no edit to
+                     // the MAP able to silence it. Pattern 3 below already compares
+                     // exactly; these now match it.
+                     !MAP_STRUCTURE_KEYWORD.test(token.value) &&
                      !token.value.startsWith("!") &&
                      !isAttributeKeyword(token.value)) {
                 // This looks like a shorthand procedure declaration with separate tokens
@@ -1833,19 +1859,36 @@ export class DocumentStructure {
             // the declaration was invisible to all of them: findMapDeclarationInMemberFile
             // located the right MODULE block, found zero declarations inside it, and
             // missing-map-declaration fired on a procedure that IS declared (#462).
-            // A MAP body holds only prototypes and MODULE blocks, so a lone identifier
-            // here is a prototype; requiring it to be alone on its line keeps attributes
-            // and multi-token forms out.
+            // A MAP body holds only prototypes and MODULE blocks, so an identifier that
+            // STARTS a line here is a prototype.
+            //
+            // #466: the original cut also required the name to be the LAST token on its
+            // line, which silently excluded most of the form. The Language Reference
+            // (prototype_syntax.htm) gives the keyword-less prototype as:
+            //
+            //   name [(parameter list)] [,return type] [,calling convention] [,RAW]
+            //        [,NAME( )] [,TYPE] [,DLL( )] [,PROC] [,PRIVATE]
+            //
+            // so everything after the name is optional AND repeatable — `MyProc,LONG`,
+            // `MyProc,NAME('_x')`, `Func46(*CSTRING),REAL,C,RAW` are all prototypes. The
+            // parenthesised forms are Pattern 2's; this one now accepts a following
+            // comma, which covers every attribute tail.
+            //
+            // The load-bearing guard is that the name STARTS its line — that is what
+            // separates a prototype from an argument, a continuation, or an attribute of
+            // something else, and it is kept exactly as it was.
             else if ((token.type === TokenType.Variable ||
                       token.type === TokenType.Label ||
                       token.type === TokenType.Function) &&
                      token.subType === undefined &&
                      !isAttributeKeyword(token.value) &&
-                     !/^(MODULE|MAP|END|PROCEDURE|FUNCTION)$/i.test(token.value) &&
+                     !MAP_PROTOTYPE_NON_NAME.test(token.value) &&
                      !token.value.startsWith("!") &&
                      /^[A-Za-z_][A-Za-z0-9_:.]*$/.test(token.value) &&
                      (this.tokens[i - 1] === undefined || this.tokens[i - 1].line !== token.line) &&
-                     (this.tokens[i + 1] === undefined || this.tokens[i + 1].line !== token.line)) {
+                     (this.tokens[i + 1] === undefined ||
+                      this.tokens[i + 1].line !== token.line ||
+                      this.tokens[i + 1].value === ",")) {
                 const owner = structureStack[structureStack.length - 1];
                 token.subType = TokenType.MapProcedure;
                 token.label = token.value;
