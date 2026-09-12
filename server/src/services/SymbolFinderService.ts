@@ -165,6 +165,18 @@ export interface SymbolSearchOptions {
 }
 
 /**
+ * FILE-member declarations whose KEYWORD is the declaration's type, the way a
+ * scalar's type word is (#476). `CusKey KEY(CUS:ID)` declares a KEY; there is
+ * no separate type token to read.
+ *
+ * Kept as VALUES rather than token types deliberately: KEY tokenizes as `Keyword` and
+ * INDEX as `Function` (its trailing open paren), so a type-based test would cover one
+ * and silently miss the other. MEMO and BLOB need no entry — they already arrive
+ * as `Type` and `Variable` respectively and the existing branches return them.
+ */
+const FILE_MEMBER_DECLARATION_KEYWORDS = new Set(['KEY', 'INDEX']);
+
+/**
  * Unified service for finding symbols in Clarion code
  */
 export class SymbolFinderService {
@@ -187,6 +199,20 @@ export class SymbolFinderService {
         const idx = lineTokens.indexOf(labelToken);
         if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
         const next = lineTokens[idx + 1];
+
+        // #476: a FILE's KEY / INDEX declaration — `CusKey KEY(CUS:ID)` — where the
+        // keyword itself IS the type, exactly as MEMO and BLOB already are. Neither
+        // reached a branch that returned it, so both rendered as `UNKNOWN`.
+        //
+        // Checked ahead of the type dispatch, and on value rather than token type,
+        // because the two arrive differently: KEY tokenizes as `Keyword`, while INDEX
+        // tokenizes as `Function` on account of its trailing '('. Keying off the token
+        // type would fix one and leave the other — which is how KEY came to be reported
+        // while INDEX went unnoticed. `next` is the token AFTER the label, so this can
+        // only match a declaration, never a variable that happens to be named KEY.
+        if (FILE_MEMBER_DECLARATION_KEYWORDS.has(next.value.toUpperCase())) {
+            return next.value.toUpperCase();
+        }
 
         if (next.type === TokenType.Type) return next.value;
         if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
