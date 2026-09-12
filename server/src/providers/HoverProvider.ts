@@ -355,7 +355,15 @@ export class HoverProvider {
                 
                 const currentFilePath = decodeURIComponent(document.uri.replace('file:///', ''));
                 const currentFileDir = path.dirname(currentFilePath);
-                const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
+                // #452 — `MEMBER('Parent')` is legal without the extension. Resolving the
+                // raw target produced a path that does not exist, the parent was never
+                // loaded, and hover fell through to the generic symbol path — so a CALL
+                // SITE rendered the "Global procedure" card with only the MAP declaration
+                // link, and never offered the implementation. The declaration still
+                // resolved because a different path already normalises, which is what made
+                // this look unrelated to the extension-less work in #447/#449/#450.
+                const resolvedPath = path.resolve(
+                    currentFileDir, TokenHelper.normalizeMemberFilename(memberToken.referencedFile));
                 logger.info(`Resolved MEMBER path: ${resolvedPath}`);
                 
                 const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
