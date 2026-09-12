@@ -519,7 +519,12 @@ export function validateViewProjectFields(
                 // stay silent rather than accuse a field of not existing.
                 if (!owner || owner.fields.size === 0) continue;
                 const fieldToken = scoped.token;
-                if (owner.fields.has(fieldToken.value.toUpperCase())) continue;
+                // #467: a dotted field carries its own qualifier (`Customer.Name`).
+                // Compare the member half - `collectFieldNames` holds bare and
+                // PRE:-prefixed names, never the dotted form.
+                const dotted = splitDottedReference(fieldToken.value);
+                const comparable = (dotted ? dotted.member : fieldToken.value).toUpperCase();
+                if (owner.fields.has(comparable)) continue;
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range: {
@@ -532,9 +537,24 @@ export function validateViewProjectFields(
             }
         }
 
-        // JOIN(File, fieldRefs...) field validation — fields resolved against the
-        // JOINED file. Same shape as PROJECT, using the cross-file resolver for
-        // the joined file.
+        // JOIN(key, fieldRefs...) field validation.
+        //
+        // DORMANT BY DESIGN — do not "fix" the `resolve` below into
+        // `resolveFileOrPrefixed`. A JOIN's first argument is a KEY reference
+        // (`CUS:CusKey` / `Customer.CusKey`), never a bare FILE label, so
+        // `resolve` never matches and this loop does not run. Making it resolve
+        // emits false positives on the prefixed form every app generator emits.
+        //
+        // The premise is also wrong: these fields do NOT belong to the joined
+        // file. Compiler-verified against Clarion 10.0.12567 with
+        // test-programs/ViewJoinTest, one line changed per case:
+        //   JOIN(CUS:CusKey, ORD:NoSuchField) -> `Field not found in parent FILE`
+        //   JOIN(CUS:CusKey, CUS:Name)        -> `Field not found in parent FILE`
+        //   JOIN(CUS:CusKey, CUS:ID)          -> compiles
+        // The last is the trap: it passes only because the PARENT (Orders) also
+        // has an `ID`. So the rule is: resolved against the parent file, by field
+        // name, prefix ignored. Reviving this loop means checking the parent —
+        // its own issue, not #467.
         for (const join of collectJoinClauses(tokens, view)) {
             if (!join.fileToken) continue;
             const joinedFile = fileResolver.resolve(join.fileToken.value);
@@ -604,6 +624,31 @@ interface ResolvedFile {
     fileLabel: string;
 }
 
+/**
+ * Split a dotted VIEW reference into its file qualifier and the name after the
+ * dot - `Customer.CusKey` -> `{ file: 'Customer', member: 'CusKey' }`. Returns
+ * undefined when there is no usable dot, so callers fall through to their
+ * existing colon/literal handling unchanged.
+ *
+ * #467. Both halves are needed, and by different callers: `FileResolver`
+ * resolves a JOIN target from the `file` half, while the PROJECT field check
+ * compares the `member` half against its scope owner's field set. The whole
+ * dotted token matches neither the bare (`NAME`) nor the prefixed (`CUS:NAME`)
+ * form that `collectFieldNames` builds, which is why the unsplit value produced
+ * a warning on code the compiler accepts.
+ *
+ * The qualifier is deliberately NOT required to match the owner. Compiling
+ * `PROJECT(Orders.Total)` inside `JOIN(Customer.CusKey, ...)` fails with
+ * `Field not found in parent FILE` - so the compiler checks the member against
+ * the enclosing scope's file and ignores the qualifier, exactly as this does.
+ */
+export function splitDottedReference(name: string): { file: string; member: string } | undefined {
+    const dot = name.indexOf('.');
+    // A leading dot has no file half; a trailing one is a period terminator.
+    if (dot <= 0 || dot === name.length - 1) return undefined;
+    return { file: name.slice(0, dot), member: name.slice(dot + 1) };
+}
+
 interface JoinClause {
     fileToken?: Token;        // first arg of JOIN(...) — the joined file name
     fieldTokens: Token[];     // subsequent name args — fields to validate against the joined file
@@ -655,13 +700,22 @@ class FileResolver {
     private pendingExpansion?: Token[];
 
     /**
-     * Resolve a VIEW/JOIN target that may be a FILE name (`Invoice`) or a prefixed
-     * reference to one (`CUS:Key` - a KEY, which is what a JOIN actually names). The
-     * literal name is tried first, so files whose label contains no colon are unaffected.
+     * Resolve a VIEW/JOIN target that may be a FILE name (`Invoice`), a dotted
+     * reference to one (`Customer.CusKey`) or a prefixed one (`CUS:Key` - a KEY,
+     * which is what a JOIN actually names). The literal name is tried first, so
+     * files whose label contains neither separator are unaffected.
      */
     public resolveFileOrPrefixed(name: string): ResolvedFile | undefined {
         const direct = this.resolve(name);
         if (direct) return direct;
+        // #467: dot notation names the file outright - `Customer.CusKey` is the
+        // CusKey KEY on FILE Customer. Legal Clarion, and compiler-verified in
+        // test-programs/ViewJoinTest.
+        const dotted = splitDottedReference(name);
+        if (dotted) {
+            const byDottedFile = this.resolve(dotted.file);
+            if (byDottedFile) return byDottedFile;
+        }
         const colon = name.indexOf(':');
         if (colon <= 0) return undefined;
         const prefix = name.slice(0, colon).toUpperCase();

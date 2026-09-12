@@ -31,6 +31,32 @@ knowing before "fixing" a diagnostic:
   therefore projections first, then joins — so "ownership returns to the FROM file after
   a JOIN ends" describes source that cannot compile.
 
+## The JOIN field list resolves against the PARENT file
+
+Established for #467 by compiling this fixture with one line changed per case:
+
+| variant | result |
+|---|---|
+| `JOIN(CUS:CusKey, ORD:NoSuchField)` | `Field not found in parent FILE` |
+| `JOIN(CUS:CusKey, CUS:Name)` | `Field not found in parent FILE` |
+| `JOIN(CUS:CusKey, CUS:ID)` | compiles |
+
+So a JOIN's field list is resolved against the **parent** file, **by field
+name, with the prefix ignored**. The third row is the trap: `CUS:ID` carries the
+joined file's prefix and still compiles, purely because the parent `Orders` also
+has a field called `ID`. Read alone it looks like proof that the joined file is
+consulted, and it is not — row two is the one that settles it.
+
+This is why the JOIN loop in `StructureDiagnostics.ts` is left dormant rather
+than repaired: its premise (fields belong to the joined file) is wrong, and
+making it resolve emits false positives on the prefixed form every app
+generator emits.
+
+Also compiler-verified, for the dotted form: `PROJECT(Orders.Total)` inside
+`JOIN(Customer.CusKey, ...)` fails with `Field not found in parent FILE`. A dot
+qualifier therefore does **not** override the enclosing JOIN's scope — it is a
+qualifier to strip, not an owner to honour.
+
 ## Building it
 
 ```
