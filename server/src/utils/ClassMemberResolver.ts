@@ -19,7 +19,16 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean };
+/**
+ * The kind of structure a member was found in. Carried on MemberInfo so a
+ * consumer can describe the member accurately: a QUEUE/GROUP member is a field,
+ * not a "Class Property". Optional because not every producer of a MemberInfo
+ * knows the kind, and consumers keep their previous CLASS/INTERFACE assumption
+ * when it is absent.
+ */
+export type MemberOwnerKind = 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
+
+export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean; structureType?: MemberOwnerKind };
 
 /** Access level for a class member. */
 export type MemberAccess = 'public' | 'protected' | 'private';
@@ -160,7 +169,12 @@ export function scanClassBodyForMember(
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
         for (let j = 0; j < lines.length; j++) {
-            if (!headerPattern.test(lines[j])) continue;
+            const headerMatch = lines[j].match(headerPattern);
+            if (!headerMatch) continue;
+            // The keyword on the declaration itself, not the caller's hint: the
+            // header pattern accepts all four kinds, so a caller passing the
+            // default 'CLASS' can still land on a QUEUE/GROUP body.
+            const ownerKind = headerMatch[1].toUpperCase() as MemberOwnerKind;
 
             const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
             let nestDepth = 0;
@@ -198,7 +212,7 @@ export function scanClassBodyForMember(
             const bestMatch = selectBestOverload(candidates, paramCount);
             if (bestMatch) {
                 const fileUri = pathToCanonicalUri(filePath); // #251
-                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType: ownerKind };
             }
         }
     } catch (error) {
@@ -386,7 +400,9 @@ export class ClassMemberResolver {
                 // Select best match based on parameter count
                 const bestMatch = this.selectBestOverload(candidates, paramCount);
                 if (bestMatch) {
-                    return { type: bestMatch.type, className, line: bestMatch.line, file: document.uri };
+                    // findClassStructures filters to CLASS tokens, so this branch
+                    // can only ever have matched a CLASS body.
+                    return { type: bestMatch.type, className, line: bestMatch.line, file: document.uri, structureType: 'CLASS' };
                 }
 
                 // Member not in this class — walk the inheritance chain
@@ -512,7 +528,10 @@ export class ClassMemberResolver {
                         if (bestMatch) {
                             // Convert file path to URI format
                             const fileUri = pathToCanonicalUri(resolvedPath); // #251
-                            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri };
+                            return {
+                                type: bestMatch.type, className, line: bestMatch.line, file: fileUri,
+                                structureType: classMatch[1].toUpperCase() as MemberOwnerKind
+                            };
                         }
 
                         // Member not in this class/queue/group — walk the inheritance chain
