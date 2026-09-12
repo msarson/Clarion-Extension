@@ -939,13 +939,25 @@ export class DefinitionProvider {
                 // Find the end of this structure
                 const endLine = structureDefToken.finishesAt || Number.MAX_VALUE;
 
-                // Look for field labels within this structure's range
+                // Look for field labels within this structure's range.
+                //
+                // #475: this used to also require `token.start > 0`, on the theory that
+                // "fields are indented". They are not - a field label sits at column 0 by
+                // language rule, exactly like the structure's own label. The note further
+                // up this file already records that as the reason the old PREFIX:Field
+                // branch here was dead code. So the test excluded every FILE field and
+                // this tier could never return one: F12 on the field half of a dotted
+                // reference (`Customer.Name`) resolved nothing at all.
+                //
+                // Nothing is lost by dropping it. The structure's own label is already
+                // excluded by `line > structureDefToken.line`, and the upper bound keeps
+                // the match inside this structure - which is what stops `Orders.ID`
+                // binding to the `ID` of an earlier FILE.
                 fieldTokens = tokens.filter(token =>
                     token.type === TokenType.Label &&
                     token.value.toLowerCase() === fieldName.toLowerCase() &&
                     token.line > structureDefToken!.line &&
-                    token.line < endLine &&
-                    token.start > 0  // Fields are indented
+                    token.line < endLine
                 );
             }
         }
