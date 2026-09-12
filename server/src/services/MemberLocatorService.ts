@@ -17,7 +17,7 @@ import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
-import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -1621,7 +1621,7 @@ export class MemberLocatorService {
             return result;
         }
 
-        if (classInfo.structureType === 'CLASS' && classInfo.parentName) {
+        if (inheritsMembersFromParent(classInfo.structureType) && classInfo.parentName) {
             this.trace(`walkParentChain ascend "${className}" -> "${classInfo.parentName}"`);
             return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited, document);
         }

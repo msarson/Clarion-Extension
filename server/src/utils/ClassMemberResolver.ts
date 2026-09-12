@@ -6,7 +6,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { TokenHelper } from './TokenHelper';
-import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, inheritsMembersFromParent } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
 import { ProcedureUtils } from './ProcedureUtils';
@@ -916,8 +916,9 @@ export class ClassMemberResolver {
             const info = infos.find(d => !d.isType) || infos[0];
             const result = this.searchFileForMember(info.filePath, structureName, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
             if (result) return result;
-            // Walk parent chain for CLASS types
-            if (info.structureType === 'CLASS' && info.parentName) {
+            // Walk the parent chain — CLASS(Base) inherits members, and
+            // QUEUE(Type)/GROUP(Type) inherit the parent's fields the same way.
+            if (inheritsMembersFromParent(info.structureType) && info.parentName) {
                 return this.findMemberInParentChain(info.parentName, memberName, paramCount, new Set([structureName.toLowerCase()]));
             }
         }
