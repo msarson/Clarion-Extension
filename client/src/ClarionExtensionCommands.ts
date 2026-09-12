@@ -123,6 +123,50 @@ export class ClarionExtensionCommands {
   }
 
   /**
+   * #479 — offer to change the active Clarion configuration while adopting a
+   * solution.
+   *
+   * A ClarionProperties.xml need not live under %APPDATA%: clarion.exe and
+   * ClarionCL.exe both take /ConfigDir=, and the build passes a matching ConfigDir
+   * property since #471, so a checked-out tree can carry its own IDE settings. The
+   * open-solution flow previously reused whatever was already configured without
+   * asking, which is the one moment the choice is obviously relevant.
+   *
+   * Deliberately cheap to dismiss: the current configuration is the first item, so
+   * Enter keeps it, and Esc does too. Only the second item costs anything.
+   */
+  public static async offerDifferentConfiguration(): Promise<void> {
+    const globals = await import('./globals');
+    const { globalClarionPropertiesFile, globalClarionVersion } = globals;
+    if (!globalClarionPropertiesFile) return;
+
+    const KEEP = 'keep';
+    const CHANGE = 'change';
+    const configDir = path.dirname(globalClarionPropertiesFile);
+    const picked = await window.showQuickPick(
+      [
+        {
+          label: globalClarionVersion || '(no compile target selected)',
+          description: '$(check) (current)',
+          detail: configDir,
+          action: KEEP,
+        },
+        {
+          label: '$(folder-opened) Select Different Configuration…',
+          description: 'Pick another Clarion installation, or browse for a ClarionProperties.xml',
+          action: CHANGE,
+        },
+      ],
+      { placeHolder: 'Clarion configuration for this solution' }
+    );
+
+    // Esc, or keeping the current one, changes nothing.
+    if (!picked || picked.action === KEEP) return;
+
+    await ClarionExtensionCommands.setActiveVersionCommand();
+  }
+
+  /**
    * #132 / dd87633f B2 + #134 / 972b3040 — solution-free command handler for
    * `clarion.setActiveVersion`.
    *
@@ -152,7 +196,7 @@ export class ClarionExtensionCommands {
       const globals = await import('./globals');
       const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
       const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
-      const { buildCompileTargetItems, buildInstallationItems, buildSetAsDefaultFooterItem } = await import('./utils/VersionPickerItems');
+      const { buildCompileTargetItems, buildInstallationItems, buildSetAsDefaultFooterItem, buildBrowseFooterItem } = await import('./utils/VersionPickerItems');
       const { SettingsStorageManager } = await import('./utils/SettingsStorageManager');
 
       const installations = await ClarionInstallationDetector.detectInstallations();
@@ -177,10 +221,20 @@ export class ClarionExtensionCommands {
         // Stage 2 — pick Installation if none is active for this loop iteration.
         if (!currentInstallation) {
           const installItems = buildInstallationItems(installations, activePropertiesPath);
+          // #479 — a ConfigDir installation is never auto-discovered (the detector
+          // scans %APPDATA% only), so offer the manual route here rather than only
+          // when discovery comes back empty.
+          installItems.push(buildBrowseFooterItem());
           const pickedInstall = await window.showQuickPick(installItems, {
             placeHolder: "Pick Clarion installation",
           });
           if (!pickedInstall) return; // user cancelled — no state change
+          if (pickedInstall.isBrowse) {
+            // The picker owns the rest of the flow (parse, compile-target pick,
+            // persist), exactly as it does when discovery finds nothing.
+            await ClarionExtensionCommands.setActiveVersionViaFilePicker();
+            return;
+          }
           currentInstallation = installations.find(i => i.propertiesPath === pickedInstall.propertiesPath) ?? null;
           if (!currentInstallation) {
             // Defensive — should never happen since installItems was built from `installations`.
