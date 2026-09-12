@@ -2535,17 +2535,26 @@ MyView VIEW(Customer)
         assert.strictEqual(viewProjectDiags(code).length, 0);
     });
 
-    test('JOIN field name is NOT validated as a PROJECT target', () => {
-        // Bogus field appears inside JOIN(...) — only PROJECT clauses are validated.
+    test('a JOIN field argument is checked against the PARENT, not as a PROJECT target', () => {
+        // #473: a JOIN's field arguments name fields of the PARENT file (here the VIEW's
+        // FROM, Customer), NOT of the file being joined. `Cus:Id` is on the parent, so
+        // this is silent even though the joined file has no such field.
         const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
 Record RECORD
 Id   LONG
      END
      END
 
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
+Record RECORD
+Id    LONG
+     END
+     END
+
 MyView VIEW(Customer)
        PROJECT(Cus:Id)
-       JOIN(SomeFile, Bogus, Cus:Id)
+       JOIN(Ord:OrdKey, Cus:Id)
        END
 `;
         assert.strictEqual(viewProjectDiags(code).length, 0);
@@ -2592,15 +2601,82 @@ MyView VIEW(Customer)
     });
 
     // d4fe847b — two extensions over v1.
-    suite('JOIN field validation (d4fe847b)', () => {
-        test('JOIN with all fields present on joined file — no warning', () => {
+    suite('JOIN field arguments resolve against the PARENT file (#473)', () => {
+        // These previously asserted the opposite — that a JOIN's field arguments belong
+        // to the JOINED file — using the shape `JOIN(FileLabel, field...)`. Both were
+        // wrong, and the compiler says so on Clarion 10.0.12567:
+        //
+        //   JOIN(Customer, ORD:CusID)          -> error: Too many parameters
+        //   JOIN(CUS:CusKey, ORD:NoSuchField)  -> error: Field not found in parent FILE
+        //   JOIN(CUS:CusKey, CUS:Name)         -> error: Field not found in parent FILE
+        //   JOIN(CUS:CusKey, CUS:ID)           -> compiles
+        //
+        // A JOIN's first argument is a KEY, never a bare file label, and its field
+        // arguments are matched against the PARENT by field NAME with the prefix
+        // IGNORED. The last case is why: it compiles only because the parent also has
+        // an `ID`, despite the argument carrying the joined file's prefix.
+
+        test('field arguments present on the PARENT file produce no warning', () => {
             const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
 Record RECORD
 Id   LONG
      END
      END
 
 Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
+Record RECORD
+Id    LONG
+CusId LONG
+     END
+     END
+
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Ord:CusId)
+       END
+`;
+            assert.strictEqual(viewProjectDiags(code).length, 0);
+        });
+
+        test('a field argument on no file at all warns, naming the PARENT', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
+Record RECORD
+Id    LONG
+CusId LONG
+     END
+     END
+
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Ord:Bogus)
+       END
+`;
+            const diags = viewProjectDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+            assert.ok(diags[0].message.includes("'Orders'"), 'must name the parent file');
+        });
+
+        test('a field that exists ONLY on the joined file warns — it is not the parent', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
 Record RECORD
 Id    LONG
 CusId LONG
@@ -2609,71 +2685,62 @@ CusId LONG
 
 MyView VIEW(Customer)
        PROJECT(Cus:Id)
-       JOIN(Orders, Ord:CusId, Ord:Id)
+       JOIN(Ord:OrdKey, Ord:CusId)
        END
 `;
-            assert.strictEqual(viewProjectDiags(code).length, 0);
+            // CusId is on Orders (joined), not on Customer (parent). The compiler
+            // rejects this shape too: `Field not found in parent FILE`.
+            const diags = viewProjectDiags(code);
+            assert.strictEqual(diags.length, 1);
+            assert.ok(diags[0].message.includes("'Customer'"), 'must be attributed to the parent');
         });
 
-        test('JOIN with bogus field on joined file — warns on the offending field', () => {
+        test('the prefix is ignored — a joined-file prefix on a parent field is accepted', () => {
             const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
 Record RECORD
 Id   LONG
      END
      END
 
 Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
 Record RECORD
 Id    LONG
 CusId LONG
      END
      END
 
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       JOIN(Orders, Ord:Bogus)
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Cus:Id)
        END
 `;
-            const diags = viewProjectDiags(code);
-            assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
-            assert.ok(diags[0].message.includes("'Orders'"));
-        });
-
-        test('JOIN with unresolved file — skipped silently (no false positive)', () => {
-            // Mirror of the v1 FROM-not-found case. Joined file isn't declared
-            // anywhere reachable, so the validator can't tell whether the
-            // following names are valid fields. Silent skip.
-            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
-Record RECORD
-Id   LONG
-     END
-     END
-
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       JOIN(SomeOtherFile, BogusField)
-       END
-`;
+            // `Cus:Id` carries the JOINED file's prefix, but the parent Orders also
+            // has an `Id`, and the compiler accepts it. Comparing the written form
+            // rather than the bare name would produce a false positive here.
             assert.strictEqual(viewProjectDiags(code).length, 0);
         });
 
-        test('INNER JOIN / OUTER JOIN — same field validation applied', () => {
+        test('INNER / OUTER JOIN are validated the same way', () => {
             const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
 Record RECORD
 Id   LONG
      END
      END
 
 Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
 Record RECORD
 Id    LONG
+CusId LONG
      END
      END
 
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       INNER JOIN(Orders, Ord:Bogus)
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       INNER JOIN(Cus:CusKey, Ord:Bogus)
        END
 `;
             const diags = viewProjectDiags(code);
@@ -2681,36 +2748,58 @@ MyView VIEW(Customer)
             assert.ok(diags[0].message.includes("'Ord:Bogus'"));
         });
 
-        test('Multiple JOIN clauses — each validated independently', () => {
+        test('each JOIN clause is validated independently', () => {
             const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
 Record RECORD
 Id   LONG
      END
      END
 
 Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
 Record RECORD
 Id    LONG
+CusId LONG
      END
      END
 
-Items FILE,DRIVER('TopSpeed'),PRE(Itm)
-Record RECORD
-Id    LONG
-     END
-     END
-
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       JOIN(Orders, Ord:Id)
-       JOIN(Items, Itm:Bogus)
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Ord:Id)
+       END
+       JOIN(Cus:CusKey, Ord:Bogus)
        END
 `;
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Itm:Bogus'"));
-            assert.ok(diags[0].message.includes("'Items'"));
+            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
         });
+
+        test('an unresolvable parent is silent — no false positive', () => {
+            const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
+CusKey     KEY(Cus:Id)
+Record RECORD
+Id   LONG
+     END
+     END
+
+Orders FILE,DRIVER('TopSpeed'),PRE(Ord)
+OrdKey     KEY(Ord:Id)
+Record RECORD
+Id    LONG
+CusId LONG
+     END
+     END
+
+MyView VIEW(NotDeclaredAnywhere)
+       JOIN(Cus:CusKey, Anything:AtAll)
+       END
+`;
+            // The validator cannot know the parent's fields, so it must not accuse.
+            assert.strictEqual(viewProjectDiags(code).length, 0);
+        });
+
     });
 
     suite('Cross-file FROM resolution (d4fe847b)', () => {
@@ -2817,9 +2906,9 @@ Id    LONG
             const code = `  MEMBER('parent.clw')
   INCLUDE('files3.inc')
 
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       JOIN(Orders, Ord:Bogus)
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Ord:Bogus)
        END
 `;
             const diags = viewProjectDiagsAtPath('childC.clw', code);
@@ -2873,9 +2962,9 @@ LiveOnly LONG
             const code = `  MEMBER('parent.clw')
   INCLUDE('files4.inc')
 
-MyView VIEW(Customer)
-       PROJECT(Cus:Id)
-       JOIN(Orders, Ord:LiveOnly, Ord:Missing)
+MyView VIEW(Orders)
+       PROJECT(Ord:Id)
+       JOIN(Cus:CusKey, Ord:LiveOnly, Ord:Missing)
        END
 `;
             const diags = viewProjectDiagsAtPathWithResolver('childE.clw', code, resolver);

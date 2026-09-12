@@ -500,20 +500,23 @@ export function validateViewProjectFields(
         //
         // Owner resolution is cached: it is a cross-file lookup, and a generated browse
         // projects many fields from the same two or three files.
-        if (desc.projectedFields.length > 0) {
-            const ownerCache = new Map<string, { label: string; fields: Set<string> } | null>();
-            const resolveOwner = (name: string) => {
-                const key = name.toUpperCase();
-                if (ownerCache.has(key)) return ownerCache.get(key)!;
-                const resolved = fileResolver.resolveFileOrPrefixed(name);
-                const entry = resolved
-                    ? { label: resolved.fileLabel, fields: collectFieldNames(resolved.fileToken) }
-                    : null;
-                ownerCache.set(key, entry);
-                return entry;
-            };
+        // One walk serves both checks below (#473).
+        const scopedFields = collectScopedViewFields(tokens, view, desc.from);
 
-            for (const scoped of collectScopedProjectFieldTokens(tokens, view, desc.from)) {
+        const ownerCache = new Map<string, { label: string; fields: Set<string> } | null>();
+        const resolveOwner = (name: string) => {
+            const key = name.toUpperCase();
+            if (ownerCache.has(key)) return ownerCache.get(key)!;
+            const resolved = fileResolver.resolveFileOrPrefixed(name);
+            const entry = resolved
+                ? { label: resolved.fileLabel, fields: collectFieldNames(resolved.fileToken) }
+                : null;
+            ownerCache.set(key, entry);
+            return entry;
+        };
+
+        if (desc.projectedFields.length > 0) {
+            for (const scoped of scopedFields.projects) {
                 const owner = resolveOwner(scoped.owner);
                 // An unresolvable owner, or one we know no fields for, proves nothing —
                 // stay silent rather than accuse a field of not existing.
@@ -537,43 +540,39 @@ export function validateViewProjectFields(
             }
         }
 
-        // JOIN(key, fieldRefs...) field validation.
+        // JOIN(key, field...) field-argument validation (#473).
         //
-        // DORMANT BY DESIGN — do not "fix" the `resolve` below into
-        // `resolveFileOrPrefixed`. A JOIN's first argument is a KEY reference
-        // (`CUS:CusKey` / `Customer.CusKey`), never a bare FILE label, so
-        // `resolve` never matches and this loop does not run. Making it resolve
-        // emits false positives on the prefixed form every app generator emits.
+        // These fields belong to the PARENT file - the VIEW's FROM file, or the enclosing
+        // JOIN's file when nested - NOT to the file being joined. That is the opposite
+        // of what this loop assumed for its whole life, and it never fired to prove it:
+        // it resolved the JOIN's first argument with `resolve()`, but that argument is a
+        // KEY reference (`CUS:CusKey`), never a bare FILE label, so it matched nothing.
         //
-        // The premise is also wrong: these fields do NOT belong to the joined
-        // file. Compiler-verified against Clarion 10.0.12567 with
-        // test-programs/ViewJoinTest, one line changed per case:
-        //   JOIN(CUS:CusKey, ORD:NoSuchField) -> `Field not found in parent FILE`
-        //   JOIN(CUS:CusKey, CUS:Name)        -> `Field not found in parent FILE`
+        // Compiler-verified on Clarion 10.0.12567 against test-programs/ViewJoinTest,
+        // one line changed per case:
+        //   JOIN(CUS:CusKey, ORD:NoSuchField) -> Field not found in parent FILE
+        //   JOIN(CUS:CusKey, CUS:Name)        -> Field not found in parent FILE
         //   JOIN(CUS:CusKey, CUS:ID)          -> compiles
-        // The last is the trap: it passes only because the PARENT (Orders) also
-        // has an `ID`. So the rule is: resolved against the parent file, by field
-        // name, prefix ignored. Reviving this loop means checking the parent —
-        // its own issue, not #467.
-        for (const join of collectJoinClauses(tokens, view)) {
-            if (!join.fileToken) continue;
-            const joinedFile = fileResolver.resolve(join.fileToken.value);
-            if (!joinedFile) continue; // joined file not reachable — skip silently
-            const validFields = collectFieldNames(joinedFile.fileToken);
-            if (validFields.size === 0) continue;
-            for (const fieldToken of join.fieldTokens) {
-                const value = fieldToken.value.toUpperCase();
-                if (validFields.has(value)) continue;
-                diagnostics.push({
-                    severity: DiagnosticSeverity.Warning,
-                    range: {
-                        start: { line: fieldToken.line, character: fieldToken.start },
-                        end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
-                    },
-                    message: `'${fieldToken.value}' is not a field on FILE '${joinedFile.fileLabel}'.`,
-                    source: 'clarion'
-                });
-            }
+        //
+        // The third is the trap that made the old premise look right: it passes only
+        // because the PARENT (Orders) also has an `ID`, despite the argument carrying
+        // the JOINED file's prefix. So the match is by field NAME with the prefix
+        // IGNORED - hence bareFieldName rather than the PROJECT check's exact compare.
+        for (const scoped of scopedFields.joinFields) {
+            const owner = resolveOwner(scoped.owner);
+            // Same silence contract as PROJECT: an unresolvable parent proves nothing.
+            if (!owner || owner.fields.size === 0) continue;
+            const fieldToken = scoped.token;
+            if (owner.fields.has(bareFieldName(fieldToken.value))) continue;
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: fieldToken.line, character: fieldToken.start },
+                    end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
+                },
+                message: `'${fieldToken.value}' is not a field on the parent FILE '${owner.label}'.`,
+                source: 'clarion'
+            });
         }
     }
 
@@ -851,10 +850,32 @@ function collectScopedProjectFieldTokens(
     view: Token,
     primaryFile: string
 ): Array<{ token: Token; owner: string }> {
+    return collectScopedViewFields(tokens, view, primaryFile).projects;
+}
+
+/**
+ * One walk, two answers (#473). Both PROJECT fields and a JOIN's field arguments need
+ * the same owner stack, but they read it at different moments, which is the whole
+ * subtlety:
+ *
+ *   PROJECT fields    belong to the CURRENT owner — the JOINed file when nested inside
+ *                     a JOIN, the VIEW's FROM file otherwise (#464).
+ *   JOIN field args   belong to the owner the JOIN is declared IN — its PARENT — read
+ *                     BEFORE the JOIN pushes its own file onto the stack.
+ *
+ * The parent rule is compiler-verified, not inferred; see `validateViewProjectFields`
+ * and `test-programs/ViewJoinTest/README.md` for the three variants that establish it.
+ */
+function collectScopedViewFields(
+    tokens: Token[],
+    view: Token,
+    primaryFile: string
+): { projects: Array<{ token: Token; owner: string }>; joinFields: Array<{ token: Token; owner: string }> } {
     const result: Array<{ token: Token; owner: string }> = [];
+    const joinFields: Array<{ token: Token; owner: string }> = [];
 
     const viewIndex = tokens.findIndex(t => t === view);
-    if (viewIndex === -1) return result;
+    if (viewIndex === -1) return { projects: result, joinFields };
 
     // Owner stack: the VIEW's FROM file, then one entry per enclosing JOIN.
     const owners: string[] = [primaryFile];
@@ -875,8 +896,14 @@ function collectScopedProjectFieldTokens(
             // The first argument names the join target - a KEY, whose prefix resolves
             // to the file. An unresolvable one still pushes, so the matching END pops
             // the right entry and ownership downstream is not shifted by one.
-            const firstArg = firstNameInsideParens(tokens, i + 1);
-            owners.push(firstArg ?? owners[owners.length - 1]);
+            const args = namesInsideParens(tokens, i + 1);
+            // #473: the remaining arguments are fields of the PARENT - the owner this
+            // JOIN is declared in - so they must be read BEFORE the push below.
+            const parentOwner = owners[owners.length - 1];
+            for (const field of args.slice(1)) {
+                joinFields.push({ token: field, owner: parentOwner });
+            }
+            owners.push(args[0]?.value ?? parentOwner);
             depth++;
             continue;
         }
@@ -896,7 +923,23 @@ function collectScopedProjectFieldTokens(
         }
     }
 
-    return result;
+    return { projects: result, joinFields };
+}
+
+/**
+ * The field name a qualifier-agnostic comparison uses — `CUS:Name`, `Customer.Name` and
+ * `Name` all reduce to `NAME` (#473).
+ *
+ * A JOIN's field list is matched by NAME with the prefix IGNORED, which is not how the
+ * PROJECT check works and is not a shortcut: `JOIN(CUS:CusKey, CUS:ID)` compiles against
+ * a parent that has an `ID`, even though the argument carries the JOINED file's prefix.
+ * Comparing the written form would reject it.
+ */
+function bareFieldName(value: string): string {
+    const dotted = splitDottedReference(value);
+    const afterQualifier = dotted ? dotted.member : value;
+    const colon = afterQualifier.lastIndexOf(':');
+    return (colon >= 0 ? afterQualifier.slice(colon + 1) : afterQualifier).toUpperCase();
 }
 
 /** Name tokens inside the parenthesised argument list starting at `openIndex`. */

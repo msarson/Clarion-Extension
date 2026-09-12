@@ -47,10 +47,18 @@ joined file's prefix and still compiles, purely because the parent `Orders` also
 has a field called `ID`. Read alone it looks like proof that the joined file is
 consulted, and it is not — row two is the one that settles it.
 
-This is why the JOIN loop in `StructureDiagnostics.ts` is left dormant rather
-than repaired: its premise (fields belong to the joined file) is wrong, and
-making it resolve emits false positives on the prefixed form every app
-generator emits.
+The validator checks this rule as of #473. It previously did not: the loop resolved
+the JOIN's first argument as if it were a bare FILE label, which a KEY reference never
+is, so it almost never ran — and where it did run, it checked the wrong file.
+
+One more variant, which is what the old tests had assumed:
+
+| variant | result |
+|---|---|
+| `JOIN(Customer, ORD:CusID)` — bare file label, then fields | `error: Too many parameters` |
+
+So `JOIN(FileLabel, field...)` is not legal Clarion at all. Tests written against that
+shape were pinning something the compiler rejects.
 
 Also compiler-verified, for the dotted form: `PROJECT(Orders.Total)` inside
 `JOIN(Customer.CusKey, ...)` fails with `Field not found in parent FILE`. A dot
