@@ -264,6 +264,16 @@ export class HoverProvider {
             }
 
             if (!currentScope) {
+                // #474: a DOTTED field reference must be answered before anything below.
+                // `HoverContextBuilder` truncates the word at the dot, so hovering
+                // `Customer.Name` arrives here as the bare word `Customer` — which is a
+                // real global structure label, so `findGlobalVariableHover` answers with
+                // the FILE and the field is never looked up. That is why a dotted field
+                // described its own file instead of itself.
+                const dottedFieldHover = await this.resolveDottedFieldHover(tokens, document, position);
+                mark('dottedField(noScope)');
+                if (dottedFieldHover) return dottedFieldHover;
+
                 // Check for global variable (in current file or MEMBER parent)
                 const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document, position.line);
                 mark('globalVar(noScope)');
@@ -278,6 +288,19 @@ export class HoverProvider {
                 if (structureFieldHover) return structureFieldHover;
 
                 logger.info('No scope found and no global variable found - cannot provide hover');
+
+                // #474: a PREFIXED field reference outside any PROCEDURE — a VIEW's
+                // `PROJECT(CUS:Name)`, a `KEY(CUS:ID)`, anything in the data section —
+                // produced no hover at all. This lookup lives on the scoped path
+                // (`findInIncludesAndEquates`, near the end of this method) and this
+                // branch returns before ever reaching it.
+                //
+                // Placed here, after the global and structure-field-declaration checks,
+                // so it mirrors the scoped path's ordering: those run before it there too,
+                // and a prefixed word that is genuinely a global keeps answering as one.
+                const prefixedFieldHover = await this.resolvePrefixedFieldHover(word, tokens, document);
+                mark('prefixedField(noScope)');
+                if (prefixedFieldHover) return prefixedFieldHover;
 
                 const classTypeHover = await this.checkClassTypeHover(word, document);
                 mark('classType(noScope)');
@@ -816,6 +839,70 @@ export class HoverProvider {
     /**
      * Builds markdown lines for scope information
      */
+
+    /**
+     * Resolve a qualified field reference — `CUS:Name` or `Orders.ID` — for a cursor
+     * that has no enclosing PROCEDURE scope (#474).
+     *
+     * Both forms name a field of a declared structure, but by different keys, so they
+     * need different lookups:
+     *   `CUS:Name`   PRE() prefix + field. Delegates to the same
+     *                `findInIncludesAndEquates` the scoped path uses, so the rendered
+     *                hover is identical wherever the reference appears.
+     *   `Orders.ID`  structure LABEL + field, which no PRE() lookup can match — the
+     *                prefix here is `ORD`, not `Orders`.
+     *
+     * Deliberately narrow: only qualified references are handled. An unqualified word in
+     * the data section keeps its existing behaviour, so this cannot introduce hovers where
+     * there were none before except for the forms #474 is about.
+     *
+     * The dotted half reads the TOKEN rather than `word`. `HoverContextBuilder` truncates
+     * at the dot — hovering `Customer.Name` yields the word `Customer` — which is precisely
+     * why that case answered with the FILE. Widening word extraction is not an option: the
+     * dot is also the chained-access separator (`SELF.records.alpha`), and the chained
+     * resolver depends on the current split. The tokenizer already emits the whole
+     * reference as one `StructureField` token, so the token is the reliable source here.
+     */
+    private async resolveDottedFieldHover(
+        tokens: Token[],
+        document: TextDocument,
+        position: Position
+    ): Promise<Hover | null> {
+        const dottedToken = tokens.find(t =>
+            t.type === TokenType.StructureField &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length &&
+            t.value.includes('.')
+        );
+        if (!dottedToken) return null;
+
+        const dot = dottedToken.value.indexOf('.');
+        const typeName = dottedToken.value.slice(0, dot);
+        const fieldName = dottedToken.value.slice(dot + 1);
+        // A single qualifier is a field reference. `A.B.C` is a chained member
+        // access and belongs to the chained resolver, not here.
+        if (!typeName || !fieldName || fieldName.includes('.')) return null;
+
+        return this.structureFieldResolver.resolveStructureTypeFieldHover(typeName, fieldName, document);
+    }
+
+    /**
+     * The `PRE:Field` half of #474 — see `resolveDottedFieldHover` for the dotted half.
+     *
+     * Delegates to the same `findInIncludesAndEquates` the scoped path uses, so the hover
+     * a prefixed field renders is identical wherever the reference appears. Narrow by
+     * design: an unqualified word is left alone, so this cannot manufacture hovers beyond
+     * the form #474 is about.
+     */
+    private async resolvePrefixedFieldHover(
+        word: string,
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Hover | null> {
+        if (word.lastIndexOf(':') <= 0) return null;
+        return this.variableResolver.findInIncludesAndEquates(word, tokens, document);
+    }
 
     /**
      * Check if a word is a CLASS type and provide hover with definition info

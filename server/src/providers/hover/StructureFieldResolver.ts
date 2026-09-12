@@ -265,8 +265,12 @@ export class StructureFieldResolver {
     /**
      * Find a field inside a QUEUE/GROUP/FILE type definition (potentially in INCLUDE files
      * or the current document itself).
+     *
+     * Public since #474: `HoverProvider` needs it for a dotted field reference that sits
+     * outside any PROCEDURE (`PROJECT(Orders.ID)` in a VIEW), where the scoped hover path
+     * that normally reaches field resolution never runs.
      */
-    private async resolveStructureTypeFieldHover(typeName: string, fieldName: string, document: TextDocument): Promise<Hover | null> {
+    public async resolveStructureTypeFieldHover(typeName: string, fieldName: string, document: TextDocument): Promise<Hover | null> {
         // First: check the current document's own tokens (handles same-file GROUP,TYPE definitions)
         const currentTokens = this.tokenCache.getTokens(document);
         const fromCurrentDoc = this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri);
