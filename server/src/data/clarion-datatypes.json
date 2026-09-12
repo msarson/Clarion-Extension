@@ -558,6 +558,63 @@
       "attributes": ["DIM", "NAME", "EXTERNAL", "DLL", "STATIC", "THREAD", "AUTO", "PRIVATE", "PROTECTED"],
       "size": "16 bytes",
       "notes": "Equivalent to the OLE API Variant type. Can be assigned any data type and can be a field within a QUEUE. The AUTO attribute is ignored by the compiler. Use ANY instead if the program does not use OLE API functions."
+    },
+    {
+      "name": "PROJECT",
+      "category": "complex",
+      "description": "Names the fields a VIEW retrieves",
+      "syntax": "PROJECT(field[,field...])",
+      "parameters": [
+        {
+          "name": "field",
+          "type": "field_reference",
+          "optional": false,
+          "description": "A field of the structure that owns this PROJECT - the VIEW's FROM file at VIEW level, or the JOINed file inside a JOIN. Prefixed (CUS:Name) or dotted (Customer.Name); both are legal."
+        }
+      ],
+      "attributes": [],
+      "size": "N/A (VIEW clause)",
+      "notes": "Valid only inside a VIEW. Every PROJECT must appear BEFORE any JOIN - the compiler rejects a PROJECT that follows one with 'All fields must be declared before JOINs'. Fields that are not projected are not retrieved."
+    },
+    {
+      "name": "JOIN",
+      "category": "complex",
+      "description": "Relates a second file to a VIEW through one of its keys",
+      "syntax": "JOIN(key,field[,field...]) ... END",
+      "parameters": [
+        {
+          "name": "key",
+          "type": "key_reference",
+          "optional": false,
+          "description": "A KEY on the file being joined - CUS:CusKey, or the dotted Customer.CusKey. It names a KEY, never a bare file label."
+        },
+        {
+          "name": "field",
+          "type": "field_reference",
+          "optional": false,
+          "description": "The field(s) whose values match the key components. Resolved against the PARENT file - the VIEW's FROM file, or the enclosing JOIN's file when nested - by field name, with any prefix ignored."
+        }
+      ],
+      "attributes": ["INNER", "OUTER"],
+      "size": "N/A (VIEW clause)",
+      "notes": "Valid only inside a VIEW, terminated with END or a period. PROJECT statements inside the JOIN select fields of the JOINED file. The field list belongs to the PARENT file, not the joined one - compiler-verified: JOIN(CUS:CusKey, CUS:Name) fails with 'Field not found in parent FILE' when the parent has no Name field."
+    },
+    {
+      "name": "KEY",
+      "category": "complex",
+      "description": "Declares an access path into a FILE, kept sorted on its component fields",
+      "syntax": "label KEY(component[,component...]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "component",
+          "type": "field_reference",
+          "optional": false,
+          "description": "A field of the FILE's RECORD, in sort-major order. Prefix a component with a minus sign for descending order."
+        }
+      ],
+      "attributes": ["DUP", "NOCASE", "OPT", "PRIMARY", "NAME"],
+      "size": "N/A (FILE structure)",
+      "notes": "Declared inside a FILE, before its RECORD. A KEY forbids duplicate entries unless DUP is given; an INDEX is the unsorted equivalent. Used as the first argument of a VIEW's JOIN, and as the argument to SET/NEXT for ordered access."
     }
   ]
 }
