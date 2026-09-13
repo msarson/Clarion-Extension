@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Maintenance
 
 - **Development, CI and the type definitions now all target Node 20,** the runtime VS Code 1.97 ships. `.nvmrc`, `engines.node` and `@types/node` are pinned to the 20 line, the release workflows read `.nvmrc`, and `npm run test:node20` runs the suite under Node 20 before a release dry run. [#491](https://github.com/msarson/Clarion-Extension/issues/491)
+- **The build now compiles with TypeScript 6.0.3 and bundler module resolution.** Output is unchanged; the old node10 resolver, removed in TypeScript 6, could not read `exports`-only packages, which is what kept the language-server protocol package pinned. [#497](https://github.com/msarson/Clarion-Extension/issues/497)
 
 ---
 
