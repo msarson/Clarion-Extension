@@ -3,7 +3,7 @@
 [![Marketplace version](https://flat.badgen.net/vs-marketplace/v/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 [![Marketplace installs](https://flat.badgen.net/vs-marketplace/i/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
-Clarion language support for Visual Studio Code: navigation, hover, IntelliSense, diagnostics, refactoring and builds, backed by a language server that understands whole solutions. Built and measured against real generated applications, 40 projects and 3,000 source files at a time, so the things a Clarion IDE user expects to work on an ABC app work here too.
+Clarion language support for Visual Studio Code: navigation, hover, IntelliSense, diagnostics, refactoring and builds, backed by a language server that understands whole solutions. Built and measured against real generated applications, 40 projects and 3,000 source files at a time, so the things a Clarion IDE user expects to work on a generated app, ABC or Legacy templates alike, work here too.
 
 - [Quick start](docs/guides/quick-start.md) — five minutes to your first solution
 - [Common tasks](docs/guides/common-tasks.md) — how do I…
@@ -76,7 +76,7 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ### 1.0.3 (2026-09-13)
 
-Most of this release is about reading generated code correctly: the MAP shapes an ABC app emits, the procedure names it shares between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath. Several rules were settled by compiling a fixture, and the same work removed the last second-long cold starts on large programs.
+Most of this release is about reading generated code correctly: the MAP shapes a generated app emits, the procedure names it shares between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath. Several rules were settled by compiling a fixture, and the same work removed the last second-long cold starts on large programs.
 
 - Every documented MAP prototype shape is recognised and navigable, and none is reported as undeclared; a `MODULE()`-wrapped prototype in the global MAP is labelled Global, a `,PRIVATE` one is called out.
 - New diagnostic: a call to a PRIVATE procedure from another module, matching the compiler's *Invalid use of PRIVATE procedure*.

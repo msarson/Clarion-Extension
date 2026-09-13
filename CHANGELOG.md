@@ -14,7 +14,7 @@ All notable changes to the Clarion Extension are documented here.
 
 ![33 fixes](https://img.shields.io/badge/fixes-33-1f6feb?style=flat-square) ![5 new](https://img.shields.io/badge/new-5-2da44e?style=flat-square) ![3 performance](https://img.shields.io/badge/performance-3-8250df?style=flat-square)
 
-Forty-one changes, most of them about how the extension reads generated code: the MAP shapes an ABC app emits, the procedure names it shares between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath. Several rules were settled by compiling a fixture, and the same work removed the last second-long cold starts on large programs. Contributions from [@geircodes](https://github.com/geircodes) and [@ClarionLive](https://github.com/ClarionLive) are credited inline.
+Forty-one changes, most of them about how the extension reads generated code: the MAP shapes a generated app emits, the procedure names it shares between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath. Several rules were settled by compiling a fixture, and the same work removed the last second-long cold starts on large programs. Contributions from [@geircodes](https://github.com/geircodes) and [@ClarionLive](https://github.com/ClarionLive) are credited inline.
 
 #### Navigation and hover
 
