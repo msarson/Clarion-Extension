@@ -3111,6 +3111,16 @@ export class ReferencesProvider {
                         !(fileUri === declarationUri && token.line === declarationLine)) {
                         continue;
                     }
+                    // #487 — and for a NON-field symbol (a local, module or global), a col-0
+                    // declaration that is a field of a PRE()'d or PRE-less structure is a
+                    // different symbol: `fq:loc` is only ever reached through its qualifier,
+                    // so it is not a reference to the bare local `loc` and must not be listed.
+                    if (scopeType !== 'field' &&
+                        token.start === 0 &&
+                        (token.structurePrefix || SymbolFinderService.requiresDotQualification(token)) &&
+                        !(fileUri === declarationUri && token.line === declarationLine)) {
+                        continue;
+                    }
                 } else if (token.type === TokenType.ReferenceVariable &&
                            token.value.toLowerCase() === '&' + searchWordLower) {
                     // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"

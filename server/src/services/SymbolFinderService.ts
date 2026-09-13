@@ -472,7 +472,27 @@ export class SymbolFinderService {
                 logger.info(`⏭️ Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a window/report control keyword, not a data declaration — deferring to declaration scan`);
             }
         }
-        const varSymbol = varSymbolIsControl ? null : rawVarSymbol;
+        // #487 — the symbol-tree recursion descends into structure children, so a bare
+        // word's FIRST match can be a field of a PRE()'d (or PRE-less) structure that
+        // the bare name cannot legally reference (#265 / #350). Returning null there
+        // (as the post-match check below used to be the only place to notice) skipped
+        // the declaration scan that already excludes such fields — so a procedure with
+        // `FoundQ QUEUE,PRE(fq)` holding `loc` AND a plain local `loc` hovered as
+        // nothing, while F12 (a different route) found the local. Treat it exactly
+        // like the control case: discard the match and let the scan bind the real one.
+        let varSymbolIsShadowedField = false;
+        if (rawVarSymbol !== null && bareSearch && !varSymbolIsControl) {
+            const nameLower = searchText.toLowerCase();
+            const matchTok = tokens.find(t =>
+                t.line === rawVarSymbol.range.start.line &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === nameLower);
+            if (matchTok && (matchTok.structurePrefix || SymbolFinderService.requiresDotQualification(matchTok))) {
+                varSymbolIsShadowedField = true;
+                logger.info(`⏭️ [#487] Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a structure field a bare name cannot reference — deferring to declaration scan`);
+            }
+        }
+        const varSymbol = (varSymbolIsControl || varSymbolIsShadowedField) ? null : rawVarSymbol;
 
         if (!varSymbol) {
             logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
