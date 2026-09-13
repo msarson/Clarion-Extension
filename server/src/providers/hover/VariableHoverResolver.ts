@@ -127,16 +127,27 @@ export class VariableHoverResolver {
             ``
         ];
         
+        // #486 — same badge rule as the global card: a structure label is a structure.
+        const structureKind = this.structureKindOf(symbolInfo.token, tokens);
         if (scopeInfo) {
-            const scopeIcon = '📦';
-            markdown.push(`${scopeIcon} Module variable`);
+            markdown.push(structureKind ? `📦 Module ${structureKind} structure` : `📦 Module variable`);
+            if (structureKind) {
+                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document);
+                if (facts) {
+                    markdown.push(``);
+                    markdown.push(facts);
+                }
+            }
         }
-        
-        // Add the actual source code line
-        if (symbolInfo.declaration) {
+
+        // Add the actual source code line — as written, not rebuilt from tokens
+        // (#486: the token join rendered `LocalF FILE , DRIVER ( 'ASCII' ) , PRE ( LF )`).
+        const sourceLine = document.getText().split(/\r?\n/)[symbolInfo.location.line]?.trim();
+        const declaration = sourceLine || symbolInfo.declaration;
+        if (declaration) {
             markdown.push(``);
             markdown.push('```clarion');
-            markdown.push(symbolInfo.declaration);
+            markdown.push(declaration);
             markdown.push('```');
         }
 
@@ -342,12 +353,27 @@ export class VariableHoverResolver {
             markdown.push(`🔷 \`${structureParentName}\` field`);
         } else if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-            const scopeLabel = isProcedure
-                ? (scopeInfo.type === 'global' ? 'Global procedure' : 'Module procedure')
-                : isEquate
-                    ? (scopeInfo.type === 'global' ? 'Global constant' : 'Module constant')
-                    : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
+            const scopeWord = scopeInfo.type === 'global' ? 'Global' : 'Module';
+            // #486 — a structure label (FILE, QUEUE, GROUP, CLASS, WINDOW, REPORT, VIEW…)
+            // is not a variable. The title already named the type; the badge — the line
+            // a reader trusts — said "Global variable" for a FILE. Badge it as the
+            // structure it is, and give a FILE the facts it is hovered for.
+            const structureKind = this.structureKindOf(globalVar, tokens);
+            const scopeLabel = structureKind
+                ? `${scopeWord} ${structureKind} structure`
+                : isProcedure
+                    ? `${scopeWord} procedure`
+                    : isEquate
+                        ? `${scopeWord} constant`
+                        : `${scopeWord} variable`;
             markdown.push(`${scopeIcon} ${scopeLabel}`);
+            if (structureKind) {
+                const facts = this.describeStructure(globalVar, structureKind, tokens, document);
+                if (facts) {
+                    markdown.push(``);
+                    markdown.push(facts);
+                }
+            }
         }
 
         // Inline declared-value summary (Gap D). Reads the structured dataType / dataValue
@@ -395,6 +421,72 @@ export class VariableHoverResolver {
      * string when nothing useful can be shown (the heading line above already
      * shows `Name — TYPE`, so we only add value-bearing detail).
      */
+    /**
+     * #486 — the structure keyword this label declares (`Orders FILE,…` → "FILE"),
+     * from the Structure token on the label's own line; undefined for a scalar,
+     * a reference, a procedure or an EQUATE.
+     */
+    private structureKindOf(labelToken: Token, tokens: Token[]): string | undefined {
+        const opener = tokens.find(t =>
+            t.line === labelToken.line &&
+            t.start > labelToken.start &&
+            t.type === TokenType.Structure &&
+            t.finishesAt !== undefined
+        );
+        return opener ? opener.value.toUpperCase() : undefined;
+    }
+
+    /**
+     * #486 — one line of facts for a structure card, from the declaration the
+     * tokenizer already parsed. FILE: driver, PRE prefix, keys, memos/blobs and
+     * record fields. QUEUE/GROUP: PRE prefix and field count. Nothing for the rest.
+     */
+    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument): string {
+        const opener = tokens.find(t =>
+            t.line === labelToken.line && t.start > labelToken.start &&
+            t.type === TokenType.Structure && t.finishesAt !== undefined);
+        if (!opener || opener.finishesAt === undefined) return '';
+
+        const lines = document.getText().split(/\r?\n/);
+        const declLine = lines[labelToken.line] ?? '';
+        const parts: string[] = [];
+
+        const driver = /\bDRIVER\s*\(\s*'([^']*)'/i.exec(declLine);
+        if (driver) parts.push(`DRIVER('${driver[1]}')`);
+        const pre = /\bPRE\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(declLine);
+        if (pre) parts.push(`PRE(${pre[1]})`);
+        for (const attr of ['CREATE', 'THREAD', 'OWNER', 'ENCRYPT', 'RECLAIM', 'BINDABLE']) {
+            if (new RegExp(`[,\\s]${attr}\\b`, 'i').test(declLine)) parts.push(attr);
+        }
+
+        // Column-0 labels declared inside this structure, with the keyword that follows each.
+        const members = tokens.filter(t =>
+            t.line > opener.line && t.line < opener.finishesAt! &&
+            t.start === 0 && t.type === TokenType.Label);
+        const followerOf = (t: Token) => tokens.find(n => n.line === t.line && n.start > t.start)?.value.toUpperCase() ?? '';
+        const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+        if (kind === 'FILE') {
+            const keys = members.filter(t => ['KEY', 'INDEX'].includes(followerOf(t))).length;
+            const memos = members.filter(t => ['MEMO', 'BLOB'].includes(followerOf(t))).length;
+            const record = tokens.find(t =>
+                t.line > opener.line && t.line < opener.finishesAt! &&
+                t.type === TokenType.Structure && t.value.toUpperCase() === 'RECORD' && t.finishesAt !== undefined);
+            const fields = record
+                ? members.filter(t => t.line > record.line && t.line < record.finishesAt!).length
+                : 0;
+            if (keys) parts.push(plural(keys, 'key'));
+            if (memos) parts.push(plural(memos, 'memo'));
+            parts.push(plural(fields, 'field'));
+            return parts.length ? `🗄️ ${parts.join(' · ')}` : '';
+        }
+        if (kind === 'QUEUE' || kind === 'GROUP') {
+            parts.push(plural(members.length, 'field'));
+            return `🗂️ ${parts.join(' · ')}`;
+        }
+        return parts.length ? `🗂️ ${parts.join(' · ')}` : '';
+    }
+
     private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
         const upperType = type.toUpperCase();
         if (value !== undefined) {

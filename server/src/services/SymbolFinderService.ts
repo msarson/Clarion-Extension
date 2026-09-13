@@ -228,7 +228,12 @@ export class SymbolFinderService {
             let depth = 0;
             let seenOpen = false;
             let typeArg: Token | undefined;
-            for (const t of afterNext) {
+            // #486: a type argument is the group that IMMEDIATELY follows the keyword —
+            // CLASS(WindowManager), QUEUE(ParentType). `LineQ QUEUE,PRE(LQ)` has no such
+            // group; scanning on to the first '(' anywhere on the line took PRE's argument
+            // and rendered the hover title as `QUEUE(LQ)`.
+            const immediatelyFollows = afterNext[0]?.value === '(';
+            for (const t of immediatelyFollows ? afterNext : []) {
                 if (t.value === '(') {
                     depth++;
                     seenOpen = true;
