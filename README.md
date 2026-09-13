@@ -5,6 +5,8 @@
 
 Clarion language support for Visual Studio Code: navigation, hover, IntelliSense, diagnostics, refactoring and builds, backed by a language server that understands whole solutions. Built and measured against real generated applications, 40 projects and 3,000 source files at a time, so the things a Clarion IDE user expects to work on a generated app, ABC or Legacy templates alike, work here too.
 
+![Hover on a FILE label: Orders is a global FILE structure with DRIVER TOPSPEED, PRE ORD, CREATE, THREAD, 1 key and 3 fields, declared at viewjoin.clw line 16](docs/images/hover-file.png)
+
 - [Quick start](docs/guides/quick-start.md) — five minutes to your first solution
 - [Common tasks](docs/guides/common-tasks.md) — how do I…
 - [Changelog](CHANGELOG.md) — what changed in each release
@@ -35,6 +37,8 @@ Works in the current file with no solution open; opens out across files when a s
 
 Reported as you type, following the compiler's rules; where the rule was unclear it was settled by compiling a fixture.
 
+![A PROJECT of a misspelled field is flagged: Customer.Naem is not a field on FILE Customer](docs/images/diagnostic-view-field.png)
+
 - Unterminated structures, missing RETURN, FILE validation, VIEW field references checked against the owning file.
 - Missing INCLUDE and missing project DefineConstants, each with a quick fix that adds the line.
 - Discarded return values, a literal passed by reference, a call to a PRIVATE procedure from another module, undeclared variables, missing implementations and indistinguishable overloads.
@@ -45,12 +49,16 @@ Reported as you type, following the compiler's rules; where the rule was unclear
 
 On Ctrl+.: Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, and Create routine from an unresolved `DO`. [Code editing in detail](docs/features/code-editing.md)
 
+![The Quick Fix menu on an unresolved DO offering Create routine](docs/images/quick-fix-create-routine.png)
+
 ### Solutions and builds
 
 - Open a folder; the extension finds the `.sln`, reads the projects, and follows Clarion's redirection files exactly as the IDE does, including per-configuration sections.
 - Installed Clarion versions are discovered from the IDE's settings; a `ClarionProperties.xml` kept anywhere else can be chosen, and the build follows it.
 - Build from the Solution View with live output, projects ordered by dependency. A solution that loads in a degraded state says so instead of silently returning nothing.
 - [Solution management in detail](docs/features/solution-management.md)
+
+<img src="docs/images/solution-view.png" width="344" alt="The Clarion Tools side bar: Actions with the selected Clarion version and configuration, the Solution View with the loaded solution and its project, and the Structure view of the open file">
 
 ### Editing and syntax
 
