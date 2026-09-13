@@ -67,7 +67,17 @@ feel/rendering judgments, and VM-parity absolute timings.
   runs the server suite.
 - `version-x.y.z` branches have a pre-commit hook blocking direct source
   commits — branch off, then FF-merge back (FF bypasses the hook).
-- CHANGELOG.md gets a lean entry in the same commit as any user-facing change.
+- CHANGELOG.md gets a lean entry in the same commit as any user-facing change,
+  in the #492 style: no emoji; under an area subheading (`Navigation and hover`,
+  `Diagnostics`, `Performance`, `Configuration and build`, `Syntax`, `Editing`,
+  `Maintenance`); a bold short statement ending in a full stop, one or two
+  plain sentences, the issue/PR link, then `@handle` if contributed. Cause
+  narrative, measurements and test counts stay in the issue and commit. At
+  release time the section head gets the shields.io pills
+  (`fixes` 1f6feb · `new` 2da44e · `performance` 8250df, `?style=flat-square`)
+  and a one-to-two-sentence lead; the three newest versions stay in full,
+  older ones become a Highlights block linking `dev/docs-internal/changelogs/`
+  (that folder is gitignored — `git add -f` new archives).
 - Release packaging: run `npm run bundle` before `vsce package` if the VSIX
   comes out with hundreds of files (the `rimraf` in `package:release` can miss,
   leaving the tsc tree in `out/`; a correct bundle VSIX is ~26 files).
