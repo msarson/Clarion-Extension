@@ -1,7 +1,7 @@
 # Clarion Extension for Visual Studio Code
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
+[![Marketplace version](https://flat.badgen.net/vs-marketplace/v/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
+[![Marketplace installs](https://flat.badgen.net/vs-marketplace/i/msarson.clarion-extensions)](https://marketplace.visualstudio.com/items?itemName=msarson.clarion-extensions)
 
 Clarion language support for Visual Studio Code: navigation, hover, IntelliSense, diagnostics, refactoring and builds, backed by a language server that understands whole solutions. Built and measured against real generated applications, 40 projects and 3,000 source files at a time, so the things a Clarion IDE user expects to work on an ABC app work here too.
 
