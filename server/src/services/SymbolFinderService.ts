@@ -2109,8 +2109,24 @@ export class SymbolFinderService {
         // trying to resolve. Skip the index probe for anything qualified.
         if (word.includes('.') || word.includes(':')) return null;
 
-        const hits = StructureDeclarationIndexer.getInstance().findProcedure(word);
-        if (hits.length === 0) return null;
+        const allHits = StructureDeclarationIndexer.getInstance().findProcedure(word);
+        if (allHits.length === 0) return null;
+
+        // #483 — drop hits this file cannot reach. The index scans .inc/.equ only, so
+        // a same-named procedure prototyped in ANOTHER project's callout INC can be the
+        // only indexed declaration while this project's own PROGRAM-MAP prototype is
+        // not indexed at all. Trusting it sent FAR (and rename) to the other project's
+        // family and left out the call site under the cursor. A hit the graph has
+        // never seen (`undefined`) is kept — no-solution mode and a still-building
+        // graph behave as before. With nothing reachable left, fall through to the
+        // walk tiers, which start from this file and its MEMBER parent.
+        const curPathForReach = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const frg = FileRelationshipGraph.getInstance();
+        const hits = allHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, curPathForReach) !== false);
+        if (hits.length === 0) {
+            logger.info(`#483: ${allHits.length} index hit(s) for "${word}" are all unreachable from ${path.basename(curPathForReach)} — falling through to the walk`);
+            return null;
+        }
 
         // TRUST the index. Its scanner only records MAP/MODULE-context prototypes
         // and column-0 procedure declarations, so a hit IS a real declaration —

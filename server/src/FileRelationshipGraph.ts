@@ -819,6 +819,52 @@ export class FileRelationshipGraph {
     }
 
     /**
+     * #483 — can `fromPath` legitimately see a declaration that lives in `declPath`?
+     *
+     * A procedure prototype is visible to a caller only through the caller's own
+     * MAP/INCLUDE chain or its PROGRAM's. When two projects in one solution declare
+     * the same name, the structure-declaration index (which scans .inc/.equ only)
+     * may hold just the OTHER project's prototype — a module-callout INC that is
+     * included by that project's modules and nobody else's. Trusting such a hit
+     * gave hover and FAR the wrong project's procedure while F12 stayed right.
+     *
+     * Reachable when `declPath` is the caller itself, the caller's PROGRAM, a
+     * MEMBER of that same PROGRAM, or is (transitively) INCLUDEd by any of those.
+     *
+     * Returns `undefined` when the graph knows nothing about `declPath` — no
+     * solution loaded, graph still building, or a file outside every project —
+     * so callers keep their existing behaviour rather than rejecting a hit the
+     * graph simply never saw.
+     */
+    public isDeclarationReachableFrom(declPath: string, fromPath: string): boolean | undefined {
+        const decl = this.normalizePath(declPath);
+        const from = this.normalizePath(fromPath);
+        if (decl === from) return true;
+        if (!this.forwardEdges.has(decl) && !this.reverseEdges.has(decl)) return undefined;
+
+        const program = this.getProgramFile(from);
+        const belongsHere = (f: string): boolean =>
+            f === from || (program !== undefined && (f === program || this.getProgramFile(f) === program));
+
+        if (belongsHere(decl)) return true;
+
+        // Walk UP the INCLUDE edges from the declaring file: every file that includes
+        // it, and every file that includes those, until one of them is ours.
+        const visited = new Set<string>([decl]);
+        const queue: string[] = [decl];
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            for (const includer of this.getIncludingFiles(current)) {
+                if (visited.has(includer)) continue;
+                visited.add(includer);
+                if (belongsHere(includer)) return true;
+                queue.push(includer);
+            }
+        }
+        return false;
+    }
+
+    /**
      * Returns all MEMBER file paths belonging to the given PROGRAM file.
      * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
      * files of the cursor's file may contain cross-procedure callers (P2b,

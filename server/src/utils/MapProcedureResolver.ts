@@ -15,6 +15,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
@@ -115,7 +116,15 @@ export class MapProcedureResolver {
         // index is empty" gate is deliberately NOT taken: a prototype could live in an
         // INCLUDEd .clw the SDI doesn't scan, and the walk must still find it.)
         const procHits = StructureDeclarationIndexer.getInstance().findProcedure(procName);
-        if (procHits.length === 1) {
+        // #483 — a unique hit is only "the target" if THIS file can reach it. The index
+        // scans .inc/.equ only, so when two projects share a name and one declares it
+        // in its PROGRAM's own MAP (never indexed) while the other uses a callout INC
+        // (indexed, and visible through shared redirection paths), the lone hit is the
+        // OTHER project's. Reject it and let the walk — which starts from this file
+        // and its parent — find the right prototype. `undefined` (graph knows nothing
+        // about the file) keeps the fast path, so no-solution mode is unchanged.
+        if (procHits.length === 1 &&
+            FileRelationshipGraph.getInstance().isDeclarationReachableFrom(procHits[0].filePath, currentPath) !== false) {
             const loaded = await this.loadDocForWalk(procHits[0].filePath);
             if (loaded) {
                 const fastLine = this.findModuleScopedProcDeclLine(loaded.tokens, procName.toLowerCase());

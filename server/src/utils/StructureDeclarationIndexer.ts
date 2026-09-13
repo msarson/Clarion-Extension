@@ -991,11 +991,22 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             if (idx) return idx.get(key) ?? [];
             // Fall through to cross-index search (mirrors find()'s #290 behaviour).
         }
+        // #483 — aggregate across EVERY project index, not the first that answers.
+        // Returning the first project's hits alone hid the second project's same-named
+        // prototype from callers that decide "unique hit → trust it" or "prefer the
+        // hit in my own project" (#364): they never saw the competitor. Same file+line
+        // reached through two projects' shared search paths is reported once.
+        const seen = new Set<string>();
+        const all: ProcedureDeclarationInfo[] = [];
         for (const idx of this.procIndexes.values()) {
-            const hit = idx.get(key);
-            if (hit?.length) return hit;
+            for (const hit of idx.get(key) ?? []) {
+                const id = `${hit.filePath.toLowerCase()}|${hit.line}`;
+                if (seen.has(id)) continue;
+                seen.add(id);
+                all.push(hit);
+            }
         }
-        return [];
+        return all;
     }
 
     clearCache(): void {
