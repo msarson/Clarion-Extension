@@ -40,6 +40,24 @@ node scripts/perf/lsp-driver.js --sln=... --file=...
 What still needs a human: PWEE-embeditor scenarios (live Clarion IDE), UI
 feel/rendering judgments, and VM-parity absolute timings.
 
+## Working rules
+
+- **One branch per change.** Never work on a `version-x.y.z` branch directly —
+  cut `fix/…` or `feat/…` off it first, then FF-merge back.
+- **TDD: red then green.** Write the failing test first and *watch it fail* for
+  the right reason before touching the implementation. A test written after the
+  fix proves nothing about the fix. Report the red run, not just the green one.
+- **Check the Clarion help before asserting language behaviour.** The full help
+  is extracted and greppable at
+  `C:\Users\msars\.claude\clarion-help\ClarionHelp\` (4,686 topic pages, one
+  per keyword — e.g. `prototype_syntax.htm`, `map.htm`, `module.htm`).
+  Re-extract with
+  `hh.exe -decompile <dest> F:\DirectSystems\Clarion10\bin\ClarionHelp.chm`.
+  PDFs (LanguageReference, ABC Library Reference) are in
+  `F:\DirectSystems\Clarion10\docs`. Where the docs are ambiguous or silent,
+  settle it by compiling a fixture (see the compiler-verified notes in
+  `test-programs/`) — and say which source settled it.
+
 ## Other repo conventions
 
 - Tests are **Mocha** (tdd ui: `suite`/`test`/`setup`), not Jest. `npm test`
