@@ -17,6 +17,7 @@ import { SymbolFinderService } from '../services/SymbolFinderService';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
+import { validatePrivateProcedureCalls } from './diagnostics/PrivateProcedureDiagnostics';
 import { validateUnicodeCharacters } from './diagnostics/UnicodeDiagnostics';
 import { validateAttributeApplicability } from './diagnostics/AttributeDiagnostics';
 import { validateItemizeBlocks } from './diagnostics/ItemizeDiagnostics';
@@ -179,6 +180,15 @@ export class DiagnosticProvider {
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
         return this.filterOmitted(await validateMissingImplementations(tokens, document, getOpenDocumentContent), tokens, document);
+    }
+
+    /** Async pass: warn on a call to a PRIVATE MAP prototype from outside its own module. #481 */
+    public static async validatePrivateProcedureCalls(
+        tokens: Token[],
+        document: TextDocument,
+        getOpenDocumentContent?: (absPath: string) => string | null
+    ): Promise<Diagnostic[]> {
+        return this.filterOmitted(await validatePrivateProcedureCalls(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
     /** Async pass: warn when a variable's type is defined in an .inc not yet included. Closes #83 */

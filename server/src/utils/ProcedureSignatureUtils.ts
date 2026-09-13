@@ -4,6 +4,7 @@
  */
 
 import LoggerManager from '../logger';
+import { DeclaredValueParser } from '../tokenizer/DeclaredValueParser';
 
 const logger = LoggerManager.getLogger("ProcedureSignatureUtils");
 logger.setLevel("error");
@@ -209,6 +210,24 @@ export class ProcedureSignatureUtils {
 
         if (depth !== 0) return null; // unbalanced
         return { start: parenStart, end: i };
+    }
+
+    /**
+     * True when the MAP prototype starting at `lines[line]` carries PRIVATE (#480, #481).
+     * Follows `|` continuations, since a long attribute tail is often wrapped, and
+     * ignores comments so a `! PRIVATE` note does not count. Only the attribute tail
+     * after the parameter list is read, so a parameter named Private cannot match.
+     */
+    public static isPrivatePrototype(lines: string[], line: number): boolean {
+        let prototype = '';
+        for (let i = line; i < lines.length; i++) {
+            const code = DeclaredValueParser.stripTrailingComment(lines[i]).trimEnd();
+            if (!code.endsWith('|')) { prototype += code; break; }
+            prototype += code.slice(0, -1) + ' ';
+        }
+        const span = this.findParameterListSpan(prototype);
+        const attributes = span ? prototype.slice(span.end) : prototype;
+        return attributes.split(',').some(part => part.trim().toUpperCase() === 'PRIVATE');
     }
 
     /**

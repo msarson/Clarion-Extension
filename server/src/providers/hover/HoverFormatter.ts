@@ -24,7 +24,7 @@ import { PropEntry } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
-import { DeclaredValueParser } from '../../tokenizer/DeclaredValueParser';
+import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -393,21 +393,6 @@ export class HoverFormatter {
     }
 
     /**
-     * True when the MAP prototype starting at `line` carries PRIVATE (#480). Follows
-     * `|` continuations, since a long attribute tail is often wrapped, and ignores
-     * comments so a `! PRIVATE` note does not count.
-     */
-    private isPrivatePrototype(lines: string[], line: number): boolean {
-        let prototype = '';
-        for (let i = line; i < lines.length; i++) {
-            const code = DeclaredValueParser.stripTrailingComment(lines[i]).trimEnd();
-            if (!code.endsWith('|')) { prototype += code; break; }
-            prototype += code.slice(0, -1) + ' ';
-        }
-        return this.parseMethodModifiers(prototype).visibility === 'PRIVATE';
-    }
-
-    /**
      * Builds the Option-C style header line for a method or property hover.
      * Format: **Name** — [Private] [Virtual] Category MemberType · ClassName  returns `TYPE`
      */
@@ -542,7 +527,7 @@ export class HoverFormatter {
                     const lines = content.split('\n');
                     const firstStatement = lines.find(l => l.trim() && !l.trim().startsWith('!'))?.trim().toUpperCase() ?? '';
 
-                    if (mapDecl && this.isPrivatePrototype(lines, mapDecl.range.start.line)) {
+                    if (mapDecl && ProcedureSignatureUtils.isPrivatePrototype(lines, mapDecl.range.start.line)) {
                         header = `**${procName}** 📦 Module Procedure · Private\n`;
                     } else if (firstStatement.startsWith('PROGRAM')) {
                         header = `**${procName}** 🌍 Global Procedure\n`;
