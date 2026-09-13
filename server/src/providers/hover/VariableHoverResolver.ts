@@ -6,7 +6,7 @@ import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from './CrossFileCache';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { SymbolFinderService, SymbolInfo } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { CompilerFlagService } from '../../utils/CompilerFlagService'; // #420
@@ -63,11 +63,7 @@ export class VariableHoverResolver {
         
         if (symbolInfo) {
             logger.info(`✅ Found variable info for ${word}: type=${symbolInfo.type}, line=${symbolInfo.location.line}`);
-            const variableInfo: VariableInfo = {
-                type: symbolInfo.type,
-                line: symbolInfo.location.line,
-                parentStructure: symbolInfo.parentStructure
-            };
+            const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
             // #302 follow-up (Mark): no class-definition appendix — the declaration line and
             // location already carry everything the hover needs; F12 on the type covers "where
             // is the class defined".
@@ -94,11 +90,7 @@ export class VariableHoverResolver {
         if (!symbolInfo) return null;
 
         logger.info(`✅ Found structure field declaration for ${word} at line ${symbolInfo.location.line}`);
-        const variableInfo: VariableInfo = {
-            type: symbolInfo.type,
-            line: symbolInfo.location.line,
-            parentStructure: TokenHelper.getEnclosingDataStructure(symbolInfo.token, this.tokenCache.getStructure(document))
-        };
+        const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
         return this.formatter.formatVariable(word, variableInfo, symbolInfo.token, document, hoverLine);
     }
 
@@ -281,13 +273,46 @@ export class VariableHoverResolver {
         
         if (symbolInfo) {
             logger.info(`Found variable in symbol tree: ${symbolInfo.token.value}`);
-            return {
-                type: symbolInfo.type,
-                line: symbolInfo.location.line
-            };
+            return this.toVariableInfo(symbolInfo, document);
         }
-        
+
         return null;
+    }
+
+    /**
+     * #488 — ONE card for one symbol, whichever cursor reached it. The finder's
+     * result differs by route: the declaration-line fast path carries the owning
+     * structure, the symbol-tree / PRE:Field / Structure.Field routes do not, and
+     * each derived the title type its own way (`string` vs `string(261)`). So a
+     * QUEUE field read "Field of local procedure QUEUE `FoundQ`" on its own line
+     * and "Local procedure variable" at `fq:loc` or `FoundQ.loc`. Both facts come
+     * from the declaration token itself, so derive them here for every route.
+     */
+    private toVariableInfo(symbolInfo: SymbolInfo, document: TextDocument): VariableInfo {
+        const token = symbolInfo.token;
+        const parentStructure = symbolInfo.parentStructure
+            ?? TokenHelper.getEnclosingDataStructure(token, this.tokenCache.getStructure(document));
+        return {
+            type: this.declaredTypeText(token, document) ?? symbolInfo.type,
+            line: symbolInfo.location.line,
+            parentStructure
+        };
+    }
+
+    /**
+     * #488 — the type expression as written on the declaration line: the first
+     * attribute after the label, up to the first top-level comma. `loc string(261)`
+     * → `string(261)`; `pick long,auto` → `long`; `DirQ QUEUE(File:queue),PRE(dq)`
+     * → `QUEUE(File:queue)`; `t &StringTheory` → `&StringTheory`. Undefined when
+     * the line does not look like a declaration (callers keep the finder's type).
+     */
+    private declaredTypeText(token: Token, document: TextDocument): string | undefined {
+        const line = document.getText().split(/\r?\n/)[token.line];
+        if (!line || token.start !== 0) return undefined;
+        const rest = line.slice(token.value.length);
+        if (!/^\s/.test(rest)) return undefined;
+        const m = /^\s+(&?[A-Za-z_][\w:.]*(?:\([^)]*\))?)/.exec(rest);
+        return m ? m[1] : undefined;
     }
 
     /**
