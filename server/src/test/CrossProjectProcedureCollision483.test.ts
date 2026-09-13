@@ -200,11 +200,14 @@ suite('Cross-project same-named procedure (#483)', () => {
         return typeof c === 'string' ? c : (c.value ?? JSON.stringify(c));
     }
 
-    test('precondition: the index knows only B\'s prototype for the name', () => {
+    test('precondition: the index holds B\'s INC prototype — the hit the callers used to trust blindly', () => {
+        // Originally the ONLY indexed hit (the SDI scanned .inc/.equ alone). Since the
+        // #483 follow-up indexes PROGRAM-file MAPs, A's prototype is indexed too and
+        // the resolvers must choose by reachability, not by uniqueness — the
+        // behavioural tests below cover both states.
         const hits = StructureDeclarationIndexer.getInstance().findProcedure('Forms1099Misc');
-        assert.ok(hits.length >= 1, 'B\'s INC prototype must be indexed');
-        assert.ok(hits.every(h => path.basename(h.filePath).toLowerCase() === 'forms_b.inc'),
-            `only the INC is indexable; got [${hits.map(h => path.basename(h.filePath)).join(', ')}]`);
+        assert.ok(hits.some(h => path.basename(h.filePath).toLowerCase() === 'forms_b.inc'),
+            `B's INC prototype must be indexed; got [${hits.map(h => path.basename(h.filePath)).join(', ')}]`);
     });
 
     test('F12 from A\'s call site stays in A (control — already correct)', async () => {

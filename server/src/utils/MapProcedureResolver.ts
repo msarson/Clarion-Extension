@@ -123,13 +123,18 @@ export class MapProcedureResolver {
         // OTHER project's. Reject it and let the walk — which starts from this file
         // and its parent — find the right prototype. `undefined` (graph knows nothing
         // about the file) keeps the fast path, so no-solution mode is unchanged.
-        if (procHits.length === 1 &&
-            FileRelationshipGraph.getInstance().isDeclarationReachableFrom(procHits[0].filePath, currentPath) !== false) {
-            const loaded = await this.loadDocForWalk(procHits[0].filePath);
+        // #483 follow-up — with PROGRAM MAPs indexed, a name declared by several projects
+        // has several hits; the one THIS file can reach is still unambiguous.
+        const frg = FileRelationshipGraph.getInstance();
+        const reachableHits = procHits.length === 1
+            ? procHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, currentPath) !== false)
+            : procHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, currentPath) === true);
+        if (reachableHits.length === 1) {
+            const loaded = await this.loadDocForWalk(reachableHits[0].filePath);
             if (loaded) {
                 const fastLine = this.findModuleScopedProcDeclLine(loaded.tokens, procName.toLowerCase());
                 if (fastLine !== null) {
-                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(procHits[0].filePath)}:${fastLine}`);
+                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(reachableHits[0].filePath)}:${fastLine}`);
                     mapDeclWalkCache.set(cacheKey, { docUri: loaded.document.uri, declLine: fastLine });
                     return { doc: loaded.document, tokens: loaded.tokens, declLine: fastLine };
                 }

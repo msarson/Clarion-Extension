@@ -2190,10 +2190,19 @@ export class SymbolFinderService {
             resolved: 'true'
         });
 
+        // #483 follow-up — a prototype in a PROGRAM's own MAP is global to that
+        // program: FAR's file set for a 'module' PROCEDURE is the declaring file plus
+        // its MODULE targets and includers, which for a PROGRAM file (no includers,
+        // and no graph in no-solution mode) collapses to the PROGRAM alone and loses
+        // every member call site. 'global' is what the walk always reported for it,
+        // and what getFilesToSearch's own PROGRAM-file-MAP-entry branch expects.
+        const scopeType: 'global' | 'module' =
+            StructureDeclarationIndexer.getInstance().isProgramFile(hit.filePath) ? 'global' : 'module';
+
         return {
             token,
             type: 'PROCEDURE',
-            scope: { token, type: 'module' },
+            scope: { token, type: scopeType },
             location: { uri, line, character },
             originalWord: word,
             searchWord: word
