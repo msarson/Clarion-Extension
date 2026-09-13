@@ -55,7 +55,7 @@ export interface FileEdge {
 // before the solution's redirection parsers were primed, so every MEMBER('x.clw')
 // resolution failed and the persisted edge lists were missing their MEMBER edges
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
-const DISK_CACHE_VERSION = 2;
+const DISK_CACHE_VERSION = 3; // #484 — MODULE edges to binaries dropped
 
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
 
@@ -649,6 +649,11 @@ export class FileRelationshipGraph {
             }
 
             if (!edgeType) continue;
+            // #484 — MODULE('x.dll') names an external library, not a source module
+            // (Language Reference, MODULE). The `*.dll` redirection rule resolved it
+            // to the real binary — 39 such edges on the 40-project rig — and FAR's
+            // module-scoped file set then handed a DLL to the tokenizer (2.5s).
+            if (FileRelationshipGraph.isBinaryModuleTarget(token.referencedFile)) continue;
 
             const resolved = this.resolveFile(token.referencedFile, filePath);
             if (!resolved) continue;
@@ -745,6 +750,7 @@ export class FileRelationshipGraph {
             // MODULE('file') — class attribute if CLASS keyword on same line, else MAP block
             moduleRe.lastIndex = 0;
             while ((m = moduleRe.exec(stripped)) !== null) {
+                if (FileRelationshipGraph.isBinaryModuleTarget(m[1])) continue; // #484
                 const resolved = this.resolveFile(m[1], filePath);
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);
@@ -936,6 +942,14 @@ export class FileRelationshipGraph {
     /** Normalise a path for use as a map key: lowercase, backslashes → forward slashes. */
     private normalizePath(filePath: string): string {
         return filePath.toLowerCase().replace(/\\/g, '/');
+    }
+
+    /**
+     * #484 — a MODULE() target that names a linked library or another binary rather
+     * than a source module. No file relationship exists to record for it.
+     */
+    public static isBinaryModuleTarget(referencedFile: string): boolean {
+        return /\.(dll|lib|exe|obj|res)$/i.test(referencedFile.trim());
     }
 
     private denormalizePath(filePath: string): string {
