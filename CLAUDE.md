@@ -81,3 +81,11 @@ feel/rendering judgments, and VM-parity absolute timings.
 - Release packaging: run `npm run bundle` before `vsce package` if the VSIX
   comes out with hundreds of files (the `rimraf` in `package:release` can miss,
   leaving the tsc tree in `out/`; a correct bundle VSIX is ~26 files).
+- **One Node runtime, declared in four places.** `engines.vscode ^1.97.0` means
+  Electron 32.2.7, which bundles Node 20 (VS Code 1.97.0 `.npmrc` → Electron
+  `DEPS`: v20.18.1). So `.nvmrc`, `engines.node`, `@types/node` and the CI
+  `setup-node` step (which reads `.nvmrc`) all say 20, and they move together
+  whenever `engines.vscode` is raised. The dev box may run a newer Node, and V8
+  differs between majors (a `(?i:` regex passed on Node 26 and failed the 1.0.3
+  dry run, #490), so run `npm run test:node20` — the suite under Node 20 via
+  `npx node@20` — before any release dry run (#491).
