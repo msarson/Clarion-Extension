@@ -43,3 +43,5 @@ server/src/generated/
 test-programs/ViewJoinTest/obj/
 test-programs/ViewJoinTest/map/
 test-programs/ViewJoinTest/*.exe
+
+CLAUDE.local.md
