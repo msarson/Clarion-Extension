@@ -59,6 +59,7 @@ Write code faster with 50+ smart snippets - works immediately!
 Open any Clarion solution - just open the folder.
 - Auto-detects `.sln` files in folder
 - Recent solutions list for quick access
+- Installed Clarion versions are discovered from `%APPDATA%`; a `ClarionProperties.xml` kept anywhere else can be browsed for, is shown as a **Config dir** row in Clarion Tools while active, and the build follows it
 - No workspace files needed
 - **[Learn more about Solution Management →](docs/features/solution-management.md)**
 
@@ -74,7 +75,8 @@ Jump to definitions, find implementations, and explore references — works in s
 - **Overload resolution by argument types** — F12, Ctrl+F12, hover, and references pick the overload matching the call's arguments (typed variables, members, EQUATEs, implicit variables, `PRE:Field` arguments)
 - **Document Highlight** — scope-aware occurrence highlighting, including procedure call sites
 - **Workspace Symbol Search** (`Ctrl+T`) — search for any procedure, class, or label across all solution files
-- Hover for documentation — declaration location, class/interface context, type info, resolved INCLUDE/MODULE/MEMBER file paths
+- Hover for documentation — declaration location, class/interface context, type info, resolved INCLUDE/MODULE/MEMBER file paths; a FILE/QUEUE/GROUP label hovers as the structure it is (driver, prefix, keys/fields), a field is the same card from its declaration, `PRE:Field` or `Structure.Field`, and a MAP prototype says whether it is Global, Module or Private
+- **Same-named procedures across projects** — hover, F12, Ctrl+F12 and references stay inside the project that can actually reach the declaration, so the EXE/DLL name sharing in generated multi-DLL apps never answers with the wrong side
 - **Chained navigation**: `SELF.Order.RangeList.Init` — hover, F12, Ctrl+F12, and references resolve through CLASS, QUEUE, and GROUP type chains
 - **SELF/PARENT properties**: F12 on `SELF.List` navigates to the class member declaration
 - **Typed variable members**: F12/Ctrl+F12/hover on `obj.Method()` where `obj` is any typed variable
@@ -112,6 +114,8 @@ Catch errors as you type.
 - **Literal passed by reference** — a literal handed to a `*TYPE` (or complex-type) parameter, which needs an addressable variable
 - **Undeclared variables** (opt-out) — names that resolve to no declaration through the full scope model, cross-file aware
 - **Missing implementations / indistinguishable prototypes** — MAP declarations without bodies, and overloads a call could never disambiguate
+- **Call to a PRIVATE procedure from another module** — the compiler's *Invalid use of PRIVATE procedure*, reported at edit time; passing the procedure as a reference (`START(Proc)`, `ADDRESS(Proc)`) is allowed, as the compiler allows it
+- **VIEW field references** — `PROJECT` and `JOIN` fields are checked against the file that owns them (a JOIN's field list belongs to the parent file), in both `PRE:Field` and `File.Field` notation
 - **Character-set validation** that respects all Windows ANSI code pages (1250–1258) — national letters pass clean, genuine contamination (emoji, box-drawing) is flagged
 - Code inside unconditional `OMIT` blocks is excluded from diagnostics and reference counts (rename still updates it — other build configurations may compile it)
 - **[Learn more about Diagnostics →](docs/features/diagnostics.md)**
@@ -180,28 +184,30 @@ The ANTLR4 grammar / folding-provider exploration (2025–Jan 2026) was split ou
 
 ## 🆕 What's New
 
-### Latest: v1.0.2 (2026-09-06) — Solutions that load wrong now say so, and a batch of navigation fixes
+### Latest: v1.0.3 (2026-09-13) — Right answers about MAPs, FILEs and generated apps; the last big cold-start costs gone
 
-1.0.2 is a correctness release. The theme running through it is **silent failure**: several ways a solution could load in a degraded state — wrong build configuration, unresolvable redirection paths, source files missing from the index — looked identical to a healthy load, so features simply returned nothing and the extension read as broken rather than misconfigured. Those now report themselves. Alongside that is a run of hover, navigation and diagnostic fixes, many contributed by [@geircodes](https://github.com/geircodes).
+1.0.3 is about **being right where generated code is concerned**. Every ABC app declares its procedures in the PROGRAM's MAP inside `MODULE('x.clw')` blocks, prototypes them again in module-callout `.INC` files, and shares names across the EXE and every DLL — and several features had quietly been reasoning about a simpler world. They now follow the compiler's rules, most of them verified by compiling a fixture, and the work took the first hover, F12 or Find All References on a big generated program from a second or two down to tens of milliseconds.
 
-- **Degraded solutions are visible:** source files that fail to resolve are counted and named instead of being silently dropped from the file-relationship graph; redirection macros that expand to nothing say so rather than leaving a dead search path; re-opening a solution from the recent list now validates the stored build configuration instead of adopting a stale one.
-- **Redirection:** `%THISDIR%`, `%WinUserApplicationData%` and `%WinCommonApplicationData%` are implemented — previously they were left in the path as literal text, so every directory on that line failed to resolve.
-- **Command Palette:** every command now carries a `Clarion` category, so typing "clarion" finds them — including how to open a solution, which was previously reachable only from the Clarion Tools sidebar.
-- **Navigation & hover:** a bare local `CLASS` used as its own instance now resolves for hover, F12, Ctrl+F12, completion and signature help; colon-bearing labels no longer truncate and kill navigation; a local CLASS's indented `END` no longer swallows the next procedure; GROUP/QUEUE/CLASS field declarations resolve to themselves; 61 built-ins that hovered as "undefined" now show their signatures.
-- **Diagnostics:** attribute and built-in names that collide with your own variables no longer hijack the hover card or the warning; discarded-return warnings survive a trailing comment; false "missing END" on a WINDOW with a continuation-line attribute is fixed.
-- **Performance:** hovering an undeclared bare word in a large generated module no longer freezes for ~10s (10.5s → 13ms on the 40-project test solution), and Clarion's predefined compiler flags (`DLL_MODE`, `_DEBUG_`, `_USTRING_`, …) now hover properly instead of being flagged as undeclared.
+- **MAP prototypes, every documented shape:** `MyProc,LONG`, `MyProc,NAME('_x')`, bare `MyProc`, `Func46(*CSTRING),REAL,C,RAW` — all recognised, all navigable, none falsely reported as undeclared. A `MODULE()`-wrapped prototype in the global MAP is labelled **Global**, since `MODULE()` only names the file holding the body, and a `,PRIVATE` one is called out as such.
+- **New diagnostic — calling a PRIVATE procedure from another module:** the compiler's *Invalid use of PRIVATE procedure*, reported at edit time, with the rules for every MAP kind settled by compiling them and zero false warnings over 3,692 real sources.
+- **Same-named procedures across projects:** hover and references from a call site no longer answer with another project's procedure; a hit counts only if the calling file can actually reach it.
+- **FILE, VIEW and KEY:** `PROJECT`, a VIEW's `JOIN` and a FILE's `KEY` now hover; a JOIN's field list is checked against the right (parent) file; dot notation in a VIEW is understood; F12 on the field half of `Customer.Name` works; a KEY hovers as `KEY`, not `UNKNOWN`.
+- **Hover cards tell the truth about kind and scope:** a FILE/QUEUE/GROUP label is a *structure*, with driver, prefix and a keys/fields inventory; a structure field is the same card from its declaration, `PRE:Field` and `Structure.Field`; a PROGRAM's global data is *Global* from inside a procedure too; a local shadowed by a same-named structure field resolves again.
+- **Cold-start cost:** PROGRAM-MAP prototypes are indexed, the MAP's INCLUDEs are no longer expanded for a prototype the document already declares, a DLL named by `MODULE('x.dll')` no longer reaches the tokenizer, and a quadratic tokenizer phase is gone (1.47s → 1ms on a 6,000-line library source; the whole 7,000-file corpus tokenises in 74s instead of 135s). First Find All References on a generated program: ~2s → ~60ms.
+- **Configuration outside `%APPDATA%`:** a `ClarionProperties.xml` kept elsewhere can be browsed for and is shown when active, and the build now follows the selected file (`ConfigDir`).
+- Plus contributions from [@geircodes](https://github.com/geircodes) and [@ClarionLive](https://github.com/ClarionLive): inherited QUEUE/GROUP fields, "Queue Field" labels, discarded-return checks through intermediate fields, clickable hover locations, and JOIN-scoped PROJECT checks.
 
 **[See the full changelog for the complete list →](CHANGELOG.md)**
 
 ---
 
+### Recent: v1.0.2 (2026-09-06) — Solutions that load wrong now say so, and a batch of navigation fixes
+
+1.0.2 was a correctness release about **silent failure**: several ways a solution could load in a degraded state — wrong build configuration, unresolvable redirection paths, source files missing from the index — looked identical to a healthy load. Those now report themselves. It also implemented the `%THISDIR%` family of redirection macros, gave every command a `Clarion` category in the Command Palette, fixed a ~10s hover freeze on undeclared words in large generated modules, and carried a run of hover, navigation and diagnostic fixes, many from [@geircodes](https://github.com/geircodes).
+
 ### Recent: v1.0.1 (2026-08-09) — Maintenance: performance follow-ups & correctness fixes
 
 A stability release on top of the 1.0 overhaul — more startup and hover performance work verified on the real 40-project / 3,000-file solution, plus a batch of hover, completion, and diagnostic correctness fixes. Startup validators stopped freezing the editor in multi-second blocks, F12 on a built-in became instant instead of a ~24s cold walk, and `.app` global data stopped being falsely flagged "not declared" in generated MEMBER modules.
-
-### Recent: v1.0.0 (2026-07-11) — Performance at scale, exact references, refactoring
-
-The 1.0 release was the largest update yet — a ground-up performance overhaul verified on real 40-project / 3,000-file solutions: the IDE is usable seconds after opening a large solution, with all indexes persisted across sessions and no event-loop freezes. It also brought exact reference counts with routine lenses, overload-aware navigation everywhere (FAR, F12, Ctrl+F12, hover, signature help), new refactors (Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, Create routine from `DO`), new diagnostics, and an upgrade to LSP 8.x.
 
 **[See full changelog →](CHANGELOG.md)**
 

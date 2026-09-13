@@ -1,0 +1,36 @@
+# Changelog — 0.9.9 (2026-07-04)
+
+Archived from the main CHANGELOG.md on 2026-09-13 (1.0.3 release). Full text as published.
+
+_Release focus: open-solution scope correctness and cross-file resolution; the no-solution changes below are additive hardening, not the primary target._
+
+**New Features**
+
+- ✨ **Qualifier completion now respects the typed qualifier**: when typing `Prefix:` (or `Prefix:Par`), word completion now returns only symbols declared with that exact qualifier (e.g. `TGLO:*`) and filters by the typed suffix, instead of mixing unrelated in-scope symbols.
+- ✨ **Dot completion now shows member types inline**: member lists now include the declared type in the visible completion label (for example `Var1 LONG`) while still inserting only the member name when selected.
+- ✨ **TypeScript-style initialization status bar flow**: startup/solution-load progress now uses a single evolving status bar item with clear phase updates (activating, language server start, loading/indexing solution, ready) instead of multiple transient “solution loaded” popups.
+- ✨ **Build + generation status bar lifecycle**: Clarion build and generation commands now surface a consistent status bar lifecycle (`running` → `success` / `failure`) so users can track progress without watching terminal output continuously.
+- ✨ **Cross-file global-data completion parity for MEMBER files** (#224): word completion now includes PROGRAM-file global symbols while editing MEMBER modules, including both direct globals (e.g. `GLO:*`) and `PRE(...)`-qualified global structure fields (e.g. `TGLO:FieldName`); prefixed completions now insert only the suffix after an already-typed qualifier, so accepting `GLO:Var` after typing `GLO:` no longer duplicates the prefix.
+- ✨ **No-solution entry-point completion coverage extended** (#113): no-solution LSP entry-point tests now include completion validation for MEMBER files consuming PROGRAM globals (`GLO:*` and `PRE(...)`-qualified fields), and FAR global-scope loading now has a no-solution MEMBER→PROGRAM fallback when FRG is unavailable.
+- ✨ **Lazy no-solution FRG substrate for DocumentLink / FAR / completion** (#140): `FileRelationshipGraph` now builds on demand around the active no-solution document using its reachable INCLUDE/MEMBER/MODULE neighborhood plus nearby libsrc/source directories, so INCLUDE links, cross-MEMBER global FAR, and MEMBER→PROGRAM completion all reuse the same graph-backed file relationships even with no `.sln` loaded.
+- ✨ **Sibling MEMBER module-scope symbol resolution** (#118): `SymbolFinderService` now walks FRG MEMBER edges to resolve module-scope declarations from sibling MEMBER files of the same PROGRAM, which restores Hover/F12/FAR and the undeclared-variable hybrid path for Tier 5b cross-MEMBER module data.
+
+**Bug Fixes**
+
+- 🐛 **`SymbolFinder.findSymbol` now honors Tier 1 routine-local shadowing** (#116): lookups from inside a `ROUTINE` now check that routine's `DATA` section before falling back to procedure-local scope, so Hover/F12/FAR resolve same-name locals to the routine declaration instead of the parent procedure variable.
+- 🐛 **Cross-file overload resolution no longer regresses when a stale/unrelated FRG is already built**: `MethodOverloadResolver` now falls back to the legacy INCLUDE walk when the graph has no edges for the active file, preventing chained/cross-file overload sites from silently dropping back to param-count-only selection after the new no-solution FRG work.
+- 🐛 **`Self.MyQueue.` completion in derived methods now resolves queue members correctly**: chained `SELF.<reference>.` paths now resolve through live member enumeration, so references like `MyQueue &MyQueueType` surface `MyQueueType` fields in method scope.
+- 🐛 **Cross-file return-value diagnostics now scan unopened project files deterministically** (#162): `validateDiscardedReturnValues` no longer depends on `TokenCache.getAllCachedUris()` alone; it now includes solution source files and uses shared cross-file loading (live buffer/cache/disk) so warnings do not silently depend on which files are open.
+- 🐛 **F12 on `DO RoutineName` now resolves to the matching `ROUTINE` label in the current procedure scope** (#211): DefinitionProvider now uses `DocumentStructure.findRoutines()` plus parent-scope matching, so routine references in `DO ...` statements navigate correctly and do not bleed into unrelated routines.
+- 🐛 **`CLIP(...)` hover now resolves as a built-in function in expression contexts** (#213): hover routing no longer misclassifies keyword collisions (e.g. `CLIP`) as control attributes outside control declarations.
+- 🐛 **Hover/F12 on structure fields via typed procedure parameters now works** (#215): cases like `Info.Maximized` where `Info` is declared `*WindowInfo` (GROUP/TYPE) now resolve correctly. Parameter type extraction was added for `PROCEDURE(...)` signatures and wired into typed dot-access paths.
+- 🐛 **Parameter hover on declaration lines now prefers the declaration scope** (#217): hovering `Info` directly in `PROCEDURE(... *WindowInfo Info)` no longer resolves to a same-named local from a sibling procedure.
+- 🐛 **Real-world `abutil.clw` dot-access fixes (expression-safe chain detection + MEMBER-parent type resolution)** (#219): typed member access inside expressions like `CHOOSE(NOT Info.Maximized, ...)` now resolves correctly for both hover and F12; lookup now properly reaches MEMBER parent/include layouts and GROUP/QUEUE type members.
+- 🐛 **Removed false `invalid-attribute-context` diagnostics for `Type` identifier usage** (#220): diagnostics now skip attribute validation when keyword-like tokens are used as dot-member suffixes (e.g. `SELF.Sectors.Type`) or as parameter names inside `PROCEDURE(...)` / `FUNCTION(...)` signatures.
+- 🐛 **Deep inherited member lookup now resolves from local classes through INCLUDE ancestors** (#239): when a local class derives from an included library chain (e.g. `LocalClient CLASS(MidType)`), hover/F12/dot-member resolution now continues parent traversal using class declarations resolved from current file, INCLUDE graph, and SDI, instead of stopping when the local class is not present in the declaration index.
+- 🐛 **Nested local structure chains now complete correctly from bare GROUP/QUEUE roots** (#235): dot-completion now resolves non-`SELF` chained expressions like `problems.Diabetes.` by traversing structure members through local queue/group declarations (including indented members), instead of treating the chain as a literal class name and returning no members.
+
+**Performance**
+
+- ⚡ **#187 high-priority search-loop cooperation + cancellation wiring landed**: `WorkspaceSymbolProvider`, `ImplementationProvider`/`ClassMemberResolver` cross-file implementation scans, and `ReferencesProvider` now share cooperative checkpoints and honor LSP cancellation tokens, so superseded Ctrl+T/Ctrl+F12/FAR requests bail early instead of running full solution scans to completion.
+- ⚡ **#187 LSP handler cancellation propagation completed**: server handlers now pass request cancellation tokens into `onImplementation` and `onReferences`, and both providers now stop long-running scans promptly when requests are superseded.
