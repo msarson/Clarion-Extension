@@ -17,7 +17,7 @@ import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
-import { StructureDeclarationIndexer, StructureDeclarationInfo } from '../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -988,6 +988,19 @@ export class MemberLocatorService {
         if (!(t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t) || t.start === 0)) {
             return false;
         }
+
+        // A field nested inside a GROUP/QUEUE/FILE/RECORD (t.parent set) is only
+        // reachable via its PRE()/dot qualifier — never as a bare name. Mirrors
+        // SymbolFinderService.findGlobalVariableInCurrentFile's `t.parent === undefined`
+        // exclusion for the exact same reason. Without this, a same-file lookup for a
+        // GROUP,TYPE field correctly comes up empty (fields need qualification) and falls
+        // through to this cross-file/include-chain walk — which had no such guard, so it
+        // matched the first same-named field in ANY unrelated structure reachable via the
+        // INCLUDE chain. Reported live: hovering a field's own declaration inside one
+        // GROUP,TYPE resolved to an unrelated same-named field of a completely different
+        // GROUP,TYPE several includes away.
+        if (t.parent !== undefined) return false;
+
         // A CLASS/INTERFACE member (property or method prototype) is only reachable via
         // qualified access (SELF.X / instance.X) — Clarion has no bare/global path to it,
         // even though its declaration token is column-0 and procedure-shaped exactly like a
@@ -1063,7 +1076,7 @@ export class MemberLocatorService {
         const best = selectBestMemberOverload(candidates, paramCount);
         if (!best) return null;
         const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true };
+        return { type: best.type, className: ifaceName, line: best.line, file: fileUri, signature: best.signature, isInterface: true, structureType: 'INTERFACE' };
     }
 
     /** Walks the INCLUDE chain searching for an INTERFACE method declaration. */
@@ -1608,7 +1621,7 @@ export class MemberLocatorService {
             return result;
         }
 
-        if (classInfo.structureType === 'CLASS' && classInfo.parentName) {
+        if (inheritsMembersFromParent(classInfo.structureType) && classInfo.parentName) {
             this.trace(`walkParentChain ascend "${className}" -> "${classInfo.parentName}"`);
             return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited, document);
         }
@@ -1782,7 +1795,9 @@ export class MemberLocatorService {
         const bestMatch = selectBestMemberOverload(candidates, paramCount);
         if (bestMatch) {
             const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature };
+            // The structure token above was matched BY structureType, so it is the
+            // kind actually found here, not an assumption.
+            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType };
         }
         return null;
     }

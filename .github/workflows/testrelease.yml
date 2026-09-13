@@ -13,7 +13,21 @@ permissions:
 
 jobs:
   test-release:
-    runs-on: ubuntu-latest
+    # #441/#442 — Windows, because that is the only platform this extension
+    # supports and the only one its suite passes on. On ubuntu-latest 172 tests
+    # fail: file resolution relies on the filesystem being case-insensitive
+    # exactly as the Clarion compiler does, so those failures are correct
+    # behaviour rather than a defect (see #442). Running here is what lets the
+    # test step below assert anything at all.
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        # Keeps the existing POSIX steps working unchanged; Windows runners ship
+        # Git Bash. The one step that cannot survive the move is the VSIX report,
+        # which needed `unzip` — absent from Git for Windows — and is rewritten
+        # in PowerShell below.
+        shell: bash
 
     steps:
       - name: Checkout version branch
@@ -43,8 +57,19 @@ jobs:
       - name: Build dev and run tests
         run: npm run compile:dev
 
-      - name: Run tests
-        run: npm run test:server || true
+      # #441 — this used to be `npm run test:server || true`, which discarded the
+      # exit code: the workflow reported success whether the suite passed, failed
+      # one test, or failed 172. A green dry run therefore said nothing about the
+      # tests, which is worse than not running them, because it invited the belief
+      # that they had been verified. The `|| true` existed only because the suite
+      # could not pass on Linux; on Windows it does, so the result can be trusted.
+      - name: Run server tests
+        run: npm run test:server
+
+      # Also new: the client suite was never run here at all, so ~197 tests took no
+      # part in the release gate.
+      - name: Run client tests
+        run: npm run test:client
 
       - name: Install vsce
         run: npm install -g @vscode/vsce
@@ -52,17 +77,36 @@ jobs:
       - name: Package extension (bundle + VSIX)
         run: vsce package --no-dependencies
 
+      # Rewritten for the Windows move: the previous version used `unzip`, which
+      # Git for Windows does not ship. .NET's ZipFile is present on the runner and
+      # needs no tooling at all.
+      #
+      # The file count is the check that matters. A correctly bundled VSIX is ~26
+      # files; a build where the esbuild bundle did not replace the tsc output ships
+      # hundreds, and that has happened before. Worth reading on every dry run.
       - name: Report VSIX stats
+        shell: pwsh
         run: |
-          VSIX="clarion-extensions-${{ inputs.version }}.vsix"
-          SIZE=$(du -sh "$VSIX" | cut -f1)
-          COUNT=$(unzip -l "$VSIX" | tail -1 | awk '{print $2}')
-          echo "📦 VSIX: $VSIX"
-          echo "📏 Size: $SIZE"
-          echo "🗂️  Files: $COUNT"
-          echo ""
-          echo "=== Contents ==="
-          unzip -l "$VSIX"
+          $vsix = "clarion-extensions-${{ inputs.version }}.vsix"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $vsix))
+          try {
+            $count = $zip.Entries.Count
+            $sizeMb = [math]::Round((Get-Item $vsix).Length / 1MB, 2)
+            Write-Host "VSIX:  $vsix"
+            Write-Host "Size:  $sizeMb MB"
+            Write-Host "Files: $count"
+            if ($count -gt 100) {
+              Write-Host "::warning::$count files in the VSIX - a correctly bundled one is ~26. The esbuild bundle may not have replaced the tsc output."
+            }
+            Write-Host ""
+            Write-Host "=== Contents ==="
+            $zip.Entries | Sort-Object FullName | ForEach-Object {
+              "{0,10}  {1}" -f $_.Length, $_.FullName
+            }
+          } finally {
+            $zip.Dispose()
+          }
 
       - name: Upload VSIX as artifact
         uses: actions/upload-artifact@v4.6.2

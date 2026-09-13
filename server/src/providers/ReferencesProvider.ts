@@ -1839,10 +1839,12 @@ export class ReferencesProvider {
     ): Location[] {
         const locations: Location[] = [];
         if (includeDeclaration) {
-            locations.push(Location.create(document.uri, {
-                start: { line: routineToken.line, character: routineToken.start },
-                end: { line: routineToken.line, character: routineToken.start + routineToken.value.length }
-            }));
+            // The routine token IS the ROUTINE keyword — `value` is "ROUTINE", `label` is the
+            // routine's name — so its own start and length describe the keyword, not the label.
+            // Reported that way, the declaration highlights the word ROUTINE, and a second
+            // extension contributing the label's range shows as a separate reference to the same
+            // place. See TokenHelper.getRoutineLabelRange.
+            locations.push(Location.create(document.uri, TokenHelper.getRoutineLabelRange(routineToken)));
         }
 
         const wordLower = word.toLowerCase();
@@ -3106,6 +3108,16 @@ export class ReferencesProvider {
                     if (scopeType === 'field' &&
                         token.start === 0 &&
                         token.parent !== undefined &&
+                        !(fileUri === declarationUri && token.line === declarationLine)) {
+                        continue;
+                    }
+                    // #487 — and for a NON-field symbol (a local, module or global), a col-0
+                    // declaration that is a field of a PRE()'d or PRE-less structure is a
+                    // different symbol: `fq:loc` is only ever reached through its qualifier,
+                    // so it is not a reference to the bare local `loc` and must not be listed.
+                    if (scopeType !== 'field' &&
+                        token.start === 0 &&
+                        (token.structurePrefix || SymbolFinderService.requiresDotQualification(token)) &&
                         !(fileUri === declarationUri && token.line === declarationLine)) {
                         continue;
                     }

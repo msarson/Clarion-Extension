@@ -7,7 +7,7 @@
  */
 
 import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection } from "vscode";
-import { globalSolutionFile, globalSettings } from "./globals";
+import { globalSolutionFile, globalSettings, globalClarionPropertiesFile } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
@@ -17,6 +17,8 @@ import { SolutionCache } from "./SolutionCache";
 import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
+import { buildConfigDirArg } from "./utils/ClarionBuildArgs";
+
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
 
@@ -343,6 +345,32 @@ export function prepareBuildParameters(buildConfig: {
     // and its space causes shell-quoting issues, so skip it in that case.
     if (platformPart && platformPart.toLowerCase() !== 'any cpu') {
         buildArgs.splice(3, 0, `/property:Platform=${platformPart}`);
+    }
+
+    // #471 — tell the Clarion targets WHICH ClarionProperties.xml to read.
+    //
+    // `ConfigDir` is not an MSBuild concept (it appears nowhere in
+    // Microsoft.Common.targets and there is no such switch); it is an ordinary
+    // property that SoftVelocity.Build.Clarion.targets hands to its own tasks —
+    // Redirection ×3 and CWClean — and never defines itself. It selects the folder
+    // holding ClarionProperties.xml, which is where the compile target's version,
+    // its redirection file name and its macros all come from. `clarion.exe` and
+    // `clarioncl.exe` expose the same thing as a /ConfigDir= switch.
+    //
+    // Without it the tasks fall back to the default location, so an installation
+    // configured elsewhere — Mark Goldberg's `%CWRoot%\Settings` layout, where a
+    // checked-out tree carries its own IDE settings — builds against the wrong
+    // settings or fails to resolve its version at all.
+    //
+    // The directory is derived from the properties file the user already selected,
+    // so this needs no new setting and cannot disagree with the IDE-side choice.
+    // Omitted entirely when unknown, which leaves the previous default behaviour.
+    const configDirArg = buildConfigDirArg(globalClarionPropertiesFile);
+    if (configDirArg) {
+        buildArgs.push(configDirArg);
+        logger.info(`🔹 Clarion ConfigDir: ${path.dirname(globalClarionPropertiesFile)}`);
+    } else {
+        logger.info(`🔹 Clarion ConfigDir: not set — the targets will use their default location`);
     }
 
     // Log the build configuration

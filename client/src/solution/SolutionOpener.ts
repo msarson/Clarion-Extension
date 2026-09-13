@@ -341,6 +341,16 @@ export async function openClarionSolution(
         }
 
         // ✅ Step 2: Select or retrieve ClarionProperties.xml
+        //
+        // #479 — when one IS already configured, offer the chance to change it as the
+        // solution is adopted. Previously the configured file was reused silently, so a
+        // solution belonging to a ConfigDir tree (#471) got no say at the one moment the
+        // choice is obviously relevant. Esc keeps the current configuration, so the
+        // common path is a single Enter.
+        if (globalClarionPropertiesFile && fs.existsSync(globalClarionPropertiesFile)) {
+            await ClarionExtensionCommands.offerDifferentConfiguration();
+        }
+
         if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
             logger.info("📂 No ClarionProperties.xml found. Prompting user for selection...");
             await ClarionExtensionCommands.configureClarionPropertiesFile();

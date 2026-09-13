@@ -639,3 +639,125 @@ suite('ReferencesProvider – local CLASS label references', () => {
             `Should find method implementation headers at lines 10 and 14. Lines found: ${refLines}`);
     });
 });
+
+// ---------------------------------------------------------------------------
+// ReferencesProvider — ROUTINE declaration label
+// ---------------------------------------------------------------------------
+
+suite('ReferencesProvider – ROUTINE label references', () => {
+    let provider: ReferencesProvider;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        provider = new ReferencesProvider();
+    });
+
+    /**
+     * Same shape as the local CLASS label case above, one keyword along.
+     *
+     * On "PrepareProcedure ROUTINE" the tokenizer emits TWO tokens that know the routine's name:
+     *
+     *     start | type    | value              | label
+     *         0 | Label   | "PrepareProcedure" | "PrepareProcedure"
+     *        17 | Keyword | "ROUTINE"          | "PrepareProcedure"
+     *
+     * The Label token matches by value and yields the correct range. The ROUTINE keyword token
+     * matches by `label` in findReferencesInFile, and that branch takes matchLength from the label
+     * while leaving matchStart at the KEYWORD's column — so it reports Range(line, 17)..(line, 33)
+     * on a 24-character line. The editor clamps it to end of line, which renders as a reference
+     * highlighting the word "ROUTINE".
+     *
+     * NOTE ON REPRODUCING THIS: a bare ROUTINE at the top of a file will NOT reproduce it. The
+     * tokenizer only attaches `label` to the ROUTINE keyword when the routine sits inside a
+     * procedure, so the surrounding PROCEDURE below is load-bearing rather than scenery.
+     */
+    test('Cursor on ROUTINE label reports the label position, not the ROUTINE keyword position', async () => {
+        const code = [
+            "  MEMBER('demoleg')",       // line 0
+            '',                           // line 1
+            'BrowseInvoice PROCEDURE',    // line 2
+            '  CODE',                     // line 3
+            '  DO PrepareProcedure',      // line 4 — call site
+            '  RETURN',                   // line 5
+            '',                           // line 6
+            'PrepareProcedure ROUTINE',   // line 7 — declaration, label at col 0
+            '  CODE',                     // line 8
+            '  RETURN',                   // line 9
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///routine-label.clw');
+        seedCache(doc);
+
+        // Cursor on the routine's label at line 7, col 2.
+        const refs = await provider.provideReferences(doc, { line: 7, character: 2 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should return results, not null');
+
+        const declarationRefs = refs!.filter(r => r.range.start.line === 7);
+        assert.ok(declarationRefs.length >= 1, 'Should report the declaration line');
+
+        // The declaration must be reported at the LABEL, col 0 — never at the ROUTINE keyword.
+        const wrongColRefs = declarationRefs.filter(r => r.range.start.character > 0);
+        assert.strictEqual(wrongColRefs.length, 0,
+            `Declaration reference must be at col 0 (the label), not the ROUTINE keyword position. Got: ${JSON.stringify(wrongColRefs)}`);
+
+        // And exactly one entry for that line: the label token and the keyword token both know the
+        // name, and reporting both makes one declaration look like two references.
+        assert.strictEqual(declarationRefs.length, 1,
+            `Declaration line should produce ONE reference, not one per token carrying the label. Got: ${JSON.stringify(declarationRefs)}`);
+
+        // The call site is unaffected and must still be found.
+        const refLines = refs!.map(r => r.range.start.line).sort((a, b) => a - b);
+        assert.ok(refLines.includes(4), `Should still find the DO call site on line 4. Lines found: ${refLines}`);
+    });
+
+    /**
+     * The same defect reached from the CALL SITE rather than the label, asserted as exact ranges.
+     *
+     * An earlier version of this test asserted only the COUNT — and passed before the fix, because
+     * the count was never wrong. One entry was simply in the wrong place. A test that cannot fail
+     * against the defect it names is worse than no test, so this one pins both ranges.
+     */
+    test('From a DO site, the declaration range covers the label and the call covers the name', async () => {
+        const code = [
+            "  MEMBER('demoleg')",       // line 0
+            '',                           // line 1
+            'BrowseInvoice PROCEDURE',    // line 2
+            '  CODE',                     // line 3
+            '  DO PrepareProcedure',      // line 4
+            '  RETURN',                   // line 5
+            '',                           // line 6
+            'PrepareProcedure ROUTINE',   // line 7
+            '  CODE',                     // line 8
+            '  RETURN',                   // line 9
+        ].join('\n');
+
+        const doc = createDocument(code, 'file:///routine-count.clw');
+        seedCache(doc);
+
+        const refs = await provider.provideReferences(doc, { line: 4, character: 6 },
+            { includeDeclaration: true });
+
+        assert.ok(refs !== null, 'Should return results, not null');
+        assert.strictEqual(refs!.length, 2,
+            `One declaration and one call site is two references. Got ${refs!.length}: ${JSON.stringify(refs!.map(r => `${r.range.start.line}:${r.range.start.character}`))}`);
+
+        const describe = (r: typeof refs extends null ? never : NonNullable<typeof refs>[number]) =>
+            `${r.range.start.line}:${r.range.start.character}-${r.range.end.character}`;
+
+        const declaration = refs!.find(r => r.range.start.line === 7);
+        const callSite = refs!.find(r => r.range.start.line === 4);
+
+        // "PrepareProcedure ROUTINE" — the label occupies columns 0..16.
+        assert.ok(declaration !== undefined, 'Should report the declaration');
+        assert.strictEqual(describe(declaration!), '7:0-16',
+            `Declaration must cover the label "PrepareProcedure", not the ROUTINE keyword. Got ${describe(declaration!)}`);
+
+        // "  DO PrepareProcedure" — the name occupies columns 5..21.
+        assert.ok(callSite !== undefined, 'Should report the DO call site');
+        assert.strictEqual(describe(callSite!), '4:5-21',
+            `Call site must cover the routine name. Got ${describe(callSite!)}`);
+    });
+});

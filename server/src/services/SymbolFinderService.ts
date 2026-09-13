@@ -165,6 +165,18 @@ export interface SymbolSearchOptions {
 }
 
 /**
+ * FILE-member declarations whose KEYWORD is the declaration's type, the way a
+ * scalar's type word is (#476). `CusKey KEY(CUS:ID)` declares a KEY; there is
+ * no separate type token to read.
+ *
+ * Kept as VALUES rather than token types deliberately: KEY tokenizes as `Keyword` and
+ * INDEX as `Function` (its trailing open paren), so a type-based test would cover one
+ * and silently miss the other. MEMO and BLOB need no entry — they already arrive
+ * as `Type` and `Variable` respectively and the existing branches return them.
+ */
+const FILE_MEMBER_DECLARATION_KEYWORDS = new Set(['KEY', 'INDEX']);
+
+/**
  * Unified service for finding symbols in Clarion code
  */
 export class SymbolFinderService {
@@ -188,6 +200,20 @@ export class SymbolFinderService {
         if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
         const next = lineTokens[idx + 1];
 
+        // #476: a FILE's KEY / INDEX declaration — `CusKey KEY(CUS:ID)` — where the
+        // keyword itself IS the type, exactly as MEMO and BLOB already are. Neither
+        // reached a branch that returned it, so both rendered as `UNKNOWN`.
+        //
+        // Checked ahead of the type dispatch, and on value rather than token type,
+        // because the two arrive differently: KEY tokenizes as `Keyword`, while INDEX
+        // tokenizes as `Function` on account of its trailing '('. Keying off the token
+        // type would fix one and leave the other — which is how KEY came to be reported
+        // while INDEX went unnoticed. `next` is the token AFTER the label, so this can
+        // only match a declaration, never a variable that happens to be named KEY.
+        if (FILE_MEMBER_DECLARATION_KEYWORDS.has(next.value.toUpperCase())) {
+            return next.value.toUpperCase();
+        }
+
         if (next.type === TokenType.Type) return next.value;
         if (next.type === TokenType.Variable || next.type === TokenType.Label) return next.value;
         if (next.type === TokenType.ReferenceVariable) {
@@ -202,7 +228,12 @@ export class SymbolFinderService {
             let depth = 0;
             let seenOpen = false;
             let typeArg: Token | undefined;
-            for (const t of afterNext) {
+            // #486: a type argument is the group that IMMEDIATELY follows the keyword —
+            // CLASS(WindowManager), QUEUE(ParentType). `LineQ QUEUE,PRE(LQ)` has no such
+            // group; scanning on to the first '(' anywhere on the line took PRE's argument
+            // and rendered the hover title as `QUEUE(LQ)`.
+            const immediatelyFollows = afterNext[0]?.value === '(';
+            for (const t of immediatelyFollows ? afterNext : []) {
                 if (t.value === '(') {
                     depth++;
                     seenOpen = true;
@@ -441,7 +472,27 @@ export class SymbolFinderService {
                 logger.info(`⏭️ Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a window/report control keyword, not a data declaration — deferring to declaration scan`);
             }
         }
-        const varSymbol = varSymbolIsControl ? null : rawVarSymbol;
+        // #487 — the symbol-tree recursion descends into structure children, so a bare
+        // word's FIRST match can be a field of a PRE()'d (or PRE-less) structure that
+        // the bare name cannot legally reference (#265 / #350). Returning null there
+        // (as the post-match check below used to be the only place to notice) skipped
+        // the declaration scan that already excludes such fields — so a procedure with
+        // `FoundQ QUEUE,PRE(fq)` holding `loc` AND a plain local `loc` hovered as
+        // nothing, while F12 (a different route) found the local. Treat it exactly
+        // like the control case: discard the match and let the scan bind the real one.
+        let varSymbolIsShadowedField = false;
+        if (rawVarSymbol !== null && bareSearch && !varSymbolIsControl) {
+            const nameLower = searchText.toLowerCase();
+            const matchTok = tokens.find(t =>
+                t.line === rawVarSymbol.range.start.line &&
+                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.value.toLowerCase() === nameLower);
+            if (matchTok && (matchTok.structurePrefix || SymbolFinderService.requiresDotQualification(matchTok))) {
+                varSymbolIsShadowedField = true;
+                logger.info(`⏭️ [#487] Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a structure field a bare name cannot reference — deferring to declaration scan`);
+            }
+        }
+        const varSymbol = (varSymbolIsControl || varSymbolIsShadowedField) ? null : rawVarSymbol;
 
         if (!varSymbol) {
             logger.info(`❌ Variable "${searchText}" not found in symbol tree — falling back to token scan`);
@@ -2083,8 +2134,24 @@ export class SymbolFinderService {
         // trying to resolve. Skip the index probe for anything qualified.
         if (word.includes('.') || word.includes(':')) return null;
 
-        const hits = StructureDeclarationIndexer.getInstance().findProcedure(word);
-        if (hits.length === 0) return null;
+        const allHits = StructureDeclarationIndexer.getInstance().findProcedure(word);
+        if (allHits.length === 0) return null;
+
+        // #483 — drop hits this file cannot reach. The index scans .inc/.equ only, so
+        // a same-named procedure prototyped in ANOTHER project's callout INC can be the
+        // only indexed declaration while this project's own PROGRAM-MAP prototype is
+        // not indexed at all. Trusting it sent FAR (and rename) to the other project's
+        // family and left out the call site under the cursor. A hit the graph has
+        // never seen (`undefined`) is kept — no-solution mode and a still-building
+        // graph behave as before. With nothing reachable left, fall through to the
+        // walk tiers, which start from this file and its MEMBER parent.
+        const curPathForReach = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const frg = FileRelationshipGraph.getInstance();
+        const hits = allHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, curPathForReach) !== false);
+        if (hits.length === 0) {
+            logger.info(`#483: ${allHits.length} index hit(s) for "${word}" are all unreachable from ${path.basename(curPathForReach)} — falling through to the walk`);
+            return null;
+        }
 
         // TRUST the index. Its scanner only records MAP/MODULE-context prototypes
         // and column-0 procedure declarations, so a hit IS a real declaration —
@@ -2148,10 +2215,19 @@ export class SymbolFinderService {
             resolved: 'true'
         });
 
+        // #483 follow-up — a prototype in a PROGRAM's own MAP is global to that
+        // program: FAR's file set for a 'module' PROCEDURE is the declaring file plus
+        // its MODULE targets and includers, which for a PROGRAM file (no includers,
+        // and no graph in no-solution mode) collapses to the PROGRAM alone and loses
+        // every member call site. 'global' is what the walk always reported for it,
+        // and what getFilesToSearch's own PROGRAM-file-MAP-entry branch expects.
+        const scopeType: 'global' | 'module' =
+            StructureDeclarationIndexer.getInstance().isProgramFile(hit.filePath) ? 'global' : 'module';
+
         return {
             token,
             type: 'PROCEDURE',
-            scope: { token, type: 'module' },
+            scope: { token, type: scopeType },
             location: { uri, line, character },
             originalWord: word,
             searchWord: word

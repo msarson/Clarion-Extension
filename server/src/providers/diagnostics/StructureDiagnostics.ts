@@ -493,51 +493,86 @@ export function validateViewProjectFields(
         const desc = ViewDescriptorParser.parse(headerText, bodyText);
         if (!desc.from) continue;
 
-        // PROJECT(...) field validation — fields are resolved against the FROM file.
-        if (desc.projectedFields.length > 0) {
-            const fromFile = fileResolver.resolve(desc.from);
-            if (fromFile) {
-                const validFields = collectFieldNames(fromFile.fileToken);
-                if (validFields.size > 0) {
-                    for (const fieldToken of collectProjectFieldTokens(tokens, view)) {
-                        const value = fieldToken.value.toUpperCase();
-                        if (validFields.has(value)) continue;
-                        diagnostics.push({
-                            severity: DiagnosticSeverity.Warning,
-                            range: {
-                                start: { line: fieldToken.line, character: fieldToken.start },
-                                end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
-                            },
-                            message: `'${fieldToken.value}' is not a field on FILE '${fromFile.fileLabel}'.`,
-                            source: 'clarion'
-                        });
-                    }
-                }
-            }
-        }
+        // PROJECT(...) field validation — each field is resolved against the file that
+        // OWNS it: the JOIN's file when the PROJECT sits inside a JOIN ... END, and the
+        // VIEW's FROM file otherwise (#464). Resolving every PROJECT against FROM
+        // reported every joined field as missing.
+        //
+        // Owner resolution is cached: it is a cross-file lookup, and a generated browse
+        // projects many fields from the same two or three files.
+        // One walk serves both checks below (#473).
+        const scopedFields = collectScopedViewFields(tokens, view, desc.from);
 
-        // JOIN(File, fieldRefs...) field validation — fields resolved against the
-        // JOINED file. Same shape as PROJECT, using the cross-file resolver for
-        // the joined file.
-        for (const join of collectJoinClauses(tokens, view)) {
-            if (!join.fileToken) continue;
-            const joinedFile = fileResolver.resolve(join.fileToken.value);
-            if (!joinedFile) continue; // joined file not reachable — skip silently
-            const validFields = collectFieldNames(joinedFile.fileToken);
-            if (validFields.size === 0) continue;
-            for (const fieldToken of join.fieldTokens) {
-                const value = fieldToken.value.toUpperCase();
-                if (validFields.has(value)) continue;
+        const ownerCache = new Map<string, { label: string; fields: Set<string> } | null>();
+        const resolveOwner = (name: string) => {
+            const key = name.toUpperCase();
+            if (ownerCache.has(key)) return ownerCache.get(key)!;
+            const resolved = fileResolver.resolveFileOrPrefixed(name);
+            const entry = resolved
+                ? { label: resolved.fileLabel, fields: collectFieldNames(resolved.fileToken) }
+                : null;
+            ownerCache.set(key, entry);
+            return entry;
+        };
+
+        if (desc.projectedFields.length > 0) {
+            for (const scoped of scopedFields.projects) {
+                const owner = resolveOwner(scoped.owner);
+                // An unresolvable owner, or one we know no fields for, proves nothing —
+                // stay silent rather than accuse a field of not existing.
+                if (!owner || owner.fields.size === 0) continue;
+                const fieldToken = scoped.token;
+                // #467: a dotted field carries its own qualifier (`Customer.Name`).
+                // Compare the member half - `collectFieldNames` holds bare and
+                // PRE:-prefixed names, never the dotted form.
+                const dotted = splitDottedReference(fieldToken.value);
+                const comparable = (dotted ? dotted.member : fieldToken.value).toUpperCase();
+                if (owner.fields.has(comparable)) continue;
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
                     range: {
                         start: { line: fieldToken.line, character: fieldToken.start },
                         end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
                     },
-                    message: `'${fieldToken.value}' is not a field on FILE '${joinedFile.fileLabel}'.`,
+                    message: `'${fieldToken.value}' is not a field on FILE '${owner.label}'.`,
                     source: 'clarion'
                 });
             }
+        }
+
+        // JOIN(key, field...) field-argument validation (#473).
+        //
+        // These fields belong to the PARENT file - the VIEW's FROM file, or the enclosing
+        // JOIN's file when nested - NOT to the file being joined. That is the opposite
+        // of what this loop assumed for its whole life, and it never fired to prove it:
+        // it resolved the JOIN's first argument with `resolve()`, but that argument is a
+        // KEY reference (`CUS:CusKey`), never a bare FILE label, so it matched nothing.
+        //
+        // Compiler-verified on Clarion 10.0.12567 against test-programs/ViewJoinTest,
+        // one line changed per case:
+        //   JOIN(CUS:CusKey, ORD:NoSuchField) -> Field not found in parent FILE
+        //   JOIN(CUS:CusKey, CUS:Name)        -> Field not found in parent FILE
+        //   JOIN(CUS:CusKey, CUS:ID)          -> compiles
+        //
+        // The third is the trap that made the old premise look right: it passes only
+        // because the PARENT (Orders) also has an `ID`, despite the argument carrying
+        // the JOINED file's prefix. So the match is by field NAME with the prefix
+        // IGNORED - hence bareFieldName rather than the PROJECT check's exact compare.
+        for (const scoped of scopedFields.joinFields) {
+            const owner = resolveOwner(scoped.owner);
+            // Same silence contract as PROJECT: an unresolvable parent proves nothing.
+            if (!owner || owner.fields.size === 0) continue;
+            const fieldToken = scoped.token;
+            if (owner.fields.has(bareFieldName(fieldToken.value))) continue;
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: fieldToken.line, character: fieldToken.start },
+                    end: { line: fieldToken.line, character: fieldToken.start + fieldToken.value.length }
+                },
+                message: `'${fieldToken.value}' is not a field on the parent FILE '${owner.label}'.`,
+                source: 'clarion'
+            });
         }
     }
 
@@ -588,6 +623,31 @@ interface ResolvedFile {
     fileLabel: string;
 }
 
+/**
+ * Split a dotted VIEW reference into its file qualifier and the name after the
+ * dot - `Customer.CusKey` -> `{ file: 'Customer', member: 'CusKey' }`. Returns
+ * undefined when there is no usable dot, so callers fall through to their
+ * existing colon/literal handling unchanged.
+ *
+ * #467. Both halves are needed, and by different callers: `FileResolver`
+ * resolves a JOIN target from the `file` half, while the PROJECT field check
+ * compares the `member` half against its scope owner's field set. The whole
+ * dotted token matches neither the bare (`NAME`) nor the prefixed (`CUS:NAME`)
+ * form that `collectFieldNames` builds, which is why the unsplit value produced
+ * a warning on code the compiler accepts.
+ *
+ * The qualifier is deliberately NOT required to match the owner. Compiling
+ * `PROJECT(Orders.Total)` inside `JOIN(Customer.CusKey, ...)` fails with
+ * `Field not found in parent FILE` - so the compiler checks the member against
+ * the enclosing scope's file and ignores the qualifier, exactly as this does.
+ */
+export function splitDottedReference(name: string): { file: string; member: string } | undefined {
+    const dot = name.indexOf('.');
+    // A leading dot has no file half; a trailing one is a period terminator.
+    if (dot <= 0 || dot === name.length - 1) return undefined;
+    return { file: name.slice(0, dot), member: name.slice(dot + 1) };
+}
+
 interface JoinClause {
     fileToken?: Token;        // first arg of JOIN(...) — the joined file name
     fieldTokens: Token[];     // subsequent name args — fields to validate against the joined file
@@ -613,6 +673,7 @@ interface JoinClause {
  */
 class FileResolver {
     private filesByName = new Map<string, ResolvedFile>();
+    private filesByPrefix = new Map<string, ResolvedFile>();
     private visitedUris = new Set<string>();
     private currentClwDir: string;
     private tokenCache = TokenCache.getInstance();
@@ -637,6 +698,35 @@ class FileResolver {
 
     private pendingExpansion?: Token[];
 
+    /**
+     * Resolve a VIEW/JOIN target that may be a FILE name (`Invoice`), a dotted
+     * reference to one (`Customer.CusKey`) or a prefixed one (`CUS:Key` - a KEY,
+     * which is what a JOIN actually names). The literal name is tried first, so
+     * files whose label contains neither separator are unaffected.
+     */
+    public resolveFileOrPrefixed(name: string): ResolvedFile | undefined {
+        const direct = this.resolve(name);
+        if (direct) return direct;
+        // #467: dot notation names the file outright - `Customer.CusKey` is the
+        // CusKey KEY on FILE Customer. Legal Clarion, and compiler-verified in
+        // test-programs/ViewJoinTest.
+        const dotted = splitDottedReference(name);
+        if (dotted) {
+            const byDottedFile = this.resolve(dotted.file);
+            if (byDottedFile) return byDottedFile;
+        }
+        const colon = name.indexOf(':');
+        if (colon <= 0) return undefined;
+        const prefix = name.slice(0, colon).toUpperCase();
+        const byPrefix = this.filesByPrefix.get(prefix);
+        if (byPrefix) return byPrefix;
+        if (this.pendingExpansion) {
+            this.expandIncludes(this.pendingExpansion);
+            this.pendingExpansion = undefined;
+        }
+        return this.filesByPrefix.get(prefix);
+    }
+
     public resolve(name: string): ResolvedFile | undefined {
         const upper = name.toUpperCase();
         const local = this.filesByName.get(upper);
@@ -657,6 +747,12 @@ class FileResolver {
                 const key = t.label.toUpperCase();
                 if (!this.filesByName.has(key)) {
                     this.filesByName.set(key, { fileToken: t, fileLabel: t.label });
+                }
+                // Also index by PRE() prefix: a JOIN names a KEY, not a file --
+                // JOIN(CUS:Key, ...) -- so scoping a JOIN's fields needs prefix -> file.
+                const pre = t.structurePrefix?.toUpperCase();
+                if (pre && !this.filesByPrefix.has(pre)) {
+                    this.filesByPrefix.set(pre, { fileToken: t, fileLabel: t.label });
                 }
             }
         }
@@ -734,10 +830,144 @@ const crossTokensMemo = new Map<string, { content: string; tokens: Token[] }>();
 /**
  * Walks the body of a VIEW structure and returns every JOIN clause — the
  * joined-file name token (first arg) and any field-name tokens after it.
- * Mirrors the structure of `collectProjectFieldTokens` but separated because
+ * Mirrors the structure of `collectScopedProjectFieldTokens` but separated because
  * JOIN args have positional meaning (first = file; rest = fields) while
  * PROJECT args are flat field references.
  */
+/**
+ * PROJECT fields inside a VIEW, each paired with the file that OWNS it (#464).
+ *
+ * A PROJECT nested in a `JOIN(Key, ...) ... END` projects fields of the JOINED file,
+ * not of the VIEW's FROM file, and nested JOINs nest their ownership.
+ *
+ * The walk counts openers against ENDs itself rather than using token ranges, because
+ * neither is usable here: JOIN is tokenized as a Function and carries no `finishesAt`,
+ * and a VIEW containing a JOIN reports a `finishesAt` pointing at the JOIN's END rather
+ * than its own.
+ */
+function collectScopedProjectFieldTokens(
+    tokens: Token[],
+    view: Token,
+    primaryFile: string
+): Array<{ token: Token; owner: string }> {
+    return collectScopedViewFields(tokens, view, primaryFile).projects;
+}
+
+/**
+ * One walk, two answers (#473). Both PROJECT fields and a JOIN's field arguments need
+ * the same owner stack, but they read it at different moments, which is the whole
+ * subtlety:
+ *
+ *   PROJECT fields    belong to the CURRENT owner — the JOINed file when nested inside
+ *                     a JOIN, the VIEW's FROM file otherwise (#464).
+ *   JOIN field args   belong to the owner the JOIN is declared IN — its PARENT — read
+ *                     BEFORE the JOIN pushes its own file onto the stack.
+ *
+ * The parent rule is compiler-verified, not inferred; see `validateViewProjectFields`
+ * and `test-programs/ViewJoinTest/README.md` for the three variants that establish it.
+ */
+function collectScopedViewFields(
+    tokens: Token[],
+    view: Token,
+    primaryFile: string
+): { projects: Array<{ token: Token; owner: string }>; joinFields: Array<{ token: Token; owner: string }> } {
+    const result: Array<{ token: Token; owner: string }> = [];
+    const joinFields: Array<{ token: Token; owner: string }> = [];
+
+    const viewIndex = tokens.findIndex(t => t === view);
+    if (viewIndex === -1) return { projects: result, joinFields };
+
+    // Owner stack: the VIEW's FROM file, then one entry per enclosing JOIN.
+    const owners: string[] = [primaryFile];
+    let depth = 1; // the VIEW itself is open
+
+    for (let i = viewIndex + 1; i < tokens.length && depth > 0; i++) {
+        const t = tokens[i];
+        const upper = t.value.toUpperCase();
+
+        if (t.type === TokenType.EndStatement) {
+            depth--;
+            if (depth === 0) break;          // the VIEW's own END
+            if (owners.length > 1) owners.pop();
+            continue;
+        }
+
+        if (upper === 'JOIN' && tokens[i + 1]?.value === '(') {
+            // The first argument names the join target - a KEY, whose prefix resolves
+            // to the file. An unresolvable one still pushes, so the matching END pops
+            // the right entry and ownership downstream is not shifted by one.
+            const args = namesInsideParens(tokens, i + 1);
+            // #473: the remaining arguments are fields of the PARENT - the owner this
+            // JOIN is declared in - so they must be read BEFORE the push below.
+            const parentOwner = owners[owners.length - 1];
+            for (const field of args.slice(1)) {
+                joinFields.push({ token: field, owner: parentOwner });
+            }
+            owners.push(args[0]?.value ?? parentOwner);
+            depth++;
+            continue;
+        }
+
+        // Any other structure opener inside a VIEW keeps the stack balanced.
+        if (t.type === TokenType.Structure) {
+            depth++;
+            owners.push(owners[owners.length - 1]);
+            continue;
+        }
+
+        if (upper === 'PROJECT' && tokens[i + 1]?.value === '(') {
+            const owner = owners[owners.length - 1];
+            for (const field of namesInsideParens(tokens, i + 1)) {
+                result.push({ token: field, owner });
+            }
+        }
+    }
+
+    return { projects: result, joinFields };
+}
+
+/**
+ * The field name a qualifier-agnostic comparison uses — `CUS:Name`, `Customer.Name` and
+ * `Name` all reduce to `NAME` (#473).
+ *
+ * A JOIN's field list is matched by NAME with the prefix IGNORED, which is not how the
+ * PROJECT check works and is not a shortcut: `JOIN(CUS:CusKey, CUS:ID)` compiles against
+ * a parent that has an `ID`, even though the argument carries the JOINED file's prefix.
+ * Comparing the written form would reject it.
+ */
+function bareFieldName(value: string): string {
+    const dotted = splitDottedReference(value);
+    const afterQualifier = dotted ? dotted.member : value;
+    const colon = afterQualifier.lastIndexOf(':');
+    return (colon >= 0 ? afterQualifier.slice(colon + 1) : afterQualifier).toUpperCase();
+}
+
+/** Name tokens inside the parenthesised argument list starting at `openIndex`. */
+function namesInsideParens(tokens: Token[], openIndex: number): Token[] {
+    const names: Token[] = [];
+    let depth = 1;
+    for (let j = openIndex + 1; j < tokens.length && depth > 0; j++) {
+        const inner = tokens[j];
+        if (inner.value === '(') { depth++; continue; }
+        if (inner.value === ')') { depth--; if (depth === 0) break; continue; }
+        if (inner.value === ',' || inner.type === TokenType.Comment) continue;
+        if (
+            inner.type === TokenType.StructurePrefix ||
+            inner.type === TokenType.Variable ||
+            inner.type === TokenType.Label ||
+            inner.type === TokenType.StructureField
+        ) {
+            names.push(inner);
+        }
+    }
+    return names;
+}
+
+/** The first name token inside the argument list starting at `openIndex`, if any. */
+function firstNameInsideParens(tokens: Token[], openIndex: number): string | undefined {
+    return namesInsideParens(tokens, openIndex)[0]?.value;
+}
+
 function collectJoinClauses(tokens: Token[], view: Token): JoinClause[] {
     const result: JoinClause[] = [];
     if (view.finishesAt === undefined) return result;
@@ -793,44 +1023,3 @@ function collectJoinClauses(tokens: Token[], view: Token): JoinClause[] {
     return result;
 }
 
-/**
- * Walks the body of a VIEW structure and returns every name token that sits
- * inside a PROJECT(...) argument list. Used by validateViewProjectFields to
- * place diagnostic ranges on the offending field token (not the PROJECT
- * keyword) and to ignore non-PROJECT references inside JOIN clauses.
- */
-function collectProjectFieldTokens(tokens: Token[], view: Token): Token[] {
-    const result: Token[] = [];
-    if (view.finishesAt === undefined) return result;
-
-    for (let i = 0; i < tokens.length; i++) {
-        const t = tokens[i];
-        if (t.line <= view.line || t.line >= view.finishesAt) continue;
-        if (t.value.toUpperCase() !== 'PROJECT') continue;
-
-        let j = i + 1;
-        if (j >= tokens.length || tokens[j].value !== '(') continue;
-        j++;
-        let depth = 1;
-        while (j < tokens.length && depth > 0) {
-            const inner = tokens[j];
-            if (inner.value === '(') {
-                depth++;
-            } else if (inner.value === ')') {
-                depth--;
-                if (depth === 0) break;
-            } else if (inner.value !== ',' && inner.type !== TokenType.Comment) {
-                if (
-                    inner.type === TokenType.StructurePrefix ||
-                    inner.type === TokenType.Variable ||
-                    inner.type === TokenType.Label ||
-                    inner.type === TokenType.StructureField
-                ) {
-                    result.push(inner);
-                }
-            }
-            j++;
-        }
-    }
-    return result;
-}

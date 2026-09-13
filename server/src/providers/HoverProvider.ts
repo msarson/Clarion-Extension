@@ -37,6 +37,7 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
+import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -174,6 +175,22 @@ export class HoverProvider {
                 if (sectionArg) {
                     return this.buildSectionRefHover(sectionArg.section, sectionArg.includeFile, document);
                 }
+
+                // A `?Name` field equate — a window control's own label. Like the two
+                // above, this must run BEFORE the context builder: `?` is a non-word
+                // character, so `getWordRangeAtPosition` either drops the sigil (leaving
+                // a bare `Cancel`, which the ladder below then matches against any
+                // unrelated EQUATE or keyword of that name) or, with the cursor on the
+                // `?` itself, returns an empty range and no hover at all. Resolving from
+                // the token keeps both cases on the control.
+                const feqToken = TokenHelper.getFieldEquateTokenAt(preTokens, position.line, position.character);
+                if (feqToken) {
+                    // Deliberately terminal: a `?Name` resolving to no control in scope
+                    // returns null rather than falling through. Nothing in the ladder
+                    // below models controls, so any match it finds on the bare name is a
+                    // coincidence rather than an answer.
+                    return this.buildFieldEquateHover(feqToken, document, position);
+                }
             }
 
             // Build hover context
@@ -247,12 +264,43 @@ export class HoverProvider {
             }
 
             if (!currentScope) {
+                // #474: a DOTTED field reference must be answered before anything below.
+                // `HoverContextBuilder` truncates the word at the dot, so hovering
+                // `Customer.Name` arrives here as the bare word `Customer` — which is a
+                // real global structure label, so `findGlobalVariableHover` answers with
+                // the FILE and the field is never looked up. That is why a dotted field
+                // described its own file instead of itself.
+                const dottedFieldHover = await this.resolveDottedFieldHover(tokens, document, position);
+                mark('dottedField(noScope)');
+                if (dottedFieldHover) return dottedFieldHover;
+
                 // Check for global variable (in current file or MEMBER parent)
                 const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, tokens, document, position.line);
                 mark('globalVar(noScope)');
                 if (globalVarHover) return globalVarHover;
 
+                // Cursor may be ON the declaration line of a module/global-scope
+                // structure field (e.g. a field inside a file-scope `GROUP,TYPE` in
+                // an .inc) — not a bare-name reference, so findGlobalVariableHover's
+                // PRE()/dot-qualifier exclusion above correctly doesn't match it.
+                const structureFieldHover = this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
+                mark('structureFieldDecl(noScope)');
+                if (structureFieldHover) return structureFieldHover;
+
                 logger.info('No scope found and no global variable found - cannot provide hover');
+
+                // #474: a PREFIXED field reference outside any PROCEDURE — a VIEW's
+                // `PROJECT(CUS:Name)`, a `KEY(CUS:ID)`, anything in the data section —
+                // produced no hover at all. This lookup lives on the scoped path
+                // (`findInIncludesAndEquates`, near the end of this method) and this
+                // branch returns before ever reaching it.
+                //
+                // Placed here, after the global and structure-field-declaration checks,
+                // so it mirrors the scoped path's ordering: those run before it there too,
+                // and a prefixed word that is genuinely a global keeps answering as one.
+                const prefixedFieldHover = await this.resolvePrefixedFieldHover(word, tokens, document);
+                mark('prefixedField(noScope)');
+                if (prefixedFieldHover) return prefixedFieldHover;
 
                 const classTypeHover = await this.checkClassTypeHover(word, document);
                 mark('classType(noScope)');
@@ -307,7 +355,15 @@ export class HoverProvider {
                 
                 const currentFilePath = decodeURIComponent(document.uri.replace('file:///', ''));
                 const currentFileDir = path.dirname(currentFilePath);
-                const resolvedPath = path.resolve(currentFileDir, memberToken.referencedFile);
+                // #452 — `MEMBER('Parent')` is legal without the extension. Resolving the
+                // raw target produced a path that does not exist, the parent was never
+                // loaded, and hover fell through to the generic symbol path — so a CALL
+                // SITE rendered the "Global procedure" card with only the MAP declaration
+                // link, and never offered the implementation. The declaration still
+                // resolved because a different path already normalises, which is what made
+                // this look unrelated to the extension-less work in #447/#449/#450.
+                const resolvedPath = path.resolve(
+                    currentFileDir, TokenHelper.normalizeMemberFilename(memberToken.referencedFile));
                 logger.info(`Resolved MEMBER path: ${resolvedPath}`);
                 
                 const cached = await this.crossFileCache.getOrLoadDocument(resolvedPath);
@@ -793,6 +849,70 @@ export class HoverProvider {
      */
 
     /**
+     * Resolve a qualified field reference — `CUS:Name` or `Orders.ID` — for a cursor
+     * that has no enclosing PROCEDURE scope (#474).
+     *
+     * Both forms name a field of a declared structure, but by different keys, so they
+     * need different lookups:
+     *   `CUS:Name`   PRE() prefix + field. Delegates to the same
+     *                `findInIncludesAndEquates` the scoped path uses, so the rendered
+     *                hover is identical wherever the reference appears.
+     *   `Orders.ID`  structure LABEL + field, which no PRE() lookup can match — the
+     *                prefix here is `ORD`, not `Orders`.
+     *
+     * Deliberately narrow: only qualified references are handled. An unqualified word in
+     * the data section keeps its existing behaviour, so this cannot introduce hovers where
+     * there were none before except for the forms #474 is about.
+     *
+     * The dotted half reads the TOKEN rather than `word`. `HoverContextBuilder` truncates
+     * at the dot — hovering `Customer.Name` yields the word `Customer` — which is precisely
+     * why that case answered with the FILE. Widening word extraction is not an option: the
+     * dot is also the chained-access separator (`SELF.records.alpha`), and the chained
+     * resolver depends on the current split. The tokenizer already emits the whole
+     * reference as one `StructureField` token, so the token is the reliable source here.
+     */
+    private async resolveDottedFieldHover(
+        tokens: Token[],
+        document: TextDocument,
+        position: Position
+    ): Promise<Hover | null> {
+        const dottedToken = tokens.find(t =>
+            t.type === TokenType.StructureField &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length &&
+            t.value.includes('.')
+        );
+        if (!dottedToken) return null;
+
+        const dot = dottedToken.value.indexOf('.');
+        const typeName = dottedToken.value.slice(0, dot);
+        const fieldName = dottedToken.value.slice(dot + 1);
+        // A single qualifier is a field reference. `A.B.C` is a chained member
+        // access and belongs to the chained resolver, not here.
+        if (!typeName || !fieldName || fieldName.includes('.')) return null;
+
+        return this.structureFieldResolver.resolveStructureTypeFieldHover(typeName, fieldName, document);
+    }
+
+    /**
+     * The `PRE:Field` half of #474 — see `resolveDottedFieldHover` for the dotted half.
+     *
+     * Delegates to the same `findInIncludesAndEquates` the scoped path uses, so the hover
+     * a prefixed field renders is identical wherever the reference appears. Narrow by
+     * design: an unqualified word is left alone, so this cannot manufacture hovers beyond
+     * the form #474 is about.
+     */
+    private async resolvePrefixedFieldHover(
+        word: string,
+        tokens: Token[],
+        document: TextDocument
+    ): Promise<Hover | null> {
+        if (word.lastIndexOf(':') <= 0) return null;
+        return this.variableResolver.findInIncludesAndEquates(word, tokens, document);
+    }
+
+    /**
      * Check if a word is a CLASS type and provide hover with definition info
      * @param word The word to check
      * @param document The document
@@ -839,9 +959,7 @@ export class HoverProvider {
             const hoverMarkdown = [
                 `**${info.name}** — ${typeLabel}`,
                 ``,
-                `📦 Defined in \`${fileName}\` at line ${info.line + 1}${parentLine}`,
-                ``,
-                `*(F12 to navigate to definition)*`
+                `📦 Defined in ${this.formatter.locationLink(info.filePath, info.line)}${parentLine}`
             ].join('\n');
 
             return {
@@ -911,7 +1029,7 @@ export class HoverProvider {
         const loc = findSectionLocation(includeFile, sectionName, document.uri);
         const lines: string[] = [`**SECTION** \`'${sectionName}'\` — \`${includeFile}\``];
         if (loc) {
-            lines.push(`Resolves to: \`${loc.path}:${loc.line + 1}\``);
+            lines.push(`Resolves to: ${this.formatter.locationLink(loc.path, loc.line)}`);
         } else {
             lines.push(`⚠️ Section not found in the resolved include`);
         }
@@ -921,6 +1039,158 @@ export class HoverProvider {
                 sectionStr.line, sectionStr.start,
                 sectionStr.line, sectionStr.start + sectionStr.value.length)
         };
+    }
+
+    /**
+     * Hover card for a `?Name` field equate: the control's own type keyword, the
+     * structure that owns it, its declaration line, and a link to it.
+     *
+     * Scoped to the WINDOW/APPLICATION/REPORT structures declared in the CURRENT
+     * procedure, the same scope `?` completion offers — a field equate belongs to
+     * the procedure whose window declares it, so a same-named control elsewhere in
+     * the file is a different control, not this one. Returns null when the name
+     * resolves to nothing in that scope; that reference doesn't compile, and
+     * pointing at some other procedure's control instead would be a guess.
+     */
+    private buildFieldEquateHover(feqToken: Token, document: TextDocument, position: Position): Hover | null {
+        const structure = this.tokenCache.getStructure(document);
+
+        // 1. The usual case: a window declared in the enclosing procedure. The same
+        //    `?Name` — `?Cancel` above all — recurs across unrelated windows, so the
+        //    procedure's own window is the only reading that is certain.
+        for (const proc of this.enclosingProcedures(structure, position.line)) {
+            for (const win of structure.getContainerStructuresInProcedure(proc)) {
+                const hit = structure.findControl(feqToken.value, win);
+                if (hit) {
+                    return this.renderFieldEquateCard(feqToken, hit, win, document, structure);
+                }
+            }
+        }
+
+        // 2. Not the enclosing procedure's — but a window can be declared in a class
+        //    or in another source entirely, so absence here is not absence. A
+        //    declaration found elsewhere in THIS file is offered as a candidate and
+        //    labelled with its owner, never as the current procedure's control.
+        const declarations = structure.findControlDeclarations(feqToken.value);
+        if (declarations.length === 1) {
+            return this.renderFieldEquateCard(feqToken, declarations[0].control, null, document, structure);
+        }
+        if (declarations.length > 1) {
+            // The same name across several windows is ordinary Clarion. Listing the
+            // candidates is the honest answer; picking one would be a coin toss.
+            const lines: string[] = [
+                `**${feqToken.value}** — \`FIELD EQUATE\``,
+                `Declared in ${declarations.length} windows in this file — none in this procedure:`
+            ];
+            for (const { control } of declarations) {
+                const { controlType } = structure.getControlContextAt(control.line, control.start);
+                const owner = this.enclosingScopeName(structure, control.line);
+                const what = [controlType, owner ? `in \`${owner}\`` : null].filter(Boolean).join(' ');
+                lines.push(`- ${what ? what + ' — ' : ''}${this.formatter.locationLink(document.uri, control.line)}`);
+            }
+            return {
+                contents: { kind: 'markdown', value: lines.join('\n\n') },
+                range: Range.create(
+                    feqToken.line, feqToken.start,
+                    feqToken.line, feqToken.start + feqToken.value.length)
+            };
+        }
+
+        // 3. Declared in another source, or not at all. Either way this file cannot
+        //    say which — and no card beats a confident wrong one.
+        return null;
+    }
+
+    /**
+     * Procedure/method tokens whose windows a `?Name` on `line` could refer to,
+     * innermost first.
+     *
+     * The scope chain matters because of the ABC shape: a generated procedure holds
+     * its WINDOW in local data and its event handling in the methods of a locally
+     * declared `WindowManager` subclass. A `?Name` inside one of those methods is
+     * outside the method's own line range, so the method alone never resolves it —
+     * `ScopeResolver` links the method to the procedure whose local data declared
+     * its CLASS, and that is the procedure holding the window.
+     */
+    private enclosingProcedures(structure: ReturnType<TokenCache['getStructure']>, line: number): Token[] {
+        const out: Token[] = [];
+        const seen = new Set<Token>();
+        const push = (t: Token | null | undefined) => {
+            if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+        };
+
+        let node: ScopeNode | null;
+        try {
+            node = structure.getScopeResolver().resolveScopeAt(line);
+        } catch {
+            return out;
+        }
+        for (let n: ScopeNode | null = node; n; n = n.parent) {
+            if (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method) {
+                push(n.token);
+            }
+            push(n.declaringProcedure?.token);
+        }
+        return out;
+    }
+
+    /**
+     * The card itself. `container` is the owning WINDOW/APPLICATION/REPORT when the
+     * control was resolved inside the current procedure; null when it was found
+     * elsewhere in the file, which the card then says outright.
+     */
+    private renderFieldEquateCard(
+        feqToken: Token,
+        declToken: Token,
+        container: Token | null,
+        document: TextDocument,
+        structure: ReturnType<TokenCache['getStructure']>
+    ): Hover {
+        // The control keyword (BUTTON/ENTRY/LIST/…) is read at the DECLARATION's
+        // position, not the cursor's — the cursor is usually on a reference, where
+        // there is no control keyword to find.
+        const { controlType } = structure.getControlContextAt(declToken.line, declToken.start);
+
+        const lines: string[] = [
+            controlType ? `**${declToken.value}** — \`${controlType}\`` : `**${declToken.value}**`
+        ];
+
+        if (container) {
+            lines.push(`🔷 ${container.value.toUpperCase()} control`);
+        } else {
+            const owner = this.enclosingScopeName(structure, declToken.line);
+            lines.push(owner
+                ? `🔷 Control declared in \`${owner}\`, not in this procedure`
+                : '🔷 Control declared elsewhere in this file, not in this procedure');
+        }
+
+        const declLine = document.getText({
+            start: { line: declToken.line, character: 0 },
+            end: { line: declToken.line, character: Number.MAX_VALUE }
+        }).trim();
+        if (declLine) {
+            lines.push('```clarion\n' + declLine + '\n```');
+        }
+        lines.push(this.formatter.locationLink(document.uri, declToken.line));
+
+        return {
+            contents: { kind: 'markdown', value: lines.join('\n\n') },
+            range: Range.create(
+                feqToken.line, feqToken.start,
+                feqToken.line, feqToken.start + feqToken.value.length)
+        };
+    }
+
+    /** Name of the procedure/method enclosing `line`, for labelling a control found outside the current one. */
+    private enclosingScopeName(structure: ReturnType<TokenCache['getStructure']>, line: number): string | null {
+        try {
+            // A scope node's token is the PROCEDURE keyword; `label` carries the name
+            // (dotted, for a method implementation) — same accessor CodeLens uses.
+            const t = structure.getScopeResolver().resolveScopeAt(line).token;
+            return t ? (t.label ?? t.value) : null;
+        } catch {
+            return null;
+        }
     }
 
     /**
@@ -1084,7 +1354,7 @@ export class HoverProvider {
             const implementors = this.tokenCache.getStructure(document).getImplementors(ifaceName);
             if (implementors.length > 0) {
                 const list = implementors
-                    .map(c => `- \`${c.label ?? c.value}\` (line ${c.line + 1})`)
+                    .map(c => `- \`${c.label ?? c.value}\` — ${this.formatter.locationLink(document.uri, c.line)}`)
                     .join('\n');
                 implementorsFooter =
                     `\n\n**${implementors.length} class${implementors.length === 1 ? '' : 'es'} implement${implementors.length === 1 ? 's' : ''} this interface in this file:**\n${list}`;

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { globalSolutionFile, globalClarionVersion, globalSettings } from '../globals';
+import { globalSolutionFile, globalClarionVersion, globalSettings, globalClarionPropertiesFile } from '../globals';
+import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -146,6 +147,17 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
             versionLabel = effectiveVersion;
         }
         rows.push({ label: 'Clarion', value: versionLabel });
+
+        // #479 — the compile-target name stopped being a unique identifier once a
+        // ClarionProperties.xml could live outside %APPDATA% (see #471): two
+        // installations can present the same target name from different files, and
+        // since the build now follows the selected file, not showing which one is
+        // active means not being able to tell what you are building against.
+        // Shown only for a non-default location, so the ordinary case stays quiet.
+        const configDir = describeNonDefaultConfigDir(globalClarionPropertiesFile, process.env.APPDATA);
+        if (configDir) {
+            rows.push({ label: 'Config dir', value: configDir });
+        }
 
         if (!globalSolutionFile) {
             rows.push({ label: 'Solution', value: 'No solution open' });

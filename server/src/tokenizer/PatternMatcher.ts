@@ -46,7 +46,14 @@ export class PatternMatcher {
             'operator': [TokenType.Operator],
             'delimiter': [TokenType.Delimiter, TokenType.DataTypeParameter, TokenType.EndStatement],
             'upper': [ // Uppercase letter - identifiers, keywords, structures
-                TokenType.Directive, TokenType.EndStatement, TokenType.Structure, TokenType.Label, TokenType.Keyword,
+                // #485: Label FIRST. It is guarded to column 0, and its regex refuses the
+                // reserved words (OMIT/COMPILE/PROGRAM/MEMBER/END/CODE/DATA…) unless a ':' or
+                // word character follows — so `OMIT('x')` still tokenises as a Directive
+                // while `Omit:pXPos EQUATE(4)` (ABUserControl.CLW) is the one Label it is,
+                // not Directive "Omit" + ":" + "pXPos". A column-0 word is a label by
+                // language rule; the Structure path already defers to that at column 0.
+                TokenType.Label,
+                TokenType.Directive, TokenType.EndStatement, TokenType.Structure, TokenType.Keyword,
                 TokenType.ClarionDocument, TokenType.ExecutionMarker,
                 TokenType.ConditionalContinuation, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
@@ -56,8 +63,13 @@ export class PatternMatcher {
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
             ],
             'lower': [ // Lowercase letter - identifiers, keywords (case-insensitive)
-                TokenType.Keyword, TokenType.Directive, TokenType.ClarionDocument,
-                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Label,
+                // #485: Label FIRST, as in the 'upper' group (see there). With Keyword tried
+                // first, a column-0 label whose first word is a statement keyword —
+                // `return:xml Equate(2)` in NetTalk's NetWeb.inc — tokenised as Keyword
+                // "return" + ":" + "xml", while `Return:xml` did not.
+                TokenType.Label,
+                TokenType.Directive, TokenType.ClarionDocument,
+                TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Keyword,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
                 TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,

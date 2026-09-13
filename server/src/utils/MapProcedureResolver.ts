@@ -15,6 +15,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from './TokenHelper';
 import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
@@ -115,12 +116,25 @@ export class MapProcedureResolver {
         // index is empty" gate is deliberately NOT taken: a prototype could live in an
         // INCLUDEd .clw the SDI doesn't scan, and the walk must still find it.)
         const procHits = StructureDeclarationIndexer.getInstance().findProcedure(procName);
-        if (procHits.length === 1) {
-            const loaded = await this.loadDocForWalk(procHits[0].filePath);
+        // #483 — a unique hit is only "the target" if THIS file can reach it. The index
+        // scans .inc/.equ only, so when two projects share a name and one declares it
+        // in its PROGRAM's own MAP (never indexed) while the other uses a callout INC
+        // (indexed, and visible through shared redirection paths), the lone hit is the
+        // OTHER project's. Reject it and let the walk — which starts from this file
+        // and its parent — find the right prototype. `undefined` (graph knows nothing
+        // about the file) keeps the fast path, so no-solution mode is unchanged.
+        // #483 follow-up — with PROGRAM MAPs indexed, a name declared by several projects
+        // has several hits; the one THIS file can reach is still unambiguous.
+        const frg = FileRelationshipGraph.getInstance();
+        const reachableHits = procHits.length === 1
+            ? procHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, currentPath) !== false)
+            : procHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, currentPath) === true);
+        if (reachableHits.length === 1) {
+            const loaded = await this.loadDocForWalk(reachableHits[0].filePath);
             if (loaded) {
                 const fastLine = this.findModuleScopedProcDeclLine(loaded.tokens, procName.toLowerCase());
                 if (fastLine !== null) {
-                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(procHits[0].filePath)}:${fastLine}`);
+                    logger.info(`✅ #362: index fast-path — ${procName} in ${pathUtil.basename(reachableHits[0].filePath)}:${fastLine}`);
                     mapDeclWalkCache.set(cacheKey, { docUri: loaded.document.uri, declLine: fastLine });
                     return { doc: loaded.document, tokens: loaded.tokens, declLine: fastLine };
                 }
@@ -531,28 +545,40 @@ export class MapProcedureResolver {
         // Collect all candidate declarations
         const candidates: Array<{ token: Token, signature: string }> = [];
 
-        // Search inside each MAP block
-        for (const mapToken of mapStructures) {
-            const mapStartLine = mapToken.line;
-            const mapEndLine = mapToken.finishesAt;
-            
-            if (mapEndLine === undefined) continue;
-
+        // The MAPs this lookup may search (local-MAP scoping applied once).
+        const eligibleMaps = mapStructures.filter(mapToken => {
+            if (mapToken.finishesAt === undefined) return false;
             // When containingProcedure is specified, only search MAPs whose immediate
             // parent in the token tree is the named procedure (local MAP scope).
             if (containingProcedure) {
                 const mapParent = mapToken.parent;
                 const parentLabel = mapParent?.label ?? mapParent?.value;
                 if (!parentLabel || parentLabel.toUpperCase() !== containingProcedure.toUpperCase()) {
-                    logger.info(`⏭️ Skipping MAP at line ${mapStartLine} — parent is '${parentLabel}', not '${containingProcedure}'`);
-                    continue;
+                    logger.info(`⏭️ Skipping MAP at line ${mapToken.line} — parent is '${parentLabel}', not '${containingProcedure}'`);
+                    return false;
                 }
             }
+            return true;
+        });
 
-            // ✨ NEW: Get tokens from MAP including INCLUDEs using ScopeAnalyzer
-            logger.info(`🗺️ Searching MAP at line ${mapStartLine} (including INCLUDEs)...`);
-            const tokensInMap = this.scopeAnalyzer.getMapTokensWithIncludes(mapToken, document, tokens);
-            logger.info(`📋 Found ${tokensInMap.length} total tokens in MAP (with INCLUDEs)`);
+        // #484 — two passes. The document's OWN MAP tokens first: a generated app
+        // declares every procedure in its PROGRAM's MAP, and expanding that MAP's
+        // INCLUDEs meant tokenising every header it pulls in (ap1's MAP INCLUDEs a
+        // 5,992-line library source) on the first hover / F12 — ~1.7s — for a
+        // prototype sitting right there in the document. The expansion now runs
+        // only when the document itself does not declare the name.
+        const passes: Array<{ label: string; tokensFor: (mapToken: Token) => Token[] }> = [
+            { label: 'direct', tokensFor: m => TokenHelper.findTokens(tokens, { afterLine: m.line, beforeLine: m.finishesAt! }) },
+            { label: 'including INCLUDEs', tokensFor: m => this.scopeAnalyzer.getMapTokensWithIncludes(m, document, tokens) },
+        ];
+        for (const pass of passes) {
+        if (candidates.length > 0) break;
+        for (const mapToken of eligibleMaps) {
+            const mapStartLine = mapToken.line;
+
+            logger.info(`🗺️ Searching MAP at line ${mapStartLine} (${pass.label})...`);
+            const tokensInMap = pass.tokensFor(mapToken);
+            logger.info(`📋 Found ${tokensInMap.length} total tokens in MAP (${pass.label})`);
 
             // Look for MapProcedure tokens or Function tokens matching our procedure name
             for (const t of tokensInMap) {
@@ -598,6 +624,7 @@ export class MapProcedureResolver {
                     }
                 }
             }
+        }
         }
 
         if (candidates.length === 0) {
@@ -816,8 +843,38 @@ export class MapProcedureResolver {
             return null;
         }
         
+        // #484 — the document's own tokens first. In a generated app the prototype
+        // AND its MODULE('x.clw') block are both in the PROGRAM's MAP, so expanding
+        // the MAP's INCLUDEs (tokenising every header — ap1's MAP pulls in a
+        // 5,992-line library source, ~1s) proved nothing the document did not
+        // already say. Keyed by NAME, as the expanded walk below is, because
+        // `position` may carry an INCLUDE file's line number when the declaration
+        // came from a header.
+        const nameLower = procName.toLowerCase();
+        const namesProc = (t: Token) =>
+            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
+            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower);
+        const inDocModule = tokens.find(m =>
+            m.type === TokenType.Structure && m.value.toUpperCase() === 'MODULE' && !!m.referencedFile &&
+            m.finishesAt !== undefined && m.line >= mapBlock.line && m.finishesAt <= (mapBlock.finishesAt ?? Infinity) &&
+            tokens.some(p => p.line > m.line && p.line < m.finishesAt! && namesProc(p)));
+        if (inDocModule?.referencedFile) {
+            logger.info(`   #484: ${procName} is declared in this document's MODULE('${inDocModule.referencedFile}') — no INCLUDE expansion`);
+            const externalImpl = await this.findImplementationInModuleFile(
+                procName, inDocModule.referencedFile, document, declarationSignature);
+            if (externalImpl) return externalImpl;
+        }
+        // A prototype directly in this document's MAP, outside any MODULE, belongs to
+        // this source module (Language Reference, MODULE: a MODULE "contains the
+        // prototypes for the PROCEDUREs contained in the sourcefile") — the
+        // implementation search below is in-file and needs no expansion either.
+        const inDocPrototype = tokens.some(p =>
+            p.line > mapBlock.line && p.line < (mapBlock.finishesAt ?? Infinity) && namesProc(p));
+
         // Get all tokens from MAP including INCLUDEs to find MODULE references
-        const tokensInMap = this.scopeAnalyzer.getMapTokensWithIncludes(mapBlock, document, tokens);
+        const tokensInMap = (inDocModule || inDocPrototype)
+            ? []
+            : this.scopeAnalyzer.getMapTokensWithIncludes(mapBlock, document, tokens);
         logger.info(`   📋 Got ${tokensInMap.length} tokens from MAP (including INCLUDEs)`);
         
         // Find the MODULE block that contains the current position
@@ -1291,9 +1348,26 @@ export class MapProcedureResolver {
                 return null;
             }
             
+            // #484 — the file MODULE('x.clw') names is where the implementation lives;
+            // look for its column-0 label BEFORE expanding this module's own MAP (which
+            // INCLUDEs its callout headers). The expansion below is for the rare
+            // delegation shape where the module's MAP re-declares the procedure under
+            // yet another MODULE.
+            const directImpl = moduleTokens.find(t =>
+                t.subType === TokenType.GlobalProcedure &&
+                t.label?.toLowerCase() === procName.toLowerCase()
+            );
+            if (directImpl) {
+                logger.info(`✅ #484: direct implementation in ${path.basename(resolvedPath)} at line ${directImpl.line} — no MAP expansion`);
+                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
+                    start: { line: directImpl.line, character: 0 },
+                    end: { line: directImpl.line, character: directImpl.value.length }
+                });
+            }
+
             logger.info(`📋 Found MAP in ${path.basename(resolvedPath)}, searching for procedure declaration`);
             const mapBlock = mapBlocks[0];
-            
+
             // Get all tokens from the MAP (including INCLUDEs)
             const mapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(
                 mapBlock, 

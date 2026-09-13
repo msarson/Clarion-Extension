@@ -24,6 +24,7 @@ import { PropEntry } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
+import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -49,6 +50,36 @@ export interface ClassMemberInfo {
     line: number;
     file: string;
     isInterface?: boolean;
+    structureType?: 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
+}
+
+/**
+ * Names a member the way its owning structure does: a CLASS has properties and
+ * methods, an INTERFACE has methods, and a QUEUE/GROUP has fields — calling a
+ * queue field a "Class Property" misreports what the reader is looking at.
+ *
+ * "Field" matches the noun already used for structure members elsewhere in
+ * hover (`**<Type> Field:** <name>` in StructureFieldResolver).
+ *
+ * Falls back to the previous CLASS/INTERFACE-only wording when the owner kind
+ * is unknown, so producers that don't set it are unaffected.
+ */
+export function describeMemberOwner(
+    structureType: 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE' | undefined,
+    isInterface: boolean | undefined,
+    isMethod: boolean
+): { category: string; noun: string } {
+    const kind = structureType ?? (isInterface ? 'INTERFACE' : 'CLASS');
+    switch (kind) {
+        case 'QUEUE':
+            return { category: 'Queue', noun: isMethod ? 'Method' : 'Field' };
+        case 'GROUP':
+            return { category: 'Group', noun: isMethod ? 'Method' : 'Field' };
+        case 'INTERFACE':
+            return { category: 'Interface', noun: isMethod ? 'Method' : 'Property' };
+        default:
+            return { category: 'Class', noun: isMethod ? 'Method' : 'Property' };
+    }
 }
 
 export interface MethodDeclarationInfo {
@@ -183,8 +214,8 @@ export class HoverFormatter {
      */
     formatClassMember(name: string, info: ClassMemberInfo): Hover {
         const isMethod = info.type.toUpperCase().includes('PROCEDURE') || info.type.toUpperCase().includes('FUNCTION');
-        const memberType = isMethod ? 'Method' : 'Property';
-        const memberCategory = info.isInterface ? 'Interface' : 'Class';
+        const { category: memberCategory, noun: memberType } =
+            describeMemberOwner(info.structureType, info.isInterface, isMethod);
 
         const header = this.buildMethodHeader(name, info.type, memberCategory, memberType, info.className, isMethod);
         const markdown = [header, ``];
@@ -213,7 +244,8 @@ export class HoverFormatter {
      * Constructs hover for a method call (SELF.method) with both declaration and implementation
      */
     formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
-        const memberCategory = declarationInfo.isInterface ? 'Interface' : 'Class';
+        const { category: memberCategory } =
+            describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
         const markdown = [header, ``];
 
@@ -473,63 +505,34 @@ export class HoverFormatter {
         
         logger.info(`formatProcedure: isAtMapDeclaration=${isAtMapDeclaration}, isAtImplementation=${isAtImplementation}`);
         
-        // Add scope information if available
+        // Add scope information if available.
+        //
+        // Scope follows the OWNER of the MAP holding the prototype, plus PRIVATE (#480).
+        // A PROGRAM's MAP declares procedures callable throughout the program — with or
+        // without a MODULE() wrapper, which only names the file containing the body. A
+        // MEMBER's MAP declares procedures available in that module. PRIVATE restricts
+        // either to its own module. Compiler-verified on Clarion 10.0.12567.
+        //
+        // With no MAP declaration to go on, the implementation's file is the best guess.
+        // A prototype in an include file (first statement OMIT or MODULE, as in LibSrc)
+        // belongs to whichever MAP includes it, so it is left unlabelled unless PRIVATE.
         if (procImpl || mapDecl) {
             try {
-                // First check if MAP declaration is inside a MODULE block
-                let isModuleScoped = false;
-                if (mapDecl) {
-                    const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    const mapContent = fs.readFileSync(mapUri, 'utf-8');
-                    const mapLines = mapContent.split('\n');
-                    const mapLine = mapDecl.range.start.line;
-                    
-                    // Search backwards from MAP declaration to find MODULE keyword
-                    for (let i = mapLine - 1; i >= Math.max(0, mapLine - 20); i--) {
-                        const line = mapLines[i].trim().toUpperCase();
-                        if (line.startsWith('MODULE(') || line === 'MODULE') {
-                            isModuleScoped = true;
-                            break;
-                        }
-                        // Stop if we hit MAP or END
-                        if (line === 'MAP' || line === 'END') {
-                            break;
-                        }
-                    }
-                }
-                
-                if (isModuleScoped) {
-                    header = `**${procName}** 📦 Module Procedure\n`;
-                } else {
-                    // Check file type for global vs module
-                    const checkLocation = procImpl || mapDecl;
-                    if (checkLocation) {
-                        let content: string;
-                        
-                        // Use current document if same URI, otherwise read from disk
-                        if (checkLocation.uri === currentDocument.uri) {
-                            content = currentDocument.getText();
-                        } else if (checkLocation.uri.startsWith('test://')) {
-                            // Skip for test URIs
-                            content = '';
-                        } else {
-                            const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
-                            content = fs.readFileSync(uri, 'utf-8');
-                        }
-                        
-                        if (content) {
-                            const lines = content.split('\n');
-                            const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
-                            
-                            if (firstNonCommentLine) {
-                                const trimmed = firstNonCommentLine.trim().toUpperCase();
-                                if (trimmed.startsWith('PROGRAM')) {
-                                    header = `**${procName}** 🌍 Global Procedure\n`;
-                                } else if (trimmed.startsWith('MEMBER')) {
-                                    header = `**${procName}** 📦 Module Procedure\n`;
-                                }
-                            }
-                        }
+                const scopeSource = mapDecl ?? procImpl!;
+                const content = scopeSource.uri === currentDocument.uri
+                    ? currentDocument.getText()
+                    : scopeSource.uri.startsWith('test://') ? '' : readCachedOrDiskFile(scopeSource.uri);
+
+                if (content) {
+                    const lines = content.split('\n');
+                    const firstStatement = lines.find(l => l.trim() && !l.trim().startsWith('!'))?.trim().toUpperCase() ?? '';
+
+                    if (mapDecl && ProcedureSignatureUtils.isPrivatePrototype(lines, mapDecl.range.start.line)) {
+                        header = `**${procName}** 📦 Module Procedure · Private\n`;
+                    } else if (firstStatement.startsWith('PROGRAM')) {
+                        header = `**${procName}** 🌍 Global Procedure\n`;
+                    } else if (firstStatement.startsWith('MEMBER')) {
+                        header = `**${procName}** 📦 Module Procedure\n`;
                     }
                 }
             } catch (error) {

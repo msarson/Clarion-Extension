@@ -30,6 +30,8 @@ export interface CompileTargetPickItem extends QuickPickItem {
 export interface InstallationPickItem extends QuickPickItem {
     ideVersion: string;
     propertiesPath: string;
+    /** #479 — true for the bottom "Browse for ClarionProperties.xml…" entry. */
+    isBrowse?: boolean;
 }
 
 /**
@@ -127,4 +129,31 @@ export function buildInstallationItems(
             propertiesPath: inst.propertiesPath,
         };
     });
+}
+
+/**
+ * #479 — the "Browse for ClarionProperties.xml…" footer for the Installation picker.
+ *
+ * `ClarionProperties.xml` need not live under `%APPDATA%\SoftVelocity\Clarion`:
+ * `clarion.exe` and `ClarionCL.exe` both take `/ConfigDir=`, and MSBuild honours a
+ * `ConfigDir` property (see #471), so a checked-out tree can carry its own IDE
+ * settings beside the compiler.
+ *
+ * `ClarionInstallationDetector.detectInstallations()` only scans AppData, so such an
+ * installation is never discovered. A file picker that accepts any path already
+ * existed (`setActiveVersionViaFilePicker`, #134) but ran in exactly one situation —
+ * discovery returning nothing — so the developer most likely to want it, one with a
+ * normal AppData install AND a ConfigDir tree, could never reach it.
+ *
+ * A sentinel rather than a real installation: it carries no properties path of its
+ * own, because the path is whatever the user picks next.
+ */
+export function buildBrowseFooterItem(): InstallationPickItem {
+    return {
+        label: '$(folder-opened) Browse for ClarionProperties.xml…',
+        description: 'Use a configuration outside %APPDATA% (ConfigDir)',
+        ideVersion: '',
+        propertiesPath: '',
+        isBrowse: true,
+    };
 }

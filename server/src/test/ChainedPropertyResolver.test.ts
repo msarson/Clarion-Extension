@@ -6,6 +6,7 @@
 
 import * as assert from 'assert';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 
 // ─── extractClassName helper tests ───────────────────────────────────────────
 
@@ -119,5 +120,71 @@ suite('ClassMemberResolver.extractClassName', () => {
 
     test('GROUP keyword alone still returns null (unaffected by GROUP(TypeName) handling)', () => {
         assert.strictEqual(ClassMemberResolver.extractClassName('GROUP'), null);
+    });
+});
+
+// --- extractChain helper tests -------------------------------------------------
+
+/**
+ * Mirrors the `isPureChain` gate applied by the hover and definition callers to
+ * extractChain's result. A chain that fails this test is routed to the
+ * single-segment fallback instead of the chained resolver.
+ */
+const isPureChain = (s: string): boolean =>
+    /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(s.trim());
+
+suite('ChainedPropertyResolver.extractChain', () => {
+
+    test('SELF anchor — keeps only the rightmost SELF chain', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('SELF.Order.X &= SELF.Primary'), 'SELF.Primary');
+    });
+
+    test('PARENT anchor — keeps only the rightmost PARENT chain', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('x = PARENT.Owner'), 'PARENT.Owner');
+    });
+
+    test('bare chain with no statement context is returned unchanged', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('Obj.Prop'), 'Obj.Prop');
+    });
+
+    test('assignment context is stripped from a non-SELF chain root', () => {
+        // Regression: the whole prefix used to be returned, so the caller's
+        // pure-chain gate rejected it and multi-segment access never resolved.
+        assert.strictEqual(ChainedPropertyResolver.extractChain('rc = Obj.Prop'), 'Obj.Prop');
+    });
+
+    test('an extracted non-SELF chain satisfies the caller-side pure-chain gate', () => {
+        const extracted = ChainedPropertyResolver.extractChain('rc = Obj.Prop');
+        assert.ok(isPureChain(extracted), `expected a pure chain, got "${extracted}"`);
+    });
+
+    test('open-paren call context is stripped from a non-SELF chain root', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('Foo(Obj.Prop'), 'Obj.Prop');
+    });
+
+    test('keyword context is stripped from a non-SELF chain root', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('IF Obj.Prop'), 'Obj.Prop');
+    });
+
+    test('a colon-prefixed chain root survives extraction', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('rc = PRE:Field.Prop'), 'PRE:Field.Prop');
+    });
+
+    test('deeper non-SELF chains keep every segment', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('rc = Obj.Inner.Deeper'), 'Obj.Inner.Deeper');
+    });
+
+    test('a prefix not ending in an identifier is returned unchanged', () => {
+        // Nothing sensible to extract — must not mangle it into a bogus chain.
+        assert.strictEqual(ChainedPropertyResolver.extractChain('CLIP(a.b)'), 'CLIP(a.b)');
+    });
+
+    test('a single identifier with no dot is returned as-is', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('rc = Obj'), 'Obj');
+    });
+
+    test('SELF anchor still wins over the trailing-chain fallback', () => {
+        // The fallback must not shadow SELF handling when both could match.
+        assert.strictEqual(ChainedPropertyResolver.extractChain('rc = SELF.Owner'), 'SELF.Owner');
     });
 });

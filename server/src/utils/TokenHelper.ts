@@ -261,6 +261,28 @@ export class TokenHelper {
     }
 
     /**
+     * The range of a ROUTINE's LABEL, given the routine token.
+     *
+     * `findScopedRoutineToken` and `DocumentStructure.findRoutines` return the ROUTINE **keyword**
+     * token, whose `value` is `"ROUTINE"` and whose `label` is the routine's name. Building a range
+     * from `routineToken.value.length` therefore measures the keyword, not the label — and the three
+     * providers that navigate to a routine had each open-coded it slightly differently, producing
+     * three different wrong ranges for `PrepareProcedure ROUTINE`:
+     *
+     *     ReferencesProvider       cols 17-24   "ROUTINE"            (start and length both the keyword)
+     *     DefinitionProvider       cols  0-7    "Prepare"            (start right, length the keyword)
+     *     ImplementationProvider   cols  0-7    "Prepare"            (same)
+     *     correct                  cols  0-16   "PrepareProcedure"
+     *
+     * A Clarion label must begin in column 1, so the label starts at character 0 by language rule
+     * rather than by observation.
+     */
+    public static getRoutineLabelRange(routineToken: Token): Range {
+        const labelLength = (routineToken.label ?? routineToken.value).length;
+        return Range.create(routineToken.line, 0, routineToken.line, labelLength);
+    }
+
+    /**
      * #321 — resolve a GOTO target: a statement label visible from `cursorLine`
      * under GOTO's scope rule (Language Reference): the target must be the
      * label of another EXECUTABLE statement inside the currently executing
@@ -589,6 +611,31 @@ export class TokenHelper {
      */
     public static isInsideFileRefArg(tokens: Token[], line: number, character: number): boolean {
         return this.getFileRefArgStringToken(tokens, line, character) !== null;
+    }
+
+    /**
+     * The `?Name` field-equate token at `line`/`character`, or null.
+     *
+     * Read from the token stream rather than re-scanned off the line, which buys
+     * two things for free. The span INCLUDES the leading `?`, so a cursor on the
+     * sigil itself resolves the control instead of returning nothing —
+     * `getWordRangeAtPosition` classifies `?` as a non-word character, so it
+     * collapses to an empty range there and its caller bails. And a `?` inside a
+     * string literal or a comment is never a `FieldEquateLabel` token, so those
+     * positions can't match without a separate guard.
+     *
+     * The bare `?` anonymous-control marker (`BUTTON('OK'),USE(?)`) is excluded:
+     * it names nothing, so there is no control to resolve.
+     */
+    public static getFieldEquateTokenAt(tokens: Token[], line: number, character: number): Token | null {
+        for (const t of tokens) {
+            if (t.line !== line || t.type !== TokenType.FieldEquateLabel) continue;
+            if (t.value.length <= 1) continue; // bare `?` — anonymous control marker
+            if (t.start <= character && character <= t.start + t.value.length) {
+                return t;
+            }
+        }
+        return null;
     }
 
     /**

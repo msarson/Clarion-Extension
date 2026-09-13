@@ -1,7 +1,7 @@
 import { Hover } from 'vscode-languageserver-protocol';
 import { DataTypeService } from '../../utils/DataTypeService';
 import { ControlService } from '../../utils/ControlService';
-import { HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
+import { HANDLED_BY_SPECIAL_KEYWORDS, prefersAttributeMeaning } from '../../utils/AttributeContextGuards';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("SymbolHoverResolver");
@@ -48,7 +48,7 @@ export class SymbolHoverResolver {
 
         if (checkDataTypeFirst) {
             // Data declaration context - check data type first
-            const dataTypeHover = this.checkDataType(word);
+            const dataTypeHover = this.checkDataType(word, context);
             if (dataTypeHover) return dataTypeHover;
             
             // Then check control as fallback
@@ -60,7 +60,7 @@ export class SymbolHoverResolver {
             if (controlHover) return controlHover;
             
             // Then check data type as fallback
-            const dataTypeHover = this.checkDataType(word);
+            const dataTypeHover = this.checkDataType(word, context);
             if (dataTypeHover) return dataTypeHover;
         }
 
@@ -70,7 +70,7 @@ export class SymbolHoverResolver {
     /**
      * Check if word is a Clarion data type
      */
-    private checkDataType(word: string): Hover | null {
+    private checkDataType(word: string, context: HoverContext): Hover | null {
         // MODULE is BOTH a data-type-ish structure keyword AND (outside a MAP
         // block) a CLASS attribute — HoverRouter.handleSpecialKeywords already
         // makes the authoritative, context-aware call for it (dotted/nested
@@ -78,6 +78,13 @@ export class SymbolHoverResolver {
         // here means that call already ran and came back null; matching it
         // again via the plain data-type lookup would silently overrule it.
         if (HANDLED_BY_SPECIAL_KEYWORDS.has(word.toUpperCase())) {
+            return null;
+        }
+        // #472: JOIN and KEY each name a structural element AND an unrelated window
+        // attribute. In attribute position the attribute handler (step 9 of the ladder)
+        // is the right answer, and this lookup runs first — so decline and let it
+        // through, or a SHEET's `,JOIN` would describe a relational join.
+        if (prefersAttributeMeaning(word, context)) {
             return null;
         }
         if (this.dataTypeService.hasDataType(word)) {

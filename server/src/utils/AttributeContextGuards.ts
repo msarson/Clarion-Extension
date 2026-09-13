@@ -116,3 +116,34 @@ export function isDeclarationLabel(tokens: Token[], line: number, character: num
  * positive one step later.
  */
 export const HANDLED_BY_SPECIAL_KEYWORDS = new Set(['MODULE', 'HIDE', 'DISABLE', 'TYPE']);
+
+/**
+ * Names that denote a STRUCTURAL element in a data declaration and an unrelated
+ * ATTRIBUTE inside a window, sharing nothing but their spelling (#472):
+ *
+ *   JOIN   a VIEW clause relating a second file through one of its keys
+ *          vs. the SHEET attribute making TABs display on a single row.
+ *   KEY    a FILE's sorted access path
+ *          vs. the CONTROL attribute setting a control's execution keycode.
+ *
+ * The structural meanings were added to `clarion-datatypes.json` so they hover
+ * at all; without this guard they would shadow the attribute meanings, because
+ * data-type resolution runs before attribute resolution in the hover ladder and
+ * is a pure name lookup with no positional awareness. A SHEET's `,JOIN` would
+ * then describe a relational join.
+ *
+ * `isAttributePosition` — window context, with no label starting the line — is
+ * what separates them. A structural declaration always carries a label
+ * (`CusKey KEY(CUS:ID)`) or sits outside any window (a VIEW's `JOIN(...)`),
+ * so declining here costs the structural meaning nothing.
+ */
+export const STRUCTURAL_KEYWORDS_ALSO_ATTRIBUTES = new Set(['JOIN', 'KEY']);
+
+export function prefersAttributeMeaning(
+    word: string,
+    context: { hasLabelBefore: boolean; isInWindowContext: boolean }
+): boolean {
+    return STRUCTURAL_KEYWORDS_ALSO_ATTRIBUTES.has(word.toUpperCase())
+        && context.isInWindowContext
+        && !context.hasLabelBefore;
+}

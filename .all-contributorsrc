@@ -1,0 +1,133 @@
+{
+  "projectName": "Clarion-Extension",
+  "projectOwner": "msarson",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "angular",
+  "commitType": "docs",
+  "contributorsPerLine": 7,
+  "contributorsSortAlphabetically": false,
+  "badgeTemplate": "[![All Contributors](https://img.shields.io/badge/all_contributors-<%= contributors.length %>-orange.svg?style=flat-square)](#contributors-)",
+  "skipCi": true,
+  "contributors": [
+    {
+      "login": "geircodes",
+      "name": "geircodes",
+      "avatar_url": "https://avatars.githubusercontent.com/u/127224049?v=4",
+      "profile": "https://github.com/geircodes",
+      "contributions": [
+        "code",
+        "bug",
+        "ideas"
+      ]
+    },
+    {
+      "login": "Chahton",
+      "name": "Edin Čahtarević",
+      "avatar_url": "https://avatars.githubusercontent.com/u/10942054?v=4",
+      "profile": "https://github.com/Chahton",
+      "contributions": [
+        "bug",
+        "ideas",
+        "userTesting"
+      ]
+    },
+    {
+      "login": "ClarionLive",
+      "name": "ClarionLive",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2301791?v=4",
+      "profile": "https://github.com/ClarionLive",
+      "contributions": [
+        "bug",
+        "ideas",
+        "userTesting"
+      ]
+    },
+    {
+      "login": "celeron533",
+      "name": "Allen Zhu",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3608762?v=4",
+      "profile": "http://celeron533.github.io/",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "fushnisoft",
+      "name": "Brahn Partridge",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1259015?v=4",
+      "profile": "http://fushnisoft.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "MarkGoldberg",
+      "name": "Mark Goldberg",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4584617?v=4",
+      "profile": "https://github.com/MarkGoldberg",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "CarlosGtrz",
+      "name": "Carlos Gutierrez",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5258638?v=4",
+      "profile": "https://carlosgutierrez.mx",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "ThaDaVos",
+      "name": "Dylan Vos",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5251028?v=4",
+      "profile": "https://github.com/ThaDaVos",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "krosoftware",
+      "name": "krosoftware",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8056218?v=4",
+      "profile": "https://github.com/krosoftware",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "jslarveEC",
+      "name": "jslarveEC",
+      "avatar_url": "https://avatars.githubusercontent.com/u/112515315?v=4",
+      "profile": "https://github.com/jslarveEC",
+      "contributions": [
+        "bug"
+      ]
+    },
+    {
+      "login": "narduss",
+      "name": "Nardus",
+      "avatar_url": "https://avatars.githubusercontent.com/u/15345011?v=4",
+      "profile": "https://github.com/narduss",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "BoxSoft",
+      "name": "Mike Hanson",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1831296?v=4",
+      "profile": "https://www.boxsoft.net",
+      "contributions": [
+        "ideas"
+      ]
+    }
+  ]
+}

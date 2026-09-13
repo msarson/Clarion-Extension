@@ -88,5 +88,16 @@ suite('HoverProvider — standalone procedure declared after an indented-END loc
 
         assert.ok(content.includes('Owner'),
             `Method declared inside Owner must still resolve as Owner's own member; got: ${content}`);
+
+        // #444 — the assertion above cannot fail for the reason it exists. The
+        // not-found fallback renders as:
+        //     **Method Declaration:** `Owner.Method`  ⚠️ *Implementation not found*
+        // which contains "Owner" too, so it passed whether or not an implementation
+        // was actually located. This fixture deliberately places `Owner.Method`'s
+        // implementation before the next PROCEDURE (see the comment above the
+        // fixture), so a miss here is a real regression and must be caught.
+        assert.ok(!content.includes('Implementation not found'),
+            `Owner.Method's implementation is present in the fixture and must be resolved, ` +
+            `not reported missing; got: ${content}`);
     });
 });

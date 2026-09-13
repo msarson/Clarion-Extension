@@ -783,7 +783,8 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('IncrementCounter'), 'Should show procedure name');
-            assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
+            // #480: declared in the PROGRAM's MAP, so global — MODULE('utils.clw') only names where the body lives.
+            assert.ok(hoverText.includes('🌍 Global Procedure'), 'Should show global procedure scope');
             assert.ok(hoverText.includes('→'), 'Should show declaration → implementation locations');
             assert.ok(hoverText.includes('→'), 'Should show declaration and implementation locations');
         });
@@ -805,7 +806,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('GetCounter'), 'Should show procedure name');
             assert.ok(hoverText.includes('LONG'), 'Should show return type');
-            assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
+            assert.ok(hoverText.includes('🌍 Global Procedure'), 'Should show global procedure scope (#480)');
         });
         
         test('TEST 4: Hover on ModuleData in utils.clw line 52 (module-local variable)', async function() {
@@ -947,7 +948,7 @@ suite('Solution-Based Cross-File Scope Tests', () => {
             
             const hoverText = (hoverResult.contents as any).value;
             assert.ok(hoverText.includes('IncrementCounter'), 'Should show procedure name');
-            assert.ok(hoverText.includes('📦'), 'Should show module scope icon');
+            assert.ok(hoverText.includes('🌍 Global Procedure'), 'Should show global procedure scope (#480)');
             // Module procedures may not show "Declared in" when at implementation
             assert.ok(hoverText.includes('main.clw') || hoverText.includes('Module'), 'Should show definition file or module scope');
         });

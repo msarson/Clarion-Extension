@@ -467,6 +467,23 @@ export class RedirectionFileParserServer {
           continue;
         }
 
+        // #436 — unsectioned lines are Common, INCLUDING inside a file pulled in by
+        // an `{include}` that sits within a section. redirection_file.htm claims
+        // "any {include} within a section is only active when that section is
+        // active"; the shipped system does not do that. Verified 2026-09-06 against
+        // Clarion 12.0.14204 with the IDE's own redirection trace — a parent whose
+        // [Debug] section contained `{include reddebug.red}`, traced under a
+        // RELEASE configuration:
+        //
+        //   Section:  Debug in file ...\Clarion120.red is not active.  Section skipped.
+        //   Looking in Section:  Common in file ...\reddebug.red
+        //   Pattern: *.txt matches
+        //   FOUND: ...\redtest-debug\redtarget.txt
+        //
+        // The section's own entries are skipped, the included file is consulted
+        // anyway, and the IDE labels its content "Common". So `{include}` splices
+        // content in and the enclosing section does not gate it. Do NOT "fix" this
+        // toward the documentation — that would drop entries the compiler uses.
         if (!currentSection) currentSection = "Common";
 
         if (trimmed.startsWith("{include")) {
@@ -588,6 +605,23 @@ export class RedirectionFileParserServer {
           continue;
         }
 
+        // #436 — unsectioned lines are Common, INCLUDING inside a file pulled in by
+        // an `{include}` that sits within a section. redirection_file.htm claims
+        // "any {include} within a section is only active when that section is
+        // active"; the shipped system does not do that. Verified 2026-09-06 against
+        // Clarion 12.0.14204 with the IDE's own redirection trace — a parent whose
+        // [Debug] section contained `{include reddebug.red}`, traced under a
+        // RELEASE configuration:
+        //
+        //   Section:  Debug in file ...\Clarion120.red is not active.  Section skipped.
+        //   Looking in Section:  Common in file ...\reddebug.red
+        //   Pattern: *.txt matches
+        //   FOUND: ...\redtest-debug\redtarget.txt
+        //
+        // The section's own entries are skipped, the included file is consulted
+        // anyway, and the IDE labels its content "Common". So `{include}` splices
+        // content in and the enclosing section does not gate it. Do NOT "fix" this
+        // toward the documentation — that would drop entries the compiler uses.
         if (!currentSection) currentSection = "Common";
 
         if (trimmed.startsWith("{include")) {

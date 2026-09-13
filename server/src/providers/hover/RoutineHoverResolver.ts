@@ -66,7 +66,7 @@ export class RoutineHoverResolver {
                     value: [
                         `**Routine:** \`${routineName}\``,
                         '',
-                        `📍 Line ${routineToken.line + 1}`,
+                        `📍 ${this.formatter.locationLink(document.uri, routineToken.line)}`,
                         '',
                         '```clarion',
                         ...allLines.slice(start, end),
@@ -119,7 +119,7 @@ export class RoutineHoverResolver {
                 value: [
                     `**Label:** \`${labelToken.value}\``,
                     '',
-                    `📍 Line ${labelToken.line + 1}`,
+                    `📍 ${this.formatter.locationLink(document.uri, labelToken.line)}`,
                     '',
                     '```clarion',
                     sourceLine,

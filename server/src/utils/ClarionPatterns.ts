@@ -79,11 +79,27 @@ export class ClarionPatterns {
      * - MyProc    FUNCTION(params)             [column 0, with FUNCTION keyword]
      * - MyProc    PROCEDURE                    [column 0, no parameters]
      * - MyProc    FUNCTION                     [column 0, no parameters]
-     * 
+     * - MyProc,LONG                            [keyword-less, attribute tail only]
+     * - MyProc,NAME('_x')                      [ditto]
+     * - MyProc                                 [keyword-less, nothing at all]
+     *
+     * The last three are the keyword-less form the Language Reference gives as
+     * `name [(parameter list)] [,return type] [,attributes...]` — everything after
+     * the name optional. Requiring a `(` or the PROCEDURE keyword missed them, so
+     * go-to-implementation and the MAP hover found nothing on a prototype like
+     * `AttributeProto,NAME('_x')` even though the same prototype resolved fine for
+     * go-to-definition (#466 follow-up).
+     *
+     * Both callers gate on the cursor being inside a MAP/MODULE block, where a lone
+     * identifier can only be a prototype. The keyword guard is what keeps `END`,
+     * `MAP` and `MODULE('f.clw')` from being read as procedure names now that a
+     * bare word matches.
+     *
      * Capture groups:
      * [1] = Procedure name
      */
-    public static readonly MAP_PROCEDURE_DECLARATION = /^\s*(\w+)(?:\s*\(|\s+(?:PROCEDURE|FUNCTION)\b)/i;
+    public static readonly MAP_PROCEDURE_DECLARATION =
+        /^\s*(?!(?:END|MAP|MODULE|PROCEDURE|FUNCTION)\b)(\w+)(?:\s*\(|\s*,|\s+(?:PROCEDURE|FUNCTION)\b|\s*(?:!.*)?$)/i;
     
     /**
      * Matches a standalone procedure implementation

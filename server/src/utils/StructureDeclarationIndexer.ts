@@ -36,10 +36,24 @@ interface SdiDiskCacheEntry {
     procs?: ProcedureDeclarationInfo[];
 }
 
+/**
+ * #483 — is this project source a PROGRAM file? Decided once from the file's head
+ * and kept with the cache. `mtimeMs` is recorded for diagnosis; the verdict is
+ * NOT re-validated per sweep — a file does not change between PROGRAM and MEMBER
+ * in practice, and re-stat'ing every module on every sweep would cost exactly the
+ * per-I/O tax #355 moved off the startup path. A wiped cache re-derives it.
+ */
+interface SdiProgramVerdict {
+    mtimeMs: number;
+    isProgram: boolean;
+}
+
 interface SdiDiskCacheFile {
     version: number;
     projectPath: string;
     files: Record<string, SdiDiskCacheEntry>;
+    /** #483 — PROGRAM/MEMBER verdicts for the project sources, keyed by lower-cased path. */
+    programs?: Record<string, SdiProgramVerdict>;
 }
 
 /**
@@ -57,6 +71,23 @@ export type StructureType =
     | 'EQUATE'
     | 'ITEMIZE'
     | 'ITEMIZE_EQUATE';
+
+/**
+ * Structure kinds whose parenthesised parent contributes its members to the
+ * child, so a member miss on the child must continue into that parent:
+ * `CLASS(Base)` inherits methods and properties, and `QUEUE(Type)` /
+ * `GROUP(Type)` take the parent's field layout the same way.
+ *
+ * Kept as ONE predicate because the ascent is decided in two independent
+ * resolvers — two hand-maintained type lists drift, which is how a
+ * `QUEUE(Group)` field became silently unresolvable while `CLASS(Base)` worked.
+ *
+ * `VIEW(File)` is deliberately excluded: the parenthesised name there is a
+ * join's primary file, not a layout the VIEW inherits.
+ */
+export function inheritsMembersFromParent(structureType: StructureType | undefined): boolean {
+    return structureType === 'CLASS' || structureType === 'QUEUE' || structureType === 'GROUP';
+}
 
 /** A single declaration found during a file scan */
 export interface StructureDeclarationInfo {
@@ -109,6 +140,8 @@ export interface StructureIndex {
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
+    /** #483 — true when the index build classified this path as a PROGRAM file. */
+    isProgramFile(filePath: string): boolean;
     findInFile(fileName: string, projectPath?: string): StructureDeclarationInfo[];
     getOrBuildIndex(projectPath: string): Promise<StructureIndex>;
     buildIndex(projectPath: string): Promise<StructureIndex>;
@@ -480,6 +513,10 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
      * type `find()` results (the #361 hover gate would regress).
      */
     private procIndexes: Map<string, Map<string, ProcedureDeclarationInfo[]>> = new Map();
+    /** #483 — per project key: PROGRAM/MEMBER verdicts for its .clw sources (persisted with the cache). */
+    private programVerdicts: Map<string, Record<string, SdiProgramVerdict>> = new Map();
+    /** #483 — project keys whose verdicts gained entries since the cache was last written. */
+    private programVerdictsDirty: Set<string> = new Set();
     /** In-flight build promises — prevents duplicate parallel builds for the same project */
     private pendingBuilds: Map<string, Promise<StructureIndex>> = new Map();
 
@@ -597,6 +634,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         allFiles: string[];
         diskCache: SdiDiskCacheFile;
         index: StructureIndex;
+        procsOnly: Set<string>;
     }> = [];
 
     /** Resolves when the background validation for this project (if any) has completed. */
@@ -614,7 +652,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     async runDeferredValidations(): Promise<void> {
         const pending = this.deferredValidations.splice(0);
         for (const d of pending) {
-            this.launchBackgroundValidation(d.projectPath, d.allFiles, d.diskCache, d.index);
+            this.launchBackgroundValidation(d.projectPath, d.allFiles, d.diskCache, d.index, d.procsOnly);
             await this.whenValidated(d.projectPath);
         }
     }
@@ -663,6 +701,18 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             // (yielding — its wall-clock absorbs interleaved interactive work), and save.
             const { cache: diskCache, readMs: cacheReadMs, parseMs: cacheParseMs } = await this.loadDiskCache(projectPath);
 
+            // #483 — add the project's PROGRAM files. Their MAPs carry the prototype of
+            // every procedure a generated app declares in a MODULE('x.clw') block, none
+            // of which live in an .inc — so until now none of them were indexed and every
+            // hover / F12 / FAR on one paid the cross-file walk (~1.6s true-cold on the
+            // 40-project rig). Only their PROCEDURE prototypes are kept (procsOnly): the
+            // structure index must not gain PROGRAM-level data declarations, which its
+            // consumers (missing-include checks, type lookups) treat as includable.
+            const programFiles = await this.collectProgramFiles(projectPath, diskCache);
+            const procsOnly = new Set(programFiles.map(f => f.toLowerCase()));
+            allFiles.push(...programFiles);
+            fileCount = allFiles.length;
+
             // #355: TRUST the disk cache at startup. The stat sweep exists to catch
             // external changes made between sessions, but 4,104 stats cost whatever the
             // machine's per-I/O tax is (97ms warm dev box … 7s cold/AV-taxed VM), and
@@ -708,15 +758,15 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 // #357: defer the drift sweep onto the sequential lane at startup;
                 // otherwise launch it immediately (the #355 default).
                 if (this.deferBackgroundValidation) {
-                    this.deferredValidations.push({ projectPath, allFiles, diskCache, index });
+                    this.deferredValidations.push({ projectPath, allFiles, diskCache, index, procsOnly });
                 } else {
-                    this.launchBackgroundValidation(projectPath, allFiles, diskCache, index);
+                    this.launchBackgroundValidation(projectPath, allFiles, diskCache, index, procsOnly);
                 }
                 return index;
             }
 
             const { byName: scannedByName, freshEntries, total: scanTotal, scanned: scanScanned, reusedFromDisk: scanReused, statLoopMs } =
-                await this.statScanFiles(allFiles, diskCache);
+                await this.statScanFiles(allFiles, diskCache, procsOnly);
             for (const [k, v] of scannedByName) byName.set(k, v);
             total = scanTotal;
             scanned = scanScanned;
@@ -729,7 +779,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             const saveStart = Date.now();
             const cacheDirty = scanned > 0
                 || !diskCache
-                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
+                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length
+                || this.programVerdictsDirty.has(this.normalizeKey(projectPath)); // #483
             if (cacheDirty) {
                 await this.saveDiskCache(projectPath, freshEntries);
             }
@@ -773,7 +824,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
      * the yield rounds ~3×. Cold scans (reads + parses) ride the same batches;
      * 64 concurrent reads is well within Node's comfort.
      */
-    private async statScanFiles(allFiles: string[], diskCache: SdiDiskCacheFile | null): Promise<{
+    private async statScanFiles(allFiles: string[], diskCache: SdiDiskCacheFile | null, procsOnly: Set<string> = new Set()): Promise<{
         byName: Map<string, StructureDeclarationInfo[]>;
         freshEntries: Record<string, SdiDiskCacheEntry>;
         total: number;
@@ -805,8 +856,11 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
                 }
                 const scanResult = await this.scanFile(f);
                 scanned++;
-                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls: scanResult.decls, procs: scanResult.procs };
-                return scanResult.decls;
+                // #483 — a PROGRAM file contributes its MAP prototypes only; its global
+                // data declarations must not enter the structure index.
+                const decls = procsOnly.has(key) ? [] : scanResult.decls;
+                freshEntries[key] = { mtimeMs: stat.mtimeMs, decls, procs: scanResult.procs };
+                return decls;
             }));
             for (const decls of batchResults) {
                 total += decls.length;
@@ -834,16 +888,18 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         projectPath: string,
         allFiles: string[],
         diskCache: SdiDiskCacheFile,
-        index: StructureIndex
+        index: StructureIndex,
+        procsOnly: Set<string> = new Set()
     ): void {
         const key = this.normalizeKey(projectPath);
         const prev = this.backgroundValidations.get(key) ?? Promise.resolve();
         const run = prev.then(async () => {
             const vStart = Date.now();
             const { byName, freshEntries, scanned, reusedFromDisk, statLoopMs } =
-                await this.statScanFiles(allFiles, diskCache);
+                await this.statScanFiles(allFiles, diskCache, procsOnly);
             const drift = scanned > 0
-                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length;
+                || Object.keys(freshEntries).length !== Object.keys(diskCache.files).length
+                || this.programVerdictsDirty.has(key); // #483 — newly classified sources must reach the cache
             if (drift) {
                 index.byName.clear();
                 for (const [k, v] of byName) index.byName.set(k, v);
@@ -902,11 +958,14 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         try {
             const file = this.diskCachePath(projectPath);
             fs.mkdirSync(path.dirname(file), { recursive: true });
+            const key = this.normalizeKey(projectPath);
             const payload: SdiDiskCacheFile = {
                 version: DISK_CACHE_VERSION,
-                projectPath: this.normalizeKey(projectPath),
-                files
+                projectPath: key,
+                files,
+                programs: this.programVerdicts.get(key) // #483
             };
+            this.programVerdictsDirty.delete(key);
             // Async write — the payload can be tens of MB on a big installation; a sync write
             // on top of the (already sync) stringify would block the loop. A failed save just
             // means the next start scans cold.
@@ -967,6 +1026,20 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
      * index — no include-chain walk, no tokenize. Empty when the proc index isn't
      * built yet (callers fall back to their existing walk).
      */
+    /**
+     * #483 — was this file classified as a PROGRAM file by the index build? A hit
+     * in a PROGRAM's MAP is global to that program (the walk has always reported
+     * it as such), unlike a hit in a module-callout INC, which is module-scoped.
+     */
+    isProgramFile(filePath: string): boolean {
+        const key = filePath.toLowerCase();
+        for (const verdicts of this.programVerdicts.values()) {
+            const v = verdicts[key];
+            if (v) return v.isProgram;
+        }
+        return false;
+    }
+
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[] {
         const key = name.toLowerCase();
         if (projectPath) {
@@ -974,11 +1047,22 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             if (idx) return idx.get(key) ?? [];
             // Fall through to cross-index search (mirrors find()'s #290 behaviour).
         }
+        // #483 — aggregate across EVERY project index, not the first that answers.
+        // Returning the first project's hits alone hid the second project's same-named
+        // prototype from callers that decide "unique hit → trust it" or "prefer the
+        // hit in my own project" (#364): they never saw the competitor. Same file+line
+        // reached through two projects' shared search paths is reported once.
+        const seen = new Set<string>();
+        const all: ProcedureDeclarationInfo[] = [];
         for (const idx of this.procIndexes.values()) {
-            const hit = idx.get(key);
-            if (hit?.length) return hit;
+            for (const hit of idx.get(key) ?? []) {
+                const id = `${hit.filePath.toLowerCase()}|${hit.line}`;
+                if (seen.has(id)) continue;
+                seen.add(id);
+                all.push(hit);
+            }
         }
-        return [];
+        return all;
     }
 
     clearCache(): void {
@@ -1002,6 +1086,82 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             };
         } catch {
             return { decls: [], procs: [] };
+        }
+    }
+
+    /**
+     * #483 — the PROGRAM files among this project key's sources (every project the
+     * solution keys on this directory — generated multi-app solutions put all their
+     * .cwproj in one folder). Verdicts come from the cache where present; sources
+     * the cache has never seen get one bounded head read, batched and yielding.
+     * Without a solution (no project source lists) there is nothing to classify.
+     */
+    private async collectProgramFiles(projectPath: string, diskCache: SdiDiskCacheFile | null): Promise<string[]> {
+        const key = this.normalizeKey(projectPath);
+        const sm = SolutionManager.getInstance();
+        if (!sm || sm.solution.projects.length === 0) return [];
+
+        const verdicts: Record<string, SdiProgramVerdict> = { ...(diskCache?.programs ?? {}) };
+        const candidates = new Set<string>();
+        for (const project of sm.solution.projects) {
+            if (this.normalizeKey(project.path) !== key) continue;
+            for (const sf of project.sourceFiles ?? []) {
+                if (!/\.clw$/i.test(sf.name)) continue;
+                const abs = sf.getAbsolutePath();
+                if (abs) candidates.add(abs);
+            }
+        }
+
+        const programs: string[] = [];
+        const unknown: string[] = [];
+        for (const f of candidates) {
+            const v = verdicts[f.toLowerCase()];
+            if (v) { if (v.isProgram) programs.push(f); }
+            else unknown.push(f);
+        }
+
+        const BATCH_SIZE = 64;
+        let classified = 0;
+        for (let i = 0; i < unknown.length; i += BATCH_SIZE) {
+            const batch = unknown.slice(i, i + BATCH_SIZE);
+            const results = await Promise.all(batch.map(async f => ({ f, verdict: await this.readProgramVerdict(f) })));
+            for (const { f, verdict } of results) {
+                if (!verdict) continue;
+                verdicts[f.toLowerCase()] = verdict;
+                classified++;
+                if (verdict.isProgram) programs.push(f);
+            }
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+
+        this.programVerdicts.set(key, verdicts);
+        if (classified > 0) this.programVerdictsDirty.add(key);
+        if (classified > 0 || programs.length > 0) {
+            logger.debug(`[SDI] #483 PROGRAM files for ${path.basename(projectPath) || projectPath}: ${programs.length} of ${candidates.size} sources (${classified} newly classified)`);
+        }
+        return programs;
+    }
+
+    /**
+     * #483 — PROGRAM or MEMBER? Reads the first 4 KB and looks at the first line that
+     * is not blank or a comment: `PROGRAM` or `Label PROGRAM` means PROGRAM. A UTF-8
+     * BOM is tolerated. Null when the file cannot be read.
+     */
+    private async readProgramVerdict(filePath: string): Promise<SdiProgramVerdict | null> {
+        let handle: fs.promises.FileHandle | undefined;
+        try {
+            const stat = await fs.promises.stat(filePath);
+            handle = await fs.promises.open(filePath, 'r');
+            const buf = Buffer.alloc(4096);
+            const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
+            const head = buf.toString('latin1', 0, bytesRead).replace(/^ï»¿/, '');
+            const firstCode = head.split(/\r?\n/).map(l => l.trim()).find(l => l.length > 0 && !l.startsWith('!'));
+            const isProgram = !!firstCode && /^(?:[A-Za-z_][\w:]*\s+)?PROGRAM\b/i.test(firstCode);
+            return { mtimeMs: stat.mtimeMs, isProgram };
+        } catch {
+            return null;
+        } finally {
+            await handle?.close().catch(() => undefined);
         }
     }
 

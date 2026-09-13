@@ -6,7 +6,7 @@ import { HoverFormatter, VariableInfo } from './HoverFormatter';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from './CrossFileCache';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
+import { SymbolFinderService, SymbolInfo } from '../../services/SymbolFinderService';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { CompilerFlagService } from '../../utils/CompilerFlagService'; // #420
@@ -63,17 +63,35 @@ export class VariableHoverResolver {
         
         if (symbolInfo) {
             logger.info(`✅ Found variable info for ${word}: type=${symbolInfo.type}, line=${symbolInfo.location.line}`);
-            const variableInfo: VariableInfo = {
-                type: symbolInfo.type,
-                line: symbolInfo.location.line,
-                parentStructure: symbolInfo.parentStructure
-            };
+            const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
             // #302 follow-up (Mark): no class-definition appendix — the declaration line and
             // location already carry everything the hover needs; F12 on the type covers "where
             // is the class defined".
             return this.formatter.formatVariable(originalWord || word, variableInfo, currentScope, document, hoverLine);
         }
         return null;
+    }
+
+    /**
+     * Find and format hover for a module/global-scope structure field's OWN
+     * declaration line — a col-0 Label whose parent token is a GROUP/QUEUE/FILE/
+     * RECORD, declared outside any PROCEDURE (e.g. a field inside a module-level
+     * `SomeGroupType GROUP,TYPE` in an .inc file). `findLocalVariable`'s
+     * "exact token under the cursor wins" fast path only fires when a
+     * `currentScope` (PROCEDURE/ROUTINE) exists, so a field declared at true
+     * file scope never reaches it; `findGlobalVariableHover` also correctly
+     * excludes it from BARE-name lookups (structure fields need their
+     * PRE()/dot qualifier), but the cursor here is ON the declaration, not
+     * doing a bare-name reference. Without this, hovering such a field's own
+     * declaration showed nothing.
+     */
+    findStructureFieldDeclarationHover(word: string, tokens: Token[], document: TextDocument, hoverLine: number): Hover | null {
+        const symbolInfo = this.symbolFinder.findStructureField(word, tokens, hoverLine, document);
+        if (!symbolInfo) return null;
+
+        logger.info(`✅ Found structure field declaration for ${word} at line ${symbolInfo.location.line}`);
+        const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
+        return this.formatter.formatVariable(word, variableInfo, symbolInfo.token, document, hoverLine);
     }
 
     /**
@@ -101,16 +119,35 @@ export class VariableHoverResolver {
             ``
         ];
         
+        // #486 — same badge rule as the global card: a structure label is a structure.
+        const structureKind = this.structureKindOf(symbolInfo.token, tokens);
+        // #489 — this tier ("module-local variable in the current file") also matches a
+        // PROGRAM file's global data section, which is global to every module of the
+        // program; the badge was hard-coded "Module". Take the scope from the analyser,
+        // as the global card does, and treat PROGRAM-file data as global outright.
+        const isProgramFile = tokens.some(t => t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM');
+        const isGlobal = isProgramFile || scopeInfo?.type === 'global';
+        const scopeIcon = isGlobal ? '🌍' : '📦';
+        const scopeWord = isGlobal ? 'Global' : 'Module';
         if (scopeInfo) {
-            const scopeIcon = '📦';
-            markdown.push(`${scopeIcon} Module variable`);
+            markdown.push(structureKind ? `${scopeIcon} ${scopeWord} ${structureKind} structure` : `${scopeIcon} ${scopeWord} variable`);
+            if (structureKind) {
+                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document);
+                if (facts) {
+                    markdown.push(``);
+                    markdown.push(facts);
+                }
+            }
         }
-        
-        // Add the actual source code line
-        if (symbolInfo.declaration) {
+
+        // Add the actual source code line — as written, not rebuilt from tokens
+        // (#486: the token join rendered `LocalF FILE , DRIVER ( 'ASCII' ) , PRE ( LF )`).
+        const sourceLine = document.getText().split(/\r?\n/)[symbolInfo.location.line]?.trim();
+        const declaration = sourceLine || symbolInfo.declaration;
+        if (declaration) {
             markdown.push(``);
             markdown.push('```clarion');
-            markdown.push(symbolInfo.declaration);
+            markdown.push(declaration);
             markdown.push('```');
         }
 
@@ -244,13 +281,46 @@ export class VariableHoverResolver {
         
         if (symbolInfo) {
             logger.info(`Found variable in symbol tree: ${symbolInfo.token.value}`);
-            return {
-                type: symbolInfo.type,
-                line: symbolInfo.location.line
-            };
+            return this.toVariableInfo(symbolInfo, document);
         }
-        
+
         return null;
+    }
+
+    /**
+     * #488 — ONE card for one symbol, whichever cursor reached it. The finder's
+     * result differs by route: the declaration-line fast path carries the owning
+     * structure, the symbol-tree / PRE:Field / Structure.Field routes do not, and
+     * each derived the title type its own way (`string` vs `string(261)`). So a
+     * QUEUE field read "Field of local procedure QUEUE `FoundQ`" on its own line
+     * and "Local procedure variable" at `fq:loc` or `FoundQ.loc`. Both facts come
+     * from the declaration token itself, so derive them here for every route.
+     */
+    private toVariableInfo(symbolInfo: SymbolInfo, document: TextDocument): VariableInfo {
+        const token = symbolInfo.token;
+        const parentStructure = symbolInfo.parentStructure
+            ?? TokenHelper.getEnclosingDataStructure(token, this.tokenCache.getStructure(document));
+        return {
+            type: this.declaredTypeText(token, document) ?? symbolInfo.type,
+            line: symbolInfo.location.line,
+            parentStructure
+        };
+    }
+
+    /**
+     * #488 — the type expression as written on the declaration line: the first
+     * attribute after the label, up to the first top-level comma. `loc string(261)`
+     * → `string(261)`; `pick long,auto` → `long`; `DirQ QUEUE(File:queue),PRE(dq)`
+     * → `QUEUE(File:queue)`; `t &StringTheory` → `&StringTheory`. Undefined when
+     * the line does not look like a declaration (callers keep the finder's type).
+     */
+    private declaredTypeText(token: Token, document: TextDocument): string | undefined {
+        const line = document.getText().split(/\r?\n/)[token.line];
+        if (!line || token.start !== 0) return undefined;
+        const rest = line.slice(token.value.length);
+        if (!/^\s/.test(rest)) return undefined;
+        const m = /^\s+(&?[A-Za-z_][\w:.]*(?:\([^)]*\))?)/.exec(rest);
+        return m ? m[1] : undefined;
     }
 
     /**
@@ -316,12 +386,27 @@ export class VariableHoverResolver {
             markdown.push(`🔷 \`${structureParentName}\` field`);
         } else if (scopeInfo) {
             const scopeIcon = scopeInfo.type === 'global' ? '🌍' : '📦';
-            const scopeLabel = isProcedure
-                ? (scopeInfo.type === 'global' ? 'Global procedure' : 'Module procedure')
-                : isEquate
-                    ? (scopeInfo.type === 'global' ? 'Global constant' : 'Module constant')
-                    : (scopeInfo.type === 'global' ? 'Global variable' : 'Module variable');
+            const scopeWord = scopeInfo.type === 'global' ? 'Global' : 'Module';
+            // #486 — a structure label (FILE, QUEUE, GROUP, CLASS, WINDOW, REPORT, VIEW…)
+            // is not a variable. The title already named the type; the badge — the line
+            // a reader trusts — said "Global variable" for a FILE. Badge it as the
+            // structure it is, and give a FILE the facts it is hovered for.
+            const structureKind = this.structureKindOf(globalVar, tokens);
+            const scopeLabel = structureKind
+                ? `${scopeWord} ${structureKind} structure`
+                : isProcedure
+                    ? `${scopeWord} procedure`
+                    : isEquate
+                        ? `${scopeWord} constant`
+                        : `${scopeWord} variable`;
             markdown.push(`${scopeIcon} ${scopeLabel}`);
+            if (structureKind) {
+                const facts = this.describeStructure(globalVar, structureKind, tokens, document);
+                if (facts) {
+                    markdown.push(``);
+                    markdown.push(facts);
+                }
+            }
         }
 
         // Inline declared-value summary (Gap D). Reads the structured dataType / dataValue
@@ -369,6 +454,72 @@ export class VariableHoverResolver {
      * string when nothing useful can be shown (the heading line above already
      * shows `Name — TYPE`, so we only add value-bearing detail).
      */
+    /**
+     * #486 — the structure keyword this label declares (`Orders FILE,…` → "FILE"),
+     * from the Structure token on the label's own line; undefined for a scalar,
+     * a reference, a procedure or an EQUATE.
+     */
+    private structureKindOf(labelToken: Token, tokens: Token[]): string | undefined {
+        const opener = tokens.find(t =>
+            t.line === labelToken.line &&
+            t.start > labelToken.start &&
+            t.type === TokenType.Structure &&
+            t.finishesAt !== undefined
+        );
+        return opener ? opener.value.toUpperCase() : undefined;
+    }
+
+    /**
+     * #486 — one line of facts for a structure card, from the declaration the
+     * tokenizer already parsed. FILE: driver, PRE prefix, keys, memos/blobs and
+     * record fields. QUEUE/GROUP: PRE prefix and field count. Nothing for the rest.
+     */
+    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument): string {
+        const opener = tokens.find(t =>
+            t.line === labelToken.line && t.start > labelToken.start &&
+            t.type === TokenType.Structure && t.finishesAt !== undefined);
+        if (!opener || opener.finishesAt === undefined) return '';
+
+        const lines = document.getText().split(/\r?\n/);
+        const declLine = lines[labelToken.line] ?? '';
+        const parts: string[] = [];
+
+        const driver = /\bDRIVER\s*\(\s*'([^']*)'/i.exec(declLine);
+        if (driver) parts.push(`DRIVER('${driver[1]}')`);
+        const pre = /\bPRE\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(declLine);
+        if (pre) parts.push(`PRE(${pre[1]})`);
+        for (const attr of ['CREATE', 'THREAD', 'OWNER', 'ENCRYPT', 'RECLAIM', 'BINDABLE']) {
+            if (new RegExp(`[,\\s]${attr}\\b`, 'i').test(declLine)) parts.push(attr);
+        }
+
+        // Column-0 labels declared inside this structure, with the keyword that follows each.
+        const members = tokens.filter(t =>
+            t.line > opener.line && t.line < opener.finishesAt! &&
+            t.start === 0 && t.type === TokenType.Label);
+        const followerOf = (t: Token) => tokens.find(n => n.line === t.line && n.start > t.start)?.value.toUpperCase() ?? '';
+        const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+        if (kind === 'FILE') {
+            const keys = members.filter(t => ['KEY', 'INDEX'].includes(followerOf(t))).length;
+            const memos = members.filter(t => ['MEMO', 'BLOB'].includes(followerOf(t))).length;
+            const record = tokens.find(t =>
+                t.line > opener.line && t.line < opener.finishesAt! &&
+                t.type === TokenType.Structure && t.value.toUpperCase() === 'RECORD' && t.finishesAt !== undefined);
+            const fields = record
+                ? members.filter(t => t.line > record.line && t.line < record.finishesAt!).length
+                : 0;
+            if (keys) parts.push(plural(keys, 'key'));
+            if (memos) parts.push(plural(memos, 'memo'));
+            parts.push(plural(fields, 'field'));
+            return parts.length ? `🗄️ ${parts.join(' · ')}` : '';
+        }
+        if (kind === 'QUEUE' || kind === 'GROUP') {
+            parts.push(plural(members.length, 'field'));
+            return `🗂️ ${parts.join(' · ')}`;
+        }
+        return parts.length ? `🗂️ ${parts.join(' · ')}` : '';
+    }
+
     private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
         const upperType = type.toUpperCase();
         if (value !== undefined) {

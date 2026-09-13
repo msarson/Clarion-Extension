@@ -16,6 +16,7 @@ import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -110,6 +111,23 @@ export class CrossFileResolver {
     public async resolveFile(filename: string, currentDocumentUri: string): Promise<string | null> {
         logger.info(`Resolving file: ${filename}`);
 
+        // #447 — `MEMBER('TestUString')` without an extension is the idiomatic form;
+        // the compiler infers `.clw`. Neither route below could resolve it: the
+        // redirection masks are extension-based, so `*.clw` cannot match a bare
+        // name, and the relative probe looks for a literal extension-less file. The
+        // whole of findMapDeclarationInMemberFile then bailed at its first step and
+        // every procedure in the module was reported as undeclared — while F12,
+        // which has other strategies, navigated to the very declaration the warning
+        // denied. Same defect as #395 fixed in IncludeVerifier, in a second site.
+        //
+        // Candidates are tried in order, the name AS GIVEN first, so nothing that
+        // resolves today changes. Both callers of this method resolve a MEMBER
+        // parent, which is why `.clw` is the right inference here.
+        //
+        // #449 — moved onto the shared rule once the same defect turned up in the
+        // relationship graph and the MAP self-declaration check.
+        const candidates = clarionSourceCandidates(filename);
+
         // Try solution-wide redirection first - owner project first (#328).
         // Local reorder (not the shared util) to honour the injected manager.
         if (this.solutionManager && this.solutionManager.solution) {
@@ -119,10 +137,12 @@ export class CrossFileResolver {
             const orderedProjects = owner ? [owner, ...list.filter(pr => pr !== owner)] : list;
             for (const project of orderedProjects) {
                 const redirectionParser = project.getRedirectionParser();
-                const resolved = redirectionParser.findFile(filename);
-                if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                    logger.info(`✅ Resolved via redirection: ${resolved.path}`);
-                    return resolved.path;
+                for (const candidate of candidates) {
+                    const resolved = redirectionParser.findFile(candidate);
+                    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+                        logger.info(`✅ Resolved via redirection: ${resolved.path}`);
+                        return resolved.path;
+                    }
                 }
             }
         }
@@ -131,11 +151,13 @@ export class CrossFileResolver {
         const currentDir = path.dirname(
             decodeURIComponent(currentDocumentUri.replace('file:///', '')).replace(/\//g, '\\')
         );
-        const relativePath = path.join(currentDir, filename);
-        if (fs.existsSync(relativePath)) {
-            const resolvedPath = path.resolve(relativePath);
-            logger.info(`✅ Resolved via relative path: ${resolvedPath}`);
-            return resolvedPath;
+        for (const candidate of candidates) {
+            const relativePath = path.join(currentDir, candidate);
+            if (fs.existsSync(relativePath)) {
+                const resolvedPath = path.resolve(relativePath);
+                logger.info(`✅ Resolved via relative path: ${resolvedPath}`);
+                return resolvedPath;
+            }
         }
 
         logger.info(`❌ Could not resolve file: ${filename}`);
@@ -239,9 +261,11 @@ export class CrossFileResolver {
                         t.referencedFile
                     );
 
-                    // Check if this MODULE points to our current file
+                    // Check if this MODULE points to our current file.
+                    // #450 — `MODULE('member')` names member.clw; the comparison has to
+                    // infer the extension or the parent's MAP never matches this file.
                     if (moduleToken?.referencedFile &&
-                        path.basename(moduleToken.referencedFile).toLowerCase() === currentFileName.toLowerCase()) {
+                        moduleTargetMatchesFile(moduleToken.referencedFile, currentFileName)) {
                         logger.info(`✅ Found MODULE('${moduleToken.referencedFile}') pointing to current file`);
 
                         // Find procedure declaration in this MODULE block
@@ -518,7 +542,8 @@ export class CrossFileResolver {
                         t.referencedFile
                     );
                     if (!moduleToken?.referencedFile) continue;
-                    if (path.basename(moduleToken.referencedFile).toLowerCase() !== currentFileName.toLowerCase()) continue;
+                    // #450 — same inference as the sibling check above.
+                    if (!moduleTargetMatchesFile(moduleToken.referencedFile, currentFileName)) continue;
 
                     const moduleStart = moduleBlock.line;
                     const moduleEnd = moduleBlock.finishesAt;

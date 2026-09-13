@@ -105,6 +105,7 @@ import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
+import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -809,6 +810,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
             ['missingMapDecl', () => DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)],
             ['missingImpl', () => DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)],
+            ['privateCall', () => DiagnosticProvider.validatePrivateProcedureCalls(tokens, document, getOpenDocumentContent)],
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
         ];
@@ -828,7 +830,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             // Real macrotask yield between validators — lets queued requests in.
             await new Promise<void>(resolve => setImmediate(resolve));
         }
-        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, undeclaredVarDiags, ifaceImplDiags] = validatorResults;
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, ifaceImplDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -843,7 +845,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
@@ -1346,8 +1348,11 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
                 const openMemberToken = openTokens.find(t =>
                     t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
                 );
+                // #450 — MEMBER('name') without an extension names name.clw, so this
+                // comparison must infer it or an edit to the PROGRAM never revalidates
+                // its member modules.
                 if (openMemberToken?.referencedFile &&
-                    path.basename(openMemberToken.referencedFile).toLowerCase() === changedBasename) {
+                    moduleTargetMatchesFile(openMemberToken.referencedFile, changedBasename)) {
                     validateTextDocument(openDoc, 'crossFileUpdate');
                 }
             }
@@ -1361,7 +1366,9 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
             for (const openDoc of documents.all()) {
                 if (openDoc.uri === changedDocument.uri) continue;
                 const openPath = decodeURIComponent(openDoc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                if (path.basename(openPath).toLowerCase() === programBasename) {
+                // #450 — the MEMBER target may carry no extension, so compare through
+                // the same rule or an open PROGRAM is never matched back.
+                if (moduleTargetMatchesFile(programBasename, path.basename(openPath))) {
                     validateTextDocument(openDoc, 'crossFileUpdate');
                 }
             }

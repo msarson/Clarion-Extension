@@ -8,6 +8,21 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 
+/**
+ * The two structure keywords that can open a block inside a MAP body. Matched
+ * EXACTLY, never by prefix (#477): a procedure may legitimately be called
+ * `MapFields`, `Mapper` or `ModuleList`, and a prefix test rejects those as if
+ * they were the keyword, leaving a real prototype unmarked for good.
+ */
+const MAP_STRUCTURE_KEYWORD = /^(MODULE|MAP)$/i;
+
+/**
+ * Words that cannot themselves be the NAME of a prototype in a MAP body — the
+ * block keywords plus the procedure keywords, which introduce the other form
+ * (`name PROCEDURE ...`) rather than being a name.
+ */
+const MAP_PROTOTYPE_NON_NAME = /^(MODULE|MAP|END|PROCEDURE|FUNCTION)$/i;
+
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
 export type { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
@@ -1759,23 +1774,35 @@ export class DocumentStructure {
         // Find the END statement for this MAP
         let endIndex = -1;
         let depth = 1;
+        // Innermost enclosing structure, so a declaration inside MODULE('x.clw') is
+        // parented to that MODULE and not to the outer MAP. Consumers rely on the
+        // distinction: a bare entry parented to the MAP is a self-declaration (#338),
+        // one parented to a MODULE is implemented in the file that MODULE names.
+        const structureStack: Token[] = [mapToken];
         
         for (let i = mapIndex + 1; i < this.tokens.length; i++) {
             const token = this.tokens[i];
             
             if (token.type === TokenType.Structure) {
                 depth++;
+                structureStack.push(token);
             } else if (token.type === TokenType.EndStatement) {
                 depth--;
                 if (depth === 0) {
                     endIndex = i;
                     break;
                 }
+                if (structureStack.length > 1) structureStack.pop();
             }
             
             // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
             // In shorthand syntax, the procedure name and opening parenthesis are in the same token
-            if (token.value.includes("(") && token.value !== "(" && !token.value.toLowerCase().startsWith("module") && ! token.value.startsWith("!")) {
+            if (token.value.includes("(") && token.value !== "(" &&
+                // #477: compare the NAME half exactly, not the whole fused value by
+                // prefix. `MODULE('f.clw')` must still be excluded — but `ModuleList(1)`
+                // is a prototype, and the old `startsWith("module")` rejected both.
+                !MAP_STRUCTURE_KEYWORD.test(token.value.split("(")[0].trim()) &&
+                !token.value.startsWith("!")) {
                 // This looks like a shorthand procedure declaration
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
@@ -1783,7 +1810,7 @@ export class DocumentStructure {
 
                 // Extract the procedure name (everything before the opening parenthesis)
                 const procName = token.value.split("(")[0].trim();
-                
+
                 // CRITICAL FIX: Set the token's label to the procedure name
                 // This ensures it will be displayed correctly in the outline view
                 token.label = procName;
@@ -1791,13 +1818,19 @@ export class DocumentStructure {
                 if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (single token): ${procName} at line ${token.line}`);
             }
             // Pattern 2: Check if this token is followed by "(" (separate tokens)
-            else if ((token.type === TokenType.Function || 
-                      token.type === TokenType.Variable || 
+            else if ((token.type === TokenType.Function ||
+                      token.type === TokenType.Variable ||
                       token.type === TokenType.Label) &&
                      i + 1 < this.tokens.length &&
                      this.tokens[i + 1].value === "(" &&
-                     !token.value.toLowerCase().startsWith("module") &&
-                     !token.value.toLowerCase().startsWith("map") &&
+                     // #477: these were `startsWith("module")` / `startsWith("map")`,
+                     // meant to exclude the keywords themselves. They also excluded every
+                     // procedure whose NAME merely begins with those letters — MapFoo,
+                     // Mapper, ModuleList — so a real prototype was never marked, and
+                     // missing-map-declaration fired on it permanently, with no edit to
+                     // the MAP able to silence it. Pattern 3 below already compares
+                     // exactly; these now match it.
+                     !MAP_STRUCTURE_KEYWORD.test(token.value) &&
                      !token.value.startsWith("!") &&
                      !isAttributeKeyword(token.value)) {
                 // This looks like a shorthand procedure declaration with separate tokens
@@ -1809,6 +1842,60 @@ export class DocumentStructure {
                 token.label = token.value;
                 
                 if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
+            }
+            // Pattern 3: BARE declaration - a name alone on its line, with no parameter
+            // list at all. This is the shape template-generated apps emit for
+            // parameterless procedures:
+            //
+            //     MAP
+            //       MODULE('demoleg002.clw')
+            //         BrowseInvoice
+            //       END
+            //     END
+            //
+            // Patterns 1 and 2 both key off a '(', so a bare name matched neither and
+            // kept its tokenized type (Variable) with no subType. Every consumer that
+            // asks "is this a MAP declaration?" tests subType against MapProcedure, so
+            // the declaration was invisible to all of them: findMapDeclarationInMemberFile
+            // located the right MODULE block, found zero declarations inside it, and
+            // missing-map-declaration fired on a procedure that IS declared (#462).
+            // A MAP body holds only prototypes and MODULE blocks, so an identifier that
+            // STARTS a line here is a prototype.
+            //
+            // #466: the original cut also required the name to be the LAST token on its
+            // line, which silently excluded most of the form. The Language Reference
+            // (prototype_syntax.htm) gives the keyword-less prototype as:
+            //
+            //   name [(parameter list)] [,return type] [,calling convention] [,RAW]
+            //        [,NAME( )] [,TYPE] [,DLL( )] [,PROC] [,PRIVATE]
+            //
+            // so everything after the name is optional AND repeatable — `MyProc,LONG`,
+            // `MyProc,NAME('_x')`, `Func46(*CSTRING),REAL,C,RAW` are all prototypes. The
+            // parenthesised forms are Pattern 2's; this one now accepts a following
+            // comma, which covers every attribute tail.
+            //
+            // The load-bearing guard is that the name STARTS its line — that is what
+            // separates a prototype from an argument, a continuation, or an attribute of
+            // something else, and it is kept exactly as it was.
+            else if ((token.type === TokenType.Variable ||
+                      token.type === TokenType.Label ||
+                      token.type === TokenType.Function) &&
+                     token.subType === undefined &&
+                     !isAttributeKeyword(token.value) &&
+                     !MAP_PROTOTYPE_NON_NAME.test(token.value) &&
+                     !token.value.startsWith("!") &&
+                     /^[A-Za-z_][A-Za-z0-9_:.]*$/.test(token.value) &&
+                     (this.tokens[i - 1] === undefined || this.tokens[i - 1].line !== token.line) &&
+                     (this.tokens[i + 1] === undefined ||
+                      this.tokens[i + 1].line !== token.line ||
+                      this.tokens[i + 1].value === ",")) {
+                const owner = structureStack[structureStack.length - 1];
+                token.subType = TokenType.MapProcedure;
+                token.label = token.value;
+                token.parent = owner;
+                this.addChildOnce(owner, token);
+
+                if (DOCSTRUCT_TRACE) logger.info(`Found MAP bare procedure declaration: ${token.value} at line ${token.line} inside ${owner.value.toUpperCase()}`);
             }
         }
     }
@@ -1997,9 +2084,14 @@ export class DocumentStructure {
         let isMethodImpl = false;
         let fullProcedureName = prevToken?.value ?? "AnonymousProcedure";
         
-        // Check if prevToken is a label, variable, attribute, or structure field that might be part of a method name
+        // Check if prevToken is a label, variable, attribute, or structure field that might be part of a method name.
+        // StructurePrefix counts too: a method name carrying a SINGLE colon (e.g. `Free:qLegend` in
+        // `GraphLegendClass.Free:qLegend PROCEDURE`) is captured whole by StructurePrefix's
+        // `Prefix:Field` pattern, so it arrives here as the prevToken. Without it such a line never
+        // enters this block at all and falls through to GlobalProcedure named just the colon segment.
         if (prevToken?.type === TokenType.Label || prevToken?.type === TokenType.Variable ||
-            prevToken?.type === TokenType.Attribute || prevToken?.type === TokenType.StructureField) {
+            prevToken?.type === TokenType.Attribute || prevToken?.type === TokenType.StructureField ||
+            prevToken?.type === TokenType.StructurePrefix) {
             // Check if the previous token contains dots (entire qualified name in one token)
             if (prevToken.value.includes(".")) {
                 // The previous token itself contains dots (e.g., "IConnection.CloseSocket" for 3-part)
@@ -2015,27 +2107,48 @@ export class DocumentStructure {
                 // Build the full name by looking back at previous tokens on the same line
                 // Collect all tokens before PROCEDURE that are part of the qualified name
                 const nameParts: string[] = [prevToken.value];
+                let segmentStart = prevToken.start;
                 let lookbackIndex = index - 2;
-                
+
+                const isNamePartToken = (t: Token) =>
+                    t.type === TokenType.Label || t.type === TokenType.Variable ||
+                    t.type === TokenType.Attribute || t.type === TokenType.StructurePrefix;
+
                 // Look back to collect ClassName.InterfaceName.MethodName pattern
                 while (lookbackIndex >= 0) {
                     const lookbackToken = this.tokens[lookbackIndex];
-                    
+
                     // Stop if we're on a different line
                     if (lookbackToken.line !== token.line) break;
-                    
-                    // Stop if we hit a non-name token
-                    if (lookbackToken.type !== TokenType.Label && 
-                        lookbackToken.type !== TokenType.Variable && 
-                        lookbackToken.type !== TokenType.Attribute) {
+
+                    // A bare ':' immediately touching the segment being built continues a
+                    // chained colon-qualified identifier (e.g. "My:My:Method") rather than
+                    // ending the name. StructurePrefix's own pattern only captures ONE colon
+                    // segment ("Prefix:Field"), so a second colon in the chain gets tokenized
+                    // as a stray Delimiter — glue it (and the piece before it) back onto the
+                    // segment instead of letting it stop the walk.
+                    if (lookbackToken.type === TokenType.Delimiter && lookbackToken.value === ':' &&
+                        lookbackToken.start + 1 === segmentStart) {
+                        const before = lookbackIndex >= 1 ? this.tokens[lookbackIndex - 1] : undefined;
+                        if (before && before.line === token.line && isNamePartToken(before) &&
+                            before.start + before.value.length === lookbackToken.start) {
+                            nameParts[0] = before.value + ':' + nameParts[0];
+                            segmentStart = before.start;
+                            lookbackIndex -= 2;
+                            continue;
+                        }
                         break;
                     }
-                    
+
+                    // Stop if we hit a non-name token
+                    if (!isNamePartToken(lookbackToken)) break;
+
                     // Add this part to the beginning
                     nameParts.unshift(lookbackToken.value);
+                    segmentStart = lookbackToken.start;
                     lookbackIndex--;
                 }
-                
+
                 // If we collected more than one part, it's a method implementation
                 if (nameParts.length > 1) {
                     fullProcedureName = nameParts.join('.');
@@ -2617,6 +2730,35 @@ export class DocumentStructure {
     public findControlAll(name: string): Token[] {
         const list = this.fieldEquateIndex.get(name.toUpperCase());
         return list ? [...list] : [];
+    }
+
+    /**
+     * Every control DECLARATION of `?Name` in this document, paired with the
+     * container that owns it.
+     *
+     * Distinct from {@link findControlAll}, which reads the flat token index and so
+     * also returns every *reference* to the name — that index cannot tell a
+     * `USE(?Name)` declaration from a `SELECT(?Name)` use. This walks the
+     * per-structure maps instead, where only tokens inside a container's body are
+     * recorded.
+     *
+     * A control declared in a TOOLBAR or MENUBAR nested inside a WINDOW is recorded
+     * under both containers, so results are de-duplicated by control token; the
+     * outer container wins, since `linkUsesPass` indexes WINDOW/APPLICATION/REPORT
+     * before the nested keywords.
+     */
+    public findControlDeclarations(name: string): Array<{ control: Token; container: Token }> {
+        const key = name.toUpperCase();
+        const out: Array<{ control: Token; container: Token }> = [];
+        const seen = new Set<Token>();
+        for (const [container, perName] of this.fieldEquatesByStructure) {
+            const hit = perName.get(key);
+            if (hit && !seen.has(hit)) {
+                seen.add(hit);
+                out.push({ control: hit, container });
+            }
+        }
+        return out;
     }
 
     /**

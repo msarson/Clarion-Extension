@@ -8,6 +8,7 @@ import {
     CodeActionContext
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { moduleTargetMatchesFile } from '../utils/ClarionSourceNaming';
 import { TokenCache } from '../TokenCache';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { TokenType } from '../tokenizer/TokenTypes';
@@ -182,7 +183,8 @@ export class MapDeclarationCodeActionProvider {
             t.type === TokenType.Structure &&
             t.value.toUpperCase() === 'MODULE' &&
             t.referencedFile &&
-            path.basename(t.referencedFile).toLowerCase() === currentBasename &&
+            // #450 — MODULE('name') without an extension names name.clw.
+            moduleTargetMatchesFile(t.referencedFile, currentBasename) &&
             t.finishesAt !== undefined
         );
 
@@ -445,7 +447,8 @@ export class MapDeclarationCodeActionProvider {
                     t.type === TokenType.Structure &&
                     t.value.toUpperCase() === 'MODULE' &&
                     t.referencedFile &&
-                    path.basename(t.referencedFile).toLowerCase() === implBasename &&
+                    // #450 — same inference for the implementation lookup.
+                    moduleTargetMatchesFile(t.referencedFile, implBasename) &&
                     t.finishesAt !== undefined
                 );
 

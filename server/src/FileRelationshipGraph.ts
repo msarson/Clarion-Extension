@@ -12,6 +12,7 @@
  */
 
 import * as path from 'path';
+import { clarionSourceCandidates } from './utils/ClarionSourceNaming';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
@@ -54,7 +55,7 @@ export interface FileEdge {
 // before the solution's redirection parsers were primed, so every MEMBER('x.clw')
 // resolution failed and the persisted edge lists were missing their MEMBER edges
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
-const DISK_CACHE_VERSION = 2;
+const DISK_CACHE_VERSION = 3; // #484 — MODULE edges to binaries dropped
 
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
 
@@ -648,6 +649,11 @@ export class FileRelationshipGraph {
             }
 
             if (!edgeType) continue;
+            // #484 — MODULE('x.dll') names an external library, not a source module
+            // (Language Reference, MODULE). The `*.dll` redirection rule resolved it
+            // to the real binary — 39 such edges on the 40-project rig — and FAR's
+            // module-scoped file set then handed a DLL to the tokenizer (2.5s).
+            if (FileRelationshipGraph.isBinaryModuleTarget(token.referencedFile)) continue;
 
             const resolved = this.resolveFile(token.referencedFile, filePath);
             if (!resolved) continue;
@@ -744,6 +750,7 @@ export class FileRelationshipGraph {
             // MODULE('file') — class attribute if CLASS keyword on same line, else MAP block
             moduleRe.lastIndex = 0;
             while ((m = moduleRe.exec(stripped)) !== null) {
+                if (FileRelationshipGraph.isBinaryModuleTarget(m[1])) continue; // #484
                 const resolved = this.resolveFile(m[1], filePath);
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);
@@ -818,6 +825,52 @@ export class FileRelationshipGraph {
     }
 
     /**
+     * #483 — can `fromPath` legitimately see a declaration that lives in `declPath`?
+     *
+     * A procedure prototype is visible to a caller only through the caller's own
+     * MAP/INCLUDE chain or its PROGRAM's. When two projects in one solution declare
+     * the same name, the structure-declaration index (which scans .inc/.equ only)
+     * may hold just the OTHER project's prototype — a module-callout INC that is
+     * included by that project's modules and nobody else's. Trusting such a hit
+     * gave hover and FAR the wrong project's procedure while F12 stayed right.
+     *
+     * Reachable when `declPath` is the caller itself, the caller's PROGRAM, a
+     * MEMBER of that same PROGRAM, or is (transitively) INCLUDEd by any of those.
+     *
+     * Returns `undefined` when the graph knows nothing about `declPath` — no
+     * solution loaded, graph still building, or a file outside every project —
+     * so callers keep their existing behaviour rather than rejecting a hit the
+     * graph simply never saw.
+     */
+    public isDeclarationReachableFrom(declPath: string, fromPath: string): boolean | undefined {
+        const decl = this.normalizePath(declPath);
+        const from = this.normalizePath(fromPath);
+        if (decl === from) return true;
+        if (!this.forwardEdges.has(decl) && !this.reverseEdges.has(decl)) return undefined;
+
+        const program = this.getProgramFile(from);
+        const belongsHere = (f: string): boolean =>
+            f === from || (program !== undefined && (f === program || this.getProgramFile(f) === program));
+
+        if (belongsHere(decl)) return true;
+
+        // Walk UP the INCLUDE edges from the declaring file: every file that includes
+        // it, and every file that includes those, until one of them is ours.
+        const visited = new Set<string>([decl]);
+        const queue: string[] = [decl];
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            for (const includer of this.getIncludingFiles(current)) {
+                if (visited.has(includer)) continue;
+                visited.add(includer);
+                if (belongsHere(includer)) return true;
+                queue.push(includer);
+            }
+        }
+        return false;
+    }
+
+    /**
      * Returns all MEMBER file paths belonging to the given PROGRAM file.
      * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
      * files of the cursor's file may contain cross-procedure callers (P2b,
@@ -889,6 +942,14 @@ export class FileRelationshipGraph {
     /** Normalise a path for use as a map key: lowercase, backslashes → forward slashes. */
     private normalizePath(filePath: string): string {
         return filePath.toLowerCase().replace(/\\/g, '/');
+    }
+
+    /**
+     * #484 — a MODULE() target that names a linked library or another binary rather
+     * than a source module. No file relationship exists to record for it.
+     */
+    public static isBinaryModuleTarget(referencedFile: string): boolean {
+        return /\.(dll|lib|exe|obj|res)$/i.test(referencedFile.trim());
     }
 
     private denormalizePath(filePath: string): string {
@@ -983,6 +1044,19 @@ export class FileRelationshipGraph {
         // Already absolute
         if (path.isAbsolute(filename) && fs.existsSync(filename)) return filename;
 
+        // #449 — MEMBER, INCLUDE and MODULE all infer `.CLW` when the extension is
+        // omitted (the Language Reference says so for each). Without the retry an
+        // extension-less target resolved to nothing and NO EDGE was added, leaving
+        // everything built on this graph blind to that file: class-method hover,
+        // findModuleVariableInSiblingMembers, references, signature help,
+        // implementations, document links. Redirection cannot cover for it — its
+        // masks are extension-based, so `*.clw` never matches a bare name.
+        //
+        // Name as given first, so nothing that resolves today changes. A MODULE
+        // naming an external library rather than a file (`MODULE('Win32')`) simply
+        // matches neither candidate and falls through, as before.
+        const candidates = clarionSourceCandidates(filename);
+
         const solutionManager = SolutionManager.getInstance();
         if (solutionManager?.solution) {
             // #315 (review finding): try the FROM file's own project first — the
@@ -991,23 +1065,29 @@ export class FileRelationshipGraph {
             // project's redirection, mis-targeting the edge.
             const owner = this.ownerProjectByFile?.get(this.normalizePath(_fromFile));
             if (owner) {
-                const ownResolved = owner.getRedirectionParser().findFile(filename);
-                if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
-                    return ownResolved.path;
+                for (const candidate of candidates) {
+                    const ownResolved = owner.getRedirectionParser().findFile(candidate);
+                    if (ownResolved?.path && fs.existsSync(ownResolved.path)) {
+                        return ownResolved.path;
+                    }
                 }
             }
             for (const project of solutionManager.solution.projects) {
-                const resolved = project.getRedirectionParser().findFile(filename);
-                if (resolved?.path && fs.existsSync(resolved.path)) {
-                    return resolved.path;
+                for (const candidate of candidates) {
+                    const resolved = project.getRedirectionParser().findFile(candidate);
+                    if (resolved?.path && fs.existsSync(resolved.path)) {
+                        return resolved.path;
+                    }
                 }
             }
         }
 
         const sourceUri = this.pathToUri(this.denormalizePath(this.normalizePath(_fromFile)));
-        const noSolutionHit = resolveFileInNoSolutionMode(filename, sourceUri);
-        if (noSolutionHit?.path && fs.existsSync(noSolutionHit.path)) {
-            return noSolutionHit.path;
+        for (const candidate of candidates) {
+            const noSolutionHit = resolveFileInNoSolutionMode(candidate, sourceUri);
+            if (noSolutionHit?.path && fs.existsSync(noSolutionHit.path)) {
+                return noSolutionHit.path;
+            }
         }
 
         return null;

@@ -58,6 +58,10 @@ export class TokenCache {
      *  hits re-insert (LRU), overflow evicts the oldest. Mutable for tests. */
     public static closedFileCacheMax = 512;
 
+    /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them. */
+    public static readonly NON_SOURCE_EXTENSION =
+        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf)$/i;
+
     /** #260 — test/diagnostics visibility into the closed-file cache size. */
     public get closedFileCacheSize(): number {
         return this.closedFileCache.size;
@@ -342,6 +346,10 @@ export class TokenCache {
         if (open) return open;
 
         const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        // #484 — never tokenise a binary. A MODULE('x.dll') in a MAP resolved through
+        // the `*.dll` redirection rule to the real DLL, FAR's file set carried it here,
+        // and the tokenizer chewed the bytes for 2.5s (20,917 tokens from "346 lines").
+        if (TokenCache.NON_SOURCE_EXTENSION.test(filePath)) return [];
         let mtimeMs: number;
         try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return []; }
 

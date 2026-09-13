@@ -1,4 +1,5 @@
 import { Range, WorkspaceEdit, TextEdit, TextDocumentEdit, ResponseError, ErrorCodes } from 'vscode-languageserver-protocol';
+import { clarionSourceCandidates } from '../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -286,7 +287,11 @@ export class RenameProvider {
         for (const proj of solutionManager.solution.projects) {
             const redirectionParser = proj.getRedirectionParser?.();
             if (!redirectionParser) continue;
-            const resolved = redirectionParser.findFile(refFile);
+            // #450 — an extension-less directive target infers .clw; redirection
+            // masks are extension-based so a bare name matches nothing.
+            const resolved = clarionSourceCandidates(refFile)
+                .map(c => redirectionParser.findFile(c))
+                .find(r => r?.path && fs.existsSync(r.path));
             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                 return true;
             }

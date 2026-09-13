@@ -316,6 +316,12 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"**
 2. Pick the installed version — the extension reads its `ClarionProperties.xml`
 
+**A configuration kept outside `%APPDATA%`:** installation discovery scans `%APPDATA%\SoftVelocity\Clarion`, which is where the IDE writes its settings — but a `ClarionProperties.xml` can live anywhere, for example in a checked-out tree that carries its own IDE settings and is opened with `/ConfigDir=`. For that case:
+
+- The installation list ends with **Browse for ClarionProperties.xml…**, so any file can be chosen even when a normal install was also found.
+- Opening a solution offers **Select Different Configuration…** before adopting the current one (Enter or Esc keeps it).
+- While a non-default file is active, the Clarion Tools panel shows a **Config dir** row, and builds pass the same directory to MSBuild as `ConfigDir`, so what you see is what compiles.
+
 **Manual configuration:**
 ```json
 {
