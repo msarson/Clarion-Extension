@@ -834,16 +834,20 @@ export class ClarionTokenizer {
         // per tokenize on the real 873KB program file. Any column-0 declaration
         // in those ranges already carries a Label token, so nothing was ever
         // collected from them anyway.
-        const declarationSubTypes = new Set([
-            TokenType.MapProcedure,
-            TokenType.MethodDeclaration,
-            TokenType.InterfaceMethod
-        ]);
+        // #485: a function CALL (`x = CLIP(y)`) is a Function-typed token too — with
+        // no body, no finishesAt, and so the EOF fallback range below. Every call
+        // then scanned forward to the next CODE keyword: on a 5,992-line library
+        // source that was 5,133 "candidates", 15 million line reads and 1.47s (8x
+        // the main tokenise pass). Only an IMPLEMENTATION has a local data section;
+        // the document-structure pass (already run) marks those GlobalProcedure /
+        // MethodImplementation. A Procedure/Function token it left unmarked counts
+        // only if it opened a scope (has finishesAt) — a call never does.
         const procedures = this.tokens.filter(t =>
-            (t.type === TokenType.Procedure ||
-                t.type === TokenType.Function ||
-                t.subType === TokenType.MethodImplementation) &&
-            (t.subType === undefined || !declarationSubTypes.has(t.subType))
+            (t.subType === TokenType.GlobalProcedure ||
+                t.subType === TokenType.MethodImplementation) ||
+            ((t.type === TokenType.Procedure || t.type === TokenType.Function) &&
+                t.subType === undefined &&
+                t.finishesAt !== undefined)
         );
 
         // 🚀 PERF: Skip if no procedures found
