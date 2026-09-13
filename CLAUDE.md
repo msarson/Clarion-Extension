@@ -47,19 +47,17 @@ feel/rendering judgments, and VM-parity absolute timings.
 - **TDD: red then green.** Write the failing test first and *watch it fail* for
   the right reason before touching the implementation. A test written after the
   fix proves nothing about the fix. Report the red run, not just the green one.
-- **Check the Clarion help before asserting language behaviour.** The full help
-  is extracted and greppable at
-  `C:\Users\msars\.claude\clarion-help\ClarionHelp\` (4,686 topic pages, one
-  per keyword — e.g. `prototype_syntax.htm`, `map__declare_procedure_prototypes_.htm`,
-  `private__set_procedure_private_to_a_class_or_module_.htm`); the install
-  ships a near-identical copy in `F:\DirectSystems\Clarion10\bin\ClarionDocs`.
-  Re-extract with
-  `hh.exe -decompile <dest> F:\DirectSystems\Clarion10\bin\ClarionHelp.chm`.
-  **Both mix in ~200 Clarion.NET pages** — check the breadcrumb: Win32 language
-  pages read `Language Reference > 2 - Program Source Code Format`. Strip
-  `<script>`/`<style>` before reading; the raw HTML is mostly boilerplate.
-  PDFs (LanguageReference, ABC Library Reference) are in
-  `F:\DirectSystems\Clarion10\docs`. Where the docs are ambiguous or silent,
+- **Check the Clarion help before asserting language behaviour.** The official
+  help ships with every Clarion install as `bin\ClarionHelp.chm` (4,686 topic
+  pages, one per keyword — e.g. `map__declare_procedure_prototypes_`,
+  `private__set_procedure_private_to_a_class_or_module_`), with the Language
+  Reference and ABC Library Reference PDFs in `docs\`; on this machine the
+  install is `F:\DirectSystems\Clarion10`. If a `clarion-help` skill is
+  available in your session, prefer it — it is a searchable conversion of the
+  same help. Either way it is SoftVelocity's copyrighted material: quote from it
+  to answer, never copy it into this repo. **The help mixes in Clarion.NET
+  pages** — check the breadcrumb: Win32 language pages read `Language Reference
+  > 2 - Program Source Code Format`. Where the docs are ambiguous or silent,
   settle it by compiling a fixture (see the compiler-verified notes in
   `test-programs/`) — and say which source settled it.
 
