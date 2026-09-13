@@ -1,0 +1,52 @@
+name: PR Check
+
+# #502 — every pull request gets the install / compile / test steps of the
+# release dry run, minus packaging and publishing, so a contributor (or a
+# Dependabot bump) learns about a break here rather than on the maintainer's
+# machine. Fork PRs run with the read-only token, which is all this needs.
+
+on:
+  pull_request:
+    branches:
+      - 'version-*'
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Windows for the same reason as testrelease.yml (#441/#442): the suite
+    # relies on a case-insensitive filesystem exactly as the Clarion compiler
+    # does, and passes only there.
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile:dev
+
+      - name: Server tests
+        run: npm run test:server
+
+      - name: Client tests
+        run: npm run test:client
