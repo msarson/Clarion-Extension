@@ -121,8 +121,16 @@ export class VariableHoverResolver {
         
         // #486 — same badge rule as the global card: a structure label is a structure.
         const structureKind = this.structureKindOf(symbolInfo.token, tokens);
+        // #489 — this tier ("module-local variable in the current file") also matches a
+        // PROGRAM file's global data section, which is global to every module of the
+        // program; the badge was hard-coded "Module". Take the scope from the analyser,
+        // as the global card does, and treat PROGRAM-file data as global outright.
+        const isProgramFile = tokens.some(t => t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM');
+        const isGlobal = isProgramFile || scopeInfo?.type === 'global';
+        const scopeIcon = isGlobal ? '🌍' : '📦';
+        const scopeWord = isGlobal ? 'Global' : 'Module';
         if (scopeInfo) {
-            markdown.push(structureKind ? `📦 Module ${structureKind} structure` : `📦 Module variable`);
+            markdown.push(structureKind ? `${scopeIcon} ${scopeWord} ${structureKind} structure` : `${scopeIcon} ${scopeWord} variable`);
             if (structureKind) {
                 const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document);
                 if (facts) {
