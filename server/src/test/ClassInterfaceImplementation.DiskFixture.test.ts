@@ -171,17 +171,17 @@ suite('Issues #165/#181 — class-interface-implementation diagnostic (disk fixt
         fix = buildFixture({});
         const d = await run(fix);
         assert.strictEqual(d.length, 0,
-            `a class that implements every interface method in its MODULE .clw must not warn; got: ${JSON.stringify(d.map(x => x.message))}`);
+            `a class that implements every interface method in its MODULE .clw must not warn; got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 
     test('class missing a three-part impl for one interface method — warns and names it', async () => {
         fix = buildFixture({ omitImpl: 'SendData' });
         const d = await run(fix);
         assert.strictEqual(d.length, 1,
-            `expected exactly one missing-implementation warning; got: ${JSON.stringify(d.map(x => x.message))}`);
-        assert.ok(/SendData/i.test(d[0].message),
+            `expected exactly one missing-implementation warning; got: ${JSON.stringify(d.map(x => String(x.message)))}`);
+        assert.ok(/SendData/i.test(String(d[0].message)),
             `message should name the missing method SendData; got: ${d[0].message}`);
-        assert.ok(/IConnection/i.test(d[0].message),
+        assert.ok(/IConnection/i.test(String(d[0].message)),
             `message should name the interface IConnection; got: ${d[0].message}`);
     });
 
@@ -189,6 +189,6 @@ suite('Issues #165/#181 — class-interface-implementation diagnostic (disk fixt
         fix = buildFixture({ omitImpl: 'SendData', derived: true });
         const d = await run(fix);
         assert.strictEqual(d.length, 0,
-            `derived CLASS(Base),IMPLEMENTS must be skipped (inherited impls); got: ${JSON.stringify(d.map(x => x.message))}`);
+            `derived CLASS(Base),IMPLEMENTS must be skipped (inherited impls); got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 });

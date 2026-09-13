@@ -67,13 +67,13 @@ suite('Issue #338 — bare MAP self-declarations in member modules', () => {
         ]);
 
         const diags = await validateMissingMapDeclarations(tokens, doc);
-        const onComputeIt = diags.find(d => d.message.includes("'ComputeIt'"));
+        const onComputeIt = diags.find(d => String(d.message).includes("'ComputeIt'"));
         assert.strictEqual(
             onComputeIt, undefined,
-            `bare MAP entry + same-file impl is the Language Reference's own example and must not warn; got: ${JSON.stringify(diags.map(d => d.message))}`);
+            `bare MAP entry + same-file impl is the Language Reference's own example and must not warn; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
 
-        const onGhost = diags.find(d => d.message.includes("'Ghost'"));
-        assert.ok(onGhost, `Ghost has no declaration anywhere and must still warn; got: ${JSON.stringify(diags.map(d => d.message))}`);
+        const onGhost = diags.find(d => String(d.message).includes("'Ghost'"));
+        assert.ok(onGhost, `Ghost has no declaration anywhere and must still warn; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test('signature comparison still enforced for bare self-declarations', async () => {

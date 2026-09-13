@@ -42,8 +42,8 @@ suite('ReturnValueDiagnostics — chained receiver (Queue.RefField.Method)', () 
     });
     teardown(() => TokenCache.getInstance().clearAllTokens());
 
-    const discarded = (diags: { message: string }[]) =>
-        diags.filter(d => /is discarded/.test(d.message));
+    const discarded = (diags: { message: unknown }[]) =>
+        diags.filter(d => /is discarded/.test(String(d.message)));
 
     test('3-segment chain through a QUEUE reference field: discarded non-PROC return warns', async () => {
         const code = [
@@ -67,8 +67,8 @@ suite('ReturnValueDiagnostics — chained receiver (Queue.RefField.Method)', () 
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `chained receiver call must warn; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'RecordQ.Item.Recalculate'"),
+            `chained receiver call must warn; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'RecordQ.Item.Recalculate'"),
             'warning must name the full chain, not just the first dot pair');
     });
 
@@ -114,8 +114,8 @@ suite('ReturnValueDiagnostics — chained receiver (Queue.RefField.Method)', () 
         const diags = await validateDiscardedReturnValues(tokens, doc, locator);
 
         const warns = discarded(diags);
-        assert.strictEqual(warns.length, 1, `plain 2-segment call must still warn; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'Item.Recalculate'"));
+        assert.strictEqual(warns.length, 1, `plain 2-segment call must still warn; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'Item.Recalculate'"));
     });
 
     test('two chains sharing a root but ending at different classes resolve independently (cache-key regression guard)', async () => {
@@ -145,10 +145,10 @@ suite('ReturnValueDiagnostics — chained receiver (Queue.RefField.Method)', () 
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `only the non-PROC chain (RefA.Foo) may warn; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'Holder.RefA.Foo'"),
+            `only the non-PROC chain (RefA.Foo) may warn; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'Holder.RefA.Foo'"),
             'RefA.Foo (ClassA, non-PROC) must warn');
-        assert.ok(!warns.some(w => w.message.includes('RefB')),
+        assert.ok(!warns.some(w => String(w.message).includes('RefB')),
             'RefB.Foo (ClassB, PROC) must not warn even though it shares a root and method name with RefA.Foo');
     });
 });

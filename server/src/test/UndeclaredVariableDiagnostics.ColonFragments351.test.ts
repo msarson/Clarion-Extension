@@ -88,7 +88,7 @@ suite('UndeclaredVariableDiagnostics — colon-split fragments (#351)', () => {
         const queried: string[] = [];
         const diags = await validateUndeclaredVariablesAsync(tokens, doc, makeSpyFinder(queried));
 
-        assert.ok(!diags.some(d => d.message.includes('JCA:StartedDate')),
-            `fused compound must not be flagged undeclared; diags=[${diags.map(d => d.message).join(' | ')}]`);
+        assert.ok(!diags.some(d => String(d.message).includes('JCA:StartedDate')),
+            `fused compound must not be flagged undeclared; diags=[${diags.map(d => String(d.message)).join(' | ')}]`);
     });
 });

@@ -146,7 +146,7 @@ suite('validateAttributeApplicability', () => {
         const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
         assert.ok(attrDiags.length > 0, 'Expected a warning for RESIZE on BUTTON');
         assert.strictEqual(attrDiags[0].severity, DiagnosticSeverity.Warning);
-        assert.ok(attrDiags[0].message.includes('RESIZE'), `Expected RESIZE in message: ${attrDiags[0].message}`);
+        assert.ok(String(attrDiags[0].message).includes('RESIZE'), `Expected RESIZE in message: ${attrDiags[0].message}`);
     });
 
     test('warning when MDI (WINDOW-only) used on BUTTON', () => {
@@ -311,8 +311,8 @@ suite('validateAttributeApplicability', () => {
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.ok(attrDiags.length > 0,
                 'Expected diagnostic for misapplied EXTERNAL on BUTTON control (scope-fence — fix must NOT over-relax)');
-            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('EXTERNAL')),
-                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+            assert.ok(attrDiags.some(d => String(d.message).toUpperCase().includes('EXTERNAL')),
+                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => String(d.message)).join(' | ')}`);
         });
     });
 
@@ -391,8 +391,8 @@ suite('validateAttributeApplicability', () => {
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.ok(attrDiags.length > 0,
                 'Expected diagnostic for misapplied EXTERNAL on CHECK control (scope-fence — guard must NOT over-relax)');
-            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('EXTERNAL')),
-                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+            assert.ok(attrDiags.some(d => String(d.message).toUpperCase().includes('EXTERNAL')),
+                `Diagnostic message must reference EXTERNAL; got: ${attrDiags.map(d => String(d.message)).join(' | ')}`);
         });
 
         // Type-annotation regression coverage NOT included because option (b) doesn't
@@ -545,8 +545,8 @@ suite('validateAttributeApplicability', () => {
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.ok(attrDiags.length > 0,
                 'Expected diagnostic for misapplied CREATE on BUTTON (scope-fence — forward-direction guard must NOT over-relax)');
-            assert.ok(attrDiags.some(d => d.message.toUpperCase().includes('CREATE')),
-                `Diagnostic message must reference CREATE; got: ${attrDiags.map(d => d.message).join(' | ')}`);
+            assert.ok(attrDiags.some(d => String(d.message).toUpperCase().includes('CREATE')),
+                `Diagnostic message must reference CREATE; got: ${attrDiags.map(d => String(d.message)).join(' | ')}`);
         });
 
         // #175 regression check — the suffix-direction guard from #175 should still
@@ -635,7 +635,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected NO diagnostic on code-section CREATE() calls; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected NO diagnostic on code-section CREATE() calls; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         test('tightest repro — two consecutive CREATE:Region lines', () => {
@@ -650,7 +650,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected NO diagnostic on the second CREATE() (fallback must not pick up the prior line's :Region suffix); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected NO diagnostic on the second CREATE() (fallback must not pick up the prior line's :Region suffix); got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         // Negative sentinel A — a misapplied CREATE on a REAL BUTTON control (the
@@ -729,7 +729,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected NO diagnostic on DERIVED CLASS-method attributes; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected NO diagnostic on DERIVED CLASS-method attributes; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         // Negative sentinel A — real IMAGE control with a genuinely misapplied
@@ -776,7 +776,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected no invalid-attribute-context for SELF.Sectors.Type member access; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected no invalid-attribute-context for SELF.Sectors.Type member access; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         test('no diagnostic for parameter name "Type" in PROCEDURE signature', () => {
@@ -789,7 +789,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected no invalid-attribute-context for PROCEDURE parameter name "Type"; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected no invalid-attribute-context for PROCEDURE parameter name "Type"; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
     });
 
@@ -804,7 +804,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected no invalid-attribute-context for USE(Filter.Item[1]); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected no invalid-attribute-context for USE(Filter.Item[1]); got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         test('no diagnostic for bare USE(Filter) with no dotted suffix at all', () => {
@@ -817,7 +817,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected no invalid-attribute-context for bare USE(Filter); got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected no invalid-attribute-context for bare USE(Filter); got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         test('no diagnostic for USE(Filter) on an ENTRY field (same bug family, different control)', () => {
@@ -830,7 +830,7 @@ suite('validateAttributeApplicability', () => {
             const diagnostics = validateAttributeApplicability(tokens, doc);
             const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
             assert.strictEqual(attrDiags.length, 0,
-                `Expected no invalid-attribute-context for USE(Filter) on ENTRY; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                `Expected no invalid-attribute-context for USE(Filter) on ENTRY; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
         });
 
         test('misapplied FILTER attribute (no dotted suffix, not nested in another attribute) still fires on CHECK', () => {
@@ -895,7 +895,7 @@ suite('validateAttributeApplicability', () => {
                 const diagnostics = validateAttributeApplicability(tokens, doc);
                 const attrDiags = diagnostics.filter(d => d.code === 'invalid-attribute-context');
                 assert.strictEqual(attrDiags.length, 0,
-                    `${label}: expected no invalid-attribute-context; got: ${JSON.stringify(attrDiags.map(d => d.message))}`);
+                    `${label}: expected no invalid-attribute-context; got: ${JSON.stringify(attrDiags.map(d => String(d.message)))}`);
             }
         });
     });

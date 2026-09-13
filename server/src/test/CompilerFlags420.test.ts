@@ -149,7 +149,7 @@ suite('Predefined compiler flags (#420)', () => {
             const doc = TextDocument.create('file:///test.clw', 'clarion', 1, code);
             const tokens = new ClarionTokenizer(code).tokenize();
             const diags: Diagnostic[] = validateUndeclaredVariables(tokens, doc);
-            const flagged = (name: string) => diags.filter(d => typeof d.message === 'string' && d.message.includes(`'${name}'`));
+            const flagged = (name: string) => diags.filter(d => typeof d.message === 'string' && String(d.message).includes(`'${name}'`));
             for (const flag of ['DLL_MODE', '_DEBUG_', '_C80_', 'LIB_MODE']) {
                 assert.strictEqual(flagged(flag).length, 0, `${flag} must NOT be flagged as undeclared`);
             }

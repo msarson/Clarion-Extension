@@ -94,11 +94,11 @@ suite('#197 — validateMissingMapDeclarations live-doc-first (.inc open+dirty)'
         const { doc, tokens } = buildClwDoc();
 
         const diags = await validateMissingMapDeclarations(tokens, doc, liveIncResolver());
-        const fooMissing = diags.find(d => d.code === 'missing-map-declaration' && /'Foo'/.test(d.message));
+        const fooMissing = diags.find(d => d.code === 'missing-map-declaration' && /'Foo'/.test(String(d.message)));
         assert.strictEqual(fooMissing, undefined,
             'Foo is declared in the LIVE (unsaved) .inc → must NOT be reported missing; ' +
             'reading stale disk instead of the live buffer is the #197 bug. got: ' +
-            JSON.stringify(diags.map(d => d.message)));
+            JSON.stringify(diags.map(d => String(d.message))));
     });
 
     test('SENTINEL — Bar (declared in NEITHER live nor disk) STILL fires missing-map-declaration', async () => {
@@ -110,10 +110,10 @@ suite('#197 — validateMissingMapDeclarations live-doc-first (.inc open+dirty)'
         const { doc, tokens } = buildClwDoc();
 
         const diags = await validateMissingMapDeclarations(tokens, doc, liveIncResolver());
-        const barMissing = diags.find(d => d.code === 'missing-map-declaration' && /'Bar'/.test(d.message));
+        const barMissing = diags.find(d => d.code === 'missing-map-declaration' && /'Bar'/.test(String(d.message)));
         assert.ok(barMissing,
             'Bar is declared nowhere (live or disk) → must STILL fire — proves the live buffer drives ' +
             'the decision (Foo suppressed, Bar not), not blanket suppression. got: ' +
-            JSON.stringify(diags.map(d => d.message)));
+            JSON.stringify(diags.map(d => String(d.message))));
     });
 });

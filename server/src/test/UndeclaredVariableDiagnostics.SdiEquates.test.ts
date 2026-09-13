@@ -116,7 +116,7 @@ suite('UndeclaredVariableDiagnostics — SDI-indexed EQUATEs (#298)', () => {
             'sentinel: expected a diagnostic on definitelyBogus298 (genuinely undeclared) — ' +
             'the SDI fallback must not mask everything; got: ' +
             JSON.stringify(diags.map(d => ({ line: d.range.start.line, msg: d.message }))));
-        assert.ok(/definitelyBogus298/i.test(bogus.message),
+        assert.ok(/definitelyBogus298/i.test(String(bogus.message)),
             'expected the sentinel diagnostic to reference definitelyBogus298; got: ' + bogus.message);
     });
 });

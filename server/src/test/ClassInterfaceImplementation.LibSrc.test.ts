@@ -91,8 +91,8 @@ suite('Issue #181 — real-LibSrc false-positive guard (abapi.inc)', () => {
     test('CSocketConnection (fully implemented in abapi.clw) produces NO warning', async () => {
         const tokens = TokenCache.getInstance().getTokens(doc!);
         const d = await validateClassInterfaceImplementationAsync(tokens, doc!, svc);
-        const offenders = d.filter(x => /CSocketConnection/.test(x.message));
+        const offenders = d.filter(x => /CSocketConnection/.test(String(x.message)));
         assert.strictEqual(offenders.length, 0,
-            `CSocketConnection implements all IConnection methods in abapi.clw — must not warn; got: ${JSON.stringify(offenders.map(x => x.message))}`);
+            `CSocketConnection implements all IConnection methods in abapi.clw — must not warn; got: ${JSON.stringify(offenders.map(x => String(x.message)))}`);
     });
 });

@@ -87,7 +87,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
         ]);
 
         assert.deepStrictEqual(
-            diags.map(d => d.message), [],
+            diags.map(d => String(d.message)), [],
             'PROJECT(Orders.ID) compiles — it must not be flagged'
         );
     });
@@ -105,7 +105,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
         ]);
 
         assert.deepStrictEqual(
-            diags.map(d => d.message), [],
+            diags.map(d => String(d.message)), [],
             'resolving the dotted JOIN target must not expose a second false positive'
         );
     });
@@ -121,7 +121,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
 
         assert.strictEqual(diags.length, 1, 'a dotted field that does not exist must be reported');
         assert.ok(
-            diags[0].message.includes("'Orders.NoSuchField'"),
+            String(diags[0].message).includes("'Orders.NoSuchField'"),
             `the whole dotted token should be named, got: ${diags[0].message}`
         );
     });
@@ -138,7 +138,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
 
         assert.strictEqual(diags.length, 1, 'the dotted JOIN target must resolve so its fields get checked');
         assert.ok(
-            diags[0].message.includes("FILE 'Customer'"),
+            String(diags[0].message).includes("FILE 'Customer'"),
             `must be attributed to the JOINED file. Got: ${diags[0].message}`
         );
     });
@@ -158,7 +158,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
 
         assert.strictEqual(diags.length, 1, 'Total is not on Customer — the compiler rejects this too');
         assert.ok(
-            diags[0].message.includes("FILE 'Customer'"),
+            String(diags[0].message).includes("FILE 'Customer'"),
             `must be checked against the JOIN's file, not the qualifier's. Got: ${diags[0].message}`
         );
     });
@@ -174,7 +174,7 @@ suite('Issue #467 — dotted File.Field / File.Key references in a VIEW', () => 
             '              END',
             '            END'
         ]);
-        assert.deepStrictEqual(clean.map(d => d.message), [], 'the generated form must stay silent');
+        assert.deepStrictEqual(clean.map(d => String(d.message)), [], 'the generated form must stay silent');
 
         const bogus = diagnose([
             ...FILES,

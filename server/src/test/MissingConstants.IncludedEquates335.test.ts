@@ -126,7 +126,7 @@ suite('Issue #335 — constants satisfied by INCLUDEd EQUATEs', () => {
 
     test('constant declared as EQUATE in an INCLUDEd file — no missing-constants diagnostic (Edin shape)', async () => {
         const diags = await runValidator();
-        const onCopyPaste = diags.find(d => d.message.includes("'CopyPasteManager'"));
+        const onCopyPaste = diags.find(d => String(d.message).includes("'CopyPasteManager'"));
         assert.strictEqual(
             onCopyPaste, undefined,
             `_ABCLinkMode_ is an EQUATE in Globals.inc and _ABCDllMode_ is in the cwproj — nothing is missing; got: ${JSON.stringify(diags)}`);
@@ -134,7 +134,7 @@ suite('Issue #335 — constants satisfied by INCLUDEd EQUATEs', () => {
 
     test('regression: constant defined in cwproj DefineConstants — no diagnostic', async () => {
         const diags = await runValidator();
-        const onCwproj = diags.find(d => d.message.includes("'CwprojClass'"));
+        const onCwproj = diags.find(d => String(d.message).includes("'CwprojClass'"));
         assert.strictEqual(
             onCwproj, undefined,
             `_InCwproj_ is in DefineConstants; got: ${JSON.stringify(diags)}`);
@@ -142,7 +142,7 @@ suite('Issue #335 — constants satisfied by INCLUDEd EQUATEs', () => {
 
     test('sentinel: constant in neither cwproj nor any EQUATE — still reported', async () => {
         const diags = await runValidator();
-        const onMissing = diags.find(d => d.message.includes("'MissingClass'"));
+        const onMissing = diags.find(d => String(d.message).includes("'MissingClass'"));
         assert.ok(
             onMissing,
             `_NotAnywhere_ is genuinely undefined and must be reported; got: ${JSON.stringify(diags)}`);

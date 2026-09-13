@@ -110,7 +110,7 @@ suite('RenameProvider', () => {
                 assert.fail('Should have thrown for libsrc file');
             } catch (e: any) {
                 assert.ok(
-                    e.message && e.message.toLowerCase().includes('library'),
+                    e.message && String(e.message).toLowerCase().includes('library'),
                     `Error should mention library, got: "${e.message}"`
                 );
             }
@@ -151,7 +151,7 @@ suite('RenameProvider', () => {
                 assert.fail('Should have thrown for ,DLL procedure');
             } catch (e: any) {
                 assert.ok(
-                    e.message && e.message.includes('DLL'),
+                    e.message && String(e.message).includes('DLL'),
                     `Error should mention DLL, got: "${e.message}"`
                 );
             }
@@ -173,7 +173,7 @@ suite('RenameProvider', () => {
                 assert.fail('Should have thrown for case-variant ,dll procedure');
             } catch (e: any) {
                 assert.ok(
-                    e.message && e.message.toUpperCase().includes('DLL'),
+                    e.message && String(e.message).toUpperCase().includes('DLL'),
                     `Error should mention DLL, got: "${e.message}"`
                 );
             }
@@ -198,11 +198,11 @@ suite('RenameProvider', () => {
                 assert.fail('Should have thrown for unresolvable MODULE');
             } catch (e: any) {
                 assert.ok(
-                    e.message && e.message.toLowerCase().includes('could not be resolved'),
+                    e.message && String(e.message).toLowerCase().includes('could not be resolved'),
                     `Error should mention 'could not be resolved', got: "${e.message}"`
                 );
                 assert.ok(
-                    e.message.includes('NotInSolution.clw'),
+                    String(e.message).includes('NotInSolution.clw'),
                     `Error should name the referenced file, got: "${e.message}"`
                 );
             }
@@ -225,7 +225,7 @@ suite('RenameProvider', () => {
                 assert.fail('Should have thrown for bare MODULE keyword');
             } catch (e: any) {
                 assert.ok(
-                    e.message && e.message.toLowerCase().includes('could not be resolved'),
+                    e.message && String(e.message).toLowerCase().includes('could not be resolved'),
                     `Error should mention 'could not be resolved', got: "${e.message}"`
                 );
             }

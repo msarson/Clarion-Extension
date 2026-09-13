@@ -108,7 +108,7 @@ suite('#449 — extension-less source targets infer .CLW', () => {
                 fs.readFileSync(p, 'latin1')
             );
             const diags = await validateMissingMapDeclarations(TokenCache.getInstance().getTokens(doc), doc);
-            return diags.map(d => d.message);
+            return diags.map(d => String(d.message));
         }
 
         test('bug-pin: MODULE(name) with no extension is a valid self-declaration', async () => {

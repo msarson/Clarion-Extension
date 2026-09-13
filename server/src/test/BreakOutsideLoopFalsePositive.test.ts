@@ -69,9 +69,9 @@ suite('Issue #178 — BREAK false positive inside LOOP UNTIL', () => {
   END
   RETURN`;
         const diags = diagsProductionPath(code);
-        const breakDiags = diags.filter(d => d.message.includes('BREAK'));
+        const breakDiags = diags.filter(d => String(d.message).includes('BREAK'));
         assert.deepStrictEqual(
-            breakDiags.map(d => d.message),
+            breakDiags.map(d => String(d.message)),
             [],
             'BREAK is inside LOOP UNTIL — must not warn'
         );
@@ -88,7 +88,7 @@ suite('Issue #178 — BREAK false positive inside LOOP UNTIL', () => {
   END
   RETURN`;
         const diags = diagsProductionPath(code);
-        const breakDiags = diags.filter(d => d.message.includes('BREAK'));
+        const breakDiags = diags.filter(d => String(d.message).includes('BREAK'));
         assert.strictEqual(breakDiags.length, 1, 'BREAK truly outside a loop must still warn');
     });
 
@@ -106,8 +106,8 @@ suite('Issue #178 — BREAK false positive inside LOOP UNTIL', () => {
   END
   RETURN`;
         const diags = diagsProductionPath(code);
-        const breakDiags = diags.filter(d => d.message.includes('BREAK'));
-        assert.deepStrictEqual(breakDiags.map(d => d.message), [],
+        const breakDiags = diags.filter(d => String(d.message).includes('BREAK'));
+        assert.deepStrictEqual(breakDiags.map(d => String(d.message)), [],
             'inner LOOP UNTIL must own its BREAK; outer LOOP must not swallow the UNTIL header');
     });
 });

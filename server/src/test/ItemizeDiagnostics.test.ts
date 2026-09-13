@@ -20,7 +20,7 @@ function run(code: string): Diagnostic[] {
     return validateItemizeBlocks(tokens, doc);
 }
 
-function messagesOf(d: Diagnostic[]): string[] { return d.map(x => x.message); }
+function messagesOf(d: Diagnostic[]): string[] { return d.map(x => String(x.message)); }
 
 suite('ItemizeDiagnostics — itemize-non-equate', () => {
 
@@ -48,7 +48,7 @@ suite('ItemizeDiagnostics — itemize-non-equate', () => {
         const diags = run(code);
         assert.strictEqual(diags.length, 1,
             `expected exactly 1 warning; got: ${messagesOf(diags).join(' / ')}`);
-        assert.ok(diags[0].message.includes("'MyVar'"),
+        assert.ok(String(diags[0].message).includes("'MyVar'"),
             `message should name MyVar; got: "${diags[0].message}"`);
         assert.strictEqual(diags[0].code, 'itemize-non-equate');
     });
@@ -96,7 +96,7 @@ suite('ItemizeDiagnostics — itemize-non-equate', () => {
         // Outer pass should warn on `Inner` (the nested ITEMIZE label is NOT an EQUATE).
         assert.strictEqual(diags.length, 1,
             `expected exactly 1 warning at the outer level; got: ${messagesOf(diags).join(' / ')}`);
-        assert.ok(diags[0].message.includes("'Inner'"),
+        assert.ok(String(diags[0].message).includes("'Inner'"),
             `message should name 'Inner'; got: "${diags[0].message}"`);
     });
 
@@ -127,7 +127,7 @@ suite('ItemizeDiagnostics — itemize-non-equate', () => {
         const diags = run(code);
         assert.strictEqual(diags.length, 1,
             `expected 1 warning (Stale STRING); got: ${messagesOf(diags).join(' / ')}`);
-        assert.ok(diags[0].message.includes("'Stale'"),
+        assert.ok(String(diags[0].message).includes("'Stale'"),
             `message should name 'Stale'; got: "${diags[0].message}"`);
     });
 });

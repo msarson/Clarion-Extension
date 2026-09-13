@@ -53,8 +53,8 @@ suite('ReturnValueDiagnostics — bare local CLASS self-instance receiver', () =
     });
     teardown(() => TokenCache.getInstance().clearAllTokens());
 
-    const discarded = (diags: { message: string }[]) =>
-        diags.filter(d => /is discarded/.test(d.message));
+    const discarded = (diags: { message: unknown }[]) =>
+        diags.filter(d => /is discarded/.test(String(d.message)));
 
     test('plain-name repro (no colons anywhere) — full pipeline, end to end', async () => {
         const code = [
@@ -75,8 +75,8 @@ suite('ReturnValueDiagnostics — bare local CLASS self-instance receiver', () =
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `plain-name bare CLASS self-instance must warn too — confirms the gap was never colon-specific; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'MyClass.Method'"));
+            `plain-name bare CLASS self-instance must warn too — confirms the gap was never colon-specific; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'MyClass.Method'"));
     });
 
     test('PROC-attributed method on a bare CLASS self-instance stays silent', async () => {
@@ -125,8 +125,8 @@ suite('ReturnValueDiagnostics — bare local CLASS self-instance receiver', () =
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `colon-named bare CLASS self-instance must warn exactly once; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'MyOwn:CLASS.My:My:Method'"),
+            `colon-named bare CLASS self-instance must warn exactly once; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'MyOwn:CLASS.My:My:Method'"),
             `the message must name the full colon-bearing receiver and method; got: ${warns[0].message}`);
     });
 });

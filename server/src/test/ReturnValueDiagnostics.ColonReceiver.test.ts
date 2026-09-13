@@ -46,8 +46,8 @@ suite('ReturnValueDiagnostics — colon-named receiver (My:StringTheory)', () =>
     });
     teardown(() => TokenCache.getInstance().clearAllTokens());
 
-    const discarded = (diags: { message: string }[]) =>
-        diags.filter(d => /is discarded/.test(d.message));
+    const discarded = (diags: { message: unknown }[]) =>
+        diags.filter(d => /is discarded/.test(String(d.message)));
 
     test('colon-named receiver: discarded non-PROC return warns, same as a plain-named receiver', async () => {
         const code = [
@@ -71,10 +71,10 @@ suite('ReturnValueDiagnostics — colon-named receiver (My:StringTheory)', () =>
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 2,
-            `both the colon-named and plain-named receiver must warn; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns.some(w => w.message.includes("'My:Obj.IsEmpty'")),
+            `both the colon-named and plain-named receiver must warn; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(warns.some(w => String(w.message).includes("'My:Obj.IsEmpty'")),
             'colon-named receiver call must be flagged');
-        assert.ok(warns.some(w => w.message.includes("'St.IsEmpty'")),
+        assert.ok(warns.some(w => String(w.message).includes("'St.IsEmpty'")),
             'plain-named receiver call must still be flagged');
     });
 
@@ -124,8 +124,8 @@ suite('ReturnValueDiagnostics — colon-named receiver (My:StringTheory)', () =>
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `colon-named method on a resolvable receiver must warn; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'Obj.My:Method'"),
+            `colon-named method on a resolvable receiver must warn; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'Obj.My:Method'"),
             'warning must name the full colon-qualified receiver.method');
     });
 });

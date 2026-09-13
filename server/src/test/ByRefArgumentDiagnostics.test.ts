@@ -36,7 +36,7 @@ suite('ByRefArgumentDiagnostics (#244)', () => {
     test('flags a literal passed to a *STRING (by-ref) parameter', () => {
         const { doc, tokens } = build(SRC);
         const diags = validateByRefArguments(tokens, doc);
-        assert.strictEqual(diags.length, 1, `expected exactly 1 diagnostic, got ${diags.length}: ${diags.map(d => d.message).join(' | ')}`);
+        assert.strictEqual(diags.length, 1, `expected exactly 1 diagnostic, got ${diags.length}: ${diags.map(d => String(d.message)).join(' | ')}`);
         assert.strictEqual(diags[0].range.start.line, 8, 'diagnostic should be on the Update(\'literal\') call line');
     });
 

@@ -43,9 +43,9 @@ y LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('IF'), 'Message should mention IF');
-            assert.ok(diagnostics[0].message.toLowerCase().includes('unterminated') || 
-                     diagnostics[0].message.toLowerCase().includes('not terminated'), 
+            assert.ok(String(diagnostics[0].message).includes('IF'), 'Message should mention IF');
+            assert.ok(String(diagnostics[0].message).toLowerCase().includes('unterminated') || 
+                     String(diagnostics[0].message).toLowerCase().includes('not terminated'), 
                      'Message should indicate unterminated structure');
         });
 
@@ -193,7 +193,7 @@ i LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('LOOP'), 'Message should mention LOOP');
+            assert.ok(String(diagnostics[0].message).includes('LOOP'), 'Message should mention LOOP');
         });
 
         test('Should NOT flag LOOP with dot terminator', () => {
@@ -317,7 +317,7 @@ result LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('CASE'), 'Message should mention CASE');
+            assert.ok(String(diagnostics[0].message).includes('CASE'), 'Message should mention CASE');
         });
 
         test('Should NOT flag CASE with dot terminator', () => {
@@ -373,7 +373,7 @@ Field2 STRING(20)
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('GROUP'), 'Message should mention GROUP');
+            assert.ok(String(diagnostics[0].message).includes('GROUP'), 'Message should mention GROUP');
         });
 
         test('Should NOT flag GROUP with END terminator', () => {
@@ -418,7 +418,7 @@ Field2 STRING(20)
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('QUEUE'), 'Message should mention QUEUE');
+            assert.ok(String(diagnostics[0].message).includes('QUEUE'), 'Message should mention QUEUE');
         });
 
         test('Should detect unterminated RECORD', () => {
@@ -433,7 +433,7 @@ Field2 STRING(20)
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('RECORD'), 'Message should mention RECORD');
+            assert.ok(String(diagnostics[0].message).includes('RECORD'), 'Message should mention RECORD');
         });
     });
 
@@ -670,7 +670,7 @@ str StringTheory
             
             // With no ENDs, MODULE will be on stack when we hit EOF
             assert.ok(diagnostics.length >= 1, 'Should have at least 1 diagnostic');
-            const hasModuleDiag = diagnostics.some(d => d.message.includes('MODULE'));
+            const hasModuleDiag = diagnostics.some(d => String(d.message).includes('MODULE'));
             assert.ok(hasModuleDiag, 'Should report unterminated MODULE');
         });
 
@@ -743,7 +743,7 @@ Method1                    PROCEDURE()
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('CLASS'), 'Message should mention CLASS');
+            assert.ok(String(diagnostics[0].message).includes('CLASS'), 'Message should mention CLASS');
         });
 
         test('Should handle CLASS with MODULE attribute', () => {
@@ -774,8 +774,8 @@ StringTheory.Flush Procedure(StringTheory pStr)
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('OMIT'), 'Message should mention OMIT');
-            assert.ok(diagnostics[0].message.includes("'**END**'"), 'Message should mention the terminator string');
+            assert.ok(String(diagnostics[0].message).includes('OMIT'), 'Message should mention OMIT');
+            assert.ok(String(diagnostics[0].message).includes("'**END**'"), 'Message should mention the terminator string');
         });
 
         test('Should NOT flag OMIT with terminator on its own line', () => {
@@ -840,7 +840,7 @@ StringTheory.Flush Procedure(StringTheory pStr)
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic for case mismatch');
-            assert.ok(diagnostics[0].message.includes('OMIT'), 'Message should mention OMIT');
+            assert.ok(String(diagnostics[0].message).includes('OMIT'), 'Message should mention OMIT');
         });
 
         test('Should detect COMPILE without terminator', () => {
@@ -855,7 +855,7 @@ UNSIGNED  EQUATE(ULONG)
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
             assert.strictEqual(diagnostics.length, 1, 'Should have 1 diagnostic');
-            assert.ok(diagnostics[0].message.includes('COMPILE'), 'Message should mention COMPILE');
+            assert.ok(String(diagnostics[0].message).includes('COMPILE'), 'Message should mention COMPILE');
         });
 
         test('Should NOT flag COMPILE with terminator', () => {
@@ -983,9 +983,9 @@ CODE
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 1, 'Should have 1 diagnostic for missing RETURN value');
-            assert.ok(returnDiagnostics[0].message.includes('MyClass.MyProc'), 'Diagnostic should mention method name');
+            assert.ok(String(returnDiagnostics[0].message).includes('MyClass.MyProc'), 'Diagnostic should mention method name');
         });
 
         test('Should flag method with return type but only empty RETURN', () => {
@@ -1003,7 +1003,7 @@ CODE
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('all RETURN statements are empty'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('all RETURN statements are empty'));
             assert.strictEqual(returnDiagnostics.length, 1, 'Should have 1 diagnostic for empty RETURN');
         });
 
@@ -1021,7 +1021,7 @@ CODE
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 0, 'Should have no diagnostics for valid RETURN');
         });
 
@@ -1039,7 +1039,7 @@ CODE
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 0, 'Should not flag procedure without return type');
         });
 
@@ -1056,7 +1056,7 @@ CODE
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 0, 'Should not flag RETURN with expression');
         });
 
@@ -1072,9 +1072,9 @@ MyProcedure  PROCEDURE()
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 1, 'Should flag MAP procedure missing RETURN');
-            assert.ok(returnDiagnostics[0].message.includes('MyProcedure'), 'Should mention procedure name');
+            assert.ok(String(returnDiagnostics[0].message).includes('MyProcedure'), 'Should mention procedure name');
         });
 
         test('Should NOT flag overloaded MAP procedure without return type (issue #44)', () => {
@@ -1099,7 +1099,7 @@ x STRING(255)
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 0, 'Should NOT flag the non-returning overload for missing RETURN value');
         });
 
@@ -1122,9 +1122,9 @@ x STRING(255)
             const document = createDocument(code);
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
-            const returnDiagnostics = diagnostics.filter(d => d.message.includes('RETURN'));
+            const returnDiagnostics = diagnostics.filter(d => String(d.message).includes('RETURN'));
             assert.strictEqual(returnDiagnostics.length, 1, 'Should flag the overload with STRING return but empty RETURN');
-            assert.ok(returnDiagnostics[0].message.includes('FileSignature'), 'Diagnostic should mention FileSignature');
+            assert.ok(String(returnDiagnostics[0].message).includes('FileSignature'), 'Diagnostic should mention FileSignature');
         });
     });
 
@@ -1191,8 +1191,8 @@ lcl:Empty_Notes BYTE
             const diagnostics = DiagnosticProvider.validateDocument(document);
 
             // Should NOT flag 'record' as a keyword when it's a field name with prefix
-            const recordErrors = diagnostics.filter(d => d.message.toLowerCase().includes('record') && 
-                                                         d.message.toLowerCase().includes('not terminated'));
+            const recordErrors = diagnostics.filter(d => String(d.message).toLowerCase().includes('record') && 
+                                                         String(d.message).toLowerCase().includes('not terminated'));
             assert.strictEqual(recordErrors.length, 0, 'Should not flag RECORD keyword when used as prefixed field name');
         });
     });
@@ -1210,10 +1210,10 @@ Field1  LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const queueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('class'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('class'));
             assert.strictEqual(queueErrors.length, 1, 'Should have 1 diagnostic for QUEUE in CLASS');
-            assert.ok(queueErrors[0].message.toLowerCase().includes('reference'), 
+            assert.ok(String(queueErrors[0].message).toLowerCase().includes('reference'), 
                      'Message should mention using a reference (&QUEUE)');
         });
 
@@ -1226,8 +1226,8 @@ MyQueueRef &QUEUE
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const queueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('class'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('class'));
             assert.strictEqual(queueErrors.length, 0, 'Should NOT flag QUEUE reference in CLASS');
         });
 
@@ -1243,8 +1243,8 @@ Field2  LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const groupErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('group') && 
-                d.message.toLowerCase().includes('class'));
+                String(d.message).toLowerCase().includes('group') && 
+                String(d.message).toLowerCase().includes('class'));
             assert.strictEqual(groupErrors.length, 0, 'GROUP is valid as CLASS property');
         });
 
@@ -1262,8 +1262,8 @@ Field2  STRING(20)
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const queueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('class'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('class'));
             assert.strictEqual(queueErrors.length, 2, 'Should flag both QUEUEs in CLASS');
         });
     });
@@ -1281,10 +1281,10 @@ Field1      LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const nestedQueueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('nested'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('nested'));
             assert.strictEqual(nestedQueueErrors.length, 1, 'Should have 1 diagnostic for nested QUEUE');
-            assert.ok(nestedQueueErrors[0].message.toLowerCase().includes('reference'), 
+            assert.ok(String(nestedQueueErrors[0].message).toLowerCase().includes('reference'), 
                      'Message should mention using a reference (&QUEUE)');
         });
 
@@ -1297,8 +1297,8 @@ InnerQueueRef &QUEUE
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const nestedQueueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('nested'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('nested'));
             assert.strictEqual(nestedQueueErrors.length, 0, 'Should NOT flag QUEUE reference in QUEUE');
         });
 
@@ -1314,8 +1314,8 @@ Field2  LONG
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const groupErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('group') && 
-                d.message.toLowerCase().includes('queue'));
+                String(d.message).toLowerCase().includes('group') && 
+                String(d.message).toLowerCase().includes('queue'));
             assert.strictEqual(groupErrors.length, 0, 'GROUP is valid inside QUEUE');
         });
 
@@ -1333,8 +1333,8 @@ Field2  STRING(20)
             const diagnostics = DiagnosticProvider.validateDocument(document);
             
             const nestedQueueErrors = diagnostics.filter(d => 
-                d.message.toLowerCase().includes('queue') && 
-                d.message.toLowerCase().includes('nested'));
+                String(d.message).toLowerCase().includes('queue') && 
+                String(d.message).toLowerCase().includes('nested'));
             assert.strictEqual(nestedQueueErrors.length, 2, 'Should flag both nested QUEUEs');
         });
     });
@@ -1354,7 +1354,7 @@ Field2  STRING(20)
             // Match only plain (non-dot-access) call diagnostics: "Return value of 'ProcName'"
             // where ProcName has no dot (dot-access is handled by validateDiscardedReturnValues).
             return DiagnosticProvider.validateDocument(doc, tokens).filter(d =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
         }
 
@@ -1370,7 +1370,7 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'should warn once');
-            assert.ok(diags[0].message.includes("'GetStatus'"), 'message names the procedure');
+            assert.ok(String(diags[0].message).includes("'GetStatus'"), 'message names the procedure');
         });
 
         test('no-paren bare call warns', () => {
@@ -1520,7 +1520,7 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 2, 'Trace() calls should each warn; VoidHelper should not');
-            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings are for Trace only');
+            assert.ok(diags.every(d => String(d.message).includes("'Trace'")), 'warnings are for Trace only');
         });
 
         test('multiple returning procedures - warns for each bare call', () => {
@@ -1587,7 +1587,7 @@ MainProc    PROCEDURE()
             const tokens = new ClarionTokenizer(code).tokenize();
             new DocumentStructure(tokens).process();
             return DiagnosticProvider.validateDocument(doc, tokens).filter(d =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
         }
 
@@ -1624,7 +1624,7 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 1, 'PQExec returns Long — discarded call should warn');
-            assert.ok(diags[0].message.includes("'PQExec'"), 'warning is for PQExec');
+            assert.ok(String(diags[0].message).includes("'PQExec'"), 'warning is for PQExec');
         });
 
         test('GlobalProcedure with return type warns when return value discarded (no MAP)', () => {
@@ -1642,7 +1642,7 @@ MainProc    PROCEDURE()
 `;
             const diags = discardDiagsWithDS(code);
             assert.strictEqual(diags.length, 2, 'each Trace() call should warn');
-            assert.ok(diags.every(d => d.message.includes("'Trace'")), 'warnings name Trace');
+            assert.ok(diags.every(d => String(d.message).includes("'Trace'")), 'warnings name Trace');
         });
 
         test('GlobalProcedure with PROC attribute does not warn', () => {
@@ -1716,11 +1716,11 @@ CallerProc  PROCEDURE()
             const locator = new MemberLocatorService();
             const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
 
-            const plain = diags.filter((d: { message: string }) =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            const plain = diags.filter((d: { message: unknown }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
             assert.strictEqual(plain.length, 1, 'should warn for bare TestProc() call');
-            assert.ok(plain[0].message.includes("'TestProc'"));
+            assert.ok(String(plain[0].message).includes("'TestProc'"));
         });
 
         test('cross-file: assignment suppresses warning', async () => {
@@ -1746,8 +1746,8 @@ Result  LONG
             const locator = new MemberLocatorService();
             const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
 
-            const plain = diags.filter((d: { message: string }) =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            const plain = diags.filter((d: { message: unknown }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
             assert.strictEqual(plain.length, 0, 'assignment captures return value — no warning');
         });
@@ -1774,8 +1774,8 @@ CallerProc  PROCEDURE()
             const locator = new MemberLocatorService();
             const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
 
-            const plain = diags.filter((d: { message: string }) =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            const plain = diags.filter((d: { message: unknown }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
             assert.strictEqual(plain.length, 0, 'PROC attribute — no warning');
         });
@@ -1802,8 +1802,8 @@ CallerProc  PROCEDURE()
             const locator = new MemberLocatorService();
             const diags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
 
-            const plain = diags.filter((d: { message: string }) =>
-                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+            const plain = diags.filter((d: { message: unknown }) =>
+                /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
             );
             assert.strictEqual(plain.length, 0, 'void procedure — no warning');
         });
@@ -1860,8 +1860,8 @@ CallerProc  PROCEDURE()
 
                 // Side 1: program file NOT cached → out of scope → no warning.
                 const coldDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
-                const coldPlain = coldDiags.filter((d: { message: string }) =>
-                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                const coldPlain = coldDiags.filter((d: { message: unknown }) =>
+                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
                 );
                 assert.strictEqual(coldPlain.length, 0, 'unopened files are out of scope by design (#294 restores coverage)');
 
@@ -1869,11 +1869,11 @@ CallerProc  PROCEDURE()
                 const progDoc = createDoc(`file:///${programPath.replace(/\\/g, '/')}`, programCode);
                 TokenCache.getInstance().getTokens(progDoc);
                 const warmDiags = await DiagnosticProvider.validateDiscardedReturnValues(tokens, memberDoc, locator);
-                const warmPlain = warmDiags.filter((d: { message: string }) =>
-                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(d.message)
+                const warmPlain = warmDiags.filter((d: { message: unknown }) =>
+                    /^Return value of '[A-Za-z_][A-Za-z0-9_]*' is discarded/.test(String(d.message))
                 );
                 assert.strictEqual(warmPlain.length, 1, 'cached program file declaration should warn');
-                assert.ok(warmPlain[0].message.includes("'TestProc'"));
+                assert.ok(String(warmPlain[0].message).includes("'TestProc'"));
             } finally {
                 (SolutionManager as unknown as { instance: unknown }).instance = savedSm;
                 try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -1954,7 +1954,7 @@ MyProc  PROCEDURE()
 `;
             const diags = cycleBreakDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes('BREAK'));
+            assert.ok(String(diags[0].message).includes('BREAK'));
         });
 
         test('CYCLE outside any loop — warns', () => {
@@ -1965,7 +1965,7 @@ MyProc  PROCEDURE()
 `;
             const diags = cycleBreakDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes('CYCLE'));
+            assert.ok(String(diags[0].message).includes('CYCLE'));
         });
 
         test('nested LOOP/ACCEPT — inner BREAK valid', () => {
@@ -2020,7 +2020,7 @@ MyProc  PROCEDURE()
 `;
             const doc = createDocument(code);
             const diags = DiagnosticProvider.validateDocument(doc);
-            const cfDiags = diags.filter(d => d.message.includes('CYCLE') || d.message.includes('BREAK'));
+            const cfDiags = diags.filter(d => String(d.message).includes('CYCLE') || String(d.message).includes('BREAK'));
             assert.ok(cfDiags.length >= 1, 'validateDocument should include CYCLE/BREAK diagnostics');
         });
 
@@ -2084,8 +2084,8 @@ MyProc  PROCEDURE()
 `;
             const diags = cycleBreakDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'NoSuchLabel'"));
-            assert.ok(diags[0].message.includes('does not refer to'));
+            assert.ok(String(diags[0].message).includes("'NoSuchLabel'"));
+            assert.ok(String(diags[0].message).includes('does not refer to'));
         });
 
         test('BREAK Label outside any loop at all — warns (label not enclosing)', () => {
@@ -2096,7 +2096,7 @@ MyProc  PROCEDURE()
 `;
             const diags = cycleBreakDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Loop1'"));
+            assert.ok(String(diags[0].message).includes("'Loop1'"));
         });
 
         test('BREAK Inner from outer scope but past inner loop end — warns', () => {
@@ -2112,7 +2112,7 @@ Outer LOOP
 `;
             const diags = cycleBreakDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Inner'"));
+            assert.ok(String(diags[0].message).includes("'Inner'"));
         });
     });
 });
@@ -2124,7 +2124,7 @@ suite('DiagnosticProvider - Reserved Keyword Labels (#69)', () => {
 
     function labelDiags(code: string) {
         return DiagnosticProvider.validateDocument(createDocument(code))
-            .filter(d => d.message.includes('reserved') || d.message.includes('cannot be used as a label') || d.message.includes('cannot be the label of a PROCEDURE'));
+            .filter(d => String(d.message).includes('reserved') || String(d.message).includes('cannot be used as a label') || String(d.message).includes('cannot be the label of a PROCEDURE'));
     }
 
     // ── Case 1: fully reserved keywords used as labels ───────────────────────
@@ -2136,7 +2136,7 @@ RETURN  BYTE,AUTO
   RETURN`;
         const diags = labelDiags(code);
         assert.strictEqual(diags.length, 1, 'Should flag RETURN as reserved label');
-        assert.ok(diags[0].message.toUpperCase().includes('RETURN'));
+        assert.ok(String(diags[0].message).toUpperCase().includes('RETURN'));
     });
 
     test('WHILE at col 0 as variable label → error', () => {
@@ -2227,7 +2227,7 @@ return:json            EQUATE(1)`;
   RETURN`;
         const diags = labelDiags(code);
         assert.strictEqual(diags.length, 1, 'Should flag WINDOW as PROCEDURE label');
-        assert.ok(diags[0].message.toUpperCase().includes('WINDOW'));
+        assert.ok(String(diags[0].message).toUpperCase().includes('WINDOW'));
     });
 
     test('CLASS as PROCEDURE label → error', () => {
@@ -2371,7 +2371,7 @@ suite('DiagnosticProvider - undeclaredVar dotted-member leaves (#358)', () => {
         assert.ok(!lookedUp.includes('DRIVEROPTIONS'),
             `dotted-member leaf must not be collected as a candidate; looked up: ${JSON.stringify(lookedUp)}`);
         // And it must never fire a diagnostic (collect-pass contract, pinned here too).
-        assert.ok(!diags.some(d => d.message.includes("'DriverOptions'")),
+        assert.ok(!diags.some(d => String(d.message).includes("'DriverOptions'")),
             'no diagnostic for the dotted-member leaf');
     });
 
@@ -2434,8 +2434,8 @@ MyView VIEW(Customer)
 `;
         const diags = viewProjectDiags(code);
         assert.strictEqual(diags.length, 1);
-        assert.ok(diags[0].message.includes("'Cus:Bogus'"));
-        assert.ok(diags[0].message.includes("'Customer'"));
+        assert.ok(String(diags[0].message).includes("'Cus:Bogus'"));
+        assert.ok(String(diags[0].message).includes("'Customer'"));
     });
 
     test('PROJECT with bare (unprefixed) field name matches RECORD field — no warning', () => {
@@ -2491,7 +2491,7 @@ MyView VIEW(JCMaster)
         const diags = viewProjectDiags(code);
         assert.strictEqual(diags.length, 0,
             'overlay-GROUP-nested fields and the overlay label itself must be accepted; got: ' +
-            diags.map(d => d.message).join(' | '));
+            diags.map(d => String(d.message)).join(' | '));
     });
 
     test('#349 REGRESSION GUARD — bogus name still flagged with nested groups present', () => {
@@ -2510,7 +2510,7 @@ MyView VIEW(JCMaster)
 `;
         const diags = viewProjectDiags(code);
         assert.strictEqual(diags.length, 1, 'exactly the bogus name must be flagged');
-        assert.ok(diags[0].message.includes("'JCA:Bogus'"));
+        assert.ok(String(diags[0].message).includes("'JCA:Bogus'"));
     });
 
     test('FROM file declared in another doc — skipped silently (no false positive)', () => {
@@ -2573,8 +2573,8 @@ MyView VIEW(Customer)
 `;
         const diags = viewProjectDiags(code);
         assert.strictEqual(diags.length, 2);
-        assert.ok(diags[0].message.includes('Bogus1'));
-        assert.ok(diags[1].message.includes('Bogus2'));
+        assert.ok(String(diags[0].message).includes('Bogus1'));
+        assert.ok(String(diags[1].message).includes('Bogus2'));
     });
 
     // Pin flexed under #352: this asserted the diagnostic surfaced via the SYNC
@@ -2596,7 +2596,7 @@ MyView VIEW(Customer)
         const doc = createDocument(code);
         const tokens = new ClarionTokenizer(code).tokenize();
         const diags = await DiagnosticProvider.validateViewProjectFields(tokens, doc);
-        const viewDiags = diags.filter(d => d.message.includes('Cus:Bogus'));
+        const viewDiags = diags.filter(d => String(d.message).includes('Cus:Bogus'));
         assert.ok(viewDiags.length >= 1, 'facade should surface VIEW PROJECT diagnostic via the async pass');
     });
 
@@ -2663,8 +2663,8 @@ MyView VIEW(Orders)
 `;
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
-            assert.ok(diags[0].message.includes("'Orders'"), 'must name the parent file');
+            assert.ok(String(diags[0].message).includes("'Ord:Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Orders'"), 'must name the parent file');
         });
 
         test('a field that exists ONLY on the joined file warns — it is not the parent', () => {
@@ -2692,7 +2692,7 @@ MyView VIEW(Customer)
             // rejects this shape too: `Field not found in parent FILE`.
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Customer'"), 'must be attributed to the parent');
+            assert.ok(String(diags[0].message).includes("'Customer'"), 'must be attributed to the parent');
         });
 
         test('the prefix is ignored — a joined-file prefix on a parent field is accepted', () => {
@@ -2745,7 +2745,7 @@ MyView VIEW(Orders)
 `;
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Ord:Bogus'"));
         });
 
         test('each JOIN clause is validated independently', () => {
@@ -2773,7 +2773,7 @@ MyView VIEW(Orders)
 `;
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Ord:Bogus'"));
         });
 
         test('an unresolvable parent is silent — no false positive', () => {
@@ -2886,7 +2886,7 @@ MyView VIEW(Customer)
 `;
             const diags = viewProjectDiagsAtPath('childB.clw', code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Cus:Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Cus:Bogus'"));
         });
 
         test('JOIN file declared in INCLUDEd .inc — bogus field warns cross-file', () => {
@@ -2913,7 +2913,7 @@ MyView VIEW(Orders)
 `;
             const diags = viewProjectDiagsAtPath('childC.clw', code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Ord:Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Ord:Bogus'"));
         });
 
         test('FROM file unreachable (no INCLUDE) — silent skip preserved', () => {
@@ -2968,8 +2968,8 @@ MyView VIEW(Orders)
        END
 `;
             const diags = viewProjectDiagsAtPathWithResolver('childE.clw', code, resolver);
-            assert.strictEqual(diags.length, 1, `expected only the genuine miss; got: ${JSON.stringify(diags.map(d => d.message))}`);
-            assert.ok(diags[0].message.includes("'Ord:Missing'"), `expected missing field warning; got: ${diags[0].message}`);
+            assert.strictEqual(diags.length, 1, `expected only the genuine miss; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
+            assert.ok(String(diags[0].message).includes("'Ord:Missing'"), `expected missing field warning; got: ${diags[0].message}`);
         });
     });
 });
@@ -2999,9 +2999,9 @@ MyView VIEW(Customer)
     test('sync pass (validateDocument) does NOT emit VIEW PROJECT diagnostics', () => {
         const doc = createDocument(missingFieldCode);
         const diags = DiagnosticProvider.validateDocument(doc);
-        const vpf = diags.filter(d => d.message.includes("'Cus:Bogus'"));
+        const vpf = diags.filter(d => String(d.message).includes("'Cus:Bogus'"));
         assert.strictEqual(vpf.length, 0,
-            `viewProjectFields must not run in the sync/onDidOpen pass (#352); got: ${JSON.stringify(vpf.map(d => d.message))}`);
+            `viewProjectFields must not run in the sync/onDidOpen pass (#352); got: ${JSON.stringify(vpf.map(d => String(d.message)))}`);
     });
 
     test('async wrapper (DiagnosticProvider.validateViewProjectFields) emits the diagnostic', async () => {
@@ -3019,7 +3019,7 @@ MyView VIEW(Customer)
             'DiagnosticProvider.validateViewProjectFields async wrapper must exist (#352)');
         const diags = await provider.validateViewProjectFields!(tokens, doc);
         assert.strictEqual(diags.length, 1, 'the moved validator still fires on a bogus PROJECT field');
-        assert.ok(diags[0].message.includes("'Cus:Bogus'"));
+        assert.ok(String(diags[0].message).includes("'Cus:Bogus'"));
     });
 });
 
@@ -3079,7 +3079,7 @@ LocalVar LONG
                 const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
                 const undecl = await DiagnosticProvider.validateUndeclaredVariables(tokens, doc, symbolFinder);
                 assert.strictEqual(undecl.length, 1);
-                assert.ok(undecl[0].message.includes("'TyposVar'"));
+                assert.ok(String(undecl[0].message).includes("'TyposVar'"));
             } finally {
                 serverSettings.undeclaredVariablesEnabled = wasEnabled;
                 smSlot.instance = savedSm;
@@ -3165,7 +3165,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Foo'"));
+            assert.ok(String(diags[0].message).includes("'Foo'"));
         });
 
         test('augmented assignment += also flagged', () => {
@@ -3175,7 +3175,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'TypoVar'"));
+            assert.ok(String(diags[0].message).includes("'TypoVar'"));
         });
 
         test('reference assignment &= also flagged', () => {
@@ -3267,7 +3267,7 @@ MyProc PROCEDURE()
             // alone — member resolution lives elsewhere.
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'obj'"));
+            assert.ok(String(diags[0].message).includes("'obj'"));
         });
 
         test('indexed array LHS — skipped (has bracket)', () => {
@@ -3297,7 +3297,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusVar'"));
+            assert.ok(String(diags[0].message).includes("'BogusVar'"));
         });
 
         test('RHS bare-identifier declared — no warning', () => {
@@ -3317,7 +3317,7 @@ LocalB LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 2);
-            const messages = diags.map(d => d.message).sort();
+            const messages = diags.map(d => String(d.message)).sort();
             assert.ok(messages[0].includes("'BogusLhs'") || messages[0].includes("'BogusRhs'"));
             assert.ok(messages[1].includes("'BogusLhs'") || messages[1].includes("'BogusRhs'"));
         });
@@ -3330,7 +3330,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusVar'"));
+            assert.ok(String(diags[0].message).includes("'BogusVar'"));
         });
 
         test('RHS prefixed identifier — still skipped (containsSpecialChars)', () => {
@@ -3355,7 +3355,7 @@ LocalVar LONG
             // alone — member resolution lives elsewhere.
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'obj'"));
+            assert.ok(String(diags[0].message).includes("'obj'"));
         });
 
         test('RHS built-in identifier — never flagged', () => {
@@ -3375,7 +3375,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 3);
-            const names = diags.map(d => d.message).join(' ');
+            const names = diags.map(d => String(d.message)).join(' ');
             assert.ok(names.includes('BogusA'));
             assert.ok(names.includes('BogusB'));
             assert.ok(names.includes('BogusC'));
@@ -3392,7 +3392,7 @@ LocalVar LONG
             // is a Variable token — flagged.
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusArg'"));
+            assert.ok(String(diags[0].message).includes("'BogusArg'"));
         });
 
         test('Self-reference on RHS — declared name, no warning', () => {
@@ -3427,7 +3427,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusVar'"));
+            assert.ok(String(diags[0].message).includes("'BogusVar'"));
         });
 
         test('IF condition with declared identifier — no warning', () => {
@@ -3453,7 +3453,7 @@ LocalVar LONG
             // condition IS flagged.
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Bogus'"));
         });
 
         test('ELSIF condition flagged the same as IF', () => {
@@ -3468,7 +3468,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusElse'"));
+            assert.ok(String(diags[0].message).includes("'BogusElse'"));
         });
 
         test('WHILE condition (start-of-LOOP) flagged', () => {
@@ -3481,7 +3481,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusWhile'"));
+            assert.ok(String(diags[0].message).includes("'BogusWhile'"));
         });
 
         test('UNTIL condition (LOOP terminator) flagged', () => {
@@ -3494,7 +3494,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusUntil'"));
+            assert.ok(String(diags[0].message).includes("'BogusUntil'"));
         });
 
         test('CASE expression flagged', () => {
@@ -3508,7 +3508,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusCase'"));
+            assert.ok(String(diags[0].message).includes("'BogusCase'"));
         });
 
         test('OF / OROF case-match expressions flagged', () => {
@@ -3524,7 +3524,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 2);
-            const names = diags.map(d => d.message).join(' ');
+            const names = diags.map(d => String(d.message)).join(' ');
             assert.ok(names.includes('BogusOf'));
             assert.ok(names.includes('BogusOrof'));
         });
@@ -3577,7 +3577,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusObj'"));
+            assert.ok(String(diags[0].message).includes("'BogusObj'"));
             // Range covers only the leading scope name (chars 2..2+8), not
             // the full `BogusObj.Field` token.
             assert.strictEqual(diags[0].range.end.character - diags[0].range.start.character, 'BogusObj'.length);
@@ -3600,7 +3600,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusObj'"));
+            assert.ok(String(diags[0].message).includes("'BogusObj'"));
         });
 
         test('Dotted in IF condition with undeclared scope — flagged', () => {
@@ -3613,7 +3613,7 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusObj'"));
+            assert.ok(String(diags[0].message).includes("'BogusObj'"));
         });
 
         test('SELF.Method — never flagged (SELF is built-in)', () => {
@@ -3644,9 +3644,9 @@ LocalVar LONG
   RETURN`;
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'BogusObj'"));
-            assert.ok(!diags[0].message.includes("'Field'"));
-            assert.ok(!diags[0].message.includes("'Deeper'"));
+            assert.ok(String(diags[0].message).includes("'BogusObj'"));
+            assert.ok(!String(diags[0].message).includes("'Field'"));
+            assert.ok(!String(diags[0].message).includes("'Deeper'"));
         });
 
         test('Prefixed-then-dotted (Cus:Field.method) — still skipped (has colon)', () => {
@@ -3690,7 +3690,7 @@ LocalVar LONG
             // is a separate follow-up if user demand surfaces.
             const diags = undeclaredDiags(code);
             assert.strictEqual(diags.length, 1);
-            assert.ok(diags[0].message.includes("'Bogus'"));
+            assert.ok(String(diags[0].message).includes("'Bogus'"));
         });
 
         test('BREAK Loop1 — first token is Keyword, not LHS', () => {
@@ -4524,10 +4524,10 @@ suite('MapDeclarationDiagnostics — MODULE(*.dll) exemption (#292)', () => {
 
         // 1. Nothing fires for the DLL module's procedures — with or without DLL attribute
         const dllDiags = diagnostics.filter(d =>
-            /vuCPUSpeed|vuNoAttrib/i.test(d.message));
+            /vuCPUSpeed|vuNoAttrib/i.test(String(d.message)));
         assert.strictEqual(dllDiags.length, 0,
             `MODULE('vuFT3.dll') procedures must be exempt from missing-implementation. Got: ` +
-            JSON.stringify(dllDiags.map(d => d.message)));
+            JSON.stringify(dllDiags.map(d => String(d.message))));
 
         // 2. The physical binary was never loaded into the token cache
         const newEntries = TokenCache.getInstance().getAllCachedUris()
@@ -4537,10 +4537,10 @@ suite('MapDeclarationDiagnostics — MODULE(*.dll) exemption (#292)', () => {
             `The .dll binary must not be loaded/tokenized. Cache gained: ${JSON.stringify(newEntries)}`);
 
         // 3. The genuine source module still fires for its missing implementation
-        const realDiag = diagnostics.find(d => /MissingProc/i.test(d.message));
+        const realDiag = diagnostics.find(d => /MissingProc/i.test(String(d.message)));
         assert.ok(realDiag,
             `MODULE('RealMod.clw') with a missing implementation must still fire. ` +
-            `All diagnostics: ${JSON.stringify(diagnostics.map(d => d.message))}`);
+            `All diagnostics: ${JSON.stringify(diagnostics.map(d => String(d.message)))}`);
 
         for (const u of newEntries) {
             TokenCache.getInstance().clearTokens(u);

@@ -71,8 +71,8 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
     });
     teardown(() => TokenCache.getInstance().clearAllTokens());
 
-    const discarded = (diags: { message: string }[]) =>
-        diags.filter(d => /is discarded/.test(d.message));
+    const discarded = (diags: { message: unknown }[]) =>
+        diags.filter(d => /is discarded/.test(String(d.message)));
 
     test('object receiver: warn decisions unchanged across multiple methods of one class', async () => {
         const code = [
@@ -101,9 +101,9 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
         const diags = await validateDiscardedReturnValues(tokens, doc, locator);
 
         const warns = discarded(diags);
-        assert.strictEqual(warns.length, 2, `expected DoA + DoB warnings, got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns.some(w => w.message.includes("'obj.DoA'")), 'DoA (LONG, no PROC) must warn');
-        assert.ok(warns.some(w => w.message.includes("'obj.DoB'")), 'DoB (LONG, no PROC) must warn');
+        assert.strictEqual(warns.length, 2, `expected DoA + DoB warnings, got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(warns.some(w => String(w.message).includes("'obj.DoA'")), 'DoA (LONG, no PROC) must warn');
+        assert.ok(warns.some(w => String(w.message).includes("'obj.DoB'")), 'DoB (LONG, no PROC) must warn');
     });
 
     test('efficiency: one enumeration per unique class, no per-site findMemberInClass', async () => {
@@ -169,8 +169,8 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `SELF.DoA (LONG, no PROC) must warn and SELF.DoB (PROC) must not; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes('DoA'), 'the warning names DoA');
+            `SELF.DoA (LONG, no PROC) must warn and SELF.DoB (PROC) must not; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes('DoA'), 'the warning names DoA');
         assert.ok(counts.enumerateMembersInClass >= 1, 'SELF sites now spend resolution work');
     });
 
@@ -198,8 +198,8 @@ suite('ReturnValueDiagnostics #305 — per-class enumeration for dot-call sites'
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `PARENT.Calc (LONG, no PROC, inherited) must warn; PARENT.Quiet (PROC) must not; got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes('Calc'), 'the warning names Calc');
+            `PARENT.Calc (LONG, no PROC, inherited) must warn; PARENT.Quiet (PROC) must not; got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes('Calc'), 'the warning names Calc');
     });
 
     test('fallback: unresolvable receiver produces no warning and no crash', async () => {
