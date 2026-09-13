@@ -24,6 +24,7 @@ import { PropEntry } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
+import { DeclaredValueParser } from '../../tokenizer/DeclaredValueParser';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -392,6 +393,21 @@ export class HoverFormatter {
     }
 
     /**
+     * True when the MAP prototype starting at `line` carries PRIVATE (#480). Follows
+     * `|` continuations, since a long attribute tail is often wrapped, and ignores
+     * comments so a `! PRIVATE` note does not count.
+     */
+    private isPrivatePrototype(lines: string[], line: number): boolean {
+        let prototype = '';
+        for (let i = line; i < lines.length; i++) {
+            const code = DeclaredValueParser.stripTrailingComment(lines[i]).trimEnd();
+            if (!code.endsWith('|')) { prototype += code; break; }
+            prototype += code.slice(0, -1) + ' ';
+        }
+        return this.parseMethodModifiers(prototype).visibility === 'PRIVATE';
+    }
+
+    /**
      * Builds the Option-C style header line for a method or property hover.
      * Format: **Name** — [Private] [Virtual] Category MemberType · ClassName  returns `TYPE`
      */
@@ -504,63 +520,34 @@ export class HoverFormatter {
         
         logger.info(`formatProcedure: isAtMapDeclaration=${isAtMapDeclaration}, isAtImplementation=${isAtImplementation}`);
         
-        // Add scope information if available
+        // Add scope information if available.
+        //
+        // Scope follows the OWNER of the MAP holding the prototype, plus PRIVATE (#480).
+        // A PROGRAM's MAP declares procedures callable throughout the program — with or
+        // without a MODULE() wrapper, which only names the file containing the body. A
+        // MEMBER's MAP declares procedures available in that module. PRIVATE restricts
+        // either to its own module. Compiler-verified on Clarion 10.0.12567.
+        //
+        // With no MAP declaration to go on, the implementation's file is the best guess.
+        // A prototype in an include file (first statement OMIT or MODULE, as in LibSrc)
+        // belongs to whichever MAP includes it, so it is left unlabelled unless PRIVATE.
         if (procImpl || mapDecl) {
             try {
-                // First check if MAP declaration is inside a MODULE block
-                let isModuleScoped = false;
-                if (mapDecl) {
-                    const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    const mapContent = fs.readFileSync(mapUri, 'utf-8');
-                    const mapLines = mapContent.split('\n');
-                    const mapLine = mapDecl.range.start.line;
-                    
-                    // Search backwards from MAP declaration to find MODULE keyword
-                    for (let i = mapLine - 1; i >= Math.max(0, mapLine - 20); i--) {
-                        const line = mapLines[i].trim().toUpperCase();
-                        if (line.startsWith('MODULE(') || line === 'MODULE') {
-                            isModuleScoped = true;
-                            break;
-                        }
-                        // Stop if we hit MAP or END
-                        if (line === 'MAP' || line === 'END') {
-                            break;
-                        }
-                    }
-                }
-                
-                if (isModuleScoped) {
-                    header = `**${procName}** 📦 Module Procedure\n`;
-                } else {
-                    // Check file type for global vs module
-                    const checkLocation = procImpl || mapDecl;
-                    if (checkLocation) {
-                        let content: string;
-                        
-                        // Use current document if same URI, otherwise read from disk
-                        if (checkLocation.uri === currentDocument.uri) {
-                            content = currentDocument.getText();
-                        } else if (checkLocation.uri.startsWith('test://')) {
-                            // Skip for test URIs
-                            content = '';
-                        } else {
-                            const uri = decodeURIComponent(checkLocation.uri.replace('file:///', ''));
-                            content = fs.readFileSync(uri, 'utf-8');
-                        }
-                        
-                        if (content) {
-                            const lines = content.split('\n');
-                            const firstNonCommentLine = lines.find(l => l.trim() && !l.trim().startsWith('!'));
-                            
-                            if (firstNonCommentLine) {
-                                const trimmed = firstNonCommentLine.trim().toUpperCase();
-                                if (trimmed.startsWith('PROGRAM')) {
-                                    header = `**${procName}** 🌍 Global Procedure\n`;
-                                } else if (trimmed.startsWith('MEMBER')) {
-                                    header = `**${procName}** 📦 Module Procedure\n`;
-                                }
-                            }
-                        }
+                const scopeSource = mapDecl ?? procImpl!;
+                const content = scopeSource.uri === currentDocument.uri
+                    ? currentDocument.getText()
+                    : scopeSource.uri.startsWith('test://') ? '' : readCachedOrDiskFile(scopeSource.uri);
+
+                if (content) {
+                    const lines = content.split('\n');
+                    const firstStatement = lines.find(l => l.trim() && !l.trim().startsWith('!'))?.trim().toUpperCase() ?? '';
+
+                    if (mapDecl && this.isPrivatePrototype(lines, mapDecl.range.start.line)) {
+                        header = `**${procName}** 📦 Module Procedure · Private\n`;
+                    } else if (firstStatement.startsWith('PROGRAM')) {
+                        header = `**${procName}** 🌍 Global Procedure\n`;
+                    } else if (firstStatement.startsWith('MEMBER')) {
+                        header = `**${procName}** 📦 Module Procedure\n`;
                     }
                 }
             } catch (error) {

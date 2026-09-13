@@ -125,9 +125,14 @@ suite('Issue #452 — a call site links its implementation, not just the MAP dec
             // Assert positively. "does not say Global procedure" is satisfied by an
             // EMPTY hover too, so on its own it passes even when the lookup fails
             // outright — which is exactly what the broken extension-less path produced.
-            assert.ok(/Module Procedure/i.test(text),
+            //
+            // The procedure card reads "🌍 Global Procedure" (#480: a prototype in the
+            // PROGRAM's MAP is global despite its MODULE() wrapper). The generic symbol
+            // card reads "🌍 Global procedure" — they differ ONLY by the case of the P,
+            // so both regexes are deliberately case-sensitive.
+            assert.ok(/🌍 Global Procedure/.test(text),
                 `expected the procedure card; got: ${text || '(no hover at all)'}`);
-            assert.ok(!/Global procedure/i.test(text),
+            assert.ok(!/Global procedure/.test(text),
                 `the generic card means the procedure path was never reached; got: ${text}`);
         });
     }

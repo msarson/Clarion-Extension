@@ -109,7 +109,7 @@ export class DeclaredValueParser {
     }
 
     /** Strips a Clarion `!`-comment from the end of a logical line. */
-    private static stripTrailingComment(line: string): string {
+    static stripTrailingComment(line: string): string {
         // A `!` inside a string literal does NOT start a comment. Walk char-by-char,
         // tracking single-quote nesting, and cut at the first unquoted `!`.
         let inString = false;
