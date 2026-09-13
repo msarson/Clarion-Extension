@@ -44,10 +44,22 @@ suite('Clarion 12 Unicode syntax highlighting (#399)', () => {
         fs.readFileSync(path.join(repoRoot(), 'syntaxes', 'clarion.tmLanguage.json'), 'utf8')
     ) as { repository: Record<string, Rule> };
 
+    // #490 — the grammar is written for Oniguruma (TextMate's engine). Its rules
+    // use the inline modifier `(?i:…)`, which V8 accepts only from Node 23 on:
+    // these tests passed on a developer machine (Node 26) and threw
+    // "Invalid regular expression … Invalid group" on the CI runner (Node 20),
+    // failing the 1.0.3 release dry run. Compile for JavaScript: lift `(?i:` to
+    // `(?:` under the `i` flag — every affected rule is case-insensitive as a
+    // whole, so the meaning is unchanged for what these tests assert.
+    const js = (oniguruma: string): RegExp => {
+        const lifted = oniguruma.replace(/\(\?i:/g, '(?:');
+        return new RegExp(lifted, lifted === oniguruma ? '' : 'i');
+    };
+
     const firstMatch = (key: string, text: string): string | null => {
         const rule = grammar.repository[key];
         assert.ok(rule?.match, `repository.${key} should be a match rule`);
-        const m = new RegExp(rule.match!).exec(text);
+        const m = js(rule.match!).exec(text);
         return m ? m[0] : null;
     };
 
@@ -88,7 +100,7 @@ suite('Clarion 12 Unicode syntax highlighting (#399)', () => {
     });
 
     test("U'...' and u'...' both open a Unicode literal", () => {
-        const begin = new RegExp(unicodeLiteral().begin!);
+        const begin = js(unicodeLiteral().begin!);
         assert.ok(begin.test("x = U'caf'"), 'uppercase prefix');
         assert.ok(begin.test("x = u'abc'"), 'lowercase prefix');
     });
@@ -96,7 +108,7 @@ suite('Clarion 12 Unicode syntax highlighting (#399)', () => {
     test('a trailing U of an identifier does not start a literal', () => {
         // The negative lookbehind. Without it `MyU'abc'` reads as a Unicode literal
         // and the highlighting runs away from the real string boundary.
-        const begin = new RegExp(unicodeLiteral().begin!);
+        const begin = js(unicodeLiteral().begin!);
         assert.ok(!begin.test("MyU'abc'"), 'identifier-adjacent U must not be a prefix');
         assert.ok(!begin.test("A1U'abc'"), 'digit-adjacent U must not be a prefix');
     });
@@ -105,7 +117,7 @@ suite('Clarion 12 Unicode syntax highlighting (#399)', () => {
         const escapes = unicodeLiteral().patterns ?? [];
         const cp = escapes.find(e => e.name === 'constant.character.escape.unicode.clarion');
         assert.ok(cp, 'the literal must scope embedded code points');
-        const re = new RegExp(cp!.match!);
+        const re = js(cp!.match!);
         // Decimal, and hex with the Clarion `h` suffix, including astral planes.
         for (const s of ['<937>', '<0D83Dh>', '<1F4A9h>']) {
             assert.ok(re.test(s), `${s} should scope as a code-point escape`);
@@ -124,7 +136,7 @@ suite('Clarion 12 Unicode syntax highlighting (#399)', () => {
         const plain = grammar.repository.strings.patterns!
             .find(v => v.name === 'string.quoted.single.clarion');
         assert.ok(plain, 'the original plain-string variant must still exist');
-        assert.ok(new RegExp(plain!.begin!).test("x = 'hello'"));
+        assert.ok(js(plain!.begin!).test("x = 'hello'"));
         assert.ok((plain!.patterns ?? []).some(e => e.match === "''"),
             'doubled-quote escaping must be preserved');
     });
