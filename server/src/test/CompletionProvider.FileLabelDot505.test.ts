@@ -16,6 +16,8 @@ const FILE_LINES = [
     'ID          LONG',
     'CusID       LONG',
     'Total       DECIMAL(9,2)',
+    'Name        STRING(30),NAME(' + "'nm'" + ')',
+    'Ref         &StringTheory',
     '          END',
     '        END',
     '  CODE',
@@ -43,10 +45,17 @@ suite('#505 dot completion on a FILE label', () => {
     test('Orders. offers the PRE-qualified field set, inserting the field name', async () => {
         const items = await complete('  Orders.');
         const labels = items.map(i => String(i.label)).sort();
-        assert.deepStrictEqual(labels, ['CusID', 'ID', 'OrdKey', 'Record', 'Total']);
+        assert.deepStrictEqual(labels, ['CusID', 'ID', 'Name', 'OrdKey', 'Record', 'Ref', 'Total']);
         const id = items.find(i => i.label === 'ID');
         assert.strictEqual(id?.insertText, 'ID');
         assert.strictEqual(id?.detail, 'ORD:ID', '#507: the qualified name is the detail');
+
+        // #508: declared type next to the label; the attribute list after the type is not part of it
+        const typeOf = (label: string) => items.find(i => i.label === label)?.labelDetails?.detail;
+        assert.strictEqual(typeOf('Name'), ' STRING(30)');
+        assert.strictEqual(typeOf('Ref'), ' &StringTheory');
+        assert.strictEqual(typeOf('OrdKey'), ' KEY(ORD:ID)');
+        assert.strictEqual(items.find(i => i.label === 'Name')?.labelDetails?.description, 'ORD:Name');
     });
 
     test('Orders.C narrows the same list', async () => {

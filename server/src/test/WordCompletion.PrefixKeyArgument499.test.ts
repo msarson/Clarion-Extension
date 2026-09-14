@@ -52,6 +52,15 @@ suite('#499 prefix completion on a FILE with KEY(PRE:Field)', () => {
         const id = items.find(i => i.label === 'ID');
         assert.strictEqual(id?.insertText, 'ID');
         assert.strictEqual(id?.detail, 'ORD:ID', '#507: label is the field name, detail the qualified name');
+
+        // #508: the declared type as written sits next to the label, the qualified name on the right
+        const typeOf = (label: string) => items.find(i => i.label === label)?.labelDetails?.detail;
+        assert.strictEqual(typeOf('ID'), ' LONG');
+        assert.strictEqual(typeOf('Total'), ' DECIMAL(9,2)');
+        assert.strictEqual(typeOf('OrdKey'), ' KEY(ORD:ID)');
+        assert.strictEqual(typeOf('CusKey'), ' KEY(ORD:CusID,ORD:ID)');
+        assert.strictEqual(typeOf('Record'), ' RECORD');
+        assert.strictEqual(id?.labelDetails?.description, 'ORD:ID');
     });
 
     test('a typed partial after the prefix narrows the same list', async () => {
@@ -77,5 +86,7 @@ suite('#499 prefix completion on a FILE with KEY(PRE:Field)', () => {
         const items = await makeProvider(doc).provide(doc, { line: 6, character: 7 }, 'TGLO:');
         const labels = items.map(i => String(i.label)).sort();
         assert.deepStrictEqual(labels, ['GLO:SessionId', 'Plain']);
+        assert.strictEqual(items.find(i => i.label === 'GLO:SessionId')?.labelDetails?.detail, ' STRING(20)', '#508');
+        assert.strictEqual(items.find(i => i.label === 'GLO:SessionId')?.labelDetails?.description, 'TGLO:GLO:SessionId', '#508');
     });
 });

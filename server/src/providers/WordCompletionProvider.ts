@@ -78,12 +78,14 @@ export class WordCompletionProvider {
             const isOverloadable = (k?: CompletionItemKind): boolean =>
                 k === CompletionItemKind.Function || k === CompletionItemKind.Method;
 
-            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => {
+            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => {
                 const key = label.toUpperCase();
                 if (!seen.has(key)) {
                     const item: CompletionItem = { label, kind };
                     if (detail) item.detail = detail;
                     if (documentation) item.documentation = documentation;
+                    // #508: the declared type sits right after the label in the list (LONG, STRING(30), KEY(ORD:ID))
+                    if (typeText) item.labelDetails = { detail: ` ${typeText}` };
                     seen.set(key, item);
                     return;
                 }
@@ -211,6 +213,7 @@ export class WordCompletionProvider {
                             ...item,
                             label: qualifierTail,
                             detail: qualified,
+                            labelDetails: { ...(item.labelDetails ?? {}), description: qualified },
                             insertText: remainder,
                         };
                     });
@@ -467,7 +470,7 @@ export class WordCompletionProvider {
     /** Collect PRE-qualified structure fields in global scope as Prefix:Field labels. */
     private collectGlobalPrefixedFields(
         tokens: Token[],
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         const firstProcLine = tokens.find(t =>
             TokenHelper.isProcedureOrFunction(t) &&
@@ -481,7 +484,7 @@ export class WordCompletionProvider {
         tokens: Token[],
         startExclusive: number,
         endExclusive: number,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         this.collectCanonicalPrefixedFields(tokens, line => line > startExclusive && line < endExclusive, add);
     }
@@ -490,7 +493,7 @@ export class WordCompletionProvider {
     private collectCanonicalPrefixedFields(
         tokens: Token[],
         includeLine: (line: number) => boolean,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         const byLine = new Map<number, { prefix: string }>();
         for (const t of tokens) {
@@ -519,8 +522,35 @@ export class WordCompletionProvider {
             // as OPT — is not a field, however the token flags read (#499).
             const labelToken = lineTokens.find(t => t.start === 0 && t.type !== TokenType.Comment);
             if (!labelToken || !identifier.test(labelToken.value)) continue;
-            add(`${prefix}:${labelToken.value}`, CompletionItemKind.Variable, 'prefixed field');
+            add(`${prefix}:${labelToken.value}`, CompletionItemKind.Variable, 'prefixed field', undefined,
+                WordCompletionProvider.declaredTypeFromTokens(lineTokens, labelToken));
         }
+    }
+
+    /**
+     * #508: the declared type as written on the line — the tokens after the label up to
+     * the first comma at paren depth 0. `STRING(30),NAME('nm')` -> `STRING(30)`;
+     * `KEY(ORD:ID),NOCASE,OPT` -> `KEY(ORD:ID)`; `DECIMAL(9,2)` keeps its inner comma;
+     * `Ref &StringTheory` -> `&StringTheory`. Same rule as the hover card (#488).
+     */
+    private static declaredTypeFromTokens(lineTokens: Token[], labelToken: Token): string | undefined {
+        const idx = lineTokens.indexOf(labelToken);
+        if (idx < 0) return undefined;
+        let depth = 0;
+        let text = '';
+        let prevEnd = -1;
+        for (const t of lineTokens.slice(idx + 1)) {
+            if (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) break;
+            if (t.value === ',' && depth === 0) break;
+            if (prevEnd >= 0 && t.start > prevEnd) text += ' ';
+            text += t.value;
+            prevEnd = t.start + t.value.length;
+            for (const ch of t.value) {
+                if (ch === '(') depth++;
+                else if (ch === ')') depth--;
+            }
+        }
+        return text || undefined;
     }
 
     /** Add PROGRAM-file global labels + PRE-qualified fields for MEMBER-file completion parity. */
