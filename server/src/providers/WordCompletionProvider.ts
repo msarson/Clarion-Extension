@@ -486,37 +486,34 @@ export class WordCompletionProvider {
         includeLine: (line: number) => boolean,
         add: (label: string, kind: CompletionItemKind, detail?: string) => void
     ): void {
-        const byLine = new Map<number, { prefix: string; fieldTokens: Token[] }>();
+        const byLine = new Map<number, { prefix: string }>();
         for (const t of tokens) {
             if (!t.isStructureField || !t.structurePrefix) continue;
             if (!includeLine(t.line)) continue;
-            const lineEntry = byLine.get(t.line);
-            if (lineEntry) {
-                lineEntry.fieldTokens.push(t);
-            } else {
-                byLine.set(t.line, { prefix: t.structurePrefix, fieldTokens: [t] });
-            }
+            if (!byLine.has(t.line)) byLine.set(t.line, { prefix: t.structurePrefix });
         }
 
+        const identifier = /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*$/i;
         for (const [line, lineEntry] of byLine.entries()) {
-            const fieldTokens = lineEntry.fieldTokens.sort((a, b) => a.start - b.start);
             const lineTokens = tokens
                 .filter(t => t.line === line)
                 .sort((a, b) => a.start - b.start);
             const prefix = lineEntry.prefix;
 
-            const explicitPrefixed = lineTokens.find(t =>
-                /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)+$/i.test(t.value)
-            );
+            // #499: the structure's own header line (`Orders FILE,...,PRE(ORD)`) declares
+            // no field — the PRE() argument is flagged as a field token, but it is not one.
+            if (lineTokens.some(t =>
+                t.type === TokenType.Structure &&
+                t.structurePrefix?.toUpperCase() === prefix.toUpperCase()
+            )) continue;
 
-            const simpleName = fieldTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable || t.type === TokenType.ReferenceVariable) &&
-                /^[A-Za-z_][A-Za-z0-9_]*$/i.test(t.value)
-            );
-
-            const suffix = explicitPrefixed?.value ?? simpleName?.value;
-            if (!suffix) continue;
-            add(`${prefix}:${suffix}`, CompletionItemKind.Variable, 'prefixed field');
+            // A declaration names its field only through the column-0 label: plain (`ID`)
+            // or colon-carrying (`GLO:SessionId`, completed as TGLO:GLO:SessionId). Any
+            // other identifier on the line — a KEY's `ORD:ID` argument, an attribute such
+            // as OPT — is not a field, however the token flags read (#499).
+            const labelToken = lineTokens.find(t => t.start === 0 && t.type !== TokenType.Comment);
+            if (!labelToken || !identifier.test(labelToken.value)) continue;
+            add(`${prefix}:${labelToken.value}`, CompletionItemKind.Variable, 'prefixed field');
         }
     }
 

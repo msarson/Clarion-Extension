@@ -267,9 +267,9 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             this.timeout(10000);
             const content = [
                 'ThisWindow.Init PROCEDURE',
-                '  TestGloGroup GROUP,PRE(TGLO)',
-                '  Var1 LONG',
-                '  GLO:TGLO LONG',
+                'TestGloGroup GROUP,PRE(TGLO)',   // #499: labels start at column 0 — indented ones do not compile
+                'Var1 LONG',
+                'GLO:TGLO LONG',
                 '  END',
                 '  CODE',
                 '  TestGloGroup.'
