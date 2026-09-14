@@ -17,6 +17,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Configuration and build
 
 - **A folder whose remembered solution has no stored Clarion version no longer ends in Initialization failed with an empty Solution View.** The view shows the found-solutions list with the remembered entry marked, and a message offers Set Version or Open Solution. [#498](https://github.com/msarson/Clarion-Extension/issues/498)
+- **The Open Solution button works during startup in a window with no folder.** Clicking it before the extension finished starting reported that `clarion.openSolution` was not found; the no-folder commands are now registered before the language server starts. [#513](https://github.com/msarson/Clarion-Extension/issues/513)
 
 #### Maintenance
 

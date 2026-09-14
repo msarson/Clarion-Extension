@@ -14,7 +14,7 @@ import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerRunCommands } from './commands/RunCommands';
-import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
+import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands, registerNoFolderSolutionCommands } from './commands/SolutionCommands';
 import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
@@ -134,6 +134,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // available); no need to wait on globalState/solution/LSP/folder-settings
     // before registering. Existing late-call at line ~141 removed.
     registerSolutionToolbar(context);
+
+    // #513 — register the no-folder commands (Open Solution, Set Version) NOW,
+    // before any of the activation awaits below (version state, global state,
+    // and especially the language-server startup at Phase 6). The welcome-view
+    // "Open Solution" button targets clarion.openSolution; registering it at
+    // Phase 11 meant it did not exist until ~1s into activation, so a click in
+    // that window — or any stall in the server startup — produced
+    // "command 'clarion.openSolution' not found".
+    context.subscriptions.push(...registerNoFolderSolutionCommands(context, openClarionSolution));
 
     const state: ActivationManager.ActivationState = {
         client,
