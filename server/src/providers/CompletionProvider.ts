@@ -284,12 +284,10 @@ export class CompletionProvider {
         tokens: Token[]
     ): Promise<CompletionItem[] | null> {
         // Dot after a structure label with PRE(prefix) surfaces the same prefixed field
-        // set as qualifier completion (e.g. TestGloGroup. -> TGLO:*). Only meaningful on a
-        // bare dot; a partial after it is a field-name filter word completion already does.
-        if (partial === '') {
-            const structurePrefixItems = await this.completePrefixedStructureDot(chain, document, position, tokens);
-            if (structurePrefixItems) return structurePrefixItems;
-        }
+        // set as qualifier completion (e.g. TestGloGroup. -> TGLO:*, Orders. -> ORD:*),
+        // narrowed by the field-name letters typed after the dot (#505).
+        const structurePrefixItems = await this.completePrefixedStructureDot(chain, partial, document, position, tokens);
+        if (structurePrefixItems) return structurePrefixItems;
 
         const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
         if (!resolved) {
@@ -352,11 +350,15 @@ export class CompletionProvider {
     }
 
     /**
-     * For `StructureLabel.` where StructureLabel is a PRE(...) structure declaration
-     * in scope, return the same prefix-qualified field list as `PREFIX:`.
+     * For `StructureLabel.` (or `StructureLabel.Par`) where StructureLabel is a PRE(...)
+     * structure declaration in scope, return the same prefix-qualified field list as
+     * `PREFIX:`, filtered by the typed partial. The insert text is the whole field name:
+     * the client replaces the word at the cursor, which is the partial after the dot.
+     * FILE is included — `File.Field` is compiler-verified dot notation (#505).
      */
     private async completePrefixedStructureDot(
         chain: string,
+        partial: string,
         document: TextDocument,
         position: { line: number; character: number },
         tokens: Token[]
@@ -364,7 +366,7 @@ export class CompletionProvider {
         if (!chain || chain.includes('.')) return null;
 
         const chainUpper = chain.toUpperCase();
-        const structureKinds = new Set(['GROUP', 'QUEUE', 'RECORD']);
+        const structureKinds = new Set(['GROUP', 'QUEUE', 'RECORD', 'FILE']);
         let best: Token | undefined;
 
         for (const t of tokens) {
@@ -385,7 +387,12 @@ export class CompletionProvider {
         }
 
         if (!best) return null;
-        const items = await this.wordCompletion.provide(document, position, `${best.structurePrefix}:`);
+        const qualifier = `${best.structurePrefix}:`;
+        const partialUpper = partial.toUpperCase();
+        const items = (await this.wordCompletion.provide(document, position, qualifier))
+            .map(item => ({ item, field: String(item.label).substring(qualifier.length) }))
+            .filter(({ field }) => field.toUpperCase().startsWith(partialUpper))
+            .map(({ item, field }) => ({ ...item, insertText: field }));
         return items.length > 0 ? items : null;
     }
 

@@ -12,6 +12,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - **A VIEW's JOIN folds, and the VIEW's own fold now reaches its own END.** JOIN was never treated as a structure, so its END closed the enclosing VIEW one line early and the JOIN itself could not be folded. The compiler confirmed the shape: every JOIN needs its own END or period, JOINs nest, and INNER is a trailing attribute (`JOIN(...),INNER`), not a prefix. [#504](https://github.com/msarson/Clarion-Extension/issues/504)
 - **Prefix completion on a FILE no longer offers its PRE() argument or a KEY's field arguments as fields.** After `ORD:` the list read `ORD:ORD` and `ORD:ORD:ID` and left out `ORD:ID` itself; a structure line now contributes only its column-0 label, so fields, keys and the record group are offered by name. [#499](https://github.com/msarson/Clarion-Extension/issues/499)
+- **Dot completion on a FILE label offers its fields.** `Orders.` lists the same fields, keys and record group as `ORD:`, and letters typed after the dot narrow the list. Previously only GROUP, QUEUE and RECORD labels answered a dot. [#505](https://github.com/msarson/Clarion-Extension/issues/505)
 
 #### Maintenance
 
