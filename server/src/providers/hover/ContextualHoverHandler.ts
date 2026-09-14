@@ -140,41 +140,42 @@ export class ContextualHoverHandler {
     }
 
     /**
-     * Handle ELSE keyword - can be in IF or CASE structure
+     * Handle ELSE keyword - can be in IF or CASE structure.
+     *
+     * Resolves the owning structure via `DocumentStructure.populateBranches()`'s
+     * `branches` array (set on the CASE/IF Structure token) instead of a manual
+     * backward token scan. Two reasons:
+     *
+     *  1. The old backward scan checked `token.type === TokenType.Keyword` for
+     *     CASE/IF, but CASE and IF are tokenized as `TokenType.Structure`
+     *     (`STRUCTURE_PATTERNS` in TokenPatterns.ts) — that condition could
+     *     never match, so this handler always fell through to null and every
+     *     ELSE showed the generic "Control Flow" keyword card regardless of
+     *     context.
+     *  2. Simply fixing the type check would still misattribute ELSE when an
+     *     unrelated CASE/IF appears earlier in the same block (e.g. a CASE
+     *     containing a nested IF...END in one of its OF branches before the
+     *     ELSE) — a line-by-line backward scan hits that nested structure's
+     *     own IF token first. `populateBranches()` already excludes a nested
+     *     CASE/IF's own branch keywords from its container's `branches` array
+     *     ("the outer pass skips their inner ConditionalContinuation tokens to
+     *     avoid double-attribution" — DocumentStructure.ts), so reading it back
+     *     is correct in that case too.
      */
     handleElseKeyword(tokens: Token[], position: { line: number; character: number }): Hover | null {
-        // Search backwards for CASE or IF keyword to determine context
-        let foundCase = false;
-        let foundIf = false;
-        
-        for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-            const searchLineTokens = tokens.filter(t => t.line === searchLine);
-            
-            for (const token of searchLineTokens) {
-                const upperValue = token.value.toUpperCase();
-                if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
-                    foundCase = true;
-                    break;
-                } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
-                    foundIf = true;
-                    break;
-                } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                    break;
-                }
-            }
-            
-            if (foundCase || foundIf) break;
-        }
-        
-        // Provide context-specific documentation
-        if (foundCase) {
+        const owner = this.findElseOwner(tokens, position);
+        if (!owner) return null;
+
+        const kind = owner.value.toUpperCase();
+        if (kind === 'CASE') {
             return {
                 contents: {
                     kind: 'markdown',
                     value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
                 }
             };
-        } else if (foundIf) {
+        }
+        if (kind === 'IF') {
             return {
                 contents: {
                     kind: 'markdown',
@@ -182,7 +183,29 @@ export class ContextualHoverHandler {
                 }
             };
         }
-        
+
+        return null;
+    }
+
+    /**
+     * Finds the CASE/IF Structure token whose `branches` array records an
+     * ELSE clause at `position`. See `handleElseKeyword` for why this reads
+     * the existing link instead of scanning backward.
+     */
+    private findElseOwner(tokens: Token[], position: { line: number; character: number }): Token | null {
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure || !t.branches) continue;
+            const upper = t.value.toUpperCase();
+            if (upper !== 'CASE' && upper !== 'IF') continue;
+
+            const match = t.branches.find(b =>
+                b.kind === 'ELSE' &&
+                b.keywordToken.line === position.line &&
+                position.character >= b.keywordToken.start &&
+                position.character <= b.keywordToken.start + b.keywordToken.value.length
+            );
+            if (match) return t;
+        }
         return null;
     }
 
