@@ -48,4 +48,20 @@ suite('BuiltinFunctionService', () => {
         const count = service.getBuiltinCount();
         strictEqual(count >= 0, true, 'Count should be non-negative');
     });
+
+    // #519 — built-in functions the help documents (Language Reference ch.13) that
+    // were absent from clarion-builtins.json until #519. Guards against a data
+    // change silently dropping them (they would then read as unknown to completion,
+    // hover, and the #517 unresolved-call check).
+    test('#519 — the added built-in functions are recognised', () => {
+        // PRAGMA is intentionally NOT here — issue #77 keeps it out of builtins.json
+        // (it is a directive, handled elsewhere), and a test guards that.
+        for (const name of [
+            'COMPRESS', 'DEBUGHOOK', 'DECOMPRESS', 'HTTPWEBREQUEST', 'HTTPWEBREQUESTTOFILE',
+            'IMAGEROTATEFLIP', 'IMAGETOPNG', 'PRINTERDIALOGA', 'SETLAYOUT',
+        ]) {
+            strictEqual(service.isBuiltin(name), true, `${name} should be a recognised built-in`);
+            strictEqual(service.isBuiltin(name.toLowerCase()), true, `${name} should match case-insensitively`);
+        }
+    });
 });
