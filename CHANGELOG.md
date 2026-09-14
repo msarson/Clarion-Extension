@@ -14,6 +14,10 @@ All notable changes to the Clarion Extension are documented here.
 - **Prefix completion on a FILE no longer offers its PRE() argument or a KEY's field arguments as fields.** After `ORD:` the list read `ORD:ORD` and `ORD:ORD:ID` and left out `ORD:ID` itself; a structure line now contributes only its column-0 label, so fields, keys and the record group are offered by name. [#499](https://github.com/msarson/Clarion-Extension/issues/499)
 - **Dot completion on a FILE label offers its fields, and structure completion lists each field with its declared type.** `Orders.` lists the same fields, keys and record group as `ORD:`, letters typed after the dot narrow the list, and on both paths each row reads as the field name, its type as declared (`LONG`, `STRING(30)`, `KEY(ORD:ID)`) and the qualified name. Previously only GROUP, QUEUE and RECORD labels answered a dot. [#505](https://github.com/msarson/Clarion-Extension/issues/505), [#507](https://github.com/msarson/Clarion-Extension/issues/507), [#508](https://github.com/msarson/Clarion-Extension/issues/508)
 
+#### Configuration and build
+
+- **A folder whose remembered solution has no stored Clarion version no longer ends in Initialization failed with an empty Solution View.** The view shows the found-solutions list with the remembered entry marked, and a message offers Set Version or Open Solution. [#498](https://github.com/msarson/Clarion-Extension/issues/498)
+
 #### Maintenance
 
 - **Development, CI and the type definitions now all target Node 20,** the runtime VS Code 1.97 ships. `.nvmrc`, `engines.node` and `@types/node` are pinned to the 20 line, the release workflows read `.nvmrc`, and `npm run test:node20` runs the suite under Node 20 before a release dry run. [#491](https://github.com/msarson/Clarion-Extension/issues/491)

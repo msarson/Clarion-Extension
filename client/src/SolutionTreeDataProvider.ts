@@ -4,7 +4,7 @@ import { ClarionSolutionInfo, ClarionProjectInfo, ClarionSourcerFileInfo } from 
 import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SolutionCache } from './SolutionCache';
-import { globalSolutionFile, globalSettings } from './globals';
+import { globalSolutionFile, globalSettings, isSolutionConfigured } from './globals';
 import * as fs from 'fs';
 import { ProjectIndex } from './ProjectIndex';
 import { PathUtils } from './PathUtils';
@@ -305,8 +305,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             // Clear detected solutions cache to allow fresh detection
             this._detectedSolutionsCache = null;
             
-            if (!globalSolutionFile) {
-                logger.info("ℹ️ No solution file set. Clearing tree.");
+            if (!isSolutionConfigured()) {
+                logger.info("ℹ️ No configured solution (#498: none remembered, or remembered without a version). Clearing tree.");
                 this._root = []; // This will trigger the welcome screen if `clarion.solutionOpen` is false
                 this._onDidChangeTreeData.fire();
                 const endTime = performance.now();
@@ -457,16 +457,24 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                     ));
 
                     for (const solution of detectedSolutions) {
+                        // #498: the remembered solution that could not load for want of a
+                        // Clarion version is listed like any other, but says why it is here.
+                        const isRemembered = !!globalSolutionFile &&
+                            solution.solutionPath.toLowerCase() === globalSolutionFile.toLowerCase();
                         const solutionNode = new TreeNode(
                             `▶ ${solution.solutionName}`,
                             TreeItemCollapsibleState.None,
                             {
                                 type: 'detectedSolution',
                                 solutionPath: solution.solutionPath,
-                                tooltip: `Click to open: ${solution.solutionPath}`
+                                tooltip: isRemembered
+                                    ? `Remembered for this folder, but no Clarion version is stored for it.\nClick to open and pick a version: ${solution.solutionPath}`
+                                    : `Click to open: ${solution.solutionPath}`
                             },
                             undefined,
-                            path.dirname(solution.solutionPath)
+                            isRemembered
+                                ? `${path.dirname(solution.solutionPath)} · remembered, needs a Clarion version`
+                                : path.dirname(solution.solutionPath)
                         );
                         nodes.push(solutionNode);
                     }
@@ -762,8 +770,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return element.children;
         }
     
-        // ✅ If no solution is loaded, show detected solutions
-        if (!globalSolutionFile) {
+        // ✅ If no solution is loaded — or one is remembered without a Clarion version
+        // (#498) — show detected solutions, so there is always something to click.
+        if (!isSolutionConfigured()) {
             logger.info(`🔍 No solution file, checking for detected solutions...`);
             return await this.getDetectedSolutionsNodes();
         }
@@ -1255,8 +1264,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         try {
             logger.info("🔄 Getting solution tree from cache...");
 
-            if (!globalSolutionFile) {
-                logger.info("ℹ️ No solution file set. Showing 'Open Solution' node.");
+            if (!isSolutionConfigured()) {
+                logger.info("ℹ️ No configured solution. Showing 'Open Solution' node.");
                 const noSolutionNode = new TreeNode(
                     "Open Solution",
                     TreeItemCollapsibleState.None,

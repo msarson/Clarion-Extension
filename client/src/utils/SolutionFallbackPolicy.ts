@@ -94,3 +94,28 @@ export function shouldRestoreSolutionFromHistory(
     if (globalSolutionFile) return false;
     return hasWorkspaceFolder;
 }
+
+/**
+ * #498 — what the remembered solution settings amount to.
+ *
+ *   - 'none'          no solution is remembered: the no-solution UI (found solutions,
+ *                     recent solutions, Open Solution) applies.
+ *   - 'ready'         solution, ClarionProperties.xml and version are all known: the
+ *                     loaded-solution UI applies and initialization may proceed.
+ *   - 'needs-version' a solution is remembered but its Clarion version or properties
+ *                     file is not (the folder was checked out elsewhere, or
+ *                     `.vscode/settings.json` was deleted): the no-solution UI applies,
+ *                     the remembered entry is marked, and Set Version is offered.
+ *                     Initialization must NOT be attempted — it can only fail.
+ */
+export type RememberedSolutionState = 'none' | 'ready' | 'needs-version';
+
+export function rememberedSolutionState(
+    solutionFile: string,
+    propertiesFile: string,
+    version: string
+): RememberedSolutionState {
+    if (!solutionFile) return 'none';
+    if (!propertiesFile || !version) return 'needs-version';
+    return 'ready';
+}

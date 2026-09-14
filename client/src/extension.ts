@@ -6,7 +6,7 @@ import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { unsupportedPlatformNotice } from './platformUtils';
-import { globalSolutionFile, activateClarionVersionState } from './globals';
+import { globalSolutionFile, activateClarionVersionState, isSolutionConfigured } from './globals';
 import LoggerManager from './utils/LoggerManager';
 import { LoggingConfig } from '../../common/LoggingConfig';
 import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
@@ -219,7 +219,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // indicator is solution-load feedback only, driven by SolutionInitializer.
 
     // Always create views
-    await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
+    // #498: a remembered solution with no Clarion version is not "open" — the found-solutions
+    // view must show, not the empty loaded-solution tree.
+    await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && isSolutionConfigured());
     
     const solutionTreeResult = await createSolutionTreeView(context, treeView, solutionTreeDataProvider);
     treeView = solutionTreeResult.treeView;

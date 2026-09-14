@@ -19,7 +19,7 @@ export interface ClarionSolutionSettings {
 // #146 explicit-close flag and fallback-policy helper live in
 // `./utils/SolutionFallbackPolicy` (vscode-free so unit tests can import
 // them without dragging in the workspace/ExtensionContext surface).
-import { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
 export { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY };
 
 /**
@@ -228,6 +228,17 @@ export async function ensureActiveClarionVersion(): Promise<boolean> {
     const { commands } = await import('vscode');
     await commands.executeCommand('clarion.setActiveVersion');
     return !!globalClarionVersion;
+}
+
+/**
+ * #498 — true only when a solution is remembered AND its Clarion version and
+ * ClarionProperties.xml are known. The Solution View, the `clarion.solutionOpen`
+ * context and the initializer key off this, not off `globalSolutionFile` alone: a
+ * remembered solution with no version is shown as a found solution to set up, never
+ * as a loaded one with an empty tree.
+ */
+export function isSolutionConfigured(): boolean {
+    return rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'ready';
 }
 
 export async function setGlobalClarionSelection(

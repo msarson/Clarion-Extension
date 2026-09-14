@@ -1,11 +1,13 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
+import { rememberedSolutionState } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
 import {
     completeInitializationStatusBar,
     failInitializationStatusBar,
+    hideInitializationStatusBar,
     updateConfigurationStatusBar,
     updateBuildProjectStatusBar,
     updateInitializationStatusBar
@@ -127,13 +129,42 @@ export async function workspaceHasBeenTrusted(
         // version picker (#134 two-stage) which writes the new-format value
         // to L1 default. The warning at line ~174 already offers that as the
         // "Configure Now" action.
-        if (!globalClarionPropertiesFile || !globalClarionVersion) {
+        if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'needs-version') {
+            // #498: initializing now can only end in "Initialization failed" with an empty
+            // Solution View. Leave the solution remembered, show the found-solutions list
+            // (which marks it) and offer the version picker; the tree keys off
+            // isSolutionConfigured(), so nothing renders as a loaded solution.
             logger.warn(
-                `⚠️ Missing Clarion properties file or version after upstream load — ` +
-                `globalClarionPropertiesFile="${globalClarionPropertiesFile || 'MISSING'}", ` +
-                `globalClarionVersion="${globalClarionVersion || 'MISSING'}". ` +
-                `Surfacing diagnostic at line ~174 instead of writing legacy defaults that would stomp user state.`
+                `⚠️ Solution "${globalSolutionFile}" is remembered but has no Clarion version ` +
+                `(propertiesFile="${globalClarionPropertiesFile || 'MISSING'}", version="${globalClarionVersion || 'MISSING'}"). ` +
+                `Not initializing; offering Set Version (#498).`
             );
+            hideInitializationStatusBar();
+            await commands.executeCommand("setContext", "clarion.solutionOpen", false);
+            await refreshSolutionTreeView();
+            const action = await vscodeWindow.showWarningMessage(
+                `"${path.basename(globalSolutionFile)}" is remembered for this folder but has no Clarion version. ` +
+                `Set one to load it.`,
+                "Set Version",
+                "Open Solution..."
+            );
+            if (action === "Set Version") {
+                await commands.executeCommand('clarion.setActiveVersion');
+                if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'ready') {
+                    // The picker sets the effective version in memory only; remember it for
+                    // this solution so the next reopen does not land here again.
+                    await setGlobalClarionSelection(
+                        globalSolutionFile,
+                        globalClarionPropertiesFile,
+                        globalClarionVersion,
+                        globalSettings.configuration || 'Release'
+                    );
+                    await commands.executeCommand('clarion.reinitializeSolution');
+                }
+            } else if (action === "Open Solution...") {
+                await commands.executeCommand('clarion.openSolution');
+            }
+            return;
         }
         
         // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
