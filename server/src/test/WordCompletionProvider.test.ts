@@ -275,8 +275,8 @@ suite('WordCompletionProvider', () => {
             const items = await p.provide(doc, { line: 8, character: 7 }, 'TGLO:');
             const labels = items.map(i => i.label);
 
-            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
-            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var1'), `Expected Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var2'), `Expected Var2 in: ${labels.join(', ')}`);
         });
     });
 
@@ -371,12 +371,12 @@ suite('WordCompletionProvider', () => {
             const tgloItems = await provider.provide(memberDoc, { line: 5, character: 7 }, 'TGLO:');
             const gloLabels = gloItems.map(i => i.label);
             const tgloLabels = tgloItems.map(i => i.label);
-            const gloItem = gloItems.find(i => i.label === 'GLO:SessionId');
-            const tgloItem = tgloItems.find(i => i.label === 'TGLO:PageReceived');
+            const gloItem = gloItems.find(i => i.label === 'SessionId');
+            const tgloItem = tgloItems.find(i => i.label === 'PageReceived');
 
-            assert.ok(gloLabels.includes('GLO:SessionId'), `Expected GLO:SessionId in: ${gloLabels.join(', ')}`);
-            assert.ok(tgloLabels.includes('TGLO:PageReceived'), `Expected TGLO:PageReceived in: ${tgloLabels.join(', ')}`);
-            assert.ok(tgloLabels.includes('TGLO:SocketCount'), `Expected TGLO:SocketCount in: ${tgloLabels.join(', ')}`);
+            assert.ok(gloLabels.includes('SessionId'), `Expected GLO:SessionId in: ${gloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('PageReceived'), `Expected TGLO:PageReceived in: ${tgloLabels.join(', ')}`);
+            assert.ok(tgloLabels.includes('SocketCount'), `Expected TGLO:SocketCount in: ${tgloLabels.join(', ')}`);
             assert.strictEqual(gloItem?.insertText, 'SessionId', `Expected suffix insertText for GLO:, got: ${gloItem?.insertText}`);
             assert.strictEqual(tgloItem?.insertText, 'PageReceived', `Expected suffix insertText for TGLO:, got: ${tgloItem?.insertText}`);
         });
@@ -398,13 +398,14 @@ suite('WordCompletionProvider', () => {
 
             const items = await p.provide(doc, { line: 6, character: 7 }, 'TGLO:');
             const labels = items.map(i => i.label);
-            const tgloVar1 = items.find(i => i.label === 'TGLO:Var1');
-            const tgloVar2 = items.find(i => i.label === 'TGLO:Var2');
+            const tgloVar1 = items.find(i => i.label === 'Var1');
+            const tgloVar2 = items.find(i => i.label === 'Var2');
 
-            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
-            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var1'), `Expected Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var2'), `Expected Var2 in: ${labels.join(', ')}`);
             assert.strictEqual(tgloVar1?.insertText, 'Var1', `Expected Var1 suffix insertText, got: ${tgloVar1?.insertText}`);
             assert.strictEqual(tgloVar2?.insertText, 'Var2', `Expected Var2 suffix insertText, got: ${tgloVar2?.insertText}`);
+            assert.strictEqual(tgloVar1?.detail, 'TGLO:Var1', '#507: the qualified name is the detail');
         });
 
         test('TGLO: still resolves from token-range fallback when scope analyzer has no containing procedure', async () => {
@@ -423,7 +424,7 @@ suite('WordCompletionProvider', () => {
             const items = await p.provide(doc, { line: 5, character: 7 }, 'TGLO:');
             const labels = items.map(i => i.label);
 
-            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var1'), `Expected Var1 in: ${labels.join(', ')}`);
         });
 
         test('TGLO: only returns TGLO-prefixed members', async () => {
@@ -446,15 +447,15 @@ suite('WordCompletionProvider', () => {
 
             const items = await p.provide(doc, { line: 11, character: 7 }, 'TGLO:');
             const labels = items.map(i => i.label);
-            const tgloVar1 = items.find(i => i.label === 'TGLO:Var1');
-            const tgloVar2 = items.find(i => i.label === 'TGLO:Var2');
-            const tgloNested = items.find(i => i.label === 'TGLO:GLO:TGLO');
+            const tgloVar1 = items.find(i => i.label === 'Var1');
+            const tgloVar2 = items.find(i => i.label === 'Var2');
+            const tgloNested = items.find(i => i.label === 'GLO:TGLO');
 
-            assert.ok(labels.includes('TGLO:Var1'), `Expected TGLO:Var1 in: ${labels.join(', ')}`);
-            assert.ok(labels.includes('TGLO:Var2'), `Expected TGLO:Var2 in: ${labels.join(', ')}`);
-            assert.ok(labels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in: ${labels.join(', ')}`);
-            assert.ok(!labels.includes('TGLO:TGLO'), `Did not expect duplicate split form TGLO:TGLO. Got: ${labels.join(', ')}`);
-            assert.ok(!labels.includes('GLO:SessionId'), `Did not expect GLO:SessionId for TGLO qualifier. Got: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var1'), `Expected Var1 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('Var2'), `Expected Var2 in: ${labels.join(', ')}`);
+            assert.ok(labels.includes('GLO:TGLO'), `Expected TGLO:GLO:TGLO in: ${labels.join(', ')}`);
+            assert.ok(!labels.includes('TGLO'), `Did not expect duplicate split form TGLO:TGLO. Got: ${labels.join(', ')}`);
+            assert.ok(!labels.includes('SessionId'), `Did not expect GLO:SessionId for TGLO qualifier. Got: ${labels.join(', ')}`);
             assert.ok(!labels.includes('LocalVar'), `Did not expect LocalVar for TGLO qualifier. Got: ${labels.join(', ')}`);
             assert.strictEqual(tgloVar1?.insertText, 'Var1', `Expected Var1 suffix insertText, got: ${tgloVar1?.insertText}`);
             assert.strictEqual(tgloVar2?.insertText, 'Var2', `Expected Var2 suffix insertText, got: ${tgloVar2?.insertText}`);
@@ -502,10 +503,10 @@ suite('WordCompletionProvider', () => {
             const methodLabels = methodItems.map(i => i.label);
             const routineLabels = routineItems.map(i => i.label);
 
-            assert.ok(methodLabels.includes('TGLO:Var1'), `Expected TGLO:Var1 in method scope: ${methodLabels.join(', ')}`);
-            assert.ok(methodLabels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in method scope: ${methodLabels.join(', ')}`);
-            assert.ok(routineLabels.includes('TGLO:Var1'), `Expected TGLO:Var1 in routine scope: ${routineLabels.join(', ')}`);
-            assert.ok(routineLabels.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in routine scope: ${routineLabels.join(', ')}`);
+            assert.ok(methodLabels.includes('Var1'), `Expected TGLO:Var1 in method scope: ${methodLabels.join(', ')}`);
+            assert.ok(methodLabels.includes('GLO:TGLO'), `Expected TGLO:GLO:TGLO in method scope: ${methodLabels.join(', ')}`);
+            assert.ok(routineLabels.includes('Var1'), `Expected TGLO:Var1 in routine scope: ${routineLabels.join(', ')}`);
+            assert.ok(routineLabels.includes('GLO:TGLO'), `Expected TGLO:GLO:TGLO in routine scope: ${routineLabels.join(', ')}`);
         });
     });
 

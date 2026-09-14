@@ -193,6 +193,10 @@ export class WordCompletionProvider {
                         .map(tail => tail.substring(tail.lastIndexOf(':') + 1).toUpperCase())
                 );
 
+                // #507: the list shows the field name (what follows the typed qualifier)
+                // and carries the qualified name as detail. VS Code's word at the cursor
+                // stops at the colon, so a bare label is a plain prefix match for the typed
+                // letters; the qualified name stays visible in the detail column.
                 return qualifierMatches
                     .filter(item => {
                         const tail = String(item.label).substring(fullQualifier.length);
@@ -200,11 +204,13 @@ export class WordCompletionProvider {
                         return !nestedTailLastSegments.has(tail.toUpperCase());
                     })
                     .map(item => {
-                        const label = String(item.label);
-                        const qualifierTail = label.substring(fullQualifier.length);
+                        const qualified = String(item.label);
+                        const qualifierTail = qualified.substring(fullQualifier.length);
                         const remainder = qualifierTail.substring(typedSuffix.length);
                         return {
                             ...item,
+                            label: qualifierTail,
+                            detail: qualified,
                             insertText: remainder,
                         };
                     });

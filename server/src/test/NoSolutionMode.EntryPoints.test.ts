@@ -453,8 +453,8 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
                 position: { line: 4, character: 7 }
             } as any, sourceDoc);
 
-            const glo = gloItems.find(i => i.label === 'GLO:SessionId');
-            const tglo = tgloItems.find(i => i.label === 'TGLO:PageReceived');
+            const glo = gloItems.find(i => i.label === 'SessionId');
+            const tglo = tgloItems.find(i => i.label === 'PageReceived');
             assert.ok(glo, `expected GLO:SessionId in completion; got: ${gloItems.map(i => i.label).join(', ')}`);
             assert.ok(tglo, `expected TGLO:PageReceived in completion; got: ${tgloItems.map(i => i.label).join(', ')}`);
             assert.strictEqual(glo?.insertText, 'SessionId');
@@ -498,7 +498,7 @@ suite('NoSolutionMode LSP entry-points (#139)', () => {
 
             const provider = new ReferencesProvider();
             const sourceDoc = TextDocument.create(fix.sourceUri!, 'clarion', 1, memberOneBody);
-            const position = cursorPositionOf(memberOneBody, 'GLO:SessionId');
+            const position = cursorPositionOf(memberOneBody, 'SessionId');
 
             const refs = await provider.provideReferences(sourceDoc, position, { includeDeclaration: true });
 

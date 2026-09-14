@@ -43,14 +43,15 @@ suite('#499 prefix completion on a FILE with KEY(PRE:Field)', () => {
         const items = await makeProvider(doc).provide(doc, { line: 11, character: 6 }, 'ORD:');
         const labels = items.map(i => String(i.label)).sort();
 
-        for (const want of ['ORD:ID', 'ORD:CusID', 'ORD:Total', 'ORD:OrdKey', 'ORD:CusKey', 'ORD:Record']) {
+        for (const want of ['ID', 'CusID', 'Total', 'OrdKey', 'CusKey', 'Record']) {
             assert.ok(labels.includes(want), `expected ${want} in: ${labels.join(', ')}`);
         }
-        for (const bad of ['ORD:ORD', 'ORD:ORD:ID', 'ORD:ORD:CusID', 'ORD:OPT', 'ORD:NOCASE', 'ORD:DUP']) {
+        for (const bad of ['ORD', 'ORD:ID', 'ORD:CusID', 'OPT', 'NOCASE', 'DUP']) {
             assert.ok(!labels.includes(bad), `did not expect ${bad} in: ${labels.join(', ')}`);
         }
-        const id = items.find(i => i.label === 'ORD:ID');
+        const id = items.find(i => i.label === 'ID');
         assert.strictEqual(id?.insertText, 'ID');
+        assert.strictEqual(id?.detail, 'ORD:ID', '#507: label is the field name, detail the qualified name');
     });
 
     test('a typed partial after the prefix narrows the same list', async () => {
@@ -59,7 +60,7 @@ suite('#499 prefix completion on a FILE with KEY(PRE:Field)', () => {
         const doc = makeDoc(lines.join('\n'));
         const items = await makeProvider(doc).provide(doc, { line: 11, character: 7 }, 'ORD:C');
         const labels = items.map(i => String(i.label)).sort();
-        assert.deepStrictEqual(labels, ['ORD:CusID', 'ORD:CusKey']);
+        assert.deepStrictEqual(labels, ['CusID', 'CusKey']);
     });
 
     test('a column-0 label that itself carries a colon still completes in its nested form', async () => {
@@ -75,6 +76,6 @@ suite('#499 prefix completion on a FILE with KEY(PRE:Field)', () => {
         ].join('\n'));
         const items = await makeProvider(doc).provide(doc, { line: 6, character: 7 }, 'TGLO:');
         const labels = items.map(i => String(i.label)).sort();
-        assert.deepStrictEqual(labels, ['TGLO:GLO:SessionId', 'TGLO:Plain']);
+        assert.deepStrictEqual(labels, ['GLO:SessionId', 'Plain']);
     });
 });

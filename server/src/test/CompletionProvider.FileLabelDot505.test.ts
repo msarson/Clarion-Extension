@@ -43,14 +43,16 @@ suite('#505 dot completion on a FILE label', () => {
     test('Orders. offers the PRE-qualified field set, inserting the field name', async () => {
         const items = await complete('  Orders.');
         const labels = items.map(i => String(i.label)).sort();
-        assert.deepStrictEqual(labels, ['ORD:CusID', 'ORD:ID', 'ORD:OrdKey', 'ORD:Record', 'ORD:Total']);
-        assert.strictEqual(items.find(i => i.label === 'ORD:ID')?.insertText, 'ID');
+        assert.deepStrictEqual(labels, ['CusID', 'ID', 'OrdKey', 'Record', 'Total']);
+        const id = items.find(i => i.label === 'ID');
+        assert.strictEqual(id?.insertText, 'ID');
+        assert.strictEqual(id?.detail, 'ORD:ID', '#507: the qualified name is the detail');
     });
 
     test('Orders.C narrows the same list', async () => {
         const items = await complete('  Orders.C');
         const labels = items.map(i => String(i.label)).sort();
-        assert.deepStrictEqual(labels, ['ORD:CusID']);
+        assert.deepStrictEqual(labels, ['CusID']);
     });
 
     test('a label that is not a structure still offers nothing', async () => {

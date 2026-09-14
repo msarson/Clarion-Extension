@@ -387,12 +387,13 @@ export class CompletionProvider {
         }
 
         if (!best) return null;
-        const qualifier = `${best.structurePrefix}:`;
+        // Qualifier completion already labels each item with the bare field name and
+        // carries the qualified name (ORD:CusID) as detail (#507); after a dot the whole
+        // field name is inserted, since the client replaces the partial typed after it.
         const partialUpper = partial.toUpperCase();
-        const items = (await this.wordCompletion.provide(document, position, qualifier))
-            .map(item => ({ item, field: String(item.label).substring(qualifier.length) }))
-            .filter(({ field }) => field.toUpperCase().startsWith(partialUpper))
-            .map(({ item, field }) => ({ ...item, insertText: field }));
+        const items = (await this.wordCompletion.provide(document, position, `${best.structurePrefix}:`))
+            .filter(item => String(item.label).toUpperCase().startsWith(partialUpper))
+            .map(item => ({ ...item, insertText: String(item.label) }));
         return items.length > 0 ? items : null;
     }
 
