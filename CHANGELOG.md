@@ -22,6 +22,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Maintenance
 
+- **Folding no longer logs a spurious "circular reference" warning for nested structures.** A VIEW's JOIN, or a QUEUE inside a GROUP, was walked twice and warned about each time; the redundant second walk is removed, with folding output unchanged. [#514](https://github.com/msarson/Clarion-Extension/issues/514)
 - **Development, CI and the type definitions now all target Node 20,** the runtime VS Code 1.97 ships. `.nvmrc`, `engines.node` and `@types/node` are pinned to the 20 line, the release workflows read `.nvmrc`, and `npm run test:node20` runs the suite under Node 20 before a release dry run. [#491](https://github.com/msarson/Clarion-Extension/issues/491)
 - **The build now compiles with TypeScript 6.0.3 and bundler module resolution.** Output is unchanged; the old node10 resolver, removed in TypeScript 6, could not read `exports`-only packages, which is what kept the language-server protocol package pinned. [#497](https://github.com/msarson/Clarion-Extension/issues/497)
 - **The language client and server libraries moved from 8.1 to 10.1 and the protocol package from 3.17.5 to 3.18.3.** No behaviour change is intended; the transport under every feature is newer, so the whole feature set was re-exercised in an Extension Development Host. [#405](https://github.com/msarson/Clarion-Extension/issues/405)
