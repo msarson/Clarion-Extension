@@ -574,6 +574,11 @@
         "command": "clarion.setActiveVersion",
         "title": "Set Active Version",
         "category": "Clarion"
+      },
+      {
+        "command": "clarion.setLogLevel",
+        "title": "Set Log Level",
+        "category": "Clarion"
       }
     ],
     "menus": {
@@ -1371,6 +1376,17 @@
           "type": "boolean",
           "default": false,
           "description": "Disabled by default. Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the 'Clarion Language Server' output channel. Enable when reporting a performance problem — these lines identify exactly which operation is slow — then attach the channel contents to your issue. Negligible overhead either way; the timers always run, only the output is gated. Toggling requires reloading the VS Code window (issue #297)."
+        },
+        "clarion.log.level": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "default": "error",
+          "markdownDescription": "How much the Clarion extension logs. `error` (the default) logs only errors, which is what end users want. Raise it to capture a diagnostic log for a bug report: `warn` adds the extension's warnings (missing settings, degraded fallbacks), `info` adds a running trace of what it is doing, and `debug` adds everything. The lines go to the 'Clarion Extension (Client)' and 'Clarion Language Server' output channels and to `.clarion-debug/client.log`. `info` and `debug` are verbose on a large solution, so raise the level only while reproducing a problem, then set it back. Applies to both processes and takes effect immediately (no reload). Run **Clarion: Set Log Level** to change it from the palette."
         },
         "clarion.activeVersion": {
           "type": "string",

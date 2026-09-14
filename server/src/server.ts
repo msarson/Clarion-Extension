@@ -440,6 +440,14 @@ connection.onInitialize((params) => {
             { settings?: { log?: { performance?: { enabled?: boolean } } } } | undefined)?.settings?.log?.performance;
         LoggingConfig.PERF_CHANNELS_ENABLED = logOpts?.enabled === true;
 
+        // #440: apply the log level the client sent in settings, so a raised level
+        // reaches the server from its first breath. Live changes arrive via the
+        // clarion/setLogLevel notification below. "error" (or absent) leaves the
+        // override unset, i.e. the per-module pins, unchanged from before.
+        const initLevel = (params.initializationOptions as
+            { settings?: { log?: { level?: string } } } | undefined)?.settings?.log?.level;
+        LoggingConfig.LEVEL_OVERRIDE = LoggingConfig.normalizeOverride(initLevel);
+
         // #289: a configured solution announces itself IN the initialize request (race-free — this
         // handler runs at t≈4ms, before any validation or timer can compete). The explicit
         // `configuredSolutionFile` field is the contract; the settings fallback covers older
@@ -2570,6 +2578,14 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
 connection.onNotification('clarion/projectConstantsChanged', () => {
     logger.test('📥 clarion/projectConstantsChanged — coalescing (#317)');
     projectConstantsCoalescer.trigger();
+});
+
+// #440: live log-level changes from the client. The client owns the setting;
+// this keeps the server process's override in step without a reload.
+connection.onNotification('clarion/setLogLevel', (params: { level?: string }) => {
+    LoggingConfig.LEVEL_OVERRIDE = LoggingConfig.normalizeOverride(params?.level);
+    // Logged at error so it lands whatever the new level is (confirms the change took).
+    logger.error(`log level override set to "${LoggingConfig.LEVEL_OVERRIDE ?? 'error (none)'}"`);
 });
 
 

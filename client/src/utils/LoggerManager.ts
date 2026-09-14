@@ -46,10 +46,14 @@ class Logger {
         if (!Logger.enabled) return false;
         if (this.fullDebugging) return true;
         // "perf" / "test" levels are their own channels — they silence all
-        // standard-severity output.
+        // standard-severity output and ignore the #440 global override.
         if (this.level === "perf" || this.level === "test") return false;
+        // #440 — a global override, when set, is the effective level for every
+        // standard-severity logger, so a user can raise the level to see the
+        // otherwise-unreachable warn/info lines without a custom build.
+        const effective = LoggingConfig.LEVEL_OVERRIDE ?? this.level;
         const levels = ["debug", "info", "warn", "error"];
-        return levels.indexOf(level) >= levels.indexOf(this.level);
+        return levels.indexOf(level) >= levels.indexOf(effective);
     }
 
     private emit(label: string, message: string, args: any[]) {

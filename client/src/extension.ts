@@ -9,6 +9,7 @@ import { unsupportedPlatformNotice } from './platformUtils';
 import { globalSolutionFile, activateClarionVersionState, isSolutionConfigured } from './globals';
 import LoggerManager from './utils/LoggerManager';
 import { LoggingConfig } from '../../common/LoggingConfig';
+import { applyConfiguredLogLevel, registerLogLevelControl } from './logging/LogLevelController';
 import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
@@ -82,6 +83,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
     LoggingConfig.PERF_CHANNELS_ENABLED =
         workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false);
 
+    // #440: apply clarion.log.level to this process NOW (before the activation awaits),
+    // so a raised level captures the client's own startup warn/info lines. Forwarding to
+    // the server is skipped here — it is not up yet; the server reads the level from
+    // initializationOptions at init. Live changes are handled by registerLogLevelControl.
+    applyConfiguredLogLevel(false);
+
     // Per-session log file — truncates on activate so each session is fresh.
     // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log
     // (or extension log dir when no workspace is open).
@@ -143,6 +150,10 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // that window — or any stall in the server startup — produced
     // "command 'clarion.openSolution' not found".
     context.subscriptions.push(...registerNoFolderSolutionCommands(context, openClarionSolution));
+
+    // #440: the log-level command + live setting watcher are folder-independent
+    // diagnostics, so register them early alongside the other no-folder commands.
+    context.subscriptions.push(...registerLogLevelControl(context));
 
     const state: ActivationManager.ActivationState = {
         client,

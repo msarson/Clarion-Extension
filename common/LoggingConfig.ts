@@ -32,6 +32,35 @@ export class LoggingConfig {
      * from initializationOptions.settings.
      */
     static PERF_CHANNELS_ENABLED: boolean = false;
+
+    /**
+     * #440 — global log-level override. When set, it is the effective level for
+     * every standard-severity logger, winning over the per-module `setLevel(...)`
+     * pins (121 of which pin "error" at import time, which is why the 229
+     * `logger.warn` sites are otherwise unreachable). `undefined` means "no
+     * override — each logger uses its own level", identical to pre-#440 behaviour.
+     *
+     * It deliberately does NOT touch the "perf" / "test" channels: a logger created
+     * with those levels stays a dedicated channel and ignores this override.
+     *
+     * Mutable, per process: the client sets it from `clarion.log.level` at
+     * activation and on config change; the server sets it from
+     * `initializationOptions.settings.log.level` and the `clarion/setLogLevel`
+     * notification. Its default matches the setting's default ("error"), so a
+     * fresh install behaves exactly as before.
+     */
+    static LEVEL_OVERRIDE: "debug" | "info" | "warn" | "error" | undefined = undefined;
+
+    /**
+     * Coerce an arbitrary value (e.g. a settings string) to a standard level, or
+     * `undefined` when it is not one — used to set {@link LEVEL_OVERRIDE} safely.
+     * "error" maps to `undefined` (no override needed: it is already the floor and
+     * every module pins "error"), keeping the common case override-free.
+     */
+    static normalizeOverride(value: unknown): "debug" | "info" | "warn" | "error" | undefined {
+        if (value === "debug" || value === "info" || value === "warn") return value;
+        return undefined;
+    }
     /**
      * Detects if we're running in release mode (packaged extension).
      * 
