@@ -2476,12 +2476,13 @@ END`;
             assert.strictEqual(desc!.joins.length, 0);
         });
 
-        test('VIEW with INNER JOIN(Other) populates joins[0]', () => {
+        test('VIEW with JOIN(Other),INNER populates joins[0] with side INNER', () => {
             const code = [
                 'MyView VIEW(Customer)',                     // 0
                 '       PROJECT(Cus:Id)',                     // 1
-                '       INNER JOIN(Orders, Cus:Id, Ord:CId)', // 2
-                '       END',                                 // 3
+                '       JOIN(Orders, Cus:Id, Ord:CId),INNER', // 2
+                '       END',                                 // 3 (closes the JOIN)
+                '       END',                                 // 4
             ].join('\n');
             const { structure, tokens } = buildL(code);
             const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
@@ -2500,7 +2501,8 @@ END`;
                 '       THREAD',                          // 1 (continuation of VIEW header)
                 '       PROJECT(Cus:Name, Cus:Id)',       // 2
                 '       JOIN(Orders, Cus:Id)',            // 3
-                '       END',                              // 4
+                '       END',                              // 4 (closes the JOIN)
+                '       END',                              // 5
             ].join('\n');
             const { structure, tokens } = buildL(code);
             const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
@@ -2561,18 +2563,27 @@ END`;
             assert.deepStrictEqual(views.map(v => v.label), ['ViewA', 'ViewB']);
         });
 
-        test('OUTER JOIN side is captured', () => {
+        test('nested JOINs are all captured, in source order, each with its own side', () => {
+            // #504: there is no OUTER keyword — a plain JOIN is the (left outer) default,
+            // and INNER is a trailing attribute. Compiler-verified in test-programs/ViewJoinTest.
             const code = [
                 'MyView VIEW(Customer)',                  // 0
-                '       OUTER JOIN(Orders, Cus:Id)',       // 1
-                '       END',                              // 2
+                '       JOIN(Orders, Cus:Id)',             // 1
+                '         JOIN(Lines, Ord:Id),INNER',      // 2
+                '         END',                            // 3
+                '       END',                              // 4
+                '       END',                              // 5
             ].join('\n');
             const { structure, tokens } = buildL(code);
             const view = tokens.find(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'VIEW');
             assert.ok(view);
+            assert.strictEqual(view!.finishesAt, 5, 'the VIEW closes at its own END');
             const desc = structure.getViewDescriptor(view!);
             assert.ok(desc);
-            assert.strictEqual(desc!.joins[0].side, 'OUTER');
+            assert.deepStrictEqual(desc!.joins, [
+                { side: undefined, joinedFile: 'Orders' },
+                { side: 'INNER', joinedFile: 'Lines' },
+            ]);
         });
     });
 

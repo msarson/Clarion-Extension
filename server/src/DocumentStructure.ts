@@ -1470,6 +1470,20 @@ export class DocumentStructure {
             }
         }
 
+        // 🛑 #504: JOIN opens a structure only inside a VIEW (or a JOIN nested in one) —
+        // Language Reference > View Structures > JOIN. Anywhere else the `Join(` shape
+        // is a prototype, a call or a label: demote it so it never eats an END.
+        if (token.value.toUpperCase() === "JOIN") {
+            const owner = this.structureStack[this.structureStack.length - 1];
+            const ownerName = owner?.value.toUpperCase();
+            if (ownerName !== "VIEW" && ownerName !== "JOIN") {
+                if (DOCSTRUCT_TRACE) logger.info(`📛 Demoting JOIN at line ${token.line} – not inside a VIEW (owner: ${ownerName ?? 'none'})`);
+                token.type = TokenType.Keyword;
+                token.subType = undefined;
+                return;
+            }
+        }
+
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
         if (token.value.toUpperCase() === "MODULE") {
             // 🚀 PERFORMANCE: Use tokensByLine index

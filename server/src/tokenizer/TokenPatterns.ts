@@ -16,7 +16,9 @@ export const STRUCTURE_PATTERNS: Record<string, RegExp> = {
     FILE: /\bFILE\b/i,
     INTERFACE: /\bINTERFACE\b/i,
     IF: /(?<![:\w.])\bIF\b/i,  // ✅ Prevent matching after : or . or word char
-    JOIN: /\bJOIN\b/i,
+    // #504: only the `JOIN(` structure form. `SHEET,...,JOIN` is an attribute (also
+    // caught by the ',' prevChar guard) and a bare `Join` label never opens a block.
+    JOIN: /\bJOIN\b(?=\s*\()/i,
     LOOP: /(?<![:\w.])\bLOOP\b/i,  // ✅ Prevent matching after : or . or word char
     MAP: /\bMAP\b/i,
     MENU: /\bMENU\b(?=\s*(\(|,|!|$))/i,

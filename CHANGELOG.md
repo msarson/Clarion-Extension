@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.4] - Unreleased
 
+#### Editing
+
+- **A VIEW's JOIN folds, and the VIEW's own fold now reaches its own END.** JOIN was never treated as a structure, so its END closed the enclosing VIEW one line early and the JOIN itself could not be folded. The compiler confirmed the shape: every JOIN needs its own END or period, JOINs nest, and INNER is a trailing attribute (`JOIN(...),INNER`), not a prefix. [#504](https://github.com/msarson/Clarion-Extension/issues/504)
+
 #### Maintenance
 
 - **Development, CI and the type definitions now all target Node 20,** the runtime VS Code 1.97 ships. `.nvmrc`, `engines.node` and `@types/node` are pinned to the 20 line, the release workflows read `.nvmrc`, and `npm run test:node20` runs the suite under Node 20 before a release dry run. [#491](https://github.com/msarson/Clarion-Extension/issues/491)

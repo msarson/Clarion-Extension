@@ -881,6 +881,9 @@ export class ClarionDocumentSymbolProvider {
 
         const foldingOnly = ["IF", "LOOP", "CASE", "BEGIN", "EXECUTE", "ITEMIZE", "BREAK", "ACCEPT"];
         if (foldingOnly.includes(value.toUpperCase())) return;
+        // #504: JOIN is now a Structure token (so it folds and closes its own END); the
+        // VIEW branch below already renders JOIN/PROJECT children by look-ahead.
+        if (value.toUpperCase() === "JOIN") return;
         // Handle UI controls that are one-liners (no END statement)
         // BUTTON is now handled by WindowElement token type
         const oneLineControls: string[] = [];

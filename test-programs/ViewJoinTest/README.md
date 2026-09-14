@@ -12,7 +12,7 @@ with `Unresolved External TOPSPEED`.
 
 ## What it pins
 
-`viewjoin.clw` declares three VIEWs over the same two files:
+`viewjoin.clw` declares four VIEWs over the same two files:
 
 1. **`ViewPrefix`** — `JOIN(CUS:CusKey, …)` / `PROJECT(CUS:Name)`. The prefixed form the
    app generator emits.
@@ -64,6 +64,22 @@ Also compiler-verified, for the dotted form: `PROJECT(Orders.Total)` inside
 `JOIN(Customer.CusKey, ...)` fails with `Field not found in parent FILE`. A dot
 qualifier therefore does **not** override the enclosing JOIN's scope — it is a
 qualifier to strip, not an owner to honour.
+
+## A JOIN closes itself; INNER is an attribute (#504)
+
+Three more variants, compiled the same way (Clarion 10.0.12567) while making JOIN a
+foldable structure in the extension:
+
+| variant | result |
+|---|---|
+| `JOIN(CUS:CusKey, ORD:CusID)` with no END of its own, then the VIEW's `END` | error on the line after the VIEW: `Expected: <ID> <LINEBREAK> ; END INCLUDE OMIT SECTION COMPILE PRAGMA JOIN` — the single END closed the JOIN and the VIEW is still open |
+| `INNER JOIN(CUS:CusKey, ORD:CusID)` | `Expected a PROJECT statement` — the prefix form is not Clarion |
+| `JOIN(CUS:CusKey, ORD:CusID),INNER` | compiles; kept in the fixture as **`ViewInnerAttr`** |
+
+So every JOIN needs its own `END` (or period), JOINs nest, and INNER is a trailing
+attribute exactly as the Language Reference draws it. Extension tests that closed a
+JOIN and its VIEW with one END, or wrote `INNER JOIN(`, were pinning source that does
+not compile and were corrected in #504.
 
 ## Building it
 

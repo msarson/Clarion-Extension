@@ -279,6 +279,7 @@ export class ClarionTokenizer {
                             upperSubstring.startsWith('MODULE') ||
                             upperSubstring.startsWith('MAP') ||
                             upperSubstring.startsWith('VIEW') ||
+                            upperSubstring.startsWith('JOIN') ||   // #504: VIEW's nested JOIN ... END
                             upperSubstring.startsWith('SHEET') ||
                             upperSubstring.startsWith('TAB') ||
                             upperSubstring.startsWith('OPTION') ||

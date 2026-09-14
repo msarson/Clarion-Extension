@@ -2556,6 +2556,7 @@ MyView VIEW(Customer)
        PROJECT(Cus:Id)
        JOIN(Ord:OrdKey, Cus:Id)
        END
+       END
 `;
         assert.strictEqual(viewProjectDiags(code).length, 0);
     });
@@ -2636,6 +2637,7 @@ MyView VIEW(Orders)
        PROJECT(Ord:Id)
        JOIN(Cus:CusKey, Ord:CusId)
        END
+       END
 `;
             assert.strictEqual(viewProjectDiags(code).length, 0);
         });
@@ -2659,6 +2661,7 @@ CusId LONG
 MyView VIEW(Orders)
        PROJECT(Ord:Id)
        JOIN(Cus:CusKey, Ord:Bogus)
+       END
        END
 `;
             const diags = viewProjectDiags(code);
@@ -2686,6 +2689,7 @@ CusId LONG
 MyView VIEW(Customer)
        PROJECT(Cus:Id)
        JOIN(Ord:OrdKey, Ord:CusId)
+       END
        END
 `;
             // CusId is on Orders (joined), not on Customer (parent). The compiler
@@ -2715,6 +2719,7 @@ MyView VIEW(Orders)
        PROJECT(Ord:Id)
        JOIN(Cus:CusKey, Cus:Id)
        END
+       END
 `;
             // `Cus:Id` carries the JOINED file's prefix, but the parent Orders also
             // has an `Id`, and the compiler accepts it. Comparing the written form
@@ -2722,7 +2727,7 @@ MyView VIEW(Orders)
             assert.strictEqual(viewProjectDiags(code).length, 0);
         });
 
-        test('INNER / OUTER JOIN are validated the same way', () => {
+        test('a JOIN with the ,INNER attribute is validated the same way', () => {
             const code = `Customer FILE,DRIVER('TopSpeed'),PRE(Cus)
 CusKey     KEY(Cus:Id)
 Record RECORD
@@ -2740,7 +2745,8 @@ CusId LONG
 
 MyView VIEW(Orders)
        PROJECT(Ord:Id)
-       INNER JOIN(Cus:CusKey, Ord:Bogus)
+       JOIN(Cus:CusKey, Ord:Bogus),INNER
+       END
        END
 `;
             const diags = viewProjectDiags(code);
@@ -2770,6 +2776,7 @@ MyView VIEW(Orders)
        END
        JOIN(Cus:CusKey, Ord:Bogus)
        END
+       END
 `;
             const diags = viewProjectDiags(code);
             assert.strictEqual(diags.length, 1);
@@ -2794,6 +2801,7 @@ CusId LONG
 
 MyView VIEW(NotDeclaredAnywhere)
        JOIN(Cus:CusKey, Anything:AtAll)
+       END
        END
 `;
             // The validator cannot know the parent's fields, so it must not accuse.
@@ -2910,6 +2918,7 @@ MyView VIEW(Orders)
        PROJECT(Ord:Id)
        JOIN(Cus:CusKey, Ord:Bogus)
        END
+       END
 `;
             const diags = viewProjectDiagsAtPath('childC.clw', code);
             assert.strictEqual(diags.length, 1);
@@ -2965,6 +2974,7 @@ LiveOnly LONG
 MyView VIEW(Orders)
        PROJECT(Ord:Id)
        JOIN(Cus:CusKey, Ord:LiveOnly, Ord:Missing)
+       END
        END
 `;
             const diags = viewProjectDiagsAtPathWithResolver('childE.clw', code, resolver);
