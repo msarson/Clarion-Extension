@@ -59,6 +59,7 @@ suite('BuiltinFunctionService', () => {
         for (const name of [
             'COMPRESS', 'DEBUGHOOK', 'DECOMPRESS', 'HTTPWEBREQUEST', 'HTTPWEBREQUESTTOFILE',
             'IMAGEROTATEFLIP', 'IMAGETOPNG', 'PRINTERDIALOGA', 'SETLAYOUT',
+            'QUOTE', 'UNQUOTE', 'WHERE',
         ]) {
             strictEqual(service.isBuiltin(name), true, `${name} should be a recognised built-in`);
             strictEqual(service.isBuiltin(name.toLowerCase()), true, `${name} should match case-insensitively`);

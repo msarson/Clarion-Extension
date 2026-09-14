@@ -5727,6 +5727,62 @@
           "syntax": "SETLAYOUT(window, layout)"
         }
       ]
+    },
+    {
+      "name": "QUOTE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "flag",
+              "optional": false
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Expands (unpacks) string data, doubling single quotes and un-paired left angle brackets so the result is safe to use as a string constant. The flag selects which characters are expanded.",
+          "syntax": "QUOTE(string, flag)"
+        }
+      ]
+    },
+    {
+      "name": "UNQUOTE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "value",
+              "optional": false
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Contracts the value's string data, singling up doubled single quotes and doubled un-paired left angle brackets — the inverse of QUOTE.",
+          "syntax": "UNQUOTE(value)"
+        }
+      ]
+    },
+    {
+      "name": "WHERE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "group",
+              "optional": false
+            },
+            {
+              "name": "field",
+              "optional": false
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Returns a field's ordinal position within a GROUP, RECORD, CLASS, or QUEUE structure.",
+          "syntax": "WHERE(group, field)"
+        }
+      ]
     }
   ]
 }
