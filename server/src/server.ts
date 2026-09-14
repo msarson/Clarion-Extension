@@ -657,6 +657,21 @@ import { ContentChangeGuard } from './utils/ContentChangeGuard';
 const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
+// #460 — a completion signal alongside publishDiagnostics, so a client can tell the
+// sync pass from the finished analysis instead of guessing from a quiet period.
+//   complete   — the whole answer is published; no further publish is coming for
+//                this version (the libsrc sync-only exit, and the final combined exit).
+//   deferred   — the async pass has not run yet (pipelines not ready); a drain pass
+//                will re-validate later and emit a further status. No deadline yet.
+//   superseded — the document changed while the async pass ran; this version will
+//                never complete, a newer one is being validated.
+// `version` is the document version the status refers to, so a client can discard an
+// answer for a buffer it has since changed. Additive: nothing that ignores it changes.
+type DiagnosticsStatusState = 'complete' | 'deferred' | 'superseded';
+function sendDiagnosticsStatus(uri: string, version: number, state: DiagnosticsStatusState): void {
+    connection.sendNotification('clarion/diagnosticsStatus', { uri, version, state });
+}
+
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
@@ -745,6 +760,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: complete — the async pass is intentionally skipped, so this sync
+            // publish is the whole answer; no further publish is coming.
+            sendDiagnosticsStatus(document.uri, startVersion, 'complete');
             return;
         }
 
@@ -777,6 +795,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: deferred — the async validators have not run; the drain pass will
+            // re-validate once both pipelines are ready and emit a further status.
+            sendDiagnosticsStatus(document.uri, startVersion, 'deferred');
             return;
         }
 
@@ -850,6 +871,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: superseded — the document changed mid-pass, so this version's async
+            // answer is discarded; the validation for the newer version is the live one.
+            sendDiagnosticsStatus(document.uri, startVersion, 'superseded');
             return;
         }
 
@@ -869,6 +893,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             uri: document.uri,
             caller
         });
+        // #460: complete — the final combined list (sync + async) is published; this is
+        // the whole answer for this version.
+        sendDiagnosticsStatus(document.uri, startVersion, 'complete');
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }

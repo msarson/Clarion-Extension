@@ -23,6 +23,7 @@ fixtures for perf claims.
 node scripts/perf/lsp-driver.js            # warm run against ap1.sln
 node scripts/perf/lsp-driver.js --cold     # true cold start (wipes the %TEMP% caches)
 node scripts/perf/lsp-driver.js --sln=... --file=...
+node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatus ordering (#460); exit 0 = all pass
 ```
 
 - **Cold runs:** the server persists mtime-validated caches under

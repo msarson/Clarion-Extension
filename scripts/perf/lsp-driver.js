@@ -33,7 +33,15 @@ const arg = (name) => { const a = process.argv.find(x => x.startsWith(`--${name}
 const SLN = arg('sln') ?? path.join(APPDEV, 'ap1.sln');
 const TARGET = arg('file') ?? path.join(APPDEV, 'genfiles', 'src', 'IBSCommon.clw');
 const COLD = process.argv.includes('--cold');
+// #460: assert the clarion/diagnosticsStatus ordering instead of timing hovers.
+const DIAG_STATUS = process.argv.includes('--diag-status');
 const STDERR_LOG = path.join(os.tmpdir(), 'clarion-lsp-driver-stderr.log');
+
+// #460: an ordered timeline of publishDiagnostics + diagnosticsStatus events, so
+// the ordering per document is assertable (publish→publish→complete for a normal
+// file, publish→complete for a libsrc file, publish→deferred→…→complete when
+// opened before the pipelines are ready).
+const diagEvents = [];
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -72,12 +80,17 @@ child.on('message', (msg) => {
     if (msg.method === 'workspace/configuration') result = (msg.params.items || []).map(() => null);
     child.send({ jsonrpc: '2.0', id: msg.id, result });
   } else if (msg.method) {
+    if (msg.method === 'textDocument/publishDiagnostics') {
+      diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length });
+    } else if (msg.method === 'clarion/diagnosticsStatus') {
+      diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
+    }
     for (let i = notificationWaiters.length - 1; i >= 0; i--) {
       const w = notificationWaiters[i];
       if (w.method === msg.method) { notificationWaiters.splice(i, 1); w.resolve(msg.params); }
     }
-    if (!/logMessage|telemetry|progress/.test(msg.method)) {
-      console.log(`  [notify] ${msg.method}${msg.params && msg.params.status ? ' ' + msg.params.status : ''}`);
+    if (!/logMessage|telemetry|progress|publishDiagnostics/.test(msg.method)) {
+      console.log(`  [notify] ${msg.method}${msg.params && msg.params.status ? ' ' + msg.params.status : ''}${msg.method === 'clarion/diagnosticsStatus' ? ' ' + msg.params.state + ' v' + msg.params.version : ''}`);
     }
   }
 });
@@ -120,6 +133,95 @@ function findPositions(text) {
   return found;
 }
 
+// #460 — assert the diagnosticsStatus ordering for the three exits the issue names.
+// Runs against the real solution like the perf lane; `updatePaths` is sent AFTER a
+// file is already open, exactly as the deferred exit requires.
+function sendUpdatePaths() {
+  notify('clarion/updatePaths', {
+    redirectionPaths: [path.join(CLARION_ROOT, 'bin')],
+    projectPaths: [path.dirname(SLN)],
+    solutionFilePath: SLN,
+    configuration: 'Debug',
+    clarionVersion: 'DirectSystems',
+    redirectionFile: 'Clarion100.red',
+    macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
+    libsrcPaths: [
+      path.join(CLARION_ROOT, 'libsrc', 'win'),
+      path.join(CLARION_ROOT, 'Accessory', 'libsrc', 'win'),
+    ],
+    defaultLookupExtensions: ['.clw', '.inc', '.equ', '.int'],
+  });
+}
+
+async function runDiagStatusCheck(t0) {
+  const results = [];
+  const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
+  const eventsFor = uri => diagEvents.filter(e => e.uri.toLowerCase() === uri.toLowerCase());
+  const statesFor = uri => eventsFor(uri).filter(e => e.kind === 'status').map(e => e.state);
+  const waitForState = (uri, state, ms) => new Promise(resolve => {
+    const deadline = Date.now() + ms;
+    const tick = () => {
+      if (statesFor(uri).includes(state)) return resolve(true);
+      if (Date.now() > deadline) return resolve(false);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+
+  const libFile = path.join(CLARION_ROOT, 'libsrc', 'win', 'ABASCII.INC');
+  const fileC = path.join(REPO, 'test-programs', 'ViewJoinTest', 'viewjoin.clw');
+
+  // Scenario 1 — a normal file opened BEFORE the pipelines are ready: deferred, then
+  // complete once the solutionReady drain re-validates it.
+  const uriA = toUri(TARGET);
+  const textA = fs.readFileSync(TARGET, 'utf8');
+  notify('textDocument/didOpen', { textDocument: { uri: uriA, languageId: 'clarion', version: 1, text: textA } });
+  console.log(`[${Date.now() - t0}ms] opened ${path.basename(TARGET)} (pre-updatePaths)`);
+  const gotDeferred = await waitForState(uriA, 'deferred', 8000);
+  record('normal file opened before ready → deferred', gotDeferred, statesFor(uriA).join(',') || '(none)');
+
+  sendUpdatePaths();
+  console.log(`[${Date.now() - t0}ms] updatePaths sent — waiting for solutionReady…`);
+  await waitNotification('clarion/solutionReady');
+  console.log(`[${Date.now() - t0}ms] solutionReady`);
+  const aComplete = await waitForState(uriA, 'complete', 120000);
+  record('…then complete after the drain pass', aComplete, statesFor(uriA).join(','));
+
+  // Scenario 2 — a libsrc file: one sync publish then complete, async pass skipped.
+  if (fs.existsSync(libFile)) {
+    const uriB = toUri(libFile);
+    notify('textDocument/didOpen', { textDocument: { uri: uriB, languageId: 'clarion', version: 1, text: fs.readFileSync(libFile, 'utf8') } });
+    console.log(`[${Date.now() - t0}ms] opened libsrc ${path.basename(libFile)}`);
+    const bComplete = await waitForState(uriB, 'complete', 30000);
+    const evB = eventsFor(uriB);
+    const publishesBeforeComplete = evB.slice(0, evB.findIndex(e => e.kind === 'status' && e.state === 'complete')).filter(e => e.kind === 'publish').length;
+    record('libsrc file → complete', bComplete, statesFor(uriB).join(','));
+    record('libsrc file → exactly one publish before complete (async skipped)', bComplete && publishesBeforeComplete === 1, `publishes=${publishesBeforeComplete}`);
+  } else {
+    record('libsrc scenario', false, `libsrc file not found: ${libFile}`);
+  }
+
+  // Scenario 3 — a normal file opened AFTER ready: sync publish, then final publish, then complete.
+  if (fs.existsSync(fileC)) {
+    const uriC = toUri(fileC);
+    notify('textDocument/didOpen', { textDocument: { uri: uriC, languageId: 'clarion', version: 1, text: fs.readFileSync(fileC, 'utf8') } });
+    console.log(`[${Date.now() - t0}ms] opened ${path.basename(fileC)} (post-ready)`);
+    const cComplete = await waitForState(uriC, 'complete', 60000);
+    const evC = eventsFor(uriC);
+    const publishesBeforeComplete = evC.slice(0, evC.findIndex(e => e.kind === 'status' && e.state === 'complete')).filter(e => e.kind === 'publish').length;
+    record('normal file after ready → complete', cComplete, statesFor(uriC).join(','));
+    record('normal file after ready → two publishes before complete (sync + async)', cComplete && publishesBeforeComplete >= 2, `publishes=${publishesBeforeComplete}`);
+    record('normal file after ready → no deferred/superseded', !statesFor(uriC).includes('deferred') && !statesFor(uriC).includes('superseded'), statesFor(uriC).join(','));
+  } else {
+    record('post-ready scenario', false, `fixture not found: ${fileC}`);
+  }
+
+  const failed = results.filter(r => !r.pass);
+  console.log(`\n== diagnosticsStatus assertions: ${results.length - failed.length}/${results.length} passed ==`);
+  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const t0 = Date.now();
@@ -137,6 +239,8 @@ function findPositions(text) {
   });
   notify('initialized', {});
   console.log(`[${Date.now() - t0}ms] initialized`);
+
+  if (DIAG_STATUS) { await runDiagStatusCheck(t0); return; }
 
   // Mirrors the real client's payload — SolutionInitializer.ts (clarion/updatePaths sender)
   notify('clarion/updatePaths', {
