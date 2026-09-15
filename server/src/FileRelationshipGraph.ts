@@ -258,6 +258,21 @@ export class FileRelationshipGraph {
     /** #522 — safety limit on closure depth; ap1.sln converges in 7. */
     private static readonly MAX_CLOSURE_HOPS = 16;
 
+    /**
+     * #523 — every file some node names as a MODULE or CLASS MODULE target: the
+     * implementation files. Normalised (lower-case, forward slashes), deduplicated.
+     * A class compiled through LINK() shows up here and nowhere in the .cwproj lists.
+     */
+    public getModuleImplementationFiles(): string[] {
+        const out = new Set<string>();
+        for (const edges of this.forwardEdges.values()) {
+            for (const e of edges) {
+                if (e.type === 'MODULE' || e.type === 'CLASS_MODULE') out.add(e.toFile);
+            }
+        }
+        return [...out];
+    }
+
     /** True once the graph has processed this path, even if the file produced no edge (#522). */
     public hasNode(filePath: string): boolean {
         return this.scannedFiles.has(this.normalizePath(filePath));

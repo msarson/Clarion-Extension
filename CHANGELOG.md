@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Navigation and hover
 
 - **A class implementation compiled through LINK() and not listed in the .cwproj now gets document links, and every file the solution reaches is in the file graph.** The graph scanned only the files each .cwproj lists, so a hand-coded class file reached through its CLASS MODULE attribute had no node: nothing in it was underlined and hover reported its includes as not found. The build now walks the referenced-file closure, an edit that names a new include pulls it in straight away, and the perf driver has a links mode for checking a file. [#522](https://github.com/msarson/Clarion-Extension/issues/522)
+- **Find All References and rename now search a class implementation compiled through LINK().** The search set came from the .cwproj file lists, so a call to a MAP procedure made inside such a file was never found and rename left it untouched. Implementation files the file graph reaches through a CLASS MODULE attribute are now searched too, within the declaring project. [#523](https://github.com/msarson/Clarion-Extension/issues/523)
 
 #### Editing
 

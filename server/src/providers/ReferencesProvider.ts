@@ -2616,6 +2616,47 @@ export class ReferencesProvider {
     /**
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
+    /**
+     * #523 — a class implementation compiled through LINK() is never a .cwproj item, so
+     * `project.sourceFiles` never lists it and a global symbol used inside it was
+     * invisible to FAR and rename. The file graph reaches such files through the CLASS
+     * MODULE edge of the declaring .inc (#522): add every MODULE-target file that is not
+     * a project item, restricted to the declaring project's folder when that is known
+     * so a same-named family in another project cannot leak in (#364). Returns the
+     * number of files added.
+     */
+    private addLinkOnlyImplementations(
+        allFiles: string[],
+        alwaysInclude: Set<string>,
+        alwaysIncludeNames: Set<string>,
+        projectDir: string | undefined
+    ): number {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return 0;
+        const solutionManager = SolutionManager.getInstance();
+        const projectItems = new Set<string>();
+        for (const project of solutionManager?.solution?.projects ?? []) {
+            for (const sf of project.sourceFiles) {
+                const abs = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                projectItems.add(abs.replace(/\\/g, '/').toLowerCase());
+            }
+        }
+        const dirPrefix = projectDir
+            ? projectDir.replace(/\\/g, '/').toLowerCase().replace(/\/?$/, '/')
+            : undefined;
+        let added = 0;
+        for (const impl of graph.getModuleImplementationFiles()) {
+            if (projectItems.has(impl)) continue;
+            if (dirPrefix && !impl.startsWith(dirPrefix)) continue;
+            const uri = `file:///${impl}`;
+            if (alwaysInclude.has(uri) || alwaysIncludeNames.has(path.basename(impl))) continue;
+            if (allFiles.includes(uri)) continue;
+            allFiles.push(uri);
+            added++;
+        }
+        return added;
+    }
+
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument, crossProjectDll: boolean = true): string[] {
         const scopeType = symbolInfo.scope.type;
         const solutionManager = SolutionManager.getInstance();
@@ -2765,7 +2806,8 @@ export class ReferencesProvider {
                     this.expandDllExportFamily(word330, defining330, allFiles);
                 }
 
-                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                const linkOnly = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, declProject.path);
+                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search (${linkOnly} LINK-only implementation(s), #523)`);
                 return allFiles;
             }
 
@@ -2781,7 +2823,8 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            const linkOnlyAll = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, undefined);
+            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search (${linkOnlyAll} LINK-only implementation(s), #523)`);
             return allFiles;
         }
 
