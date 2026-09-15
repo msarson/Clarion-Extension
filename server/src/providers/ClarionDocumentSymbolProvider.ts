@@ -551,6 +551,13 @@ export class ClarionDocumentSymbolProvider {
 
                     // Reset pastCodeStatement flag when entering new procedure/method
                     pastCodeStatement = false;
+                    // #533 — a ROUTINE holds declarations only when it opens a DATA section;
+                    // without one it is executable code from its first line and has no CODE
+                    // marker to flip the flag back, so `IF x THEN DO Name END` read as a
+                    // declaration "DO Name" (field icon, name cut at the prefix colon).
+                    if (subType === TokenType.Routine && !token.hasLocalData) {
+                        pastCodeStatement = true;
+                    }
 
                     // CRITICAL FIX: If the procedure has no local variables (CODE immediately follows),
                     // set pastCodeStatement to true to prevent execution code from appearing in outline
