@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.4] - Unreleased
 
+#### Navigation and hover
+
+- **A class implementation compiled through LINK() and not listed in the .cwproj now gets document links, and every file the solution reaches is in the file graph.** The graph scanned only the files each .cwproj lists, so a hand-coded class file reached through its CLASS MODULE attribute had no node: nothing in it was underlined and hover reported its includes as not found. The build now walks the referenced-file closure, an edit that names a new include pulls it in straight away, and the perf driver has a links mode for checking a file. [#522](https://github.com/msarson/Clarion-Extension/issues/522)
+
 #### Editing
 
 - **A VIEW's JOIN folds, and the VIEW's own fold now reaches its own END.** JOIN was never treated as a structure, so its END closed the enclosing VIEW one line early and the JOIN itself could not be folded. The compiler confirmed the shape: every JOIN needs its own END or period, JOINs nest, and INNER is a trailing attribute (`JOIN(...),INNER`), not a prefix. [#504](https://github.com/msarson/Clarion-Extension/issues/504)

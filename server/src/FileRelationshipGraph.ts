@@ -71,6 +71,8 @@ export interface FrgBuildStats {
     files: number; scanned: number; reusedFromDisk: number; ms: number;
     /** #315 diagnostics — edge counts by type; a solution build with memberEdges=0 signals degraded resolution. */
     memberEdges?: number; includeEdges?: number; moduleEdges?: number;
+    /** #522 — files reached only through the seeds' INCLUDE / MODULE / CLASS MODULE edges, and the deepest hop walked. */
+    closureFiles?: number; closureHops?: number;
 }
 
 export class FileRelationshipGraph {
@@ -78,6 +80,8 @@ export class FileRelationshipGraph {
 
     private forwardEdges = new Map<string, FileEdge[]>();      // fromFile → edges
     private reverseEdges = new Map<string, FileEdge[]>();      // toFile   → edges
+    /** Every path processed (scanned or replayed), including files that produced no edge — the graph's node set (#522). */
+    private scannedFiles = new Set<string>();
     private classModuleIndex = new Map<string, FileEdge[]>(); // className (upper) → CLASS_MODULE edges
 
     private _built = false;
@@ -138,6 +142,11 @@ export class FileRelationshipGraph {
         const visited = new Set<string>();
         const queue: string[] = projectFiles.map(f => this.normalizePath(f));
         const totalSeeds = queue.length;
+        // #522 — closure bookkeeping: hop depth per enqueued target (seeds are hop 0).
+        const queued = new Set<string>(queue);
+        const hopOf = new Map<string, number>();
+        let closureFiles = 0;
+        let closureHops = 0;
         let processed = 0;
         let nextProgressAt = 500;
 
@@ -168,16 +177,33 @@ export class FileRelationshipGraph {
             if (batch.length === 0) continue;
 
             // Process the batch concurrently.
-            // We intentionally do NOT enqueue the returned INCLUDE targets — recursively
-            // following include chains into library directories (libsrc etc.) can add
-            // thousands of files and make startup unresponsive on large solutions.
-            // PROJECT files are the only seeds; their INCLUDE edges are still recorded so
-            // reverse-include lookups work for files directly referenced by project files.
             await Promise.all(batch.map(async f => {
                 const reused = await this.processFileWithCache(f, diskCache, freshEntries);
                 if (reused) reusedFromDisk++; else scanned++;
             }));
             processed += batch.length;
+            // #522 — walk the referenced-file closure. The .cwproj items are only the
+            // seeds: a class implementation compiled through LINK() is never a Compile
+            // item, so without this it had no node (no document links, invisible to
+            // every graph consumer). Earlier builds refused to enqueue targets for fear
+            // of pulling thousands of libsrc files in; measured on ap1.sln (40 projects,
+            // 2,987 seeds) the closure is +3,425 distinct files, 84% of them generated
+            // .inc files inside the solution's own folders and only 534 from libsrc +
+            // Accessory, converging in 7 hops — ~1.4s cold, ~100ms warm via the disk
+            // cache. MEMBER edges are not followed (they point back at a PROGRAM, a seed
+            // when it belongs to this solution and a foreign tree when it does not).
+            for (const f of batch) {
+                const hop = hopOf.get(f) ?? 0;
+                if (hop >= FileRelationshipGraph.MAX_CLOSURE_HOPS) continue;
+                for (const target of this.closureTargets(f)) {
+                    if (queued.has(target) || visited.has(target)) continue;
+                    queued.add(target);
+                    hopOf.set(target, hop + 1);
+                    if (hop + 1 > closureHops) closureHops = hop + 1;
+                    closureFiles++;
+                    queue.push(target);
+                }
+            }
             if (processed >= nextProgressAt) {
                 nextProgressAt += 500;
                 perfLogger.perf("FRG build progress", {
@@ -208,7 +234,7 @@ export class FileRelationshipGraph {
         }
         this._lastBuildStats = {
             files: processed, scanned, reusedFromDisk, ms: this._buildDurationMs,
-            memberEdges, includeEdges, moduleEdges
+            memberEdges, includeEdges, moduleEdges, closureFiles, closureHops
         };
 
         // #315: a sizeable solution build that produced ZERO MEMBER edges means the
@@ -227,6 +253,45 @@ export class FileRelationshipGraph {
         }
         const edgeCount = this.getAllEdges().length;
         logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
+    }
+
+    /** #522 — safety limit on closure depth; ap1.sln converges in 7. */
+    private static readonly MAX_CLOSURE_HOPS = 16;
+
+    /** True once the graph has processed this path, even if the file produced no edge (#522). */
+    public hasNode(filePath: string): boolean {
+        return this.scannedFiles.has(this.normalizePath(filePath));
+    }
+
+    /** The files this node references that the closure should visit: everything but MEMBER (#522). */
+    private closureTargets(filePath: string): string[] {
+        const out: string[] = [];
+        for (const e of this.forwardEdges.get(filePath) ?? []) {
+            if (e.type === 'MEMBER') continue;
+            if (!out.includes(e.toFile)) out.push(e.toFile);
+        }
+        return out;
+    }
+
+    /**
+     * #522 — after a single file was (re)scanned, process any target it references that
+     * is not yet a node, transitively, under the same hop limit as the build.
+     */
+    private async expandClosure(fromFile: string): Promise<void> {
+        const queue: { file: string; hop: number }[] =
+            this.closureTargets(fromFile).map(file => ({ file, hop: 1 }));
+        const queued = new Set<string>(queue.map(q => q.file));
+        while (queue.length > 0) {
+            const { file, hop } = queue.shift()!;
+            if (this.scannedFiles.has(file)) continue;
+            await this.processFile(file);
+            if (hop >= FileRelationshipGraph.MAX_CLOSURE_HOPS) continue;
+            for (const target of this.closureTargets(file)) {
+                if (queued.has(target) || this.scannedFiles.has(target)) continue;
+                queued.add(target);
+                queue.push({ file: target, hop: hop + 1 });
+            }
+        }
     }
 
     /**
@@ -251,6 +316,7 @@ export class FileRelationshipGraph {
             try { mtimeMs = (await fs.promises.stat(filePath)).mtimeMs; } catch { mtimeMs = undefined; }
             const entry = diskCache?.files[filePath];
             if (entry && mtimeMs !== undefined && entry.mtimeMs === mtimeMs) {
+                this.scannedFiles.add(filePath);
                 for (const edge of entry.edges) this.addEdge(edge);
                 freshEntries[filePath] = entry;
                 return true;
@@ -370,6 +436,9 @@ export class FileRelationshipGraph {
         }
 
         await this.processFile(filePath, uri);
+        // #522 — an edit can name a file the graph has never seen; pull it and what it
+        // references in, so links and lookups do not wait for the next full build.
+        await this.expandClosure(filePath);
     }
 
     /**
@@ -379,6 +448,7 @@ export class FileRelationshipGraph {
         this.ownerProjectByFile = null;
         this.forwardEdges.clear();
         this.reverseEdges.clear();
+        this.scannedFiles.clear();
         this.classModuleIndex.clear();
         this._built = false;
         this._building = false;
@@ -510,6 +580,7 @@ export class FileRelationshipGraph {
      * Returns newly-discovered file paths to enqueue (INCLUDE targets).
      */
     private async processFile(filePath: string, originalUri?: string): Promise<string[]> {
+        this.scannedFiles.add(this.normalizePath(filePath));
         const tokenCache = TokenCache.getInstance();
 
         // Try the original URI first (exact key from VS Code, preserves casing)
@@ -543,6 +614,7 @@ export class FileRelationshipGraph {
     }
 
     private processFileSync(filePath: string, originalUri?: string): string[] {
+        this.scannedFiles.add(this.normalizePath(filePath));
         const tokenCache = TokenCache.getInstance();
 
         let tokens = originalUri ? tokenCache.getTokensByUri(originalUri) : null;

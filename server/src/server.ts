@@ -2479,6 +2479,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     member_edges: graph.lastBuildStats?.memberEdges ?? -1,
                     include_edges: graph.lastBuildStats?.includeEdges ?? -1,
                     module_edges: graph.lastBuildStats?.moduleEdges ?? -1,
+                    // #522 — files beyond the .cwproj seeds reached through the closure walk, and its depth.
+                    closure_files: graph.lastBuildStats?.closureFiles ?? -1,
+                    closure_hops: graph.lastBuildStats?.closureHops ?? -1,
                     // #434 — file_count above counts what RESOLVED, so on its own
                     // it cannot distinguish 0-of-0 from 0-of-3016.
                     source_file_count: sourceFileCount,

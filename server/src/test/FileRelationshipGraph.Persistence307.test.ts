@@ -120,7 +120,10 @@ suite('FileRelationshipGraph #307 — disk persistence', () => {
         await graph.buildInBackground(files);
         const stats = graph.lastBuildStats!;
 
-        assert.strictEqual(stats.scanned, 1, `only the changed file re-scans (scanned=${stats.scanned})`);
+        // #522: the changed seed re-scans, and so does extra.inc — the closure walk
+        // reaches it through the new INCLUDE edge and it has no cache entry yet.
+        // Everything that was cached still replays (the reusedFromDisk check below).
+        assert.strictEqual(stats.scanned, 2, `the changed file and its new, uncached include re-scan (scanned=${stats.scanned})`);
         assert.strictEqual(stats.reusedFromDisk, files.length - 1);
         const mainEdges = graph.getForwardEdges(mainPath);
         assert.ok(mainEdges.some(e => e.type === 'INCLUDE' && e.toFile.endsWith('extra.inc')),

@@ -18,6 +18,7 @@
 //   node scripts/perf/lsp-driver.js --cold          # wipe %TEMP% clarion-extension-* caches first
 //   node scripts/perf/lsp-driver.js --sln=F:\DirectSystems\AppDev\IBS.sln
 //   node scripts/perf/lsp-driver.js --file=F:\...\SomeOther.clw
+//   node scripts/perf/lsp-driver.js --sln=... --file=... --links   # print document links for the file (#470 hypothesis)
 'use strict';
 const { fork } = require('child_process');
 const fs = require('fs');
@@ -276,6 +277,24 @@ async function runDiagStatusCheck(t0) {
   // raise it (e.g. 60) when measuring the async validator chain / idle-lane work.
   const settleSec = Number(arg('settle') ?? 3);
   await new Promise(r => setTimeout(r, settleSec * 1000));
+
+  // --links: print the document links the server offers for TARGET and stop.
+  // Used to test the #470 hypothesis (a class .clw compiled via LINK() and not listed
+  // in the .cwproj gets no links because it is never a graph seed).
+  if (process.argv.includes('--links')) {
+    // Links come from the file graph, which builds on a delay after solutionReady — wait for 'built'.
+    let gs; do { gs = await waitNotification('clarion/graphStatus', 120000); } while (!gs || gs.status !== 'built');
+    console.log(`graphStatus: ${JSON.stringify(gs)}`);
+    const links = await request('textDocument/documentLink', { textDocument: { uri } }, 60000);
+    console.log(`
+== document links for ${path.basename(TARGET)}: ${(links ?? []).length} ==`);
+    for (const l of links ?? []) {
+      console.log(`  line ${l.range.start.line + 1} col ${l.range.start.character + 1}-${l.range.end.character + 1} -> ${l.target}`);
+    }
+    try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+    setTimeout(() => { child.kill(); process.exit(0); }, 1000);
+    return;
+  }
 
   console.log(`\n== hover timings (cold then warm per word) ==`);
   const results = [];
