@@ -28,7 +28,8 @@ const logger = LoggerManager.getLogger("ReferenceCountIndex");
 logger.setLevel("error");
 const perfLogger = LoggerManager.getLogger("ReferenceCountIndex.Perf", "perf");
 
-const DISK_CACHE_VERSION = 1;
+// 2: #525 — prefixed labels (GLO:Name) are recorded whole as well as by segment.
+const DISK_CACHE_VERSION = 2;
 
 interface RefIndexDiskEntry { mtimeMs: number; counts: Record<string, number>; }
 interface RefIndexDiskFile {
@@ -55,7 +56,12 @@ export const CLARION_STRUCTURAL_WORDS = new Set([
     'static', 'thread', 'private', 'protected', 'virtual', 'derived', 'implements',
 ]);
 
-const WORD_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
+// #525 — a Clarion label may carry a prefix joined by a single colon (GLO:Name,
+// GVF:Owner, CUS:Name). The scan records the joined name AND each segment: FAR on
+// a prefixed global asks for the whole name, field lookups ask for the bare field
+// name with the prefix applied separately. A double colon (Menu::MENUBAR1, a
+// routine label) is not a prefix and ends the match.
+const WORD_RE = /[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*/g;
 // Clarion string literal: single quotes, '' escapes inside.
 const STRING_RE = /'(?:[^']|'')*'/g;
 
@@ -358,6 +364,14 @@ export class ReferenceCountIndex {
             let m: RegExpExecArray | null;
             while ((m = WORD_RE.exec(line)) !== null) {
                 const word = m[0].toLowerCase();
+                if (word.includes(':')) {
+                    counts.set(word, (counts.get(word) ?? 0) + 1);
+                    for (const part of word.split(':')) {
+                        if (CLARION_STRUCTURAL_WORDS.has(part)) continue;
+                        counts.set(part, (counts.get(part) ?? 0) + 1);
+                    }
+                    continue;
+                }
                 if (CLARION_STRUCTURAL_WORDS.has(word)) continue;
                 counts.set(word, (counts.get(word) ?? 0) + 1);
             }
