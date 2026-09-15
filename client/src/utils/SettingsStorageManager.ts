@@ -1,4 +1,5 @@
-import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext } from 'vscode';
+import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext, WorkspaceConfiguration } from 'vscode';
+import { chooseSettingsWriteTarget } from './ConfigurationPrecedence';
 import LoggerManager from './LoggerManager';
 import { ClarionSolutionSettings } from '../globals';
 import {
@@ -149,12 +150,14 @@ export class SettingsStorageManager {
                 logger.info(`✅ Created .vscode directory: ${vscodeDir}`);
             }
 
-            // Always use WorkspaceFolder target (saves to .vscode/settings.json)
-            const target = ConfigurationTarget.WorkspaceFolder;
+            // #530 — write back to the scope the settings live in: the folder's
+            // .vscode/settings.json when they are there, else the .code-workspace file
+            // in a saved (multi-root) workspace. Reading resource-less and writing
+            // folder-only left a multi-root user's change somewhere they never looked.
             const config = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
-            
-            logger.info(`💾 Saving settings to .vscode/settings.json in ${workspaceFolder}`);
-            logger.info(`   Target: WorkspaceFolder (${ConfigurationTarget.WorkspaceFolder})`);
+            const target = SettingsStorageManager.writeTargetFor(config);
+
+            logger.info(`💾 Saving settings (${target === ConfigurationTarget.Workspace ? 'workspace file' : '.vscode/settings.json in ' + workspaceFolder})`);
             logger.info(`   Settings to save:
                 - solutionFile: ${solutionFile}
                 - propertiesFile: ${propertiesFile}
@@ -203,11 +206,23 @@ export class SettingsStorageManager {
      * and writes the standalone clarion.configuration key (so onDidChangeConfiguration fires).
      * Call this whenever the user changes the build configuration.
      */
+    /**
+     * #530 — the ConfigurationTarget the Clarion settings should be written to: the
+     * scope `clarion.solutions` (else `clarion.configuration`) was read from, or the
+     * workspace file when nothing is set yet in a saved workspace.
+     */
+    static writeTargetFor(config: WorkspaceConfiguration): ConfigurationTarget {
+        const inspection = config.inspect('solutions') ?? config.inspect('configuration');
+        const owner = chooseSettingsWriteTarget(inspection, workspace.workspaceFile !== undefined);
+        return owner === 'Workspace' ? ConfigurationTarget.Workspace : ConfigurationTarget.WorkspaceFolder;
+    }
+
     static async updateActiveConfiguration(configuration: string): Promise<void> {
         const workspaceFolder = workspace.workspaceFolders?.[0];
         if (!workspaceFolder) return;
 
         const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
+        const target = SettingsStorageManager.writeTargetFor(config);
         const currentSolution = config.get<string>('currentSolution', '');
         const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
 
@@ -217,10 +232,10 @@ export class SettingsStorageManager {
 
         if (idx >= 0) {
             solutions[idx] = { ...solutions[idx], configuration };
-            await config.update('solutions', solutions, ConfigurationTarget.WorkspaceFolder);
+            await config.update('solutions', solutions, target);
         }
 
-        await config.update('configuration', configuration, ConfigurationTarget.WorkspaceFolder);
+        await config.update('configuration', configuration, target);
         logger.info(`✅ Updated active configuration to: ${configuration}`);
     }
 

@@ -85,15 +85,15 @@ describe('decideConfiguration (#437)', () => {
         );
     });
 
-    it('matching is exact, not case-insensitive', () => {
-        // Pinning current behaviour rather than asserting it is ideal: the
-        // configuration string is compared verbatim against the .sln and is
-        // written back verbatim, so a case-folded match would silently rewrite
-        // the user's stored value. If this ever needs to change it should be a
-        // deliberate decision, not a drive-by.
+    it('matching is on the configuration name, case-insensitively, and normalises to the .sln spelling (#530)', () => {
+        // #437 pinned exact matching "until this is a deliberate decision". #530 made it:
+        // the redirection parser already matches [Debug] sections case-insensitively,
+        // and a case-folded or platform-less stored value is rewritten to the entry the
+        // solution declares — the value the picker would have produced — rather than
+        // prompting the user to re-pick something they had already set.
         assert.deepStrictEqual(
             decideConfiguration(AVAILABLE, 'debug|win32'),
-            { kind: 'prompt', choices: AVAILABLE }
+            { kind: 'migrated', configuration: 'Debug|Win32' }
         );
     });
 

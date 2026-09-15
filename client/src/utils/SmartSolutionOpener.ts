@@ -4,7 +4,8 @@ import { SolutionScanner, DetectedSolution } from '../utils/SolutionScanner';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection } from '../globals';
-import { readActiveConfigFromSlnCache, configNameFromFull } from './SlnCacheUtils';
+import { readActiveConfigFromSlnCache } from './SlnCacheUtils';
+import { chooseConfiguration, explicitConfigurationFor } from './ConfigurationPrecedence';
 import { resolveValidConfiguration } from './ConfigurationValidator';
 import LoggerManager from './LoggerManager';
 import { PathUtils } from '../PathUtils';
@@ -214,17 +215,21 @@ export class SmartSolutionOpener {
             // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
             const configurations = this.extractConfigurationsFromSolution(solutionPath);
 
-            // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
-            // configurations may be full "Config|Platform" strings; match by config name prefix
-            const cachedFullConfig = readActiveConfigFromSlnCache(solutionPath);
-            const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
-            const matchedConfig = cachedConfigName
-                ? configurations.find(c => configNameFromFull(c) === cachedConfigName) ?? null
-                : null;
+            // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
+            // is only a hint behind it (see SolutionOpener for the same rule).
+            const clarionConfig = workspace.getConfiguration('clarion');
+            const choice = chooseConfiguration({
+                explicit: explicitConfigurationFor(
+                    solutionPath,
+                    clarionConfig.get<string>('configuration', ''),
+                    clarionConfig.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', [])),
+                slnCache: readActiveConfigFromSlnCache(solutionPath),
+                available: configurations,
+            });
 
-            if (matchedConfig) {
-                selectedConfig = matchedConfig;
-                logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
+            if (choice.configuration) {
+                selectedConfig = choice.configuration;
+                logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
             } else if (configurations.length > 1) {
                 const configChoice = await window.showQuickPick(configurations, {
                     placeHolder: "Select build configuration"

@@ -10,7 +10,8 @@ import { refreshSolutionTreeView } from '../views/ViewManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { shouldMarkExplicitlyClosed, SolutionCloseReason } from '../utils/SolutionFallbackPolicy';
 import LoggerManager from '../utils/LoggerManager';
-import { readActiveConfigFromSlnCache, configNameFromFull } from '../utils/SlnCacheUtils';
+import { readActiveConfigFromSlnCache } from '../utils/SlnCacheUtils';
+import { chooseConfiguration, explicitConfigurationFor } from '../utils/ConfigurationPrecedence';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -378,18 +379,23 @@ export async function openClarionSolution(
         const solutionFileContent = fs.readFileSync(solutionFilePath, 'utf-8');
         const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
 
-        // Try to auto-detect the active configuration from the .sln.cache file
-        // (written by Clarion IDE/MSBuild after each build — reflects last-used config)
-        // availableConfigs may be full "Config|Platform" strings; match by config name prefix
-        const cachedFullConfig = readActiveConfigFromSlnCache(solutionFilePath);
-        const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
-        const matchedConfig = cachedConfigName
-            ? availableConfigs.find(c => configNameFromFull(c) === cachedConfigName) ?? null
-            : null;
+        // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
+        // (the configuration the IDE last built with) is only a hint behind it. Both
+        // are matched on the configuration name, so a hand-written `Debug|Win32`
+        // lands on the `Debug` the picker produces.
+        const clarionConfig = workspace.getConfiguration('clarion');
+        const choice = chooseConfiguration({
+            explicit: explicitConfigurationFor(
+                solutionFilePath,
+                clarionConfig.get<string>('configuration', ''),
+                clarionConfig.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', [])),
+            slnCache: readActiveConfigFromSlnCache(solutionFilePath),
+            available: availableConfigs,
+        });
 
-        if (matchedConfig) {
-            globalSettings.configuration = matchedConfig;
-            logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
+        if (choice.configuration) {
+            globalSettings.configuration = choice.configuration;
+            logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
         } else if (availableConfigs.length > 1) {
             // No cache hint — prompt the user
             const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {

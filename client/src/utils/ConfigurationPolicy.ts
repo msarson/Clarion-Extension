@@ -8,6 +8,8 @@
  * is the thin wrapper that reads the `.sln` and runs the prompt.
  */
 
+import { normalizeConfigurationTo } from './ConfigurationPrecedence';
+
 export type ConfigurationDecision =
     /** `current` is already one of the solution's declared configurations. */
     | { kind: 'valid'; configuration: string }
@@ -30,10 +32,13 @@ export function decideConfiguration(available: string[], current: string): Confi
         return { kind: 'valid', configuration: current };
     }
 
-    // An empty configuration has nothing to migrate FROM: `''` would prefix-match
-    // every entry, so the guard is load-bearing, not defensive.
+    // An empty configuration has nothing to migrate FROM (the guard is load-bearing:
+    // `''` would match every entry). #530 — the match is on the configuration NAME,
+    // platform ignored and case-insensitive, in both directions: a hand-written
+    // `Debug|Win32` against a name-only list migrates to `Debug`, and `Debug`
+    // against a full-form list migrates to `Debug|Win32` as before.
     if (current) {
-        const migrated = available.find(config => config.startsWith(current + '|'));
+        const migrated = normalizeConfigurationTo(current, available);
         if (migrated) {
             return { kind: 'migrated', configuration: migrated };
         }
