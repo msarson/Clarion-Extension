@@ -27,3 +27,36 @@ export function buildConfigDirArg(clarionPropertiesFile: string | undefined | nu
     if (!clarionPropertiesFile) return "";
     return `/property:ConfigDir="${path.dirname(clarionPropertiesFile)}"`;
 }
+
+/**
+ * #531 — `Debug|Win32` → `Debug (Win32)`, `Release` → `Release`, empty → a placeholder,
+ * for the build header and the build result messages.
+ */
+export function describeConfiguration(configuration: string | undefined | null): string {
+    const value = (configuration ?? '').trim();
+    if (!value) return '(no configuration)';
+    const [name, ...platform] = value.split('|');
+    const plat = platform.join('|').trim();
+    return plat ? `${name.trim()} (${plat})` : name.trim();
+}
+
+/**
+ * #531 — the lines written to the Clarion Build output before MSBuild starts: what is
+ * being built, in which configuration, and the exact MSBuild command line. The task
+ * terminal is hidden by default and the command line used to go only to the
+ * extension's own log, so a Release build by mistake was invisible.
+ */
+export function formatBuildHeader(p: {
+    buildTarget: 'Solution' | 'Project';
+    targetName: string;
+    configuration: string;
+    msBuildPath: string;
+    buildArgs: string[];
+}): string[] {
+    const what = p.buildTarget === 'Solution' ? 'solution' : 'project';
+    return [
+        `Building ${what} ${p.targetName} — ${describeConfiguration(p.configuration)}`,
+        `MSBuild: ${p.msBuildPath} ${p.buildArgs.join(' ')}`.trimEnd(),
+        '',
+    ];
+}
