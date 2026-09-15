@@ -140,53 +140,6 @@ export class ContextualHoverHandler {
     }
 
     /**
-     * Handle ELSE keyword - can be in IF or CASE structure
-     */
-    handleElseKeyword(tokens: Token[], position: { line: number; character: number }): Hover | null {
-        // Search backwards for CASE or IF keyword to determine context
-        let foundCase = false;
-        let foundIf = false;
-        
-        for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-            const searchLineTokens = tokens.filter(t => t.line === searchLine);
-            
-            for (const token of searchLineTokens) {
-                const upperValue = token.value.toUpperCase();
-                if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
-                    foundCase = true;
-                    break;
-                } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
-                    foundIf = true;
-                    break;
-                } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                    break;
-                }
-            }
-            
-            if (foundCase || foundIf) break;
-        }
-        
-        // Provide context-specific documentation
-        if (foundCase) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
-                }
-            };
-        } else if (foundIf) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**ELSE** (Keyword - in IF structure)\n\nStatements following ELSE execute when all preceding IF and ELSIF conditions evaluate as false. ELSE is optional but must be last option in IF structure if used.`
-                }
-            };
-        }
-        
-        return null;
-    }
-
-    /**
      * Handle keywords that serve as both a window/structure attribute and a runtime builtin
      * (HIDE, DISABLE, TYPE): in window context → attribute hover; in code context → builtin hover
      */

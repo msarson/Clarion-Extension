@@ -19,6 +19,7 @@ import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import { BranchInfo } from '../../tokenizer/TokenTypes';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 
@@ -167,8 +168,13 @@ export class HoverRouter {
      * Handle special keywords (MODULE, TO, ELSE, PROCEDURE, HIDE, DISABLE, TYPE)
      */
     private handleSpecialKeywords(context: HoverContext): Hover | null {
-        const { word, line, tokens, position, isInMapBlock, isInClassBlock, documentStructure, currentLineTokens } = context;
+        const { word, line, tokens, position, document, isInMapBlock, isInClassBlock, documentStructure, currentLineTokens } = context;
         const upperWord = word.toUpperCase();
+
+        if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
+            const branchHover = this.handleBranchKeyword(upperWord, position, tokens, document);
+            if (branchHover) return branchHover;
+        }
 
         if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
             const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure);
@@ -208,10 +214,6 @@ export class HoverRouter {
 
         if (upperWord === 'TO') {
             return this.contextHandler.handleToKeyword(tokens, position, line);
-        }
-
-        if (upperWord === 'ELSE') {
-            return this.contextHandler.handleElseKeyword(tokens, position);
         }
 
         if (upperWord === 'PROCEDURE' || upperWord === 'FUNCTION') { // #247: PROCEDURE ≡ FUNCTION
@@ -428,6 +430,91 @@ export class HoverRouter {
 
         const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
         return { contents: content };
+    }
+
+    /**
+     * Handle hover over an OF / OROF / ELSE / ELSIF branch keyword — shows
+     * which CASE/IF it belongs to (with label, if any), its position among
+     * sibling branches, its condition (when it has one), and a link back to
+     * the opening CASE/IF line.
+     *
+     * Reads `DocumentStructure.populateBranches()`'s existing `branches`
+     * array (BranchInfo[]) off the CASE/IF Structure token — the same data
+     * source, and the same reasoning, as the fix that made ELSE hover
+     * correctly resolve its owner: a backward token scan misattributes a
+     * branch keyword when an unrelated nested CASE/IF appears earlier in the
+     * same block, but `branches` already excludes a nested block's own
+     * branch keywords from its container's list, so reading it back is
+     * correct even then. Returns null (falling through to the generic
+     * keyword doc) when no container's `branches` records this position —
+     * e.g. word "OF" used somewhere that isn't actually a CASE branch.
+     */
+    private handleBranchKeyword(
+        word: string,
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const found = this.findBranchAt(tokens, position);
+        if (!found) return null;
+        const { container, branch, index } = found;
+
+        const containerKind = container.value.toUpperCase();
+        const ordinal = `${index + 1} of ${container.branches!.length}`;
+        const labelText = container.label ? ` \`${container.label}\`` : '';
+        const lines: string[] = [`**${word.toUpperCase()}** — branch ${ordinal} in ${containerKind}${labelText}`];
+
+        if (branch.kind === 'OF') {
+            lines.push('', branch.valueExpr ? `Matches when equal to: \`${branch.valueExpr}\`` : 'Matches when equal to the value above.');
+        } else if (branch.kind === 'OROF') {
+            lines.push('', branch.valueExpr ? `Also matches when equal to: \`${branch.valueExpr}\`` : 'Also matches when equal to the value above.');
+        } else if (branch.kind === 'ELSIF') {
+            lines.push('', branch.valueExpr
+                ? `Runs when every preceding condition was false, and: \`${branch.valueExpr}\``
+                : 'Runs when every preceding condition was false.');
+        } else if (branch.kind === 'ELSE') {
+            lines.push('', containerKind === 'CASE'
+                ? 'Runs when no OF/OROF option matched.'
+                : 'Runs when the IF condition (and every ELSIF) evaluated false.');
+        }
+
+        try {
+            const openerLine = document.getText().split(/\r?\n/)[container.line];
+            if (openerLine && openerLine.trim()) {
+                lines.push('');
+                lines.push('```clarion');
+                lines.push(openerLine.trim());
+                lines.push('```');
+            }
+        } catch { /* best-effort source preview */ }
+
+        lines.push(this.formatter.locationLink(document.uri, container.line));
+
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+    }
+
+    /**
+     * Finds the CASE/IF Structure token whose `branches` array records an
+     * OF/OROF/ELSE/ELSIF clause at `position`, along with that specific
+     * `BranchInfo` entry and its 0-based position among sibling branches.
+     */
+    private findBranchAt(
+        tokens: Token[],
+        position: { line: number; character: number }
+    ): { container: Token; branch: BranchInfo; index: number } | null {
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure || !t.branches) continue;
+            const upper = t.value.toUpperCase();
+            if (upper !== 'CASE' && upper !== 'IF') continue;
+
+            const index = t.branches.findIndex(b =>
+                b.keywordToken.line === position.line &&
+                position.character >= b.keywordToken.start &&
+                position.character <= b.keywordToken.start + b.keywordToken.value.length
+            );
+            if (index >= 0) return { container: t, branch: t.branches[index], index };
+        }
+        return null;
     }
 
     /**
