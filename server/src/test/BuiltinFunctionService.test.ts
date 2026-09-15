@@ -65,4 +65,17 @@ suite('BuiltinFunctionService', () => {
             strictEqual(service.isBuiltin(name.toLowerCase()), true, `${name} should match case-insensitively`);
         }
     });
+    // #521 — the help documents REGISTER and UNREGISTER with the note "Can also be
+    // prototyped as REGISTEREVENT" / "UNREGISTEREVENT". The grammar highlighted both
+    // alias names but the catalog only knew the short forms, so a call written with the
+    // long name got no hover or signature help.
+    test('#521 — the REGISTEREVENT and UNREGISTEREVENT alias names are recognised', () => {
+        for (const [alias, base] of [['REGISTEREVENT', 'REGISTER'], ['UNREGISTEREVENT', 'UNREGISTER']]) {
+            strictEqual(service.isBuiltin(alias), true, `${alias} should be a recognised built-in`);
+            strictEqual(service.isBuiltin(alias.toLowerCase()), true, `${alias} should match case-insensitively`);
+            deepStrictEqual(service.getSignatures(alias).map(s => (s.parameters ?? []).length),
+                service.getSignatures(base).map(s => (s.parameters ?? []).length),
+                `${alias} should carry the same parameter list as ${base}`);
+        }
+    });
 });

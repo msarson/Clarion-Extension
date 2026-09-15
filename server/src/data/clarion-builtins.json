@@ -5197,6 +5197,38 @@
       ]
     },
     {
+      "name": "REGISTEREVENT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "event",
+              "optional": false
+            },
+            {
+              "name": "handler",
+              "optional": false
+            },
+            {
+              "name": "object",
+              "optional": false
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Alias prototype of REGISTER (the help: \"Can also be prototyped as REGISTEREVENT\"). Registers an event handler procedure to be called by the ACCEPT loop whenever the specified event occurs. handler is the ADDRESS of the procedure. object is a unique 32-bit identifier (typically ADDRESS(SELF)). Multiple handlers can be registered for the same event; they execute in reverse registration order.",
+          "syntax": "REGISTEREVENT(event, handler, object [, window] [, control])"
+        }
+      ]
+    },
+    {
       "name": "UNREGISTER",
       "signatures": [
         {
@@ -5225,6 +5257,38 @@
           "returnType": "",
           "description": "Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration. Can also be prototyped as UNREGISTEREVENT.",
           "syntax": "UNREGISTER([event] [, handler] [, object] [, window] [, control])"
+        }
+      ]
+    },
+    {
+      "name": "UNREGISTEREVENT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "event",
+              "optional": true
+            },
+            {
+              "name": "handler",
+              "optional": true
+            },
+            {
+              "name": "object",
+              "optional": true
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Alias prototype of UNREGISTER (the help: \"Can also be prototyped as UNREGISTEREVENT\"). Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration.",
+          "syntax": "UNREGISTEREVENT([event] [, handler] [, object] [, window] [, control])"
         }
       ]
     },

@@ -24,6 +24,10 @@ All notable changes to the Clarion Extension are documented here.
 - **The Open Solution button works during startup in a window with no folder.** Clicking it before the extension finished starting reported that `clarion.openSolution` was not found; the no-folder commands are now registered before the language server starts. [#513](https://github.com/msarson/Clarion-Extension/issues/513)
 - **The log level is now adjustable, so a diagnostic log can be captured for a bug report.** A new `clarion.log.level` setting and a **Clarion: Set Log Level** command raise both processes from `error` (the default) to `warn`, `info` or `debug`, taking effect immediately. The extension's warnings, previously unreachable because every module pinned `error`, now surface when the level is raised. [#440](https://github.com/msarson/Clarion-Extension/issues/440)
 
+#### Syntax
+
+- **Eight catalogued built-in functions are now highlighted, and `REGISTEREVENT` and `UNREGISTEREVENT` are recognised.** `CALLBACK`, `NULL`, `SQL`, `SQLCALLBACK` and the four `HTTPWEBREQUEST` and image functions added in 1.0.4 had hover and completion but were painted as plain identifiers; the two event-handler alias prototypes had the reverse gap. A test now checks that every name in the built-in catalog is matched by the grammar. [#521](https://github.com/msarson/Clarion-Extension/issues/521)
+
 #### Maintenance
 
 - **Twelve documented built-in functions were added to the built-in catalog** — `COMPRESS`, `DEBUGHOOK`, `DECOMPRESS`, `HTTPWEBREQUEST`, `HTTPWEBREQUESTtoFile`, `ImageRotateFlip`, `ImageToPng`, `PRINTERDIALOGA`, `SETLAYOUT`, `QUOTE`, `UNQUOTE` and `WHERE` — so they are recognised by completion, hover and diagnostics rather than treated as unknown. [#519](https://github.com/msarson/Clarion-Extension/issues/519)
