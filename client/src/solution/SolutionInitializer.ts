@@ -1,7 +1,7 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
-import { rememberedSolutionState } from '../utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
 import {
@@ -129,7 +129,13 @@ export async function workspaceHasBeenTrusted(
         // version picker (#134 two-stage) which writes the new-format value
         // to L1 default. The warning at line ~174 already offers that as the
         // "Configure Now" action.
-        if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'needs-version') {
+        // #535 — a remembered version the selected ClarionProperties.xml no longer
+        // registers (the IDE was updated) is a stale name: same handling as a missing one.
+        const rememberedState = rememberedSolutionState(
+            globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
+            readRegisteredVersionNames(globalClarionPropertiesFile));
+        if (rememberedState === 'needs-version' || rememberedState === 'stale-version') {
+            const stale = rememberedState === 'stale-version';
             // #498: initializing now can only end in "Initialization failed" with an empty
             // Solution View. Leave the solution remembered, show the found-solutions list
             // (which marks it) and offer the version picker; the tree keys off
@@ -143,14 +149,19 @@ export async function workspaceHasBeenTrusted(
             await commands.executeCommand("setContext", "clarion.solutionOpen", false);
             await refreshSolutionTreeView();
             const action = await vscodeWindow.showWarningMessage(
-                `"${path.basename(globalSolutionFile)}" is remembered for this folder but has no Clarion version. ` +
-                `Set one to load it.`,
+                stale
+                    ? `"${path.basename(globalSolutionFile)}" remembers Clarion version "${globalClarionVersion}", but ` +
+                      `${path.basename(globalClarionPropertiesFile)} no longer registers it (the IDE may have been updated). ` +
+                      `Choose the version to use.`
+                    : `"${path.basename(globalSolutionFile)}" is remembered for this folder but has no Clarion version. ` +
+                      `Set one to load it.`,
                 "Set Version",
                 "Open Solution..."
             );
             if (action === "Set Version") {
                 await commands.executeCommand('clarion.setActiveVersion');
-                if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'ready') {
+                if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
+                        readRegisteredVersionNames(globalClarionPropertiesFile)) === 'ready') {
                     // The picker sets the effective version in memory only; remember it for
                     // this solution so the next reopen does not land here again.
                     await setGlobalClarionSelection(

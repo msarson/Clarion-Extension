@@ -19,7 +19,7 @@ export interface ClarionSolutionSettings {
 // #146 explicit-close flag and fallback-policy helper live in
 // `./utils/SolutionFallbackPolicy` (vscode-free so unit tests can import
 // them without dragging in the workspace/ExtensionContext surface).
-import { rememberedSolutionState, shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, readRegisteredVersionNames, shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
 export { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY };
 
 /**
@@ -238,7 +238,8 @@ export async function ensureActiveClarionVersion(): Promise<boolean> {
  * as a loaded one with an empty tree.
  */
 export function isSolutionConfigured(): boolean {
-    return rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion) === 'ready';
+    return rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
+        readRegisteredVersionNames(globalClarionPropertiesFile)) === 'ready';   // #535: a stale name is not configured
 }
 
 export async function setGlobalClarionSelection(

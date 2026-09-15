@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { globalSolutionFile, globalClarionVersion, globalSettings, globalClarionPropertiesFile } from '../globals';
+import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
@@ -142,14 +143,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         // effective active.
         const effectiveVersion = globalClarionVersion;
         const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
-        let versionLabel: string;
-        if (!effectiveVersion) {
-            versionLabel = 'Not set — use Set Version';
-        } else if (defaultVersion && defaultVersion !== effectiveVersion) {
-            versionLabel = `${effectiveVersion} (default: ${defaultVersion})`;
-        } else {
-            versionLabel = effectiveVersion;
-        }
+        // #535 — a name the selected ClarionProperties.xml no longer registers says so.
+        const versionLabel = versionRowLabel(effectiveVersion, defaultVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
         rows.push({ label: 'Clarion', value: versionLabel });
 
         // #479 — the compile-target name stopped being a unique identifier once a
