@@ -2617,6 +2617,100 @@ export class ReferencesProvider {
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
     /**
+     * #526 — the search set for exported global data, or null when the symbol is not
+     * exported data.
+     *
+     * Definer: the declaring project when its own .exp exports the name (cursor in the
+     * globals module), else the first project reached through the declaring project's
+     * ProjectReference chain whose .exp exports it. Family: the definer plus every
+     * project that references it directly (the #330 reverse lookup), plus the
+     * declaring project itself. Fallback: an EXTERNAL declaration whose chain reaches
+     * no exporter (the DLL's project is outside the solution) searches every project.
+     * Both are pruned by the reference index, so the cost follows the files that
+     * mention the name, not the family size.
+     */
+    private exportedDataFamily(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] | null {
+        const solutionManager = SolutionManager.getInstance();
+        const projects = (solutionManager?.solution?.projects ?? []) as DllProjectLike[];
+        if (projects.length === 0) return null;
+        const name = symbolInfo.searchWord ?? symbolInfo.originalWord ?? symbolInfo.token.value;
+        if (!name) return null;
+        const declUri = symbolInfo.location.uri;
+        const declPath = decodeURIComponent(declUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const declProject = (solutionManager?.findProjectForFile?.(declPath) as DllProjectLike | undefined) ?? null;
+        if (!declProject) return null;
+        // Until the reference index is built (seconds after start) nothing can be pruned,
+        // and a family of 34 projects would mean scanning the whole solution (73s cold on
+        // ap1.sln). Stay project-scoped until then, as before #526.
+        if (!ReferenceCountIndex.getInstance().isBuilt) {
+            logger.test(`[FAR] #526: reference index not built yet → project-scoped search for "${name}"`);
+            return null;
+        }
+        const exp = ExpExportIndex.getInstance();
+        const byName = new Map<string, DllProjectLike>();
+        for (const p of projects) byName.set(p.name.toLowerCase(), p);
+
+        // Definer: self, else breadth-first through ProjectReference names.
+        let definer: DllProjectLike | null = exp.isExportedData(declProject, name) ? declProject : null;
+        if (!definer) {
+            const seen = new Set<string>([declProject.name.toLowerCase()]);
+            const queue: DllProjectLike[] = [declProject];
+            while (queue.length > 0 && !definer) {
+                const p = queue.shift()!;
+                for (const ref of p.projectReferences ?? []) {
+                    const key = ref?.name?.toLowerCase();
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    const target = byName.get(key);
+                    if (!target) continue;
+                    if (exp.isExportedData(target, name)) { definer = target; break; }
+                    queue.push(target);
+                }
+            }
+        }
+
+        const isExternalDecl = (): boolean => {
+            const tokens = this.getTokensForUri(declUri);
+            return tokens.some(t => t.line === symbolInfo.location.line && t.value.toUpperCase() === 'EXTERNAL');
+        };
+        if (!definer && !isExternalDecl()) return null;
+
+        const refIdx = ReferenceCountIndex.getInstance();
+        const files: string[] = [currentDocument.uri];
+        const seenFiles = new Set<string>([decodeURIComponent(currentDocument.uri).toLowerCase()]);
+        const pushUri = (uri: string) => {
+            const key = decodeURIComponent(uri).toLowerCase();
+            if (seenFiles.has(key)) return;
+            seenFiles.add(key);
+            files.push(uri);
+        };
+        pushUri(declUri);
+        const pushProject = (project: DllProjectLike, prune: boolean) => {
+            for (const sf of project.sourceFiles || []) {
+                if (!sf?.relativePath) continue;
+                const fullPath = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                if (prune && !refIdx.mayContain(fullPath, name)) continue;
+                pushUri(`file:///${fullPath.replace(/\\/g, '/')}`);
+            }
+        };
+
+        if (definer) {
+            pushProject(definer, true);
+            pushProject(declProject, true);
+            const defNameLower = definer.name.toLowerCase();
+            for (const p of projects) {
+                if (p === definer || p === declProject) continue;
+                if ((p.projectReferences || []).some(r => r?.name && r.name.toLowerCase() === defNameLower)) pushProject(p, true);
+            }
+            logger.test(`[FAR] #526: "${name}" exported by ${definer.name} → data family spans ${files.length} file(s)`);
+            return files;
+        }
+        for (const p of projects) pushProject(p, true);
+        logger.test(`[FAR] #526: "${name}" is EXTERNAL with no exporter in the solution → all projects, ${files.length} file(s) after pruning`);
+        return files;
+    }
+
+    /**
      * #523 — a class implementation compiled through LINK() is never a .cwproj item, so
      * `project.sourceFiles` never lists it and a global symbol used inside it was
      * invisible to FAR and rename. The file graph reaches such files through the CLASS
@@ -2668,6 +2762,16 @@ export class ReferencesProvider {
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
             logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
             return [currentDocument.uri];
+        }
+        // #526 — exported global data (a data DLL's globals module defines it, its .exp
+        // exports `$NAME`, consumers re-declare it EXTERNAL): the family is the exporting
+        // project plus every project referencing it. Checked before the scope branches
+        // because the definition lives in a bare-MEMBER module (module data by the
+        // language rule) and the re-declarations are PROGRAM data — neither branch
+        // would look across projects. Rename keeps the #330 policy (crossProjectDll).
+        if (crossProjectDll && symbolInfo.type !== 'PROCEDURE' && symbolInfo.type !== 'FUNCTION') {
+            const family = this.exportedDataFamily(symbolInfo, currentDocument);
+            if (family) return family;
         }
 
         if (scopeType === 'module') {

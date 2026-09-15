@@ -19,6 +19,7 @@
 //   node scripts/perf/lsp-driver.js --sln=F:\DirectSystems\AppDev\IBS.sln
 //   node scripts/perf/lsp-driver.js --file=F:\...\SomeOther.clw
 //   node scripts/perf/lsp-driver.js --sln=... --file=... --links   # print document links for the file (#470 hypothesis)
+//   node scripts/perf/lsp-driver.js --file=... --refs=LINE:COL       # time find-all-references at a 1-based position (#526)
 'use strict';
 const { fork } = require('child_process');
 const fs = require('fs');
@@ -61,6 +62,9 @@ if (COLD) {
 let seq = 0;
 const pending = new Map();
 const notificationWaiters = [];
+// Last payload per notification method, so a waiter registered after a --settle can
+// see a 'built' graphStatus that already went by instead of timing out.
+const lastNotification = new Map();
 const child = fork(SERVER, ['--node-ipc'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], execArgv: [] });
 const errLog = fs.createWriteStream(STDERR_LOG);
 child.stderr.on('data', d => {
@@ -86,6 +90,7 @@ child.on('message', (msg) => {
     } else if (msg.method === 'clarion/diagnosticsStatus') {
       diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
     }
+    lastNotification.set(msg.method, msg.params);
     for (let i = notificationWaiters.length - 1; i >= 0; i--) {
       const w = notificationWaiters[i];
       if (w.method === msg.method) { notificationWaiters.splice(i, 1); w.resolve(msg.params); }
@@ -278,12 +283,37 @@ async function runDiagStatusCheck(t0) {
   const settleSec = Number(arg('settle') ?? 3);
   await new Promise(r => setTimeout(r, settleSec * 1000));
 
+  // --refs=LINE:COL (1-based): time textDocument/references at that position in TARGET,
+  // cold then warm, print the hit count grouped by file, and stop. Waits for the graph
+  // like --links so the search set is the real one (#526 acceptance).
+  const refsArg = arg('refs');
+  if (refsArg) {
+    let gs = lastNotification.get('clarion/graphStatus');
+    while (!gs || gs.status !== 'built') gs = await waitNotification('clarion/graphStatus', 120000);
+    const [l, c] = refsArg.split(':').map(Number);
+    const position = { line: l - 1, character: (c || 1) - 1 };
+    for (const pass of ['cold', 'warm']) {
+      const r0 = Date.now();
+      const refs = await request('textDocument/references', { textDocument: { uri }, position, context: { includeDeclaration: true } }, 600000);
+      const ms = Date.now() - r0;
+      const byFile = new Map();
+      for (const r of refs ?? []) { const f = decodeURIComponent(r.uri).split('/').pop(); byFile.set(f, (byFile.get(f) ?? 0) + 1); }
+      console.log(`
+== references at ${refsArg} (${pass}): ${(refs ?? []).length} hit(s) in ${byFile.size} file(s), ${ms}ms ==`);
+      if (pass === 'warm') for (const [f, n] of [...byFile.entries()].sort()) console.log(`  ${f}: ${n}`);
+    }
+    try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+    setTimeout(() => { child.kill(); process.exit(0); }, 1000);
+    return;
+  }
+
   // --links: print the document links the server offers for TARGET and stop.
   // Used to test the #470 hypothesis (a class .clw compiled via LINK() and not listed
   // in the .cwproj gets no links because it is never a graph seed).
   if (process.argv.includes('--links')) {
     // Links come from the file graph, which builds on a delay after solutionReady — wait for 'built'.
-    let gs; do { gs = await waitNotification('clarion/graphStatus', 120000); } while (!gs || gs.status !== 'built');
+    let gs = lastNotification.get('clarion/graphStatus');
+    while (!gs || gs.status !== 'built') gs = await waitNotification('clarion/graphStatus', 120000);
     console.log(`graphStatus: ${JSON.stringify(gs)}`);
     const links = await request('textDocument/documentLink', { textDocument: { uri } }, 60000);
     console.log(`
