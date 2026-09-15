@@ -2757,8 +2757,23 @@ export class ReferencesProvider {
                         }
                     }
                 }
+                // #524 — data declared in a PROGRAM file, or in a file the PROGRAM INCLUDEs at
+                // global level, is global: the Language Reference's MEMBER page makes it
+                // visible to every MEMBER('program') module, and invisible to a bare MEMBER()
+                // "universal member module". The graph encodes exactly that split: a named
+                // MEMBER produces a MEMBER edge to its program, a bare one produces none. So
+                // the search set is the declaring file, the files that include it, and the
+                // MEMBER modules of any program among them (a LINK-only class file whose
+                // MEMBER names the program is one of those since #522).
+                if (!isMember && !isProcDecl && graph.isBuilt) {
+                    const declaringPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    const programWide = this.programGlobalSearchSet(declaringPath, symbolInfo.location.uri);
+                    if (programWide.length > 1) {
+                        logger.test(`[FAR] Scope="module" PROGRAM global → searching ${programWide.length} file(s): declaring + includers + their MEMBER modules (#524)`);
+                        return programWide;
+                    }
+                }
                 // MEMBER-file module symbols are visible only within that MEMBER module.
-                // PROGRAM-file module-level data (non-procedure) also stays local.
                 logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
@@ -2970,6 +2985,36 @@ export class ReferencesProvider {
      * Returns true if the given file URI contains a MEMBER statement,
      * indicating it is a member file of a Clarion program (not a standalone program).
      */
+    /**
+     * #524 — the files that can see data declared at global level in `declaringPath`:
+     * the file itself, every file that INCLUDEs it (walking upward, since a global .inc
+     * may be included by another .inc the PROGRAM includes), and the MEMBER modules of
+     * every program reached that way. A file included only by a MEMBER module yields
+     * that module and nothing else, which is module data's visibility.
+     */
+    private programGlobalSearchSet(declaringPath: string, declaringUri: string): string[] {
+        const graph = FileRelationshipGraph.getInstance();
+        const out = new Set<string>([declaringUri]);
+        const seen = new Set<string>();
+        const queue: { file: string; depth: number }[] = [{ file: declaringPath, depth: 0 }];
+        const MAX_INCLUDE_DEPTH = 8;
+        while (queue.length > 0) {
+            const { file, depth } = queue.shift()!;
+            const key = file.replace(/\\/g, '/').toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            for (const memberFsPath of graph.getMemberFiles(file)) {
+                out.add(fsPathToUri(memberFsPath.replace(/\//g, '\\')));
+            }
+            if (depth >= MAX_INCLUDE_DEPTH) continue;
+            for (const includer of graph.getIncludingFiles(file)) {
+                out.add(fsPathToUri(includer.replace(/\//g, '\\')));
+                queue.push({ file: includer, depth: depth + 1 });
+            }
+        }
+        return [...out];
+    }
+
     private isMemberFile(uri: string): boolean {
         try {
             const tokens = this.getTokensForUri(uri);
