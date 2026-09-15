@@ -11,6 +11,8 @@ import { ClarionSourcerFileInfo } from 'common/types';
 
 export class ClarionSourcerFileServer {
     private fileContent: string | null = null;
+    /** #527 — the .cwproj marked this Compile item `<Generated>true</Generated>`: the generator owns it. */
+    public generated = false;
 
     constructor(
         public name: string,

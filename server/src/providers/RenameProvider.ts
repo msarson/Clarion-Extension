@@ -13,6 +13,18 @@ import { ReferencesProvider } from './ReferencesProvider';
 import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
+/** #527 — what a rename left alone, for the client to show. */
+export interface RenameReport {
+    skipped: { file: string; count: number }[];
+    message: string;
+}
+
+/** #527 — structural project surface for the generated-file lookup. */
+interface ProjectLike {
+    path: string;
+    sourceFiles?: Array<{ relativePath?: string; generated?: boolean }>;
+}
+
 const logger = LoggerManager.getLogger("RenameProvider");
 logger.setLevel("error");
 
@@ -30,6 +42,17 @@ export class RenameProvider {
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private referencesProvider: ReferencesProvider;
+
+    /**
+     * #527 — what the last rename left alone: occurrences in generated files outside
+     * the cursor's project, with the message the client should show. Null when
+     * nothing was skipped.
+     */
+    private lastReport: RenameReport | null = null;
+
+    public getLastRenameReport(): RenameReport | null {
+        return this.lastReport;
+    }
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -143,14 +166,47 @@ export class RenameProvider {
             position,
             { includeDeclaration: true },
             undefined,
-            // #330 tier 2: crossProjectDll OFF — consumer MAP re-declarations are
-            // GENERATED; the durable edit belongs in the .app (see #325). FAR
-            // shows them; rename must not rewrite them.
-            { includeOmitted: true, crossProjectDll: false }
+            // #527 — cross-project ON: the family is the same one references shows.
+            // The #330 rule (generated consumer re-declarations are not rewritten; the
+            // durable edit belongs in the .app, see #325) is applied per FILE below, from
+            // the .cwproj's own `<Generated>` flag, so a hand-coded multi-DLL solution
+            // gets its definer and consumers renamed and a generated one gets told why not.
+            { includeOmitted: true, crossProjectDll: true }
         );
 
         if (!locations || locations.length === 0) {
             logger.debug(`[RENAME] No references found for "${oldName}"`);
+            return null;
+        }
+
+        // #527 — everything inside the cursor's own project is renamed as before.
+        // Outside it, generated files are left alone and reported.
+        this.lastReport = null;
+        const cursorProject = this.projectOf(this.uriToPath(document.uri));
+        const skippedByFile = new Map<string, number>();
+        const kept = locations.filter(loc => {
+            const fsPath = this.uriToPath(loc.uri);
+            const project = this.projectOf(fsPath);
+            if (!project || project === cursorProject) return true;
+            if (!this.isGeneratedIn(project, fsPath)) return true;
+            const key = fsPath.toLowerCase();
+            skippedByFile.set(key, (skippedByFile.get(key) ?? 0) + 1);
+            return false;
+        });
+        if (skippedByFile.size > 0) {
+            const skipped = [...skippedByFile.entries()].map(([file, count]) => ({ file, count }))
+                .sort((a, b) => a.file.localeCompare(b.file));
+            const total = skipped.reduce((n, s) => n + s.count, 0);
+            const list = skipped.map(s => `${path.basename(s.file)}: ${s.count}`).join(', ');
+            this.lastReport = {
+                skipped,
+                message: `Rename of '${oldName}' left ${total} occurrence(s) in ${skipped.length} generated file(s) unchanged (${list}). ` +
+                    `Generated code is rewritten on the next generate, so make that change in the .app and regenerate.`,
+            };
+            logger.debug(`[RENAME] #527 skipped generated: ${list}`);
+        }
+        if (kept.length === 0) {
+            logger.debug(`[RENAME] every occurrence of "${oldName}" outside the cursor file is generated`);
             return null;
         }
 
@@ -168,7 +224,7 @@ export class RenameProvider {
         // Normalizing the key collapses the dupes into one group; dedupeRanges then folds
         // the identical ranges into a single edit.
         const groups = new Map<string, { uri: string; ranges: Range[] }>();
-        for (const loc of locations) {
+        for (const loc of kept) {
             const key = this.uriToPath(loc.uri).toLowerCase(); // Windows paths are case-insensitive
             const existing = groups.get(key);
             if (existing) {
@@ -300,6 +356,23 @@ export class RenameProvider {
     }
 
     /** Converts a file:// URI to a normalised file-system path. */
+    /** #527 — the project owning a path, by the solution's own lookup. */
+    private projectOf(fsPath: string): ProjectLike | null {
+        const sm = SolutionManager.getInstance();
+        return (sm?.findProjectForFile?.(fsPath) as ProjectLike | undefined) ?? null;
+    }
+
+    /** #527 — true when the project's .cwproj marks this file `<Generated>true</Generated>`. */
+    private isGeneratedIn(project: ProjectLike, fsPath: string): boolean {
+        const norm = path.normalize(fsPath).toLowerCase();
+        for (const sf of project.sourceFiles ?? []) {
+            if (!sf?.relativePath) continue;
+            const abs = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+            if (path.normalize(abs).toLowerCase() === norm) return sf.generated === true;
+        }
+        return false;
+    }
+
     private uriToPath(uri: string): string {
         return decodeURIComponent(uri.replace(/^file:\/\/\//i, '').replace(/^file:\/\//i, ''))
             .replace(/\//g, '\\');

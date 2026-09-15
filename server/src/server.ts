@@ -3176,7 +3176,12 @@ connection.onRenameRequest(async (params: RenameParams) => {
     if (!document) return null;
 
     try {
-        return await renameProvider.provideRename(document, params.position, params.newName);
+        const edit = await renameProvider.provideRename(document, params.position, params.newName);
+        // #527 — occurrences in generated files outside the cursor's project were left
+        // alone; say so, and where the durable change belongs.
+        const report = renameProvider.getLastRenameReport();
+        if (report) void connection.window.showWarningMessage(report.message);
+        return edit;
     } catch (error) {
         logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
         return null;
