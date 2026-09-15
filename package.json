@@ -939,6 +939,9 @@
       }
     ],
     "configurationDefaults": {
+      "[clarion]": {
+        "editor.wordSeparators": "`~!@#$%^&*()-=+[{]}\\|;'\",.<>/?"
+      },
       "[clarion-template]": {
         "editor.colorDecorators": false,
         "editor.defaultColorDecorators": "never"
