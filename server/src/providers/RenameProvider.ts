@@ -1,4 +1,4 @@
-import { Range, WorkspaceEdit, TextEdit, TextDocumentEdit, ResponseError, ErrorCodes } from 'vscode-languageserver-protocol';
+import { Range, WorkspaceEdit, TextEdit, TextDocumentEdit, ResponseError, ErrorCodes, Location } from 'vscode-languageserver-protocol';
 import { clarionSourceCandidates } from '../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
@@ -90,15 +90,21 @@ export class RenameProvider {
 
         // Reject if the symbol is a MAP procedure declared in an external DLL or
         // a MODULE whose source file cannot be resolved within the solution.
-        // #527 — a generated file is owned by the templates: any edit is lost on the next
-        // generate, so rename is refused with the reason rather than applied.
-        const generatedReason = this.getGeneratedFileRejectionReason(document, word);
-        if (generatedReason) {
-            throw new ResponseError(ErrorCodes.InvalidRequest, generatedReason);
-        }
         const dllReason = this.getDllOrUnresolvableRejectionReason(document, position.line, word);
         if (dllReason) {
             throw new ResponseError(ErrorCodes.InvalidRequest, dllReason);
+        }
+        // #527/#528 — a generated file is owned by the templates: any edit is lost on the
+        // next generate. The refusal keys on the DECLARATION's file (a hand-coded class
+        // method renamed from a generated call site proceeds; a method declared in a
+        // generated file is refused), so the reference set is gathered here and kept for
+        // provideRename. After the cheap DLL / unresolvable check, which needs no search.
+        const preflight = await this.gatherLocations(document, position);
+        if (preflight) {
+            const generatedReason = this.generatedRefusal(preflight, document, word);
+            if (generatedReason) {
+                throw new ResponseError(ErrorCodes.InvalidRequest, generatedReason);
+            }
         }
 
         // Confirm symbol is known — rejects keywords, punctuation, etc.
@@ -167,58 +173,31 @@ export class RenameProvider {
         // blocks (deliberate deviation from the C++-IDE model): Clarion projects
         // routinely build multiple configurations from one source, and skipping
         // inactive regions silently breaks the other configurations.
-        const locations = await this.referencesProvider.provideReferences(
-            document,
-            position,
-            { includeDeclaration: true },
-            undefined,
-            // #527 — cross-project ON: the family is the same one references shows.
-            // The #330 rule (generated consumer re-declarations are not rewritten; the
-            // durable edit belongs in the .app, see #325) is applied per FILE below, from
-            // the .cwproj's own `<Generated>` flag, so a hand-coded multi-DLL solution
-            // gets its definer and consumers renamed and a generated one gets told why not.
-            { includeOmitted: true, crossProjectDll: true }
-        );
+        // #527 — cross-project ON: the family is the same one references shows. The #330
+        // rule (generated consumer re-declarations are not rewritten; the durable edit
+        // belongs in the .app, see #325) is applied per FILE below, from the .cwproj's
+        // own `<Generated>` flag. The set is the one prepareRename just gathered when the
+        // client went through the pre-flight (#528).
+        const locations = await this.gatherLocations(document, position);
 
         if (!locations || locations.length === 0) {
             logger.debug(`[RENAME] No references found for "${oldName}"`);
             return null;
         }
 
-        // #527 — a generated file is never rewritten, whichever project it is in: the
-        // generator owns it. Occurrences there are skipped and reported. The cursor's
-        // own file being generated is refused outright (prepareRename says why; this
-        // repeats it for a client that skipped the pre-flight).
+        // #527/#528 — a generated file is never rewritten, whichever project it is in:
+        // the generator owns it. Refused when the DECLARATION is generated (repeated here
+        // for a client that skipped the pre-flight); otherwise occurrences in generated
+        // files are skipped and reported after the edit is built.
         this.lastReport = null;
-        const generatedReason = this.getGeneratedFileRejectionReason(document, oldName);
+        const generatedReason = this.generatedRefusal(locations, document, oldName);
         if (generatedReason) {
             throw new ResponseError(ErrorCodes.InvalidRequest, generatedReason);
         }
-        const skippedByFile = new Map<string, number>();
-        const kept = locations.filter(loc => {
-            const fsPath = this.uriToPath(loc.uri);
-            const project = this.projectOf(fsPath);
-            if (!project) return true;
-            if (!this.isGeneratedIn(project, fsPath)) return true;
-            const key = fsPath.toLowerCase();
-            skippedByFile.set(key, (skippedByFile.get(key) ?? 0) + 1);
-            return false;
-        });
-        if (skippedByFile.size > 0) {
-            const skipped = [...skippedByFile.entries()].map(([file, count]) => ({ file, count }))
-                .sort((a, b) => a.file.localeCompare(b.file));
-            const total = skipped.reduce((n, s) => n + s.count, 0);
-            const list = skipped.map(s => `${path.basename(s.file)}: ${s.count}`).join(', ');
-            this.lastReport = {
-                skipped,
-                message: `Rename of '${oldName}' left ${total} occurrence(s) in ${skipped.length} generated file(s) unchanged (${list}). ` +
-                    `Generated code is rewritten on the next generate, so make that change in the .app and regenerate.`,
-            };
-            logger.debug(`[RENAME] #527 skipped generated: ${list}`);
-        }
+        const { kept, skipped } = this.splitGenerated(locations);
         if (kept.length === 0) {
-            logger.debug(`[RENAME] every occurrence of "${oldName}" outside the cursor file is generated`);
-            return null;
+            throw new ResponseError(ErrorCodes.InvalidRequest,
+                `Cannot rename '${oldName}': every occurrence is in generated code, which rename cannot alter. Make the change in the .app and regenerate.`);
         }
 
         logger.debug(`[RENAME] Renaming "${oldName}" → "${newName}" across ${locations.length} location(s)`);
@@ -259,7 +238,17 @@ export class RenameProvider {
             const edits = this.dedupeRanges(ranges).map(r => TextEdit.replace(r, newName));
             documentChanges.push(TextDocumentEdit.create({ uri, version: null }, edits));
         }
-
+        if (skipped.length > 0) {
+            const total = skipped.reduce((n, s) => n + s.count, 0);
+            const list = skipped.map(s => `${path.basename(s.file)}: ${s.count}`).join(', ');
+            this.lastReport = {
+                skipped,
+                message: `Renamed '${oldName}' in ${documentChanges.length} hand-coded file(s). ` +
+                    `Rename cannot alter generated code: ${total} occurrence(s) in ${skipped.length} generated file(s) were left unchanged (${list}). ` +
+                    `Update the .app and regenerate.`,
+            };
+            logger.debug(`[RENAME] #527 skipped generated: ${list}`);
+        }
         return { documentChanges };
     }
 
@@ -367,16 +356,84 @@ export class RenameProvider {
     }
 
     /** Converts a file:// URI to a normalised file-system path. */
+    /** #528 — file text for a hit not open in the editor (disk read; null when unreadable). */
+    private readFileTextForUri(uri: string): string | null {
+        try {
+            return fs.readFileSync(this.uriToPath(uri), 'utf-8');
+        } catch {
+            return null;
+        }
+    }
+
+    /** #528 — the reference set gathered by the last pre-flight, reused by provideRename. */
+    private preflight: { uri: string; version: number; line: number; character: number; locations: Location[] } | null = null;
+
     /**
-     * #527 — the refusal text when the document under the cursor is a generated file
-     * (its .cwproj item carries `<Generated>true</Generated>`), else null.
+     * #528 — the full reference family for the symbol at the cursor (cross-project on,
+     * OMIT'd occurrences included), cached per document version and position so the
+     * pre-flight and the rename share one search.
      */
-    private getGeneratedFileRejectionReason(document: TextDocument, word: string): string | null {
-        const fsPath = this.uriToPath(document.uri);
-        const project = this.projectOf(fsPath);
-        if (!project || !this.isGeneratedIn(project, fsPath)) return null;
-        return `Cannot rename '${word}': ${path.basename(fsPath)} is generated by the Clarion templates and is rewritten on the next generate. ` +
-            `Make the change in the .app and regenerate.`;
+    private async gatherLocations(document: TextDocument, position: { line: number; character: number }): Promise<Location[] | null> {
+        const c = this.preflight;
+        if (c && c.uri === document.uri && c.version === document.version && c.line === position.line && c.character === position.character) {
+            return c.locations;
+        }
+        const locations = await this.referencesProvider.provideReferences(
+            document, position, { includeDeclaration: true }, undefined, { includeOmitted: true, crossProjectDll: true });
+        if (!locations || locations.length === 0) { this.preflight = null; return null; }
+        this.preflight = { uri: document.uri, version: document.version, line: position.line, character: position.character, locations };
+        return locations;
+    }
+
+    /** #528 — true when this hit is the symbol's declaration or implementation rather than a use. */
+    private isDeclarationLike(loc: Location): boolean {
+        const text = TokenCache.getInstance().getDocumentText(loc.uri) ?? this.readFileTextForUri(loc.uri);
+        if (text === null) return false;
+        const line = text.split(/\r?\n/)[loc.range.start.line] ?? '';
+        const before = line.substring(0, loc.range.start.character);
+        const after = line.substring(loc.range.end.character);
+        // A label at column 0 (data, procedure, class member), a `Class.Method` implementation
+        // label, or a name followed by PROCEDURE / FUNCTION (a class member declaration).
+        if (before.length === 0) return true;
+        if (/^[A-Za-z_][A-Za-z0-9_:]*\.$/.test(before)) return true;
+        return /^\s+(PROCEDURE|FUNCTION)\b/i.test(after);
+    }
+
+    /** #527/#528 — the generated hits (skipped, counted per file) and the rest. */
+    private splitGenerated(locations: Location[]): { kept: Location[]; skipped: { file: string; count: number }[] } {
+        const skippedByFile = new Map<string, number>();
+        const kept = locations.filter(loc => {
+            const fsPath = this.uriToPath(loc.uri);
+            const project = this.projectOf(fsPath);
+            if (!project || !this.isGeneratedIn(project, fsPath)) return true;
+            const key = fsPath.toLowerCase();
+            skippedByFile.set(key, (skippedByFile.get(key) ?? 0) + 1);
+            return false;
+        });
+        const skipped = [...skippedByFile.entries()].map(([file, count]) => ({ file, count }))
+            .sort((a, b) => a.file.localeCompare(b.file));
+        return { kept, skipped };
+    }
+
+    /**
+     * #528 — the refusal text when the symbol's DECLARATION lives in a generated file
+     * (every declaration-like hit is generated); with no declaration-like hit at all,
+     * the cursor's own file decides (#527). Null when the rename may proceed.
+     */
+    private generatedRefusal(locations: Location[], document: TextDocument, word: string): string | null {
+        const generatedAt = (uri: string): boolean => {
+            const fsPath = this.uriToPath(uri);
+            const project = this.projectOf(fsPath);
+            return !!project && this.isGeneratedIn(project, fsPath);
+        };
+        const decls = locations.filter(loc => this.isDeclarationLike(loc));
+        const culprit = decls.length > 0
+            ? (decls.every(d => generatedAt(d.uri)) ? decls[0].uri : null)
+            : (generatedAt(document.uri) ? document.uri : null);
+        if (!culprit) return null;
+        const where = decls.length > 0 ? `its declaration in ${path.basename(this.uriToPath(culprit))}` : path.basename(this.uriToPath(culprit));
+        return `Cannot rename '${word}': ${where} is generated by the Clarion templates and is rewritten on the next generate. ` +
+            `Only non-generated code can be renamed safely; make the change in the .app and regenerate.`;
     }
 
     /** #527 — the project owning a path, by the solution's own lookup. */
