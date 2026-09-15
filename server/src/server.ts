@@ -63,6 +63,7 @@ import { TrailingCoalescer } from './utils/TrailingCoalescer';
 
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
+import { ResponseError } from 'vscode-languageserver/node';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
@@ -3183,6 +3184,9 @@ connection.onRenameRequest(async (params: RenameParams) => {
         if (report) void connection.window.showWarningMessage(report.message);
         return edit;
     } catch (error) {
+        // #527 — a refusal with a reason (generated file) must reach the client so VS
+        // Code shows it, exactly as onPrepareRename does.
+        if (error instanceof ResponseError) throw error;
         logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }

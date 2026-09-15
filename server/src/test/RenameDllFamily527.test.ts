@@ -9,10 +9,10 @@
  * untouched and broke the build.
  *
  * The generator marks every Compile item it writes with `<Generated>true</Generated>`,
- * so the split is a fact from the .cwproj, not a guess. Rule: everything in the cursor's
- * own project is renamed as before; outside it, hand-coded files are renamed and
- * generated files are skipped and reported (file + occurrence count, and where the
- * durable change belongs).
+ * so the split is a fact from the .cwproj, not a guess. Rule (Mark, 2026-09-15): a
+ * generated file is never rewritten by rename, whichever project it is in. Occurrences
+ * there are skipped and reported (file + occurrence count, and where the durable change
+ * belongs), and a rename started IN a generated file is refused with that reason.
  *
  * Same fixture as #526, with ap2 marked generated.
  */
@@ -128,7 +128,7 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
         await FileRelationshipGraph.getInstance().buildInBackground(seedPaths);
         ReferenceCountIndex.getInstance().reset();
         await ReferenceCountIndex.getInstance().buildInBackground(seedPaths);
-        serverSettings.libsrcPaths = Object.keys(projects).map(n => path.join(root, n));
+        serverSettings.libsrcPaths = [];   // project folders are NOT libsrc: rename's standard-library guard must not fire
         StructureDeclarationIndexer.getInstance().clearCache();
         for (const n of Object.keys(projects)) await StructureDeclarationIndexer.getInstance().buildIndex(path.join(root, n));
     });
@@ -164,15 +164,32 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
         assert.ok(/\.app/i.test(report!.message) && /generated/i.test(report!.message), `message explains why: ${report!.message}`);
     });
 
-    test('a wholly generated family renames the cursor project only and reports the rest', async () => {
-        for (const p of built) for (const sf of p.sourceFiles) sf.generated = true;
+    test('a generated file in the cursor\'s own project is skipped and reported too', async () => {
+        // The Generated flag is about who owns the file, not which project it is in.
+        const ap1 = built.find(p => p.name === 'ap1')!;
+        ap1.sourceFiles.find(sf => sf.name === 'worker.clw')!.generated = true;
         const provider = new RenameProvider();
         const edit = await provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor');
         const got = editsByFile(edit);
-        assert.deepStrictEqual([...got.entries()].sort(), [['ap1.clw', 2], ['worker.clw', 1]], `edits: ${JSON.stringify([...got])}`);
+        assert.deepStrictEqual([...got.entries()].sort(), [['ap1.clw', 2], ['ibscoglo.clw', 1]], `edits: ${JSON.stringify([...got])}`);
         const report = provider.getLastRenameReport();
         assert.ok(report);
-        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`).sort(), ['ap2.clw:2', 'ibscoglo.clw:1']);
+        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`).sort(), ['ap2.clw:2', 'worker.clw:1']);
+    });
+
+    test('rename is refused, with the reason, when the file under the cursor is generated', async () => {
+        for (const p of built) for (const sf of p.sourceFiles) sf.generated = true;
+        const provider = new RenameProvider();
+        await assert.rejects(
+            () => provider.prepareRename(docs.get('ap1.clw')!, { line: 6, character: 4 }),
+            (err: Error) => {
+                assert.ok(/generated/i.test(err.message) && /\.app/i.test(err.message), `prepareRename rejected with: ${err.message}`);
+                return true;
+            });
+        await assert.rejects(
+            () => provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor'),
+            (err: Error) => /generated/i.test(err.message),
+            'provideRename must reject too, in case the client skipped prepareRename');
     });
 
     test('no report when nothing was left alone', async () => {
