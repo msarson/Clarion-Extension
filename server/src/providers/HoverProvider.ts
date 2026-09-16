@@ -886,6 +886,13 @@ export class HoverProvider {
         if (!dottedToken) return null;
 
         const dot = dottedToken.value.indexOf('.');
+        // #540 — the whole reference is ONE token, so a cursor on the structure half
+        // (`ItemQ` in `ItemQ.CategoryName`) matched here too and was answered with the
+        // field's card. Only a cursor at or past the dot is asking about the field; on
+        // the structure half fall through, so the bare word the context builder
+        // extracted (`ItemQ`) resolves as the structure — the same split the scoped
+        // path already makes.
+        if (position.character < dottedToken.start + dot) return null;
         const typeName = dottedToken.value.slice(0, dot);
         const fieldName = dottedToken.value.slice(dot + 1);
         // A single qualifier is a field reference. `A.B.C` is a chained member
