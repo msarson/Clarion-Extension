@@ -309,6 +309,32 @@ async function runDiagStatusCheck(t0) {
   const settleSec = Number(arg('settle') ?? 3);
   await new Promise(r => setTimeout(r, settleSec * 1000));
 
+  // --complete=LINE:COL[,LINE:COL...] (1-based; COL is the cursor column, e.g. just after a dot):
+  // time textDocument/completion at each position, cold then warm twice, and print the item count.
+  const completeArg = arg('complete');
+  if (completeArg) {
+    let gs = lastNotification.get('clarion/graphStatus');
+    while (!gs || gs.status !== 'built') gs = await waitNotification('clarion/graphStatus', 120000);
+    const lines = text.split(/\r?\n/);
+    for (const spec of completeArg.split(',')) {
+      const [l, c] = spec.split(':').map(Number);
+      const position = { line: l - 1, character: (c || 1) - 1 };
+      const before = (lines[l - 1] ?? '').slice(0, position.character);
+      for (const pass of ['cold', 'warm', 'warm2']) {
+        const r0 = Date.now();
+        const result = await request('textDocument/completion', { textDocument: { uri }, position, context: { triggerKind: 1 } }, 600000);
+        const ms = Date.now() - r0;
+        const items = Array.isArray(result) ? result : (result?.items ?? []);
+        console.log(`
+== completion at ${spec} after "${before.trim()}" (${pass}): ${items.length} item(s), ${ms}ms ==`);
+        if (pass === 'cold') console.log(`  first: ${items.slice(0, 8).map(i => i.label).join(', ')}`);
+      }
+    }
+    try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+    setTimeout(() => { child.kill(); process.exit(0); }, 1000);
+    return;
+  }
+
   // --refs=LINE:COL (1-based): time textDocument/references at that position in TARGET,
   // cold then warm, print the hit count grouped by file, and stop. Waits for the graph
   // like --links so the search set is the real one (#526 acceptance).

@@ -19,6 +19,18 @@ import { DirectiveService } from '../utils/DirectiveService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
+// Completion timing breakdown — emitted only for a slow request, so it stays readable in a user's log.
+const perfLogger = LoggerManager.getLogger("WordCompletionProvider.Perf", 'perf');
+const SLOW_COMPLETION_MS = 150;
+
+/** #565 — one recorded PROGRAM global symbol, with everything add() receives. */
+interface ProgramGlobalSymbol {
+    label: string;
+    kind: CompletionItemKind;
+    detail?: string;
+    documentation?: string;
+    typeText?: string;
+}
 logger.setLevel("error");
 
 /**
@@ -65,10 +77,16 @@ export class WordCompletionProvider {
      */
     async provide(document: TextDocument, position: Position, partial: string): Promise<CompletionItem[]> {
         try {
+            const startedAt = Date.now();
+            const step: Record<string, number> = {};
+            let mark = startedAt;
+            const lap = (name: string) => { const now = Date.now(); step[name] = now - mark; mark = now; };
             const tokens = this.tokenCache.getTokens(document);
             if (!tokens || tokens.length === 0) return [];
+            lap('tokens_ms');
 
             const scope = this.scopeAnalyzer.getTokenScope(document, position);
+            lap('scope_ms');
 
             // Build a set of lines that have a PROCEDURE or ROUTINE keyword on them.
             // Label tokens on these lines are the procedure/routine *names*, not variables.
@@ -114,6 +132,7 @@ export class WordCompletionProvider {
             // A. Callable procedures
             // ----------------------------------------------------------------
             await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
+            lap('procedures_ms');
 
             // ----------------------------------------------------------------
             // B. Equates — must run before variables so user EQUATEs land as
@@ -121,12 +140,15 @@ export class WordCompletionProvider {
             //    entry that collectVariables would otherwise produce.
             // ----------------------------------------------------------------
             await this.collectEquates(document, partial, add);
+            lap('equates_ms');
 
             // ----------------------------------------------------------------
             // C. Variables / Labels
             // ----------------------------------------------------------------
             this.collectVariables(tokens, scope, position, procDeclLines, add);
+            lap('variables_ms');
             this.collectProgramGlobalDataSymbols(tokens, document, add);
+            lap('program_globals_ms');
 
             // ----------------------------------------------------------------
             // D. Parameters from PROCEDURE(...) signature
@@ -170,6 +192,14 @@ export class WordCompletionProvider {
             // H. Data types (from clarion-datatypes.json)
             // ----------------------------------------------------------------
             this.collectDataTypes(seen);
+            lap('catalogs_ms');
+            const total = Date.now() - startedAt;
+            if (total >= SLOW_COMPLETION_MS) {
+                perfLogger.perf("WordCompletion slow", {
+                    ms: total, ...step, candidates: seen.size, partial,
+                    uri: document.uri.split('/').pop() ?? '',
+                });
+            }
 
             // ----------------------------------------------------------------
             // Filter by prefix
@@ -513,11 +543,16 @@ export class WordCompletionProvider {
             if (!byLine.has(t.line)) byLine.set(t.line, { prefix: t.structurePrefix });
         }
 
+        // #565 — gather every wanted line's tokens in ONE pass. Filtering the whole token array
+        // per field line was quadratic: a PROGRAM carrying the dictionary's FILE declarations
+        // (thousands of PRE fields over ~68k tokens) cost 1.5-3 s per completion request.
+        const tokensByLine = new Map<number, Token[]>();
+        for (const line of byLine.keys()) tokensByLine.set(line, []);
+        for (const t of tokens) tokensByLine.get(t.line)?.push(t);
+
         const identifier = /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*$/i;
         for (const [line, lineEntry] of byLine.entries()) {
-            const lineTokens = tokens
-                .filter(t => t.line === line)
-                .sort((a, b) => a.start - b.start);
+            const lineTokens = (tokensByLine.get(line) ?? []).sort((a, b) => a.start - b.start);
             const prefix = lineEntry.prefix;
 
             // #499: the structure's own header line (`Orders FILE,...,PRE(ORD)`) declares
@@ -568,7 +603,7 @@ export class WordCompletionProvider {
     private collectProgramGlobalDataSymbols(
         tokens: Token[],
         document: TextDocument,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
@@ -586,6 +621,19 @@ export class WordCompletionProvider {
         if (!result || result.tokens.length === 0) return;
 
         const programTokens = result.tokens;
+        // #565 — the PROGRAM's global labels and prefixed fields depend only on its tokens, and
+        // the token array is replaced when the file changes: replay a recorded list instead of
+        // walking a large PROGRAM again on every keystroke.
+        const cachedGlobals = WordCompletionProvider.programGlobalsByTokens.get(programTokens);
+        if (cachedGlobals) {
+            for (const g of cachedGlobals) add(g.label, g.kind, g.detail, g.documentation, g.typeText);
+            return;
+        }
+        const recorded: ProgramGlobalSymbol[] = [];
+        const record = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => {
+            recorded.push({ label, kind, detail, documentation, typeText });
+            add(label, kind, detail, documentation, typeText);
+        };
         const procDeclLines = new Set<number>();
         for (const t of programTokens) {
             if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
@@ -600,9 +648,13 @@ export class WordCompletionProvider {
             (!t.parent || t.parent.type !== TokenType.Structure) &&
             !procDeclLines.has(t.line);
 
-        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, add);
-        this.collectGlobalPrefixedFields(programTokens, add);
+        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, record);
+        this.collectGlobalPrefixedFields(programTokens, record);
+        WordCompletionProvider.programGlobalsByTokens.set(programTokens, recorded);
     }
+
+    /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
+    private static readonly programGlobalsByTokens = new WeakMap<Token[], ProgramGlobalSymbol[]>();
 
     /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */
     private collectProcLocals(

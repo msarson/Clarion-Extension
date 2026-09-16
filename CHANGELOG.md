@@ -67,6 +67,10 @@ All notable changes to the Clarion Extension are documented here.
 - **The Open Solution button works during startup in a window with no folder.** Clicking it before the extension finished starting reported that `clarion.openSolution` was not found; the no-folder commands are now registered before the language server starts. [#513](https://github.com/msarson/Clarion-Extension/issues/513)
 - **The log level is now adjustable, so a diagnostic log can be captured for a bug report.** A new `clarion.log.level` setting and a **Clarion: Set Log Level** command raise both processes from `error` (the default) to `warn`, `info` or `debug`, taking effect immediately. The extension's warnings, previously unreachable because every module pinned `error`, now surface when the level is raised. [#440](https://github.com/msarson/Clarion-Extension/issues/440)
 
+#### Performance
+
+- **Word completion in a MEMBER module no longer takes seconds per keystroke.** Completion collected the PROGRAM file's prefix-qualified globals by scanning the whole file once per field, so a program carrying a dictionary's file declarations spent one and a half to three seconds on every request. The fields are now gathered in one pass and remembered until the program file changes. Member completion after a dot was already fast. [#565](https://github.com/msarson/Clarion-Extension/issues/565)
+
 #### Syntax
 
 - **Eight catalogued built-in functions are now highlighted, and `REGISTEREVENT` and `UNREGISTEREVENT` are recognised.** `CALLBACK`, `NULL`, `SQL`, `SQLCALLBACK` and the four `HTTPWEBREQUEST` and image functions added in 1.0.4 had hover and completion but were painted as plain identifiers; the two event-handler alias prototypes had the reverse gap. A test now checks that every name in the built-in catalog is matched by the grammar. [#521](https://github.com/msarson/Clarion-Extension/issues/521)
