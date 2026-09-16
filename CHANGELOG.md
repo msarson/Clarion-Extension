@@ -30,6 +30,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Diagnostics
 
+- **A single-line `IF x THEN RETURN END` followed by more statements on the same line no longer leaves the enclosing CASE reported as unterminated.** Only the last token of a line was checked for the closing END, so `OF DeleteKey ; IF ~RECORDS(Q) THEN RETURN END ; GlobalRequest = Action:Delete` left the IF open, the CASE's END closed the IF instead, and the Problems tab flagged code that compiles; the same stale IF greyed out the OF lines that followed as unreachable. The terminator is now found anywhere after the keyword on its line, with a structure opened later on the same line keeping its own END. [#536](https://github.com/msarson/Clarion-Extension/issues/536)
 - **The undeclared-variable check now covers a PROGRAM's main CODE section.** It only looked inside procedures, so an undeclared identifier in the program's own top-level code went unreported, and was even treated as a declaration. [#516](https://github.com/msarson/Clarion-Extension/issues/516)
 
 #### Configuration and build

@@ -1558,13 +1558,27 @@ export class DocumentStructure {
         // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
         // Also applies to single-line control flow: "IF condition THEN statement." or "IF x THEN y END"
         // Handles line continuation: "IF x THEN | \n statement."
+        //
+        // #536 — the terminator is not necessarily the LAST token of the line. Statements may
+        // follow it after a separator:
+        //     OF DeleteKey ; IF ~RECORDS(xQ) THEN RETURN END ; GlobalRequest = Action:Delete
+        // Checking only the line's last token pushed that IF onto the stack, while the END
+        // handler (which treats any END sharing a line with a structure keyword as inline)
+        // never popped it — so the IF stayed open, swallowed the CASE's END, and the CASE was
+        // reported as unterminated. So: scan the tokens AFTER the keyword on its logical line
+        // and take the first END / period at nesting depth 0, counting structures opened
+        // further along the same line so that their END is not mistaken for ours
+        // (`IF x THEN LOOP ; BREAK ; END ; y = 1` — that END closes the LOOP).
         let endsOnSameLine = false;
         let continuationLine = token.line;
-        
+        let depth = 0;
+        let firstLine = true;
+        const lastLine = this.tokens[this.tokens.length - 1].line;
+
         // Follow line continuations to find the actual end
-        while (continuationLine < this.tokens[this.tokens.length - 1].line) {
+        scan: while (continuationLine <= lastLine) {
             const lineTokens = this.tokensByLine.get(continuationLine) || [];
-            
+
             // Find the last non-comment token on this line
             let lastSignificantToken: Token | undefined;
             for (let i = lineTokens.length - 1; i >= 0; i--) {
@@ -1574,36 +1588,48 @@ export class DocumentStructure {
                     break;
                 }
             }
-            
+
             if (!lastSignificantToken) {
                 break; // Empty line or only comments
             }
-            
-            // Check if this line has a continuation character
-            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation || 
-                                   lastSignificantToken.value === '|';
-            
-            if (hasContinuation) {
-                // Statement continues on next line
-                continuationLine++;
-                continue;
-            }
-            
-            // No continuation - check if this line ends with a terminator
-            const isEnd = lastSignificantToken.type === TokenType.EndStatement || 
-                         lastSignificantToken.value.toUpperCase() === 'END';
-            const isPeriod = lastSignificantToken.value === '.';
-            
-            if (isEnd || isPeriod) {
+
+            // On the keyword's own line only the tokens AFTER it can terminate it.
+            let i = firstLine ? lineTokens.indexOf(token) + 1 : 0;
+            firstLine = false;
+            for (; i < lineTokens.length; i++) {
+                const t = lineTokens[i];
+                if (t.type === TokenType.Comment) continue;
+                if (t.type === TokenType.Structure) {
+                    depth++;
+                    continue;
+                }
+                const isEnd = t.type === TokenType.EndStatement ||
+                              t.value.toUpperCase() === 'END' ||
+                              t.value === '.';
+                if (!isEnd) continue;
+                if (depth > 0) {
+                    depth--; // closes a structure opened later on this line
+                    continue;
+                }
                 endsOnSameLine = true;
                 token.finishesAt = continuationLine;
                 // Mark if this spans multiple lines due to continuation
                 if (continuationLine > token.line) {
                     token.isSingleLineWithContinuation = true;
                 }
+                break scan;
             }
-            
-            break; // Found the end of the statement
+
+            // Check if this line has a continuation character
+            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation ||
+                                   lastSignificantToken.value === '|';
+
+            if (!hasContinuation) {
+                break; // Found the end of the statement
+            }
+
+            // Statement continues on next line
+            continuationLine++;
         }
         
         // If structure ends on same line, don't push to stack (no folding needed)
