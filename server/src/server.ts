@@ -58,7 +58,7 @@ import ClarionFormatter from './ClarionFormatter';
 
 import { ClarionColorResolver } from './ClarionColorResolver';
 import ClarionFoldingProvider from './ClarionFoldingProvider';
-import { serverSettings } from './serverSettings';
+import { serverSettings, applyFeatureFlags, FeatureFlagParams } from './serverSettings';
 import { TrailingCoalescer } from './utils/TrailingCoalescer';
 
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
@@ -2027,21 +2027,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
         // Preserve the constructor default when a (legacy) client doesn't include
         // the field. Only an explicit boolean from the client wins. (#62 fix)
-        if (params.undeclaredVariablesEnabled !== undefined) {
-            serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
-        }
-        if (params.unresolvedProcedureCallsEnabled !== undefined) {
-            serverSettings.unresolvedProcedureCallsEnabled = params.unresolvedProcedureCallsEnabled === true;
-        }
-        if (params.indistinguishablePrototypesEnabled !== undefined) {
-            serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
-        }
-        if (params.inlayHintsParameterNames !== undefined) {
-            serverSettings.inlayHintsParameterNames = params.inlayHintsParameterNames === true;
-        }
-        if (params.inlayHintsImplicitTypes !== undefined) {
-            serverSettings.inlayHintsImplicitTypes = params.inlayHintsImplicitTypes === true;
-        }
+        // #541 — shared with the live clarion/updateDiagnosticSettings path.
+        applyFeatureFlags(params);
         if (params.referencesCodeLensEnabled !== undefined) {
             serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
             if (!serverSettings.referencesCodeLensEnabled) {
@@ -2611,6 +2598,33 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
         frg_files: graphFiles.length
     });
 });
+// #541 — a clarion.diagnostics.* setting changed in the editor. Apply the flags and
+// re-check every open document so the warnings appear or clear without a reload.
+// One document at a time, the same discipline as the startup re-validation chain.
+connection.onNotification('clarion/updateDiagnosticSettings', async (params: FeatureFlagParams) => {
+    const changed = applyFeatureFlags(params ?? {});
+    logger.info(`📥 clarion/updateDiagnosticSettings — changed: ${changed.length ? changed.join(', ') : '(nothing)'}`);
+    if (changed.length === 0) return;
+    // The documents have not changed, only the rules — clear the duplicate-version
+    // guard or every re-validation below is skipped as "already validated".
+    lastValidatedVersions.clear();
+    const passStart = Date.now();
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'diagnosticSettingsChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    perfLogger.perf("diagnosticSettingsChanged re-validation complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        changed: changed.join('|')
+    });
+});
+
 connection.onNotification('clarion/projectConstantsChanged', () => {
     logger.test('📥 clarion/projectConstantsChanged — coalescing (#317)');
     projectConstantsCoalescer.trigger();

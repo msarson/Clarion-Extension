@@ -46,6 +46,9 @@ const STDERR_LOG = path.join(os.tmpdir(), 'clarion-lsp-driver-stderr.log');
 const diagEvents = [];
 const lastDiagnostics = {};
 const UNRESOLVED_PROC = process.argv.includes('--unresolved-proc');
+// #541 — start with the #517 check OFF, turn it on live after the settle window via
+// clarion/updateDiagnosticSettings, and report the re-run. Proves the live-settings wiring.
+const TOGGLE_UNRESOLVED = process.argv.includes('--toggle-unresolved');
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -328,6 +331,22 @@ async function runDiagStatusCheck(t0) {
     try { await request('shutdown', null, 10000); notify('exit'); } catch { }
     setTimeout(() => { child.kill(); process.exit(0); }, 1000);
     return;
+  }
+
+  if (TOGGLE_UNRESOLVED) {
+    const count = () => (lastDiagnostics[uri] || []).filter(x => x.code === 'unresolved-procedure-call').length;
+    const untilComplete = async () => {
+      let st;
+      do { st = await waitNotification('clarion/diagnosticsStatus', 120000); } while (st.uri !== uri || st.state !== 'complete');
+    };
+    console.log(`\n== #541 live toggle: #517 count before enabling: ${count()} ==`);
+    for (const enabled of [true, false]) {
+      const t1 = Date.now();
+      const done = untilComplete();
+      notify('clarion/updateDiagnosticSettings', { unresolvedProcedureCallsEnabled: enabled });
+      await done;
+      console.log(`   unresolvedProcedureCallsEnabled=${enabled}: re-validation complete in ${Date.now() - t1}ms, #517 count now ${count()}`);
+    }
   }
 
   if (UNRESOLVED_PROC) {

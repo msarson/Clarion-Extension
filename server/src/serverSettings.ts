@@ -61,3 +61,42 @@ export const serverSettings = {
         return this.projectPaths[0] ?? "";
     }
 };
+
+/** The feature flags a client may send — in `clarion/updatePaths` at startup and, since
+ *  #541, in `clarion/updateDiagnosticSettings` whenever a setting changes. */
+export interface FeatureFlagParams {
+    undeclaredVariablesEnabled?: boolean;
+    unresolvedProcedureCallsEnabled?: boolean;
+    indistinguishablePrototypesEnabled?: boolean;
+    inlayHintsParameterNames?: boolean;
+    inlayHintsImplicitTypes?: boolean;
+}
+
+const FEATURE_FLAGS: ReadonlyArray<keyof FeatureFlagParams> = [
+    'undeclaredVariablesEnabled',
+    'unresolvedProcedureCallsEnabled',
+    'indistinguishablePrototypesEnabled',
+    'inlayHintsParameterNames',
+    'inlayHintsImplicitTypes',
+];
+
+/**
+ * Apply the flags a client sent. A missing field preserves the current value — only an
+ * explicit value from the client wins, and only `true` is true (#62 rule, kept from the
+ * inline block this replaces). Returns the names of the flags whose value changed, so a
+ * live update (#541) can skip re-validating every open document when nothing did.
+ * `referencesCodeLensEnabled` stays in server.ts: flipping it also resets caches there.
+ */
+export function applyFeatureFlags(params: FeatureFlagParams): string[] {
+    const changed: string[] = [];
+    for (const flag of FEATURE_FLAGS) {
+        const incoming = params[flag];
+        if (incoming === undefined) continue;
+        const next = incoming === true;
+        if (serverSettings[flag] !== next) {
+            serverSettings[flag] = next;
+            changed.push(flag);
+        }
+    }
+    return changed;
+}

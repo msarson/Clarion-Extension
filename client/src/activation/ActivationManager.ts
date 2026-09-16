@@ -7,7 +7,8 @@ import { StatusViewProvider } from '../StatusViewProvider';
 import { TreeNode } from '../TreeNode';
 import { globalClarionPropertiesFile, globalClarionVersion, globalSolutionFile, globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
-import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
+import { isClientReady, getClientReadyPromise, getLanguageClient } from '../LanguageClientManager';
+import { affectsDiagnosticSettings, buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
 
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
@@ -213,6 +214,26 @@ export async function setupFolderDependentFeatures(
                     logger.info("🔄 Redirection settings changed. Recreating file watchers...");
                     await createSolutionFileWatchers(context, reinitializeEnvironment);
                 }
+            })
+        );
+
+        // #541 — a clarion.diagnostics.* change reaches the server as it happens. The
+        // flags used to travel only in clarion/updatePaths at solution initialisation,
+        // so ticking a box in Settings did nothing until a window reload. Before the
+        // client is ready there is nothing to tell: startup sends the current values.
+        context.subscriptions.push(
+            workspace.onDidChangeConfiguration((event) => {
+                if (!affectsDiagnosticSettings(section => event.affectsConfiguration(section))) return;
+                const client = getLanguageClient();
+                if (!client || !isClientReady()) {
+                    logger.info("ℹ️ Diagnostics settings changed before the language client is ready — startup will send them");
+                    return;
+                }
+                const payload = buildDiagnosticSettingsPayload(
+                    (key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def)
+                );
+                client.sendNotification('clarion/updateDiagnosticSettings', payload);
+                logger.info(`🔄 Diagnostics settings changed — sent to the server: ${JSON.stringify(payload)}`);
             })
         );
 
