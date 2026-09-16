@@ -71,6 +71,33 @@ suite('StructureDeclarationIndexer — scanSourceForDeclarations', () => {
                 assert.strictEqual(r[0].structureType, expected);
             });
         }
+
+        // A colon-qualified GROUP,TYPE label was silently invisible to the SDI, so
+        // sdi.find("GLOB:WidgetCacheType") always returned zero hits — the whole type
+        // never gets a completion/hover cross-file answer even though the declaring
+        // file scans cleanly for every other declaration in it.
+        test('colon-qualified GROUP,TYPE declaration (short prefix)', () => {
+            const r = scan('GLOB:WidgetCacheType   GROUP,TYPE');
+            const d = findByName(r, 'GLOB:WidgetCacheType');
+            assert.ok(d, 'should find GLOB:WidgetCacheType');
+            assert.strictEqual(d!.structureType, 'GROUP');
+            assert.strictEqual(d!.isType, true);
+        });
+
+        test('colon-qualified QUEUE,TYPE declaration', () => {
+            const r = scan('CFG:SettingsQType   QUEUE,TYPE');
+            const d = findByName(r, 'CFG:SettingsQType');
+            assert.ok(d, 'should find CFG:SettingsQType');
+            assert.strictEqual(d!.structureType, 'QUEUE');
+            assert.strictEqual(d!.isType, true);
+        });
+
+        test('colon-qualified CLASS declaration', () => {
+            const r = scan('LONGPREFIX9:SomeClass   CLASS');
+            const d = findByName(r, 'LONGPREFIX9:SomeClass');
+            assert.ok(d, 'should find LONGPREFIX9:SomeClass');
+            assert.strictEqual(d!.structureType, 'CLASS');
+        });
     });
 
     // -----------------------------------------------------------------------
