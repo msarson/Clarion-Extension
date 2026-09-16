@@ -159,6 +159,26 @@ suite('StructureFieldHover - field lookup in tokenized INC content', () => {
         assert.strictEqual(result.found, false, 'Should return not found for missing field');
     });
 
+    // Once StructureDeclarationIndexer's SDI can locate a colon-qualified TYPE declaration
+    // (GLOB:WidgetCacheType), the field-hover token search must also be able to find the
+    // LABEL itself in that file's tokens — a colon-qualified label is a single
+    // StructurePrefix token (short prefix), not a Label/Variable token, so the existing
+    // Label/Variable-only filter would silently miss the declaration even with the right
+    // file in hand.
+    test('finds a field in a colon-qualified GROUP,TYPE declaration', () => {
+        const incContent = [
+            'GLOB:WidgetCacheType   GROUP,TYPE',
+            'Status                 STRING(20)',
+            '                       END'
+        ].join('\n');
+
+        const tokens = new ClarionTokenizer(incContent).tokenize();
+        const result = findFieldInTokens(tokens, 'GLOB:WidgetCacheType', 'Status');
+
+        assert.strictEqual(result.found, true, 'Should find Status field in GLOB:WidgetCacheType');
+        assert.strictEqual(result.fieldType, 'STRING', `Expected STRING, got ${result.fieldType}`);
+    });
+
     test('resolveVariableClassType: QUEUE(TypeName) returns isClass=false', () => {
         // This mirrors the logic in resolveVariableClassType in StructureFieldResolver
         const clwContent = [
