@@ -46,6 +46,9 @@ logger.setLevel("error");
 // solutions are diagnosable from the user's log instead of fixture guesswork.
 const perfLogger = LoggerManager.getLogger("ReferencesProvider.Perf", "perf");
 
+// #557 — an INCLUDE directive and its file name, matched over file text.
+const INCLUDE_LINE_RE = /\bINCLUDE\s*\(\s*'([^']+)'/gi;
+
 // #550 — `Label CLASS(Parent)` on its own line (a Clarion label starts in column 1). The
 // class-family walk matches this over file TEXT instead of tokenizing each candidate.
 const CLASS_DERIVATION_RE = /^([A-Za-z_][A-Za-z0-9_:]*)\s+CLASS\s*\(\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)/gim;
@@ -182,6 +185,17 @@ export class ReferencesProvider {
         };
         let resultCount = -1; // -1 = null result
         try {
+            // #557 — "who includes this file?" answers with INCLUDE lines wherever they sit:
+            // one inside an OMIT block is still an include statement, and the #255 omitted-
+            // line filter below would otherwise tokenize every file with a hit (876 files,
+            // 28s, for an ABC header) just to decide. Straight out, deduped.
+            const includeRefs = this.provideIncludeReferences(document, position);
+            if (includeRefs) {
+                this.trace({ route: 'include', word: path.basename(decodeURIComponent(document.uri)) });
+                const deduped = this.dedupeByNormalizedLocation(includeRefs);
+                resultCount = deduped.length;
+                return deduped;
+            }
             const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token, opts?.crossProjectDll !== false);
             // #322: dedup by NORMALIZED path — the cursor document's URI casing can
             // differ from the file-walk casing (CloneScript.clw:196 AND
@@ -1575,6 +1589,76 @@ export class ReferencesProvider {
         this.trace({ files_source: ownProject ? 'own-project-fallback' : 'project-fallback' });
         logger.info(`📂 [local-class] search files: ${result.length}${ownProject ? ` (project ${ownProject.name})` : ''}`);
         return result;
+    }
+
+    /**
+     * #557 — every INCLUDE of the file named on the cursor's INCLUDE line, across the
+     * solution: the answer to "which file pulls this into global scope?" that Find All
+     * References on the type name cannot give (an INCLUDE line never mentions the type).
+     * Direct includers come from the file graph's reverse INCLUDE edges; when an includer
+     * is itself an include file, its includers follow, each hop listing the INCLUDE line
+     * that names that hop's file, so the PROGRAM carrying it appears. Includes inside
+     * conditional COMPILE / OMIT blocks are edges like any other. Null when the cursor is
+     * not on an INCLUDE directive or its file name.
+     */
+    private provideIncludeReferences(document: TextDocument, position: { line: number; character: number }): Location[] | null {
+        const tokens = this.tokenCache.getTokens(document);
+        const directive = tokens.find(t => t.line === position.line && t.type === TokenType.Directive && t.value.toUpperCase() === 'INCLUDE');
+        if (!directive) return null;
+        const literal = tokens.find(t => t.line === position.line && t.type === TokenType.String && t.start > directive.start);
+        if (!literal) return null;
+        if (position.character < directive.start || position.character > literal.start + literal.value.length) return null;
+        const target = literal.value.replace(/^'|'$/g, '');
+        if (!target) return null;
+
+        // The INCLUDE lines naming `target` in one file, found by a TEXT scan — a
+        // tokenize per includer was 240s over ABBROWSE.INC's includers on ap1.sln.
+        const base = path.basename(target).toLowerCase();
+        const includeLinesFor = (uri: string): Location[] => {
+            const text = uri.toLowerCase() === document.uri.toLowerCase()
+                ? document.getText()
+                : this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
+            if (text === null) return [];
+            const out: Location[] = [];
+            const lines = text.split(/\r?\n/);
+            for (let ln = 0; ln < lines.length; ln++) {
+                const line = lines[ln];
+                if (/^\s*!/.test(line)) continue;
+                INCLUDE_LINE_RE.lastIndex = 0;
+                let m: RegExpExecArray | null;
+                while ((m = INCLUDE_LINE_RE.exec(line)) !== null) {
+                    if (path.basename(m[1]).toLowerCase() !== base) continue;
+                    const nameStart = m.index + m[0].length - m[1].length - 1; // inside the opening quote
+                    out.push(Location.create(uri, Range.create(ln, nameStart, ln, nameStart + m[1].length)));
+                }
+            }
+            return out;
+        };
+
+        const locations: Location[] = includeLinesFor(document.uri);
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            // ONE hop — the files that include this file directly. Following includers of
+            // includers turned an ABC header into the whole include graph (5,912 hits in
+            // 2,403 files). To go up a level, run References on the includer's own INCLUDE line.
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const targetPath = graph.getForwardEdges(docFsPath)
+                .find(e => e.type === 'INCLUDE' && path.basename(e.toFile).toLowerCase() === base)?.toFile;
+            if (targetPath) {
+                for (const includer of graph.getIncludingFiles(targetPath)) {
+                    const uri = 'file:///' + includer.replace(/\\/g, '/');
+                    if (uri.toLowerCase() !== document.uri.toLowerCase()) locations.push(...includeLinesFor(uri));
+                }
+            }
+        }
+        if (locations.length === 0) return null;
+        const seenLoc = new Set<string>();
+        return locations.filter(l => {
+            const k = `${decodeURIComponent(l.uri).toLowerCase()}#${l.range.start.line}:${l.range.start.character}`;
+            if (seenLoc.has(k)) return false;
+            seenLoc.add(k);
+            return true;
+        });
     }
 
     private getMemberSearchFiles(
