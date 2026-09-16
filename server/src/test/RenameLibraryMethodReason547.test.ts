@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ResponseError } from 'vscode-languageserver/node';
 import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
 import { RenameProvider } from '../providers/RenameProvider';
@@ -67,21 +66,21 @@ suite('Rename of a method declared in a library file names the file (#547)', () 
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     });
 
-    test('bug-pin: the refusal names the library include, not "symbol not found"', async () => {
+    test('a method declared in a library include is renameable — found through its class (#547, rule from #548)', async () => {
+        // The real-world case: Noyantis' TemplateHelperClass under Accessory\libsrc\win.
+        // First cut (#547) refused this by naming the file; #548 settled the rule: only
+        // generated code is refused, a rename in any hand-written source is the
+        // developer's own call. What #547 keeps is finding the method at all — before it,
+        // this was "symbol not found".
         fs.writeFileSync(path.join(libDir, 'libthing.inc'), INC);
         const main = path.join(dir, 'main.clw');
         fs.writeFileSync(main, program('libthing.inc'));
         serverSettings.libsrcPaths = [libDir];
         await indexer.buildIndex(dir);
 
-        const doc = open(main);
-        let error: ResponseError<unknown> | undefined;
-        try { await new RenameProvider().prepareRename(doc, { line: 7, character: 8 }); }
-        catch (e) { error = e as ResponseError<unknown>; }
-        assert.ok(error, 'the rename must be refused');
-        assert.ok(/libthing\.inc/i.test(error!.message), `must name the declaring file; got: ${error!.message}`);
-        assert.ok(/library/i.test(error!.message), `must say it is a library file; got: ${error!.message}`);
-        assert.ok(!/symbol not found/i.test(error!.message), `must not be the generic refusal; got: ${error!.message}`);
+        const range = await new RenameProvider().prepareRename(open(main), { line: 7, character: 8 });
+        assert.ok(range, 'the rename box opens');
+        assert.deepStrictEqual([range!.start.line, range!.start.character], [7, 6], 'the range is the method segment only');
     });
 
     test('control: the same method declared in the solution folder is still renameable', async () => {

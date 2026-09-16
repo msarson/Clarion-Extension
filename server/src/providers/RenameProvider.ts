@@ -73,14 +73,11 @@ export class RenameProvider {
         document: TextDocument,
         position: { line: number; character: number }
     ): Promise<Range | null> {
-        const filePath = this.uriToPath(document.uri);
-
-        // Reject if the file is in a Clarion library source directory
-        const libsrcReason = this.getLibsrcRejectionReason(filePath);
-        if (libsrcReason) {
-            throw new ResponseError(ErrorCodes.InvalidRequest, libsrcReason);
-        }
-
+        // #548 — rename is refused only where the edit would be lost because the code is
+        // template-generated (#527/#528 below). Where the cursor sits (a libsrc folder),
+        // what the prototype carries (,DLL) or whether its MODULE resolves are the
+        // developer's business: a rename in hand-written code is theirs to own, and it
+        // is a single undo. The libsrc / DLL / MODULE refusals that lived here are gone.
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) {
             throw new ResponseError(ErrorCodes.InvalidRequest, 'No symbol at cursor position.');
@@ -91,30 +88,18 @@ export class RenameProvider {
             throw new ResponseError(ErrorCodes.InvalidRequest, 'No symbol at cursor position.');
         }
 
-        // Reject if the symbol is a MAP procedure declared in an external DLL or
-        // a MODULE whose source file cannot be resolved within the solution.
-        const dllReason = this.getDllOrUnresolvableRejectionReason(document, position.line, word);
-        if (dllReason) {
-            throw new ResponseError(ErrorCodes.InvalidRequest, dllReason);
-        }
         // #547 — a dotted `Receiver.Method` resolves through the receiver's class first
         // (the hover / F12 path). The per-file symbol finder cannot see through an object
-        // to a class declared in a library include, and the references fallback finds
-        // nothing there, so the generic "symbol not found" fired for a method that was
-        // found perfectly well — just in a file outside the solution. Name that file.
+        // to a class declared elsewhere, and the references fallback can come back empty,
+        // so the generic "symbol not found" fired for a method that was found perfectly
+        // well. Found through the class = renameable (#548: wherever it is declared).
         let resolvedThroughClass = false;
         const lastDotIdx = word.lastIndexOf('.');
         if (lastDotIdx > 0) {
             const receiver = word.slice(0, lastDotIdx);
             const member = word.slice(lastDotIdx + 1);
             const info = await this.memberLocator.resolveDotAccess(receiver, member, document).catch(() => null);
-            if (info?.file) {
-                const libraryReason = this.getLibsrcRejectionReason(this.uriToPath(info.file), member);
-                if (libraryReason) {
-                    throw new ResponseError(ErrorCodes.InvalidRequest, libraryReason);
-                }
-                resolvedThroughClass = true;
-            }
+            if (info?.file) resolvedThroughClass = true;
         }
         // #527/#528 — a generated file is owned by the templates: any edit is lost on the
         // next generate. The refusal keys on the DECLARATION's file (a hand-coded class
@@ -301,84 +286,6 @@ export class RenameProvider {
         return a.line < b.line || (a.line === b.line && a.character < b.character);
     }
 
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns a rejection reason if the symbol at the given line is a MAP procedure
-     * that is declared with the ,DLL attribute (external library) or whose MODULE
-     * target cannot be resolved within the solution. Returns null if rename is safe.
-     */
-    private getDllOrUnresolvableRejectionReason(
-        document: TextDocument,
-        line: number,
-        name: string
-    ): string | null {
-        const tokens = this.tokenCache.getTokensByUri(document.uri);
-        if (!tokens) return null;
-
-        // Find a MapProcedure token on or near the cursor line matching the symbol name
-        const mapProc = tokens.find(t =>
-            t.subType === TokenType.MapProcedure &&
-            t.label?.toUpperCase() === name.toUpperCase() &&
-            Math.abs(t.line - line) <= 1
-        );
-
-        if (!mapProc) return null;
-
-        // Check for ,DLL attribute on the declaration line
-        const docLine = document.getText({
-            start: { line: mapProc.line, character: 0 },
-            end: { line: mapProc.line, character: 1000 }
-        });
-        if (/,\s*DLL\b/i.test(docLine)) {
-            return `Cannot rename '${name}': procedure is declared with ,DLL and may be defined in an external project. Rename the source manually.`;
-        }
-
-        // Check whether the parent MODULE's target file is resolvable.
-        //   - Bare MODULE keyword (no parenthesised filename) → referencedFile undefined → reject.
-        //   - MODULE('Foo.clw') with a solution loaded → look the filename up via every
-        //     project's redirection parser; reject when no project finds a real on-disk file.
-        //   - MODULE('Foo.clw') with no solution loaded → skip the check (no graph to consult).
-        const parentModule = mapProc.parent;
-        if (
-            parentModule?.type === TokenType.Structure &&
-            parentModule.value.toUpperCase() === 'MODULE'
-        ) {
-            const refFile = parentModule.referencedFile;
-            const solutionManager = SolutionManager.getInstance();
-            const unresolvable = !refFile
-                ? true
-                : (solutionManager?.solution ? !this.resolvesViaRedirection(solutionManager, refFile) : false);
-
-            if (unresolvable) {
-                const display = refFile || '(no filename)';
-                return `Cannot rename '${name}': the source file '${display}' could not be resolved within the current solution. Rename the source manually.`;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Returns true if `refFile` resolves to a real on-disk path via any project's
-     * redirection parser. Mirrors MapProcedureResolver's resolution pattern.
-     */
-    private resolvesViaRedirection(solutionManager: SolutionManager, refFile: string): boolean {
-        for (const proj of solutionManager.solution.projects) {
-            const redirectionParser = proj.getRedirectionParser?.();
-            if (!redirectionParser) continue;
-            // #450 — an extension-less directive target infers .clw; redirection
-            // masks are extension-based so a bare name matches nothing.
-            const resolved = clarionSourceCandidates(refFile)
-                .map(c => redirectionParser.findFile(c))
-                .find(r => r?.path && fs.existsSync(r.path));
-            if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /** Converts a file:// URI to a normalised file-system path. */
     /** #528 — file text for a hit not open in the editor (disk read; null when unreadable). */
     private readFileTextForUri(uri: string): string | null {
@@ -477,28 +384,10 @@ export class RenameProvider {
         return false;
     }
 
+    /** Converts a file:// URI to a normalised file-system path. */
     private uriToPath(uri: string): string {
         return decodeURIComponent(uri.replace(/^file:\/\/\//i, '').replace(/^file:\/\//i, ''))
             .replace(/\//g, '\\');
     }
 
-    /**
-     * Returns a human-readable rejection reason if `filePath` is inside a known
-     * Clarion library source directory, or null if the file is safe to rename.
-     */
-    private getLibsrcRejectionReason(filePath: string, symbol?: string): string | null {
-        const normalised = filePath.toLowerCase();
-
-        for (const libDir of serverSettings.libsrcPaths) {
-            if (normalised.startsWith(libDir.toLowerCase())) {
-                // #547 — with a symbol, the reason is about where it is DECLARED (the
-                // cursor may be in a solution file calling into the library).
-                return symbol
-                    ? `Cannot rename '${symbol}': it is declared in '${path.basename(filePath)}', part of the Clarion library (${libDir}), outside the solution.`
-                    : `Cannot rename: '${path.basename(filePath)}' is part of the Clarion standard library (${libDir}).`;
-            }
-        }
-
-        return null;
-    }
 }
