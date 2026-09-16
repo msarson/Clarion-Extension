@@ -6,6 +6,8 @@ import * as path from 'path';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { SolutionManager } from '../solution/solutionManager';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ScopeResolver } from '../scope/ScopeResolver';
@@ -18,6 +20,15 @@ import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
 logger.setLevel("error");
+
+/**
+ * Minimum typed characters before project-wide EQUATEs join the candidate list.
+ * The document's own EQUATEs are never gated this way.
+ */
+const PROJECT_EQUATE_MIN_PREFIX = 2;
+
+/** Upper bound on project-wide EQUATEs added to a single completion response. */
+const PROJECT_EQUATE_LIMIT = 300;
 
 /**
  * Provides general word/identifier completion for Clarion.
@@ -109,7 +120,7 @@ export class WordCompletionProvider {
             //    CompletionItemKind.Constant rather than the bare Variable
             //    entry that collectVariables would otherwise produce.
             // ----------------------------------------------------------------
-            this.collectEquates(document, tokens, add);
+            await this.collectEquates(document, partial, add);
 
             // ----------------------------------------------------------------
             // C. Variables / Labels
@@ -828,12 +839,15 @@ export class WordCompletionProvider {
      * completions. These tokens are tokenized as TokenType.Label, not
      * TokenType.Constant — the latter is the lexer's literal-value class
      * (numeric/string literals) and is intentionally not used here.
+     *
+     * Two tiers, in priority order: this document's own EQUATEs, then the
+     * project-wide declaration index (see collectProjectEquates).
      */
-    private collectEquates(
+    private async collectEquates(
         document: TextDocument,
-        _tokens: Token[],
+        partial: string,
         add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
-    ): void {
+    ): Promise<void> {
         // Single source of truth: DocumentStructure.getEquates() (Gap B).
         // Each returned token already carries `dataValue` (Gap D) and, when the
         // EQUATE is declared inside an ITEMIZE,PRE(...) block, `prefixedEquateName`
@@ -846,6 +860,72 @@ export class WordCompletionProvider {
                 : 'EQUATE';
             add(label, CompletionItemKind.Constant, detail);
         }
+
+        await this.collectProjectEquates(document, partial, add);
+    }
+
+    /**
+     * EQUATEs declared elsewhere in the project, from StructureDeclarationIndexer.
+     *
+     * getEquates() above only sees the document being edited, and a data-section
+     * `INCLUDE('Constants.inc')` is never inlined into that document's token
+     * stream — only MAP-nested INCLUDEs are, via getMapTokensWithIncludes. So an
+     * EQUATE the compiler resolves through a plain INCLUDE (directly, or through
+     * the PROGRAM file for a MEMBER module) had no tier that could see it, and
+     * never appeared as a completion. This is the same role the index already
+     * plays as hover's third tier: ".inc files not in the INCLUDE chain".
+     *
+     * Gated on a typed prefix: the index spans every RED search path plus libsrc,
+     * so on an empty prefix this would be thousands of constants nobody asked
+     * for, piled onto a candidate list that is already large. Once a couple of
+     * characters are typed the matching set is small and directly relevant —
+     * which is exactly the position the user is in when typing a constant's
+     * leading characters.
+     */
+    private async collectProjectEquates(
+        document: TextDocument,
+        partial: string,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): Promise<void> {
+        if (partial.length < PROJECT_EQUATE_MIN_PREFIX) return;
+
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const project = SolutionManager.getInstance()?.findProjectForFile(docPath);
+        if (!project?.path) return;
+
+        const sdi = StructureDeclarationIndexer.getInstance();
+        // Never make a keystroke wait on a cold scan. Consult the index only once
+        // it is already built — the diagnostics pass builds it shortly after the
+        // solution loads, and it is disk-cached across sessions, so in practice
+        // this is a Map read rather than a scan.
+        if (!sdi.isIndexed(project.path)) return;
+        const index = await sdi.getOrBuildIndex(project.path);
+
+        // byName keys are lowercased names; ITEMIZE_EQUATE entries are already
+        // PRE-expanded (`clr:red`), which is the form the caller types and the
+        // form the qualifier branch of the prefix filter expects.
+        const needle = partial.toLowerCase();
+        let emitted = 0;
+        for (const [key, decls] of index.byName) {
+            if (!key.startsWith(needle)) continue;
+            const equate = decls.find(d =>
+                d.structureType === 'EQUATE' || d.structureType === 'ITEMIZE_EQUATE'
+            );
+            if (!equate) continue;
+            add(
+                equate.name,
+                CompletionItemKind.Constant,
+                WordCompletionProvider.equateDetailFromLine(equate.lineContent),
+                `Declared in ${path.basename(equate.filePath)}`
+            );
+            if (++emitted >= PROJECT_EQUATE_LIMIT) break;
+        }
+    }
+
+    /** `MAX_ROWS EQUATE(100)` -> `EQUATE(100)`; a valueless EQUATE -> `EQUATE`. */
+    private static equateDetailFromLine(lineContent: string | undefined): string {
+        const m = /\bEQUATE\s*\(([^)]*)\)/i.exec(lineContent ?? '');
+        return m ? `EQUATE(${m[1].trim()})` : 'EQUATE';
     }
 
     // -------------------------------------------------------------------------
