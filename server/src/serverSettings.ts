@@ -1,3 +1,5 @@
+import { DIAGNOSTIC_CHECKS, DiagnosticCheckId, checkDefault } from '../../common/diagnosticChecks';
+
 export const serverSettings = {
     redirectionPaths: [] as string[],
     projectPaths: [] as string[],
@@ -11,28 +13,28 @@ export const serverSettings = {
     defaultLookupExtensions: [".clw", ".inc", ".equ", ".eq", ".int"] as string[],
 
     /**
-     * Issue #62 — diagnostic for undeclared LHS-of-assignment identifiers.
-     * Populated from `clarion.diagnostics.undeclaredVariables.enabled` via the
-     * `clarion/updatePaths` notification; defaults to true so the diagnostic
-     * fires out of the box. Toggling requires a VS Code reload.
+     * #542 — every diagnostic check has a switch, and there is a master switch. `checks`
+     * holds only values the client has sent; an absent id falls back to the table default
+     * in common/diagnosticChecks.ts. Read through `isDiagnosticEnabled(id)`, which also
+     * applies the master switch. Populated from `clarion.diagnostics.*` at startup
+     * (clarion/updatePaths) and live on every change (clarion/updateDiagnosticSettings, #541).
      */
-    undeclaredVariablesEnabled: true,
+    diagnostics: {
+        enabled: true,
+        checks: {} as Partial<Record<DiagnosticCheckId, boolean>> & Record<string, boolean | undefined>,
+    },
 
-    /**
-     * Issue #517 — OPT-IN (off by default) diagnostic for a call to a procedure
-     * that resolves to no declaration anywhere. Populated from
-     * `clarion.diagnostics.unresolvedProcedureCalls.enabled` via `clarion/updatePaths`.
-     */
-    unresolvedProcedureCallsEnabled: false,
+    /** Issue #62 — undeclared-variable check. A view onto `diagnostics.checks` (#542). */
+    get undeclaredVariablesEnabled(): boolean { return this.diagnostics.checks.undeclaredVariables ?? checkDefault('undeclaredVariables'); },
+    set undeclaredVariablesEnabled(v: boolean) { this.diagnostics.checks.undeclaredVariables = v; },
 
-    /**
-     * Issue #121 — diagnostic for indistinguishable procedure prototypes
-     * (compile-error duplicates that Clarion's compiler rejects). Populated
-     * from `clarion.diagnostics.indistinguishablePrototypes.enabled` via the
-     * `clarion/updatePaths` notification; defaults to true so the diagnostic
-     * fires out of the box. Toggling requires a VS Code reload.
-     */
-    indistinguishablePrototypesEnabled: true,
+    /** Issue #517 — OPT-IN unresolved-procedure-call check. A view onto `diagnostics.checks` (#542). */
+    get unresolvedProcedureCallsEnabled(): boolean { return this.diagnostics.checks.unresolvedProcedureCalls ?? checkDefault('unresolvedProcedureCalls'); },
+    set unresolvedProcedureCallsEnabled(v: boolean) { this.diagnostics.checks.unresolvedProcedureCalls = v; },
+
+    /** Issue #121 — indistinguishable-prototypes check. A view onto `diagnostics.checks` (#542). */
+    get indistinguishablePrototypesEnabled(): boolean { return this.diagnostics.checks.indistinguishablePrototypes ?? checkDefault('indistinguishablePrototypes'); },
+    set indistinguishablePrototypesEnabled(v: boolean) { this.diagnostics.checks.indistinguishablePrototypes = v; },
 
     /**
      * Issue #185 — reference-count CodeLens (one Find-All-References per visible
@@ -70,9 +72,22 @@ export interface FeatureFlagParams {
     indistinguishablePrototypesEnabled?: boolean;
     inlayHintsParameterNames?: boolean;
     inlayHintsImplicitTypes?: boolean;
+    /** #542 — the master switch and one flag per check, keyed by check id. */
+    diagnosticsEnabled?: boolean;
+    diagnosticChecks?: Record<string, boolean>;
 }
 
-const FEATURE_FLAGS: ReadonlyArray<keyof FeatureFlagParams> = [
+/** #542 — is this check to run: the master switch, then the check's own setting or its default. */
+export function isDiagnosticEnabled(id: DiagnosticCheckId): boolean {
+    if (!serverSettings.diagnostics.enabled) return false;
+    return serverSettings.diagnostics.checks[id] ?? checkDefault(id);
+}
+
+const KNOWN_CHECK_IDS = new Set<string>(DIAGNOSTIC_CHECKS.map(c => c.id));
+
+type BooleanFlag = 'undeclaredVariablesEnabled' | 'unresolvedProcedureCallsEnabled' | 'indistinguishablePrototypesEnabled'
+    | 'inlayHintsParameterNames' | 'inlayHintsImplicitTypes';
+const FEATURE_FLAGS: ReadonlyArray<BooleanFlag> = [
     'undeclaredVariablesEnabled',
     'unresolvedProcedureCallsEnabled',
     'indistinguishablePrototypesEnabled',
@@ -97,6 +112,22 @@ export function applyFeatureFlags(params: FeatureFlagParams): string[] {
             serverSettings[flag] = next;
             changed.push(flag);
         }
+    }
+    // #542 — the table payload. Unknown ids (a newer client) are ignored rather than stored.
+    if (params.diagnosticsEnabled !== undefined) {
+        const next = params.diagnosticsEnabled === true;
+        if (serverSettings.diagnostics.enabled !== next) {
+            serverSettings.diagnostics.enabled = next;
+            changed.push('diagnosticsEnabled');
+        }
+    }
+    for (const [id, value] of Object.entries(params.diagnosticChecks ?? {})) {
+        if (!KNOWN_CHECK_IDS.has(id)) continue;
+        const checkId = id as DiagnosticCheckId;
+        const next = value === true;
+        const current = serverSettings.diagnostics.checks[checkId] ?? checkDefault(checkId);
+        serverSettings.diagnostics.checks[checkId] = next;
+        if (current !== next) changed.push(`diagnostics.${id}`);
     }
     return changed;
 }

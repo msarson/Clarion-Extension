@@ -4,7 +4,8 @@ import { ClarionTokenizer, Token } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from '../services/MemberLocatorService';
-import { serverSettings } from '../serverSettings';
+import { serverSettings, isDiagnosticEnabled } from '../serverSettings';
+import { DiagnosticCheckId } from '../../../common/diagnosticChecks';
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 
@@ -66,27 +67,30 @@ export class DiagnosticProvider {
         // #181: class-interface-implementation and (6b40d7da/#115) undeclared-variable
         // validators live in the ASYNC pass — they resolve cross-file via
         // MemberLocator / SymbolFinderService. See the server.ts await sites.
-        const syncValidators: Array<[string, () => Diagnostic[]]> = [
-            ['structureTerminators', () => validateStructureTerminators(tokens!, document)],
-            ['conditionalBlocks', () => validateConditionalBlocks(tokens!, document)],
-            ['fileStructures', () => validateFileStructures(tokens!, document)],
-            ['caseStructures', () => validateCaseStructures(tokens!, document)],
-            ['executeStructures', () => validateExecuteStructures(tokens!, document)],
-            ['returnStatements', () => validateReturnStatements(tokens!, document, structure)],
-            ['classProperties', () => validateClassProperties(tokens!, document)],
-            ['discardedReturnPlainCalls', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
-            ['cycleBreakOutsideLoop', () => validateCycleBreakOutsideLoop(tokens!, document)],
-            ['reservedKeywordLabels', () => validateReservedKeywordLabels(tokens!, document)],
-            ['unicodeCharacters', () => validateUnicodeCharacters(document)],
-            ['attributeApplicability', () => validateAttributeApplicability(tokens!, document, structure)],
-            ['itemizeBlocks', () => validateItemizeBlocks(tokens!, document)],
-            ['indistinguishablePrototypes', () => validateIndistinguishablePrototypes(tokens!, document)],
-            ['byRefArguments', () => validateByRefArguments(tokens!, document)],
+        // #542 — [perf-timing name, check id (its clarion.diagnostics.<id>.enabled setting), validator].
+        // Each runs only when isDiagnosticEnabled(id), which also applies the master switch.
+        const syncValidators: Array<[string, DiagnosticCheckId, () => Diagnostic[]]> = [
+            ['structureTerminators', 'unterminatedStructures', () => validateStructureTerminators(tokens!, document)],
+            ['conditionalBlocks', 'omitCompileBlocks', () => validateConditionalBlocks(tokens!, document)],
+            ['fileStructures', 'fileDeclarations', () => validateFileStructures(tokens!, document)],
+            ['caseStructures', 'caseStructures', () => validateCaseStructures(tokens!, document)],
+            ['executeStructures', 'executeStructures', () => validateExecuteStructures(tokens!, document)],
+            ['returnStatements', 'returnStatements', () => validateReturnStatements(tokens!, document, structure)],
+            ['classProperties', 'classProperties', () => validateClassProperties(tokens!, document)],
+            ['discardedReturnPlainCalls', 'discardedReturnValues', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
+            ['cycleBreakOutsideLoop', 'cycleBreakOutsideLoop', () => validateCycleBreakOutsideLoop(tokens!, document)],
+            ['reservedKeywordLabels', 'reservedKeywordLabels', () => validateReservedKeywordLabels(tokens!, document)],
+            ['unicodeCharacters', 'unicodeCharacters', () => validateUnicodeCharacters(document)],
+            ['attributeApplicability', 'attributeApplicability', () => validateAttributeApplicability(tokens!, document, structure)],
+            ['itemizeBlocks', 'itemizeBlocks', () => validateItemizeBlocks(tokens!, document)],
+            ['indistinguishablePrototypes', 'indistinguishablePrototypes', () => validateIndistinguishablePrototypes(tokens!, document)],
+            ['byRefArguments', 'byRefArguments', () => validateByRefArguments(tokens!, document)],
         ];
 
         const diagnostics: Diagnostic[] = [];
         const timings: Array<[string, number]> = [];
-        for (const [name, run] of syncValidators) {
+        for (const [name, checkId, run] of syncValidators) {
+            if (!isDiagnosticEnabled(checkId)) continue;
             const t0 = performance.now();
             diagnostics.push(...run());
             timings.push([name, performance.now() - t0]);
@@ -147,6 +151,7 @@ export class DiagnosticProvider {
         memberLocator: MemberLocatorService,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('discardedReturnValues')) return []; // #542
         return this.filterOmitted(await _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent), tokens, document);
     }
 
@@ -162,6 +167,7 @@ export class DiagnosticProvider {
     ): Promise<Diagnostic[]> {
         // #258: production callers pass cache tokens — reuse the cached structure.
         const structure = TokenCache.getInstance().getStructure(document);
+        if (!isDiagnosticEnabled('interfaceImplementation')) return []; // #542
         return this.filterOmitted(await _validateClassInterfaceImplementationAsync(tokens, document, memberLocator, structure), tokens, document);
     }
 
@@ -171,6 +177,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('missingMapDeclarations')) return []; // #542
         return this.filterOmitted(await validateMissingMapDeclarations(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
@@ -180,6 +187,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('missingImplementations')) return []; // #542
         return this.filterOmitted(await validateMissingImplementations(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
@@ -189,6 +197,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('privateProcedureCalls')) return []; // #542
         return this.filterOmitted(await validatePrivateProcedureCalls(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
@@ -197,6 +206,7 @@ export class DiagnosticProvider {
         tokens: Token[],
         document: TextDocument
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('missingIncludes')) return []; // #542
         return this.filterOmitted(await validateMissingIncludes(tokens, document), tokens, document);
     }
 
@@ -212,6 +222,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         getOpenDocumentContent?: (absPath: string) => string | null
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('viewProjectFields')) return []; // #542
         return this.filterOmitted(validateViewProjectFields(tokens, document, getOpenDocumentContent), tokens, document);
     }
 
@@ -220,6 +231,7 @@ export class DiagnosticProvider {
         tokens: Token[],
         document: TextDocument
     ): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('missingConstants')) return []; // #542
         return this.filterOmitted(await validateMissingConstants(tokens, document), tokens, document);
     }
 
@@ -238,7 +250,7 @@ export class DiagnosticProvider {
      * safe in no-solution mode too.
      */
     public static async validateUnresolvedProcedureCalls(tokens: Token[], document: TextDocument): Promise<Diagnostic[]> {
-        if (!serverSettings.unresolvedProcedureCallsEnabled) return [];
+        if (!isDiagnosticEnabled('unresolvedProcedureCalls')) return []; // #542
         return this.filterOmitted(await _validateUnresolvedProcedureCalls(tokens, document), tokens, document);
     }
 
@@ -247,7 +259,7 @@ export class DiagnosticProvider {
         document: TextDocument,
         symbolFinder: SymbolFinderService
     ): Promise<Diagnostic[]> {
-        if (!serverSettings.undeclaredVariablesEnabled) return [];
+        if (!isDiagnosticEnabled('undeclaredVariables')) return []; // #542
         // #287 — in no-solution mode there is no cross-file symbol index, so `SymbolFinder` can't
         // resolve globals declared in other files (GlobalRequest, GlobalResponse, module/global data,
         // etc.). Every such legitimate cross-file global would then be flagged as undeclared. The

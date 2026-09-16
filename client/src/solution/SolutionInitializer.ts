@@ -1,6 +1,7 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
+import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
 import { rememberedSolutionState, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
@@ -410,6 +411,8 @@ export async function initializeSolution(
             undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled, // #62 opt-in
             unresolvedProcedureCallsEnabled: globalSettings.unresolvedProcedureCallsEnabled, // #517 opt-in
             indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
+            // #542 — the master switch and every per-check setting, from the shared table.
+            ...buildDiagnosticSettingsPayload((key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def)),
             referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled, // #185 opt-out
             inlayHintsParameterNames: globalSettings.inlayHintsParameterNames,   // inlay opt-out
             inlayHintsImplicitTypes: globalSettings.inlayHintsImplicitTypes      // inlay opt-out
