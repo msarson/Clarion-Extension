@@ -108,6 +108,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
+import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -330,6 +331,8 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+// #509 — call hierarchy shares the definition / implementation / references resolvers.
+const callHierarchyProvider = new CallHierarchyProvider(definitionProvider, implementationProvider, referencesProvider);
 const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
@@ -527,6 +530,7 @@ connection.onInitialize((params) => {
                 hoverProvider: true,
                 codeActionProvider: true,
                 selectionRangeProvider: true,
+                callHierarchyProvider: true, // #509
                 codeLensProvider: { resolveProvider: true },
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
@@ -1024,6 +1028,22 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 });
 
 // Handle selection range requests (Shift+Alt+→ expand selection)
+// #509 — call hierarchy: prepare on the item at the cursor, then incoming / outgoing per item.
+connection.languages.callHierarchy.onPrepare(async (params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    try { return await callHierarchyProvider.prepare(document, params.position, token); }
+    catch (err) { logger.error(`❌ call hierarchy prepare failed: ${err}`); return null; }
+});
+connection.languages.callHierarchy.onIncomingCalls(async (params, token) => {
+    try { return await callHierarchyProvider.incomingCalls(params.item, token); }
+    catch (err) { logger.error(`❌ call hierarchy incoming failed: ${err}`); return null; }
+});
+connection.languages.callHierarchy.onOutgoingCalls(async (params, token) => {
+    try { return await callHierarchyProvider.outgoingCalls(params.item, token); }
+    catch (err) { logger.error(`❌ call hierarchy outgoing failed: ${err}`); return null; }
+});
+
 connection.onSelectionRanges((params) => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];

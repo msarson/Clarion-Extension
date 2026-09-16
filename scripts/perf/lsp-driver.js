@@ -365,6 +365,33 @@ async function runDiagStatusCheck(t0) {
     if (d.length > 40) console.log(`  … and ${d.length - 40} more`);
   }
 
+  // #509 — --callhier=LINE:COL (1-based): prepareCallHierarchy at that position, then
+  // incoming and outgoing calls for the item, timed; prints the callers/callees.
+  const chArg = arg('callhier');
+  if (chArg) {
+    const [l, c] = chArg.split(':').map(Number);
+    const position = { line: l - 1, character: (c || 1) - 1 };
+    const t1 = Date.now();
+    const items = await request('textDocument/prepareCallHierarchy', { textDocument: { uri }, position }, 120000).catch(e => ({ error: e.message }));
+    console.log(`\n== call hierarchy at ${chArg}: prepare ${Date.now() - t1}ms ==`);
+    const item = Array.isArray(items) ? items[0] : null;
+    if (!item) { console.log(`  (no item${items && items.error ? ': ' + items.error : ''})`); }
+    else {
+      console.log(`  item: ${item.name} [${item.detail}] ${path.basename(decodeURIComponent(item.uri))}:${item.range.start.line + 1}-${item.range.end.line + 1}`);
+      for (const dir of ['incoming', 'outgoing']) {
+        const t2 = Date.now();
+        const calls = await request(`callHierarchy/${dir}Calls`, { item }, 600000).catch(e => ({ error: e.message }));
+        const list = Array.isArray(calls) ? calls : [];
+        console.log(`  ${dir}: ${list.length} in ${Date.now() - t2}ms${calls && calls.error ? ' error: ' + calls.error : ''}`);
+        for (const call of list.slice(0, 15)) {
+          const other = call.from || call.to;
+          console.log(`    ${other.name} [${other.detail}] ${path.basename(decodeURIComponent(other.uri))}:${other.range.start.line + 1} (${call.fromRanges.length} site(s))`);
+        }
+        if (list.length > 15) console.log(`    … and ${list.length - 15} more`);
+      }
+    }
+  }
+
   const defArg = arg('define'); // LINE:COL, 0-indexed
   if (defArg) {
     const [dl, dc] = defArg.split(':').map(Number);

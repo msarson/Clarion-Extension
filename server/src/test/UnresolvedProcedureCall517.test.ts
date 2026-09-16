@@ -109,6 +109,11 @@ suite('#517 unresolved procedure calls', () => {
         assert.strictEqual(long.range.start.character, 2, 'the squiggle starts at the prefix, not at the colon');
     });
 
+    test('a call with a space before its paren — `Name (args)` — is a call (#509 real-solution find)', async () => {
+        const d = await run(['MyProc PROCEDURE()', '  CODE', "  Gone ('x')", '  RETURN'].join('\n'));
+        assert.deepStrictEqual(flagged(d), ['Gone']);
+    });
+
     test('nothing is flagged when the procedure index is not ready', async () => {
         const d = await run(['MyProc PROCEDURE()', '  CODE', '  DoesNotExist()', '  RETURN'].join('\n'), [], /* ready */ false);
         assert.deepStrictEqual(flagged(d), []);

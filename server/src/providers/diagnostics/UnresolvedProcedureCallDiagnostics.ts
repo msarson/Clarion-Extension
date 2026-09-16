@@ -109,7 +109,8 @@ export async function validateUnresolvedProcedureCalls(
         // not a call, and must never be flagged.
         if (!isInsideCode(t.line)) continue;
 
-        if (t.value.includes('.')) continue;
+        const rawName = callNameOf(t);
+        if (!rawName || rawName.includes('.')) continue;
         // Member / method calls resolve through a class or structure, not a MAP —
         // out of scope. The receiver's trailing '.' is consumed into the preceding
         // token (`Access:File.SetErrors` tokenizes as StructureField then Function with
@@ -125,8 +126,8 @@ export async function validateUnresolvedProcedureCalls(
         // pair — is declared under its FULL name (`IBSCommon:Kill PROCEDURE,DLL`). Above
         // the tokenizer's 8-character prefix cap it arrives as Variable ':' Function, so
         // the token holds only `Kill`; read the whole identifier from the source line.
-        const name = qualifiedNameAt(lineText, t.start, t.value);
-        const start = t.start - (name.length - t.value.length);
+        const name = qualifiedNameAt(lineText, t.start, rawName);
+        const start = t.start - (name.length - rawName.length);
 
         const upper = name.toUpperCase();
         if (localNames.has(upper)) continue;
@@ -241,6 +242,21 @@ function collectCodeRanges(tokens: Token[]): { codeStart: number; end: number }[
     return ranges;
 }
 
+const SPACED_CALL_RE = /^([A-Za-z_][A-Za-z0-9_:]*)\s*\(/;
+
+/**
+ * The procedure name a call token carries: the token's value for a Function / Variable /
+ * StructurePrefix call, the identifier before the paren for the single-token
+ * `Name (args)` shape. Null when the token is not a call at all.
+ */
+export function callNameOf(t: Token): string | null {
+    if (t.type === TokenType.FunctionArgumentParameter) {
+        const m = SPACED_CALL_RE.exec(t.value);
+        return m ? m[1] : null;
+    }
+    return t.value;
+}
+
 /**
  * True when tokens[i] CALLS a procedure rather than referring to it — the same
  * classification the PRIVATE-call diagnostic uses (#481). `Proc(...)` is a
@@ -248,9 +264,14 @@ function collectCodeRanges(tokens: Token[]): { codeStart: number; end: number }[
  * Variable alone on its line; a Variable anywhere else — `START(Proc)`,
  * `ADDRESS(Proc)` — is a reference and not a call.
  */
-function isCall(tokens: Token[], i: number): boolean {
+export function isCall(tokens: Token[], i: number): boolean {
     const t = tokens[i];
     if (t.type === TokenType.Function) return true;
+    // `Name (args)` with a space before the paren — NetTalk's generated
+    // `NetDebugTrace ('…')` — is lexed as ONE FunctionArgumentParameter token holding the
+    // name, the space and the arguments. Clarion arrays index with [ ], so a name followed
+    // by `(` is always a call.
+    if (t.type === TokenType.FunctionArgumentParameter) return SPACED_CALL_RE.test(t.value);
     const next = tokens[i + 1];
     // A short colon-prefixed name (`ABC:Init`, prefix of 8 characters or fewer) is ONE
     // StructurePrefix token; with `(` right after it on the line it is a call.
