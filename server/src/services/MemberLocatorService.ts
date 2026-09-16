@@ -1844,8 +1844,12 @@ export class MemberLocatorService {
             return null;
         }
 
-        // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName)
-        const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\((\w+)\)$/i);
+        // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName) — the type name
+        // may be colon-qualified (GROUP(CFG:SomeType)), exactly as the LIKE(...) case below
+        // already allows, and as ClassMemberResolver.extractClassName allows on the chained
+        // path. Without ':' here the whole match fails and the declaration falls through to
+        // the bare-keyword branch, which resolves a variable to ITS OWN name as its type.
+        const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\(([\w:]+)\)$/i);
         if (structMatch) {
             return { typeName: structMatch[2], isClass: structMatch[1].toUpperCase() === 'CLASS', isReference };
         }
