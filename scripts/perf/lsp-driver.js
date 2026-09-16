@@ -49,6 +49,9 @@ const UNRESOLVED_PROC = process.argv.includes('--unresolved-proc');
 // #541 — start with the #517 check OFF, turn it on live after the settle window via
 // clarion/updateDiagnosticSettings, and report the re-run. Proves the live-settings wiring.
 const TOGGLE_UNRESOLVED = process.argv.includes('--toggle-unresolved');
+// #544 — print window/workDoneProgress events ($/progress) as they arrive.
+const PROGRESS = process.argv.includes('--progress');
+const progressEvents = [];
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -88,8 +91,14 @@ child.on('message', (msg) => {
     // server→client request — answer politely (configuration: all nulls)
     let result = null;
     if (msg.method === 'workspace/configuration') result = (msg.params.items || []).map(() => null);
+    // #544 — window/workDoneProgress/create: accept the token (result is void).
     child.send({ jsonrpc: '2.0', id: msg.id, result });
   } else if (msg.method) {
+    if (msg.method === '$/progress') {
+      // #544 — standard progress; printed in --progress mode.
+      progressEvents.push({ t: Date.now(), token: msg.params.token, value: msg.params.value });
+      if (PROGRESS) console.log(`  [progress ${String(msg.params.token).slice(0, 8)}] ${msg.params.value.kind}${msg.params.value.title ? ' ' + msg.params.value.title : ''}${msg.params.value.message ? ' — ' + msg.params.value.message : ''}${msg.params.value.percentage !== undefined ? ' ' + msg.params.value.percentage + '%' : ''}`);
+    }
     if (msg.method === 'textDocument/publishDiagnostics') {
       diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length });
       lastDiagnostics[msg.params.uri] = msg.params.diagnostics || [];
@@ -245,7 +254,7 @@ async function runDiagStatusCheck(t0) {
     processId: process.pid,
     rootUri: toUri(APPDEV),
     workspaceFolders: [{ uri: toUri(APPDEV), name: 'AppDev' }],
-    capabilities: { textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] } }, workspace: { configuration: true } },
+    capabilities: { textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] } }, workspace: { configuration: true }, window: { workDoneProgress: true } },
     // perf channels ON — the whole point of this driver
     initializationOptions: { settings: { log: { performance: { enabled: true } } } },
   });

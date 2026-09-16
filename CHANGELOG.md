@@ -110,6 +110,7 @@ Forty-one changes, most of them about how the extension reads generated code: th
 
 #### Performance
 
+- **Start-up work now shows as standard progress in the status bar.** Building the declaration index, building the file graph and re-checking the open files after the index is ready are reported through the protocol's progress channel, so VS Code and any other client show what the server is doing on a large solution instead of nothing. [#544](https://github.com/msarson/Clarion-Extension/issues/544)
 - **First hover, F12 or references on a generated program.** PROGRAM-file MAP prototypes are now indexed, so a member module's first request takes about 60ms instead of 2s. [#483](https://github.com/msarson/Clarion-Extension/issues/483)
 - **A call site inside the PROGRAM file** no longer expands the MAP's INCLUDEs for a prototype the file already declares, and a DLL named by `MODULE('x.dll')` no longer reaches the tokenizer. First request about 1.7s to under 250ms. [#484](https://github.com/msarson/Clarion-Extension/issues/484)
 - **A quadratic tokenizer phase is gone.** Every function call was being scanned as if it opened a data section: 1.47s to 1ms on a 6,000-line library source, and the whole 7,000-file corpus tokenises in 74s instead of 135s. Two column-0 labels beginning with a keyword, `return:xml` and `Omit:pXPos`, now tokenise as labels. [#485](https://github.com/msarson/Clarion-Extension/issues/485)

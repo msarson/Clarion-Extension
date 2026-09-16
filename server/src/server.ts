@@ -107,6 +107,7 @@ import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
+import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -433,6 +434,13 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+
+        // #544 — startup phases report through window/workDoneProgress when the client
+        // can show it (VS Code: status bar). Silent otherwise.
+        StartupProgress.configure(
+            params.capabilities.window?.workDoneProgress === true,
+            async () => adaptLibraryReporter(await connection.window.createWorkDoneProgress())
+        );
 
         // #297 (revised): perf channels are opt-in via clarion.log.performance.enabled.
         // Read it here — onInitialize is the server's first breath, so when enabled the
@@ -2264,6 +2272,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 )];
                 const sdiStart = Date.now();
                 logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
+                const sdiProgress = await StartupProgress.begin('Clarion: building declaration index', `${projectPaths.length} project folder(s)`);
+                let sdiDone = 0;
                 await Promise.all(projectPaths.map(async p => {
                     const t = Date.now();
                     await indexer.getOrBuildIndex(p).catch(err =>
@@ -2273,7 +2283,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         ms: Date.now() - t,
                         project: path.basename(p)
                     });
+                    sdiProgress.step(++sdiDone, projectPaths.length, path.basename(p));
                 }));
+                sdiProgress.done();
                 logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
                 perfLogger.perf("Phase: SDI structure-index build complete (background)", {
                     ms: Date.now() - sdiStart,
@@ -2334,12 +2346,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
                 const revalStart = Date.now();
                 let revalCount = 0;
-                for (const doc of documents.all()) {
+                const openDocsForReval = documents.all();
+                const revalProgress = await StartupProgress.begin('Clarion: checking open files', `${openDocsForReval.length} file(s)`);
+                for (const doc of openDocsForReval) {
                     try {
                         await validateTextDocument(doc, 'sdiReady');
                     } catch { /* validator errors are logged at source */ }
                     revalCount++;
+                    revalProgress.step(revalCount, openDocsForReval.length, path.basename(decodeURIComponent(doc.uri)));
                 }
+                revalProgress.done();
                 perfLogger.perf("Phase: sdiReady revalidation pass complete", {
                     ms: Date.now() - revalStart,
                     doc_count: revalCount,
@@ -2457,9 +2473,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     sourceFileCount,
                     unresolvedCount: unresolved.length
                 });
-                await graph.buildInBackground(allFiles).catch(err =>
+                const frgProgress = await StartupProgress.begin('Clarion: building file graph', `${allFiles.length} source file(s)`);
+                // The closure walk (#522) reaches files beyond the .cwproj seeds, so the count
+                // can pass the seed total; past it, report the count without a percentage.
+                await graph.buildInBackground(allFiles, (done, total) =>
+                    done <= total ? frgProgress.step(done, total) : frgProgress.report(`${done} files (${done - total} reached through includes)`)
+                ).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
+                frgProgress.done();
                 logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
                 perfLogger.perf("Phase: FRG file-relationship-graph build complete (background)", {
                     ms: Date.now() - frgStart,

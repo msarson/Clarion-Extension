@@ -122,7 +122,8 @@ export class FileRelationshipGraph {
      * Processes files in parallel batches to maximise I/O throughput.
      * Yields between batches to keep the event loop responsive.
      */
-    public async buildInBackground(projectFiles: string[]): Promise<void> {
+    /** @param onProgress #544 — called at the same cadence as the perf progress line (every 500 files). */
+    public async buildInBackground(projectFiles: string[], onProgress?: (filesDone: number, totalSeeds: number) => void): Promise<void> {
         if (this._building) return;
         this._building = true;
         this._built = false;
@@ -211,6 +212,7 @@ export class FileRelationshipGraph {
                     total_seeds: totalSeeds,
                     elapsed_ms: Date.now() - buildStart
                 });
+                onProgress?.(processed, totalSeeds);
             }
 
             // Yield back to the event loop between batches
