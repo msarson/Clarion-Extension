@@ -403,6 +403,13 @@ export class RenameProvider {
     /** #527 — true when the project's .cwproj marks this file `<Generated>true</Generated>`. */
     private isGeneratedIn(project: ProjectLike, fsPath: string): boolean {
         const norm = path.normalize(fsPath).toLowerCase();
+        // #551 — the IDE flags EVERY <Compile> entry a template adds as Generated, including
+        // third-party class sources it merely links (NYSTemplateHelper.CLW under
+        // Accessory\libsrc\win). Generated means template OUTPUT: a file under a library
+        // path is library source however the .cwproj flags it.
+        for (const libDir of serverSettings.libsrcPaths ?? []) {
+            if (libDir && norm.startsWith(path.normalize(libDir).toLowerCase().replace(/[\\/]+$/, '') + path.sep)) return false;
+        }
         for (const sf of project.sourceFiles ?? []) {
             if (!sf?.relativePath) continue;
             const abs = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
