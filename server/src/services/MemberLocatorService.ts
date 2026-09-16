@@ -552,6 +552,42 @@ export class MemberLocatorService {
     }
 
     /**
+     * SDI lookup for callers outside this class (StructureFieldResolver's field hover) that need
+     * the same declaring-file resolution `findMemberInClass` does, without duplicating the
+     * `ensureIndexBuilt()` / `loadDocument()` plumbing. Returns null only when the SDI has no
+     * entry for the name at all.
+     *
+     * An AMBIGUOUS name (several declaring files) still resolves, mirroring
+     * `findAllMembersInClass`'s last-resort tier — bailing on ambiguity instead left every
+     * duplicated type with no hover at all. That is not hypothetical: indexing a project's own
+     * directory (as the compiler does) makes duplicates the NORM, because a shared library and
+     * the project commonly both carry a copy of the same type, and both lost field hover until
+     * this fallback existed.
+     *
+     * Tiebreak: prefer a declaration in `preferDir` (the requesting document's own directory).
+     * That matches the redirection search order the compiler itself follows — `.\` precedes the
+     * shared paths in the `.red` `*.inc` line — so the copy the compiler would bind to is the
+     * copy the hover describes.
+     */
+    public async resolveSdiDeclaration(
+        typeName: string,
+        preferDir?: string
+    ): Promise<{ doc: TextDocument; tokens: Token[]; filePath: string; structureType?: string } | null> {
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.find(typeName);
+        if (infos.length === 0) return null;
+
+        const preferred = preferDir
+            ? infos.find(d => path.dirname(d.filePath).toLowerCase() === preferDir.toLowerCase())
+            : undefined;
+        const info = preferred ?? infos.find(d => !d.isType) ?? infos[0];
+
+        const loaded = await this.loadDocument(info.filePath);
+        if (!loaded) return null;
+        return { doc: loaded.doc, tokens: loaded.tokens, filePath: info.filePath, structureType: info.structureType };
+    }
+
+    /**
      * #358: ensure the MEMBER('...') parent of `document` is tokenized and in the TokenCache,
      * OFF the felt path. Resolving a MEMBER module's globals (e.g. GlobalErrors, thisStartup)
      * walks to their declarations in the parent — on IBSWorking that parent (IBSCommon.clw) is
