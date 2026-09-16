@@ -109,6 +109,7 @@ import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
 import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
+import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -438,6 +439,10 @@ connection.onInitialize((params) => {
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
 
+        // #545 — pull diagnostics, only for a client that asks for them.
+        pullDiagnosticsSupported = params.capabilities.textDocument?.diagnostic !== undefined;
+        diagnosticsRefreshSupported = params.capabilities.workspace?.diagnostics?.refreshSupport === true;
+
         // #544 — startup phases report through window/workDoneProgress when the client
         // can show it (VS Code: status bar). Silent otherwise.
         StartupProgress.configure(
@@ -531,6 +536,8 @@ connection.onInitialize((params) => {
                 codeActionProvider: true,
                 selectionRangeProvider: true,
                 callHierarchyProvider: true, // #509
+                // #545 — advertised only to a client that declared textDocument.diagnostic.
+                ...(pullDiagnosticsSupported ? { diagnosticProvider: { identifier: 'clarion', interFileDependencies: true, workspaceDiagnostics: false } } : {}),
                 codeLensProvider: { resolveProvider: true },
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
@@ -681,6 +688,34 @@ const contentChangeGuard = new ContentChangeGuard();
 // `version` is the document version the status refers to, so a client can discard an
 // answer for a buffer it has since changed. Additive: nothing that ignores it changes.
 type DiagnosticsStatusState = 'complete' | 'deferred' | 'superseded';
+// #545 — pull diagnostics. When the client declares textDocument.diagnostic the server
+// answers textDocument/diagnostic from the store and does NOT push (both at once would
+// show every diagnostic twice); when it does not, the push path is unchanged. A record
+// the client has not pulled yet is announced with workspace/diagnostic/refresh
+// (debounced — the sync and async passes record within milliseconds of each other),
+// which makes the client re-pull its visible documents.
+const diagnosticsStore = new DiagnosticsStore();
+let pullDiagnosticsSupported = false;
+let diagnosticsRefreshSupported = false;
+const lastPulledResultId = new Map<string, string>();
+let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function publishDiagnostics(document: TextDocument, version: number, diagnostics: Diagnostic[], state: DiagnosticsState): void {
+    const resultId = diagnosticsStore.record(document.uri, version, state, diagnostics);
+    if (!pullDiagnosticsSupported) {
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        return;
+    }
+    if (!diagnosticsRefreshSupported) return;
+    if (lastPulledResultId.get(document.uri) === resultId) return;
+    if (diagnosticsRefreshTimer) clearTimeout(diagnosticsRefreshTimer);
+    diagnosticsRefreshTimer = setTimeout(() => {
+        diagnosticsRefreshTimer = null;
+        connection.languages.diagnostics.refresh().catch(err =>
+            logger.info(`[#545] diagnostics refresh request failed: ${err instanceof Error ? err.message : String(err)}`));
+    }, 150);
+}
+
 function sendDiagnosticsStatus(uri: string, version: number, state: DiagnosticsStatusState): void {
     connection.sendNotification('clarion/diagnosticsStatus', { uri, version, state });
 }
@@ -764,7 +799,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         if (isLibsrcFile) {
             // Send only sync diagnostics; skip the async Promise.all entirely.
-            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            publishDiagnostics(document, startVersion, diagnostics, 'complete');
             perfLogger.perf("validateTextDocument libsrc-skip (async validators bypassed)", {
                 total_ms: Date.now() - validateStart,
                 sync_ms: syncMs,
@@ -780,7 +815,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         }
 
         // Send sync diagnostics immediately for fast feedback
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        publishDiagnostics(document, startVersion, diagnostics, 'partial');
 
         // #158 Phase B addendum — defer async validators until solution-ready
         // when the caller is the initial `onDidOpen`. At t=63ms (first
@@ -895,7 +930,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        publishDiagnostics(document, startVersion, diagnostics, 'complete');
 
         // #158 — per-document final perf summary
         perfLogger.perf("validateTextDocument complete", {
@@ -1028,6 +1063,25 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 });
 
 // Handle selection range requests (Shift+Alt+→ expand selection)
+// #545 — textDocument/diagnostic: answer from the store; validate first if this version
+// has no record yet (the duplicate-version guard makes a repeat call cheap).
+connection.languages.diagnostics.on(async (params) => {
+    const uri = params.textDocument.uri;
+    const document = documents.get(uri);
+    if (!document) {
+        diagnosticsStore.clear(uri);
+        return { kind: 'full', items: [] };
+    }
+    const stored = diagnosticsStore.get(uri);
+    if (!stored || stored.version !== document.version) {
+        try { await validateTextDocument(document, 'pull'); }
+        catch (err) { logger.error(`❌ pull validation failed for ${uri}: ${err}`); }
+    }
+    const report = diagnosticsStore.report(uri, params.previousResultId);
+    if (report.resultId) lastPulledResultId.set(uri, report.resultId);
+    return report;
+});
+
 // #509 — call hierarchy: prepare on the item at the cursor, then incoming / outgoing per item.
 connection.languages.callHierarchy.onPrepare(async (params, token) => {
     const document = documents.get(params.textDocument.uri);
@@ -1956,6 +2010,8 @@ documents.onDidClose(event => {
 
         // #359 — drop the content snapshot; a later reopen must re-validate.
         contentChangeGuard.clear(uri);
+        diagnosticsStore.clear(uri); // #545
+        lastPulledResultId.delete(uri);
 
         // Log all document details
         logger.info(`🗑️ [CRITICAL] Document closed: ${uri}`);

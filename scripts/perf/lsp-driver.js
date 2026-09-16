@@ -51,6 +51,10 @@ const UNRESOLVED_PROC = process.argv.includes('--unresolved-proc');
 const TOGGLE_UNRESOLVED = process.argv.includes('--toggle-unresolved');
 // #544 — print window/workDoneProgress events ($/progress) as they arrive.
 const PROGRESS = process.argv.includes('--progress');
+// #545 — declare pull-diagnostics support; the server then answers textDocument/diagnostic
+// and must NOT push. --pull runs the pull sequence after the settle window.
+const PULL = process.argv.includes('--pull');
+let refreshRequests = 0;
 const progressEvents = [];
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
@@ -92,6 +96,8 @@ child.on('message', (msg) => {
     let result = null;
     if (msg.method === 'workspace/configuration') result = (msg.params.items || []).map(() => null);
     // #544 — window/workDoneProgress/create: accept the token (result is void).
+    // #545 — workspace/diagnostic/refresh: the server asks the client to re-pull; count it.
+    if (msg.method === 'workspace/diagnostic/refresh') refreshRequests++;
     child.send({ jsonrpc: '2.0', id: msg.id, result });
   } else if (msg.method) {
     if (msg.method === '$/progress') {
@@ -254,7 +260,11 @@ async function runDiagStatusCheck(t0) {
     processId: process.pid,
     rootUri: toUri(APPDEV),
     workspaceFolders: [{ uri: toUri(APPDEV), name: 'AppDev' }],
-    capabilities: { textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] } }, workspace: { configuration: true }, window: { workDoneProgress: true } },
+    capabilities: {
+      textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] }, ...(PULL ? { diagnostic: { dynamicRegistration: false } } : {}) },
+      workspace: { configuration: true, ...(PULL ? { diagnostics: { refreshSupport: true } } : {}) },
+      window: { workDoneProgress: true },
+    },
     // perf channels ON — the whole point of this driver
     initializationOptions: { settings: { log: { performance: { enabled: true } } } },
   });
@@ -340,6 +350,22 @@ async function runDiagStatusCheck(t0) {
     try { await request('shutdown', null, 10000); notify('exit'); } catch { }
     setTimeout(() => { child.kill(); process.exit(0); }, 1000);
     return;
+  }
+
+  if (PULL) {
+    const pushes = diagEvents.filter(e => e.kind === 'publish').length;
+    console.log(`
+== #545 pull diagnostics on ${path.basename(TARGET)} ==`);
+    console.log(`  pushes received while pull is declared: ${pushes} (expect 0)`);
+    console.log(`  refresh requests so far: ${refreshRequests}`);
+    const p1 = Date.now();
+    const r1 = await request('textDocument/diagnostic', { textDocument: { uri } }, 120000);
+    console.log(`  pull 1: kind=${r1.kind} items=${(r1.items || []).length} resultId=${r1.resultId} in ${Date.now() - p1}ms`);
+    const p2 = Date.now();
+    const r2 = await request('textDocument/diagnostic', { textDocument: { uri }, previousResultId: r1.resultId }, 120000);
+    console.log(`  pull 2 (same resultId): kind=${r2.kind} in ${Date.now() - p2}ms (expect unchanged)`);
+    const r3 = await request('textDocument/diagnostic', { textDocument: { uri }, previousResultId: 'stale' }, 120000);
+    console.log(`  pull 3 (stale resultId): kind=${r3.kind} items=${(r3.items || []).length} (expect full)`);
   }
 
   if (TOGGLE_UNRESOLVED) {
