@@ -193,7 +193,7 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
     }
 
     // ✅ Ensure the setting is updated
-    const currentConfig = workspace.getConfiguration().get<string>("clarion.configuration");
+    const currentConfig = SettingsStorageManager.clarionSettings().get<string>("configuration", ""); // #563
 
     if (currentConfig !== configuration) {
         logger.info(`🔄 Updating folder configuration: clarion.configuration = ${configuration}`);

@@ -1,4 +1,5 @@
 import { workspace, window as vscodeWindow, ExtensionContext, commands } from 'vscode';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings, globalSolutionFile } from '../globals';
 import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManager';
@@ -76,7 +77,7 @@ export async function startLanguageServer(
             // server knows a solution is coming at t≈0 — the clarion/solutionPending notification
             // proved racy (it queues behind whatever the busy event loop is processing and lost to
             // the 2s no-solution fallback timer by 0ms on Mark's VM).
-            configuredSolutionFile: workspace.getConfiguration('clarion').get<string>('currentSolution', '')
+            configuredSolutionFile: SettingsStorageManager.clarionSettings().get<string>('currentSolution', '') // #563
                 || workspace.getConfiguration('clarion').get<string>('solutionFile', '')
         },
         synchronize: {
@@ -133,7 +134,7 @@ export async function startLanguageServer(
         // just a flag — the real load still arrives via clarion/updatePaths.
         const cfg = workspace.getConfiguration('clarion');
         const configuredSolution = globalSolutionFile
-            || cfg.get<string>('currentSolution', '')
+            || SettingsStorageManager.clarionSettings().get<string>('currentSolution', '') // #563
             || cfg.get<string>('solutionFile', '');
         if (configuredSolution) {
             client.sendNotification('clarion/solutionPending', { solutionFilePath: configuredSolution });

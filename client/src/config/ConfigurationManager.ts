@@ -5,7 +5,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { updateSolutionToolbar } from '../views/ViewManager';
+import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
@@ -80,10 +80,23 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
             });
         }
 
-        updateConfigurationStatusBar(selectedConfig);
-        updateSolutionToolbar();
-        logger.info(`🔄 Updated status bar to: ${selectedConfig}`);
+        // #563 — status bar, Tools pane and Solution View from the one stored value.
+        await applyActiveConfiguration(selectedConfig);
+        logger.info(`🔄 Updated status bar, Tools pane and Solution View to: ${selectedConfig}`);
     } else {
         logger.info("❌ User cancelled configuration selection");
     }
+}
+
+/**
+ * #563 — make `configuration` the active build configuration everywhere it is shown or used:
+ * the stored value (which the build reads), the status bar, the Tools pane and the Solution View
+ * label. Both the picker and a hand edit of `clarion.configuration` go through here, so the
+ * screen cannot disagree with itself or with the build. Does not write settings.
+ */
+export async function applyActiveConfiguration(configuration: string): Promise<void> {
+    globalSettings.configuration = configuration;
+    await updateConfigurationStatusBar(configuration);
+    updateSolutionToolbar();
+    await refreshSolutionTreeView();
 }

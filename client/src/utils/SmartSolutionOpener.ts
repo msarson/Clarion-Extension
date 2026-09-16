@@ -217,7 +217,7 @@ export class SmartSolutionOpener {
 
             // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
             // is only a hint behind it (see SolutionOpener for the same rule).
-            const clarionConfig = workspace.getConfiguration('clarion');
+            const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
             const choice = chooseConfiguration({
                 explicit: explicitConfigurationFor(
                     solutionPath,

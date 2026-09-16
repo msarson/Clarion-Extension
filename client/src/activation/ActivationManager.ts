@@ -16,6 +16,9 @@ import { shouldRestoreSolutionFromHistory } from '../utils/SolutionFallbackPolic
 import { refreshActiveEditorScopedStatusBars } from '../statusbar/StatusBarManager';
 import { createSolutionFileWatchers, handleSettingsChange } from '../providers/FileWatcherManager';
 import { startLanguageServer } from '../server/LanguageServerManager';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
+import { isAlreadyApplied } from '../utils/SolutionSettingsScope'; // #563
+import { applyActiveConfiguration } from '../config/ConfigurationManager'; // #563
 
 const logger = LoggerManager.getLogger("ActivationManager");
 logger.setLevel("error");
@@ -180,26 +183,29 @@ export async function setupFolderDependentFeatures(
     if (hasFolder && isTrusted) {
         context.subscriptions.push(
             workspace.onDidChangeConfiguration(async (event) => {
-                if (event.affectsConfiguration("clarion.defaultLookupExtensions") || event.affectsConfiguration("clarion.configuration")) {
-                    logger.info("🔄 Clarion configuration changed. Refreshing the solution cache...");
-                    
-                    // Reload the configuration from workspace settings
-                    if (event.affectsConfiguration("clarion.configuration")) {
-                        if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-                            const workspaceFolder = workspace.workspaceFolders[0];
-                            const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
-                            const configValue = config.get<string>("configuration", "");
-                            if (configValue) {
-                                globalSettings.configuration = configValue;
-                                logger.info(`✅ Updated globalSettings.configuration to: ${configValue}`);
-                            }
-                        } else {
-                            logger.info(`ℹ️ No workspace folder open - using in-memory configuration: ${globalSettings.configuration}`);
-                        }
+                const lookupChanged = event.affectsConfiguration("clarion.defaultLookupExtensions");
+                const configurationChanged = event.affectsConfiguration("clarion.configuration");
+                if (!lookupChanged && !configurationChanged) return;
+
+                if (configurationChanged && !lookupChanged) {
+                    // #563 — a configuration change needs no solution reload. The extension's own
+                    // writes (a pick) fire this event while they are still being saved; the old
+                    // handler re-derived the whole selection from settings at that moment and, in a
+                    // multi-root workspace, put the previous configuration back. If settings now
+                    // hold what the extension already holds, the change was ours: nothing to do.
+                    // Otherwise it is a hand edit of clarion.configuration: apply it.
+                    const effective = SettingsStorageManager.clarionSettings().get<string>("configuration", "");
+                    if (!effective || isAlreadyApplied(globalSettings.configuration, effective)) {
+                        logger.info(`ℹ️ clarion.configuration change already applied (${globalSettings.configuration})`);
+                        return;
                     }
-                    
-                    await handleSettingsChange(context, reinitializeEnvironment);
+                    logger.info(`🔄 clarion.configuration edited in settings: ${globalSettings.configuration} → ${effective}`);
+                    await applyActiveConfiguration(effective);
+                    return;
                 }
+
+                logger.info("🔄 Clarion lookup extensions changed. Refreshing the solution cache...");
+                await handleSettingsChange(context, reinitializeEnvironment);
             })
         );
 

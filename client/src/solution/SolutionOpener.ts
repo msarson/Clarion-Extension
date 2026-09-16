@@ -1,4 +1,6 @@
 import { commands, Uri, window, ExtensionContext, workspace, window as vscodeWindow } from 'vscode';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
+import { targetForKey } from '../utils/SolutionSettingsScope'; // #563
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
@@ -101,8 +103,7 @@ export async function openSolutionFromList(
         await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
 
         // Get the list of solutions from workspace settings
-        const config = workspace.getConfiguration("clarion");
-        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+        const solutions = SettingsStorageManager.clarionSettings().get<ClarionSolutionSettings[]>("solutions", []); // #563
         
         // Filter out the current solution if it's open
         const otherSolutions = solutions.filter(s => s.solutionFile !== globalSolutionFile);
@@ -241,8 +242,7 @@ export async function openClarionSolution(
         const previousConfiguration = globalSettings.configuration;
 
         // ✅ Step 1: Check if we should use an existing solution from the solutions array
-        const config = workspace.getConfiguration("clarion");
-        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
+        const solutions = SettingsStorageManager.clarionSettings().get<ClarionSolutionSettings[]>("solutions", []); // #563
         
         // If we have solutions in the array, offer them as quick picks
         let solutionFilePath = "";
@@ -383,7 +383,7 @@ export async function openClarionSolution(
         // (the configuration the IDE last built with) is only a hint behind it. Both
         // are matched on the configuration name, so a hand-written `Debug|Win32`
         // lands on the `Debug` the picker produces.
-        const clarionConfig = workspace.getConfiguration('clarion');
+        const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
         const choice = chooseConfiguration({
             explicit: explicitConfigurationFor(
                 solutionFilePath,
@@ -465,8 +465,10 @@ export async function closeClarionSolution(
             // Clear solution-related settings from folder settings
             await config.update("solutionFile", "", target);
 
-            // Clear the current solution setting
-            await config.update("currentSolution", "", target);
+            // Clear the current solution setting. #563: in the scope it lives in — clearing only the
+            // folder copy left a workspace-file currentSolution that reopened the solution on reload.
+            const clarionSettings = SettingsStorageManager.clarionSettings();
+            await clarionSettings.update("currentSolution", "", targetForKey(clarionSettings, "currentSolution"));
             logger.info("✅ Cleared current solution setting");
         }
 

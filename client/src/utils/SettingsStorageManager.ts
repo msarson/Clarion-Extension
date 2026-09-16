@@ -1,5 +1,5 @@
 import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext, WorkspaceConfiguration } from 'vscode';
-import { chooseSettingsWriteTarget } from './ConfigurationPrecedence';
+import { ClarionSettingsStore, SettingsWriteTarget, saveActiveConfiguration, saveSolutionSelection, sameSolutionFile, targetForKey } from './SolutionSettingsScope';
 import LoggerManager from './LoggerManager';
 import { ClarionSolutionSettings } from '../globals';
 import {
@@ -140,49 +140,42 @@ export class SettingsStorageManager {
                 return false;
             }
 
-            // Ensure .vscode directory exists
             const workspaceFolder = workspace.workspaceFolders[0].uri.fsPath;
-            const vscodeDir = path.join(workspaceFolder, '.vscode');
-            const fs = require('fs');
-            
-            if (!fs.existsSync(vscodeDir)) {
-                fs.mkdirSync(vscodeDir, { recursive: true });
-                logger.info(`✅ Created .vscode directory: ${vscodeDir}`);
+            const store = SettingsStorageManager.clarionSettings();
+
+            // #563 — each key goes back to the scope its effective value came from (#530 did this
+            // for configuration/currentSolution only; the solutions list always went to the folder
+            // while every reader read the workspace file). Ensure .vscode exists only when a key
+            // is actually headed for the folder.
+            const headedForFolder = ['solutions', 'currentSolution', 'configuration']
+                .some(key => targetForKey(store, key) === 'WorkspaceFolder');
+            if (headedForFolder) {
+                const vscodeDir = path.join(workspaceFolder, '.vscode');
+                const fs = require('fs');
+                if (!fs.existsSync(vscodeDir)) {
+                    fs.mkdirSync(vscodeDir, { recursive: true });
+                    logger.info(`✅ Created .vscode directory: ${vscodeDir}`);
+                }
             }
 
-            // #530 — write back to the scope the settings live in: the folder's
-            // .vscode/settings.json when they are there, else the .code-workspace file
-            // in a saved (multi-root) workspace. Reading resource-less and writing
-            // folder-only left a multi-root user's change somewhere they never looked.
-            const config = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
-            const target = SettingsStorageManager.writeTargetFor(config);
-
-            logger.info(`💾 Saving settings (${target === ConfigurationTarget.Workspace ? 'workspace file' : '.vscode/settings.json in ' + workspaceFolder})`);
+            logger.info(`💾 Saving settings (solutions → ${targetForKey(store, 'solutions')}, currentSolution → ${targetForKey(store, 'currentSolution')}, configuration → ${targetForKey(store, 'configuration')})`);
             logger.info(`   Settings to save:
                 - solutionFile: ${solutionFile}
                 - propertiesFile: ${propertiesFile}
                 - version: ${version}
                 - configuration: ${configuration}`);
 
-            // Update solutions array FIRST before saving individual settings
-            // This prevents the configuration change event from reading stale data
-            await this.updateSolutionsArray(solutionFile, propertiesFile, version, configuration);
-
-            // Save currentSolution BEFORE configuration so that when the
-            // onDidChangeConfiguration event fires (triggered by the 'configuration' write),
-            // initializeFromWorkspace() reads the correct new solution — not the old one.
-            await config.update('currentSolution', solutionFile, target);
-            logger.info(`✅ Saved currentSolution`);
-
-            // Save configuration (still needed as a standalone key so onDidChangeConfiguration fires)
-            await config.update('configuration', configuration, target);
-            logger.info(`✅ Saved configuration`);
+            // Solutions list first, then currentSolution, then configuration: a settings-change
+            // listener firing on any of the later writes already reads the new selection.
+            await saveSolutionSelection(store, { solutionFile, propertiesFile, version, configuration });
+            logger.info(`✅ Saved solutions, currentSolution and configuration`);
 
             // Remove legacy individual keys that are now fully covered by the solutions array
+            const config = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
             for (const legacyKey of ['solutionFile', 'propertiesFile', 'version'] as const) {
                 const inspection = config.inspect(legacyKey);
                 if (inspection?.workspaceFolderValue !== undefined) {
-                    await config.update(legacyKey, undefined, target);
+                    await config.update(legacyKey, undefined, ConfigurationTarget.WorkspaceFolder);
                 }
             }
 
@@ -202,40 +195,36 @@ export class SettingsStorageManager {
     }
 
     /**
-     * Updates the configuration of the active solution in the solutions array,
-     * and writes the standalone clarion.configuration key (so onDidChangeConfiguration fires).
-     * Call this whenever the user changes the build configuration.
+     * #563 — the Clarion settings section as one scope-aware store, read through the first
+     * workspace folder (VS Code's effective value: folder over workspace file). A
+     * `WorkspaceConfiguration` is a snapshot, so every read fetches it again: a write made
+     * earlier in the same save must be visible to the next read.
      */
-    /**
-     * #530 — the ConfigurationTarget the Clarion settings should be written to: the
-     * scope `clarion.solutions` (else `clarion.configuration`) was read from, or the
-     * workspace file when nothing is set yet in a saved workspace.
-     */
-    static writeTargetFor(config: WorkspaceConfiguration): ConfigurationTarget {
-        const inspection = config.inspect('solutions') ?? config.inspect('configuration');
-        const owner = chooseSettingsWriteTarget(inspection, workspace.workspaceFile !== undefined);
-        return owner === 'Workspace' ? ConfigurationTarget.Workspace : ConfigurationTarget.WorkspaceFolder;
+    static clarionSettings(): ClarionSettingsStore {
+        const resource = () => workspace.workspaceFolders?.[0]?.uri;
+        const section = () => workspace.getConfiguration('clarion', resource());
+        return {
+            hasWorkspaceFile: workspace.workspaceFile !== undefined,
+            inspect: <T>(key: string) => section().inspect<T>(key),
+            get: <T>(key: string, fallback: T) => section().get<T>(key, fallback),
+            update: async (key: string, value: unknown, target: SettingsWriteTarget) => {
+                // With no folder open there is no folder scope to write to.
+                const vsTarget = target === 'WorkspaceFolder' && resource()
+                    ? ConfigurationTarget.WorkspaceFolder
+                    : ConfigurationTarget.Workspace;
+                await section().update(key, value, vsTarget);
+            },
+        };
     }
 
+    /**
+     * Updates the configuration of the active solution in the solutions array and writes the
+     * standalone `clarion.configuration` key, each to the scope it lives in (#563).
+     * Call this whenever the user changes the build configuration.
+     */
     static async updateActiveConfiguration(configuration: string): Promise<void> {
-        const workspaceFolder = workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) return;
-
-        const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
-        const target = SettingsStorageManager.writeTargetFor(config);
-        const currentSolution = config.get<string>('currentSolution', '');
-        const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
-
-        const idx = currentSolution
-            ? solutions.findIndex(s => s.solutionFile === currentSolution)
-            : -1;
-
-        if (idx >= 0) {
-            solutions[idx] = { ...solutions[idx], configuration };
-            await config.update('solutions', solutions, target);
-        }
-
-        await config.update('configuration', configuration, target);
+        if (!workspace.workspaceFolders?.[0]) return;
+        await saveActiveConfiguration(SettingsStorageManager.clarionSettings(), configuration);
         logger.info(`✅ Updated active configuration to: ${configuration}`);
     }
 
@@ -248,69 +237,29 @@ export class SettingsStorageManager {
         const workspaceFolder = workspace.workspaceFolders?.[0];
         if (!workspaceFolder) return;
 
-        const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
-        const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
-        const filtered = solutions.filter(s => s.solutionFile.toLowerCase() !== solutionFile.toLowerCase());
+        const store = SettingsStorageManager.clarionSettings();
+        const solutions = store.get<ClarionSolutionSettings[]>('solutions', []);
+        const filtered = solutions.filter(s => !sameSolutionFile(s.solutionFile, solutionFile));
 
         if (filtered.length !== solutions.length) {
-            await config.update('solutions', filtered, ConfigurationTarget.WorkspaceFolder);
+            await store.update('solutions', filtered, targetForKey(store, 'solutions'));
             logger.info(`✅ Removed missing solution from solutions array: ${solutionFile}`);
         }
 
-        const currentSolution = config.get<string>('currentSolution', '');
-        if (currentSolution.toLowerCase() === solutionFile.toLowerCase()) {
-            await config.update('currentSolution', '', ConfigurationTarget.WorkspaceFolder);
+        if (sameSolutionFile(store.get<string>('currentSolution', ''), solutionFile)) {
+            await store.update('currentSolution', '', targetForKey(store, 'currentSolution'));
             logger.info(`✅ Cleared currentSolution`);
         }
 
+        // Legacy pre-solutions-array keys only ever lived in folder settings.
+        const config = workspace.getConfiguration('clarion', workspaceFolder.uri);
         const storedSolutionFile = config.get<string>('solutionFile', '');
         if (storedSolutionFile.toLowerCase() === solutionFile.toLowerCase()) {
             await config.update('solutionFile', '', ConfigurationTarget.WorkspaceFolder);
             await config.update('propertiesFile', '', ConfigurationTarget.WorkspaceFolder);
             await config.update('version', '', ConfigurationTarget.WorkspaceFolder);
-            await config.update('configuration', '', ConfigurationTarget.WorkspaceFolder);
+            await store.update('configuration', '', targetForKey(store, 'configuration'));
             logger.info(`✅ Cleared legacy solutionFile/propertiesFile/version/configuration settings`);
         }
-    }
-
-    /**
-     * Updates the solutions array in folder settings
-     */
-    private static async updateSolutionsArray(
-        solutionFile: string,
-        propertiesFile: string,
-        version: string,
-        configuration: string
-    ): Promise<void> {
-        if (!solutionFile) return;
-
-        const workspaceFolder = workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) return;
-
-        const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
-        const solutions = config.get<ClarionSolutionSettings[]>("solutions", []);
-
-        const solutionIndex = solutions.findIndex(s => s.solutionFile === solutionFile);
-
-        if (solutionIndex >= 0) {
-            // Update existing solution
-            solutions[solutionIndex] = {
-                solutionFile,
-                propertiesFile,
-                version,
-                configuration
-            };
-        } else {
-            // Add new solution
-            solutions.push({
-                solutionFile,
-                propertiesFile,
-                version,
-                configuration
-            });
-        }
-
-        await config.update("solutions", solutions, ConfigurationTarget.WorkspaceFolder);
-        logger.info(`✅ Updated solutions array (${solutions.length} solutions)`);
     }
 }

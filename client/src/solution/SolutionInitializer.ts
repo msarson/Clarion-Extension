@@ -1,4 +1,5 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
@@ -62,7 +63,7 @@ export async function workspaceHasBeenTrusted(
     // welcome-view branch when `globalSolutionFile` stays empty.
 
     // Read current solution directly from workspace settings
-    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
+    const solutionFileFromSettings = SettingsStorageManager.clarionSettings().get<string>("currentSolution", "") // #563
         || workspace.getConfiguration().get<string>("clarion.solutionFile", "");
     logger.info(`🔍 Solution file from workspace settings: ${solutionFileFromSettings || 'not set'}`);
 
