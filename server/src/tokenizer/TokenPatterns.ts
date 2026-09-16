@@ -96,7 +96,12 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Label]: /^(?!(?:COMPILE|OMIT|EMBED|SECTION|ENDSECTION|INCLUDE|PRAGMA|PROGRAM|MEMBER|END|CODE|DATA)(?![:\w]))[A-Za-z_][A-Za-z0-9_:]*/i,  // Starts at column 0, can include colons. Excludes truly reserved words. CODE/DATA are execution markers, never labels.
     [TokenType.Variable]: /\b(?!(?:IF|LOOP|CASE|ACCEPT|EXECUTE|BEGIN|FILE|QUEUE|GROUP|RECORD|CLASS|WINDOW|REPORT|MODULE|MAP|VIEW|INTERFACE|END)\b)[A-Za-z_][A-Za-z0-9_]*\b/i,  // Exclude structure keywords to allow them to match Structure type first
     [TokenType.ImplicitVariable]: /\b[A-Za-z_][A-Za-z0-9_]*[$#"]/i,  // ✅ Variables ending with implicit type suffixes
-    [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\()/i,
+    // #546 — whitespace may separate a name from its paren (`NetDebugTrace ('…')`, NetTalk's
+    // generated form; `EQUATE (5)`). Requiring the paren to follow immediately let the
+    // FunctionArgumentParameter pattern below swallow name, space and arguments as ONE
+    // token, invisible to every consumer that looks for a Function. `NOT(x)` was already
+    // a Function token; `NOT (x)` now is too — same convention, no consumer changes.
+    [TokenType.Function]: /\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()/i,
     [TokenType.ReferenceVariable]: /&\s*[A-Za-z_][A-Za-z0-9_]*/i,
     [TokenType.PropertyFunction]: /\b(?:GET|SET)\s*\(/i,
     [TokenType.Class]: /\b[A-Z][A-Za-z0-9_]*(?=\.)/,  // Matches capitalized names before a dot (e.g., ThisWindow.)
@@ -122,7 +127,8 @@ export const orderedTokenTypes: TokenType[] = [
     // ✅ Add WindowElement after Structure elements but before other types
     TokenType.WindowElement,
     TokenType.ConditionalContinuation, TokenType.TypeReference, TokenType.Attribute, TokenType.Function,  // ✅ Attribute before Function so AT(...) is Attribute not Function
-    TokenType.FunctionArgumentParameter, TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
+    // #546: FunctionArgumentParameter retired — Function accepts a space before the paren.
+    TokenType.TypeAnnotation, TokenType.PictureFormat, TokenType.Number,
     TokenType.EndStatement,  // ✅ MOVED AFTER Number to avoid matching dots in decimals
     TokenType.Operator, TokenType.Class, TokenType.Constant, TokenType.Variable,
     TokenType.ImplicitVariable, TokenType.Delimiter, TokenType.Unknown

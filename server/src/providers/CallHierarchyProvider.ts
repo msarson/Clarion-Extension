@@ -14,7 +14,7 @@ import { DirectiveService } from '../utils/DirectiveService';
 import { DefinitionProvider } from './DefinitionProvider';
 import { ImplementationProvider } from './ImplementationProvider';
 import { ReferencesProvider } from './ReferencesProvider';
-import { isCall, callNameOf } from './diagnostics/UnresolvedProcedureCallDiagnostics';
+import { isCall } from './diagnostics/UnresolvedProcedureCallDiagnostics';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger('CallHierarchyProvider');
@@ -122,25 +122,10 @@ export class CallHierarchyProvider {
             ).catch(() => null);
             const byUri = new Map<string, Location[]>();
             for (const r of refs ?? []) byUri.set(r.uri, [...(byUri.get(r.uri) ?? []), r]);
-            if (!byUri.has(item.uri)) byUri.set(item.uri, []);
-            const wanted = item.name.toUpperCase();
             for (const [uri, locs] of byUri) {
                 const target = await this.load(uri);
                 if (!target) continue;
                 const { tokens } = target;
-                // `Name (args)` with a space is ONE FunctionArgumentParameter token, which
-                // Find All References cannot match by value (#546). Supplement its result with
-                // those sites in the files it touched
-                // and in the item's own file; a file it never reached stays out of scope.
-                const seen = new Set(locs.map(l => `${l.range.start.line}:${l.range.start.character}`));
-                for (const t of tokens) {
-                    if (t.type !== TokenType.FunctionArgumentParameter) continue;
-                    if ((callNameOf(t) ?? '').toUpperCase() !== wanted) continue;
-                    const key = `${t.line}:${t.start}`;
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    locs.push({ uri, range: this.callRange(t) });
-                }
                 for (const loc of locs) {
                     const idx = tokens.findIndex(t => t.line === loc.range.start.line && t.start === loc.range.start.character);
                     if (idx < 0) continue;
@@ -151,7 +136,7 @@ export class CallHierarchyProvider {
                     if (!isCall(tokens, idx)) continue;
                     const from = this.containerOf(tokens, loc.range.start.line);
                     const fromItem = from ? this.itemFor(uri, tokens, from) : this.programItem(uri, tokens);
-                    if (fromItem) add(fromItem, this.callRange(tokens[idx]));
+                    if (fromItem) add(fromItem, this.rangeOf(tokens[idx]));
                 }
             }
         }
@@ -188,7 +173,7 @@ export class CallHierarchyProvider {
             const routine = this.routineCalledByDo(tokens, i);
             if (routine) { add(this.itemFor(item.uri, tokens, routine), this.rangeOf(t)); continue; }
             if (!isCall(tokens, i)) continue;
-            const name = callNameOf(t) ?? t.value;
+            const name = t.value;
             if (keywords.isKeyword(name) || builtins.isBuiltin(name) || directives.isDirective(name)) continue;
             if (name.toUpperCase() === 'DO') continue;
             const receiver = tokens[i - 1]?.line === t.line && (tokens[i - 1].type === TokenType.StructureField || tokens[i - 1].value === '.')
@@ -197,7 +182,7 @@ export class CallHierarchyProvider {
             let pending = memo.get(key);
             if (!pending) { pending = this.resolveCallee(document, tokens, t, cancel); memo.set(key, pending); }
             const to = await pending;
-            if (to) add(to, this.callRange(t));
+            if (to) add(to, this.rangeOf(t));
         }
         const result = [...groups.values()];
         perfLogger.perf('call hierarchy outgoing', { ms: Date.now() - t0, item: item.name, callees: result.length });
@@ -300,11 +285,6 @@ export class CallHierarchyProvider {
 
     private tokenAt(tokens: Token[], position: Position): Token | undefined {
         return tokens.find(t => t.line === position.line && position.character >= t.start && position.character <= t.start + t.value.length);
-    }
-    /** The range of the NAME in a call token (a spaced `Name (args)` token holds its arguments too). */
-    private callRange(t: Token): Range {
-        const name = callNameOf(t) ?? t.value;
-        return { start: { line: t.line, character: t.start }, end: { line: t.line, character: t.start + name.length } };
     }
     private rangeOf(t: Token): Range {
         return { start: { line: t.line, character: t.start }, end: { line: t.line, character: t.start + t.value.length } };

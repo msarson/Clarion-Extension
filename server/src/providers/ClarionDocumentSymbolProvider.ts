@@ -677,9 +677,10 @@ export class ClarionDocumentSymbolProvider {
             }
 
             // Handle variable declarations - check for Type tokens (BYTE, LONG, etc) and TypeAnnotation (STRING(255), CSTRING(100), etc)
-            // Also check for FunctionArgumentParameter which the tokenizer uses for parametrized types like CSTRING(1024)
             // CRITICAL: Don't process variables after CODE statement
-            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.FunctionArgumentParameter) && i > 0) {
+            // (#546: the FunctionArgumentParameter token type is no longer produced — a
+            // parametrized type such as CSTRING(1024) is a Type token, spaced or not.)
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 

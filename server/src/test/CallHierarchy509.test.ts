@@ -35,7 +35,7 @@ const SRC = [
     'Setup ROUTINE',             // 16
     '  Helper()',                // 17
     'Prime:VPL ROUTINE',         // 18
-    "  Helper ('spaced')",       // 19 ← a call with a space before the paren (NetTalk style)
+    '  Helper ()',               // 19 ← a call with a space before the paren (NetTalk style)
     'Helper PROCEDURE()',        // 20
     '  CODE',                    // 21
     '  RETURN',                  // 22

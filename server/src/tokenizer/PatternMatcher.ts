@@ -57,7 +57,7 @@ export class PatternMatcher {
                 TokenType.ClarionDocument, TokenType.ExecutionMarker,
                 TokenType.ConditionalContinuation, TokenType.WindowElement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function to avoid STRING(50) as function
-                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.PropertyFunction, // #546: FunctionArgumentParameter no longer tried — Function accepts a space before the paren
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
                 TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
@@ -71,7 +71,7 @@ export class PatternMatcher {
                 TokenType.Directive, TokenType.ClarionDocument,
                 TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Keyword,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
-                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.FunctionArgumentParameter, TokenType.PropertyFunction,
+                TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.PropertyFunction, // #546: FunctionArgumentParameter no longer tried — Function accepts a space before the paren
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
                 TokenType.Constant,
                 TokenType.ImplicitVariable, TokenType.Variable, TokenType.Unknown
