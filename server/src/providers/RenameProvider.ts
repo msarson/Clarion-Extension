@@ -11,6 +11,7 @@ import { SymbolFinderService } from '../services/SymbolFinderService';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ReferencesProvider } from './ReferencesProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DefinitionProvider } from './DefinitionProvider';
 import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
@@ -44,6 +45,7 @@ export class RenameProvider {
     private symbolFinder: SymbolFinderService;
     private referencesProvider: ReferencesProvider;
     private memberLocator: MemberLocatorService; // #547
+    private definitionProvider: DefinitionProvider; // #553
 
     /**
      * #527 — what the last rename left alone: occurrences in generated files outside
@@ -63,6 +65,7 @@ export class RenameProvider {
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
         this.referencesProvider = new ReferencesProvider();
         this.memberLocator = new MemberLocatorService(); // #547
+        this.definitionProvider = new DefinitionProvider(); // #553
     }
 
     /**
@@ -99,33 +102,35 @@ export class RenameProvider {
         // to a class declared elsewhere, and the references fallback can come back empty,
         // so the generic "symbol not found" fired for a method that was found perfectly
         // well. Found through the class = renameable (#548: wherever it is declared).
-        let resolvedThroughClass = false;
+        // #553 — the pre-flight needs only the DECLARATION, never the reference set: the
+        // search took 5–14s on a big solution before the box even appeared (#528 gathered
+        // it here to key the generated refusal on the declaration). The declaration comes
+        // the way F12 finds it — through the class for a dotted member, else the definition
+        // provider — in milliseconds; the search runs in provideRename, after Enter, where
+        // the editor shows progress and its own generated check stays authoritative.
+        const declarationUris: string[] = [];
         const lastDotIdx = word.lastIndexOf('.');
         if (lastDotIdx > 0) {
             const receiver = word.slice(0, lastDotIdx);
             const member = word.slice(lastDotIdx + 1);
             const info = await this.memberLocator.resolveDotAccess(receiver, member, document).catch(() => null);
-            if (info?.file) resolvedThroughClass = true;
+            if (info?.file) declarationUris.push(info.file);
         }
-        // #527/#528 — a generated file is owned by the templates: any edit is lost on the
-        // next generate. The refusal keys on the DECLARATION's file (a hand-coded class
-        // method renamed from a generated call site proceeds; a method declared in a
-        // generated file is refused), so the reference set is gathered here and kept for
-        // provideRename. After the cheap DLL / unresolvable check, which needs no search.
-        const preflight = await this.gatherLocations(document, position);
-        if (preflight) {
-            const generatedReason = this.generatedRefusal(preflight, document, word);
-            if (generatedReason) {
-                throw new ResponseError(ErrorCodes.InvalidRequest, generatedReason);
-            }
+        if (declarationUris.length === 0) {
+            const def = await this.definitionProvider.provideDefinition(document, position).catch(() => null);
+            for (const loc of def ? (Array.isArray(def) ? def : [def]) : []) declarationUris.push(loc.uri);
+        }
+        // #528 — a symbol declared in a generated file is refused from anywhere.
+        const generatedReason = this.generatedDeclarationRefusal(declarationUris, word);
+        if (generatedReason) {
+            throw new ResponseError(ErrorCodes.InvalidRequest, generatedReason);
         }
 
-        // Confirm symbol is known — rejects keywords, punctuation, etc.
-        // SymbolFinder is per-file, so it misses cross-file procedure declarations
-        // (e.g. F2 on a call site whose MAP/MODULE declaration lives in another file).
-        // Fall back to ReferencesProvider, which is solution-aware via findProcedureReferences;
-        // any non-empty result means provideRename will succeed, so the symbol is renameable.
-        const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
+        // Confirm symbol is known — rejects keywords, punctuation, etc. A resolved
+        // declaration already says so; SymbolFinder covers the per-file cases; the
+        // solution-wide references search is the LAST resort (#553), for a cross-file name
+        // neither resolver placed.
+        const symbolInfo = declarationUris.length > 0 || await this.symbolFinder.findSymbol(word, document, position);
         if (!symbolInfo) {
             // #195: includeDeclaration MUST be true — for a class method renamed at
             // its impl point with no external callers, the ONLY refs are the decl
@@ -137,9 +142,7 @@ export class RenameProvider {
                 document, position, { includeDeclaration: true },
                 undefined, { includeOmitted: true, crossProjectDll: false } // #255 pre-flight matches provideRename; #330: rename never touches generated consumer MAPs
             );
-            // #547 — a method the class resolution found is renameable even when the
-            // per-file finder and the references fallback both come back empty.
-            if ((!locations || locations.length === 0) && !resolvedThroughClass) {
+            if (!locations || locations.length === 0) {
                 throw new ResponseError(
                     ErrorCodes.InvalidRequest,
                     `Cannot rename '${word}': symbol not found or not renameable.`
@@ -376,6 +379,19 @@ export class RenameProvider {
         if (!project || !this.isGeneratedIn(project, fsPath)) return null;
         return `Cannot rename '${word}' here: ${path.basename(fsPath)} is generated by the Clarion templates. ` +
             `Rename from the hand-written declaration instead, or make the change in the .app and regenerate.`;
+    }
+
+    /** #553 — the #528 rule applied to resolved declaration files: refused when every one is generated. */
+    private generatedDeclarationRefusal(declarationUris: string[], word: string): string | null {
+        if (declarationUris.length === 0) return null;
+        const generated = declarationUris.filter(uri => {
+            const fsPath = this.uriToPath(uri);
+            const project = this.projectOf(fsPath);
+            return !!project && this.isGeneratedIn(project, fsPath);
+        });
+        if (generated.length !== declarationUris.length) return null;
+        return `Cannot rename '${word}': its declaration in ${path.basename(this.uriToPath(generated[0]))} is generated by the Clarion templates and is rewritten on the next generate. ` +
+            `Only non-generated code can be renamed safely; make the change in the .app and regenerate.`;
     }
 
     private generatedRefusal(locations: Location[], document: TextDocument, word: string): string | null {

@@ -418,6 +418,18 @@ async function runDiagStatusCheck(t0) {
     }
   }
 
+  // #553 — --prepare-rename=LINE:COL (1-based): time textDocument/prepareRename, the
+  // pre-flight before the rename box appears. Must not run Find All References.
+  const prArg = arg('prepare-rename');
+  if (prArg) {
+    const [l, c] = prArg.split(':').map(Number);
+    const position = { line: l - 1, character: (c || 1) - 1 };
+    const t1 = Date.now();
+    const res = await request('textDocument/prepareRename', { textDocument: { uri }, position }, 120000).catch(e => ({ error: e.message }));
+    console.log(`\n== prepareRename at ${prArg}: ${Date.now() - t1}ms ==`);
+    console.log(res && res.error ? `  refused: ${res.error}` : `  range: ${JSON.stringify(res)}`);
+  }
+
   const defArg = arg('define'); // LINE:COL, 0-indexed
   if (defArg) {
     const [dl, dc] = defArg.split(':').map(Number);
