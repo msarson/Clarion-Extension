@@ -134,21 +134,33 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
     const setGenerated = (rel: string, value: boolean) => { project.sourceFiles.find(sf => sf.name === rel)!.generated = value; };
     const AT_BROWSE_CALL = { line: 5, character: 8 };   // "Obj.Method()" — on Method
 
-    test('a rename started at a generated call site of a hand-coded method is allowed by the pre-flight', async () => {
-        const range = await new RenameProvider().prepareRename(docs.get('browse.clw')!, AT_BROWSE_CALL);
-        assert.ok(range, 'prepareRename returns a range instead of refusing');
+    // #549 — a rename never starts from a generated file, whatever the declaration.
+    // (#528 had let this one through; the developer's rule is "never in a generated module".)
+    test('a rename started at a generated call site is refused, even for a hand-coded method (#549)', async () => {
+        const provider = new RenameProvider();
+        await assert.rejects(
+            () => provider.prepareRename(docs.get('browse.clw')!, AT_BROWSE_CALL),
+            (err: Error) => {
+                assert.ok(/generated/i.test(err.message) && /browse\.clw/i.test(err.message), `got: ${err.message}`);
+                assert.ok(/hand-written|hand-coded/i.test(err.message), `must point at the hand-written source; got: ${err.message}`);
+                return true;
+            });
+        await assert.rejects(
+            () => provider.provideRename(docs.get('browse.clw')!, AT_BROWSE_CALL, 'Renamed'),
+            (err: Error) => /generated/i.test(err.message),
+            'provideRename must reject too, in case the client skipped prepareRename');
     });
 
-    test('it rewrites the hand-coded declaration, implementation and callers, and skips the generated module', async () => {
+    test('started at the hand-coded implementation, it rewrites the declaration, implementation and callers, and skips the generated module', async () => {
         const provider = new RenameProvider();
-        const edit = await provider.provideRename(docs.get('browse.clw')!, AT_BROWSE_CALL, 'Renamed');
+        const AT_IMPL = { line: 4, character: 9 };   // ctThing.clw "ctThing.Method PROCEDURE()" — on Method
+        const edit = await provider.provideRename(docs.get('ctThing.clw')!, AT_IMPL, 'Renamed');
         assert.deepStrictEqual(editsByFile(edit), [['ap1.clw', 1], ['ctthing.clw', 1], ['ctthing.inc', 1]]);
-        const report = provider.getLastRenameReport();
-        assert.ok(report, 'the generated call site is reported');
-        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`), ['browse.clw:1']);
-        assert.ok(/cannot alter generated code/i.test(report!.message), report!.message);
-        assert.ok(/hand-coded/i.test(report!.message) && /\.app/i.test(report!.message), report!.message);
-        assert.ok(/3 hand-coded file/i.test(report!.message) && /1 occurrence/i.test(report!.message), report!.message);
+        // The generated browse.clw call site is neither edited nor reported here: Find All
+        // References for a class method does not reach a call site in another MEMBER module
+        // unless the cursor is in that module (#550). The skipped-and-reported behaviour
+        // itself is pinned by the #527 suite, which starts from a file the search does reach.
+        for (const [file] of editsByFile(edit)) assert.notStrictEqual(file, 'browse.clw', 'a generated file is never edited');
     });
 
     test('a method whose declaration is generated is still refused, from a generated call site and from a hand-coded one', async () => {
