@@ -7,6 +7,7 @@ import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { pathToCanonicalUri } from './UriUtils';
 import { makeTimeSlicer } from './cooperativeScan';
 import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from '../services/IncludeIndexDiskCache'; // #366
+import { FileRelationshipGraph } from '../FileRelationshipGraph'; // #558
 import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -93,10 +94,10 @@ export class IncludeVerifier {
      * @param document The document to check
      * @returns true if the class file is included, false otherwise
      */
-    async isClassIncluded(classFileName: string, document: TextDocument): Promise<boolean> {
+    async isClassIncluded(classFileName: string, document: TextDocument, depth = 0): Promise<boolean> {
         // #366 follow-up: per-step timing to name the residual ~467ms/check cost.
         const startedAt = Date.now();
-        const step = { currentInc: 0, currentTrans: 0, parentDoc: 0, parentInc: 0, parentTrans: 0, companion: 0 };
+        const step = { currentInc: 0, currentTrans: 0, parentDoc: 0, parentInc: 0, parentTrans: 0, companion: 0, includers: 0 };
         let foundAt = 'none';
         try {
             logger.debug(`⏱️ [IV] isClassIncluded start: "${classFileName}" in ${document.uri.split('/').pop()}`);
@@ -172,6 +173,21 @@ export class IncludeVerifier {
             }
             step.companion = Date.now() - tCo;
 
+            // #558 — a file with no module header of its own (a template-injected data
+            // include, a shared declarations .inc) is never compiled alone either: it is
+            // INCLUDEd into modules, and whatever those modules can see, it can see. The
+            // routes above look DOWN (its own includes) and SIDEWAYS (#191 companions of
+            // the classes it declares) but never UP, so a class the including module's
+            // PROGRAM carries was reported missing. Walk the file graph's reverse INCLUDE
+            // edges and ask the same question of each includer.
+            const tUp = Date.now();
+            const includerHit = await this.isIncludedByAnIncluder(classFileName, fromPath, depth);
+            step.includers = Date.now() - tUp;
+            if (includerHit) {
+                foundAt = 'includer';
+                return true;
+            }
+
             logger.debug(`⏱️ [IV] ❌ "${classFileName}" not found in any accessible scope`);
             return false;
 
@@ -191,10 +207,77 @@ export class IncludeVerifier {
                     parentInc_ms: step.parentInc,
                     parentTrans_ms: step.parentTrans,
                     companion_ms: step.companion,
+                    includers_ms: step.includers,
                     uri: document.uri.split('/').pop() ?? ''
                 });
             }
         }
+    }
+
+    /**
+     * #558 — is the class file visible to a file that INCLUDEs this one?
+     *
+     * Includers come from the file graph, nearest first, up to MAX_INCLUDER_HOPS
+     * (an include inside an include). Their PROGRAMs are tried first when the graph
+     * knows them: every generated module of one program shares that answer, and the
+     * program's reachable set is the same cache the MEMBER-parent route fills. Then a
+     * bounded number of includers are asked directly, through isClassIncluded itself,
+     * which follows a `MEMBER('program')` reached through an INCLUDE'd shim (the graph
+     * records no program edge for those) and stops recursing at MAX_INCLUDER_DEPTH.
+     *
+     * A bare `MEMBER()` module has no program edge and, compiler-verified, no global
+     * scope; it contributes only its own include chain, so the warning stands there.
+     */
+    private static readonly MAX_INCLUDER_HOPS = 3;
+    private static readonly MAX_INCLUDER_HOSTS = 12;
+    private static readonly MAX_INCLUDER_DEPTH = 2;
+    private async isIncludedByAnIncluder(classFileName: string, fromPath: string, depth: number): Promise<boolean> {
+        if (depth >= IncludeVerifier.MAX_INCLUDER_DEPTH) return false;
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return false;
+
+        const includers: string[] = [];
+        const seen = new Set<string>([fromPath.toLowerCase().replace(/\\/g, '/')]);
+        let frontier = [fromPath];
+        for (let hop = 0; hop < IncludeVerifier.MAX_INCLUDER_HOPS && frontier.length > 0; hop++) {
+            const next: string[] = [];
+            for (const file of frontier) {
+                for (const includer of graph.getIncludingFiles(file)) {
+                    if (seen.has(includer)) continue;
+                    seen.add(includer);
+                    includers.push(includer);
+                    next.push(includer);
+                }
+            }
+            frontier = next;
+        }
+        if (includers.length === 0) return false;
+
+        // Programs the graph knows, deduped: one chain check answers for all their modules.
+        const programsTried = new Set<string>();
+        for (const includer of includers) {
+            const program = graph.getProgramFile(includer);
+            if (!program || programsTried.has(program)) continue;
+            programsTried.add(program);
+            const programPath = program.replace(/\//g, '\\');
+            const includes = await this.parseIncludesFromFilePath(programPath);
+            if (this.hasInclude(classFileName, includes)) return true;
+            if (await this.hasTransitiveInclude(classFileName, includes, programPath)) return true;
+        }
+
+        // The includers themselves — own chain, shim-resolved MEMBER parent, companions.
+        for (const includer of includers.slice(0, IncludeVerifier.MAX_INCLUDER_HOSTS)) {
+            const includerPath = includer.replace(/\//g, '\\');
+            let contents: string;
+            try {
+                contents = await fs.promises.readFile(includerPath, 'utf-8');
+            } catch {
+                continue;
+            }
+            const includerDoc = TextDocument.create(pathToCanonicalUri(includerPath), 'clarion', 1, contents);
+            if (await this.isClassIncluded(classFileName, includerDoc, depth + 1)) return true;
+        }
+        return false;
     }
 
     /**
