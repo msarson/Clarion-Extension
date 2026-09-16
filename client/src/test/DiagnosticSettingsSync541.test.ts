@@ -8,6 +8,7 @@ import {
     DIAGNOSTICS_MASTER_SETTING,
     buildDiagnosticSettingsPayload,
     settingKeyFor,
+    severitySettingKeyFor,
 } from '../../../common/diagnosticChecks';
 
 /**
@@ -46,6 +47,7 @@ describe('DiagnosticSettingsSync (#541, #542)', () => {
         const payload = buildDiagnosticSettingsPayload((_key, def) => def);
         assert.strictEqual(payload.diagnosticsEnabled, true);
         for (const c of DIAGNOSTIC_CHECKS) assert.strictEqual(payload.diagnosticChecks[c.id], c.default, c.id);
+        for (const c of DIAGNOSTIC_CHECKS) assert.strictEqual(payload.diagnosticSeverities[c.id], 'default', `${c.id} severity`); // #543
     });
 
     it('sentinel: the table matches package.json — same settings, same defaults', () => {
@@ -54,7 +56,11 @@ describe('DiagnosticSettingsSync (#541, #542)', () => {
         const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'package.json'), 'utf8'));
         const props = pkg.contributes.configuration.properties as Record<string, { type: string; default: boolean }>;
         const declared = Object.keys(props).filter(k => k.startsWith('clarion.diagnostics.')).sort();
-        const expected = [DIAGNOSTICS_MASTER_SETTING, ...DIAGNOSTIC_CHECKS.map(c => settingKeyFor(c.id))].sort();
+        const expected = [
+            DIAGNOSTICS_MASTER_SETTING,
+            ...DIAGNOSTIC_CHECKS.map(c => settingKeyFor(c.id)),
+            ...DIAGNOSTIC_CHECKS.map(c => severitySettingKeyFor(c.id)), // #543
+        ].sort();
         assert.deepStrictEqual(declared, expected, 'the table and package.json must list the same clarion.diagnostics.* settings');
         for (const c of DIAGNOSTIC_CHECKS) {
             assert.strictEqual(props[settingKeyFor(c.id)].default, c.default, `default for ${c.id}`);

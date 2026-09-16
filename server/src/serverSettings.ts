@@ -1,4 +1,4 @@
-import { DIAGNOSTIC_CHECKS, DiagnosticCheckId, checkDefault } from '../../common/diagnosticChecks';
+import { DIAGNOSTIC_CHECKS, DiagnosticCheckId, checkDefault, SEVERITY_CHOICES } from '../../common/diagnosticChecks';
 
 export const serverSettings = {
     redirectionPaths: [] as string[],
@@ -22,6 +22,8 @@ export const serverSettings = {
     diagnostics: {
         enabled: true,
         checks: {} as Partial<Record<DiagnosticCheckId, boolean>> & Record<string, boolean | undefined>,
+        /** #543 — severity overrides by check id; absent or 'default' keeps the check's own. */
+        severities: {} as Partial<Record<DiagnosticCheckId, string>> & Record<string, string | undefined>,
     },
 
     /** Issue #62 — undeclared-variable check. A view onto `diagnostics.checks` (#542). */
@@ -75,12 +77,31 @@ export interface FeatureFlagParams {
     /** #542 — the master switch and one flag per check, keyed by check id. */
     diagnosticsEnabled?: boolean;
     diagnosticChecks?: Record<string, boolean>;
+    /** #543 — a SEVERITY_CHOICES value per check id. */
+    diagnosticSeverities?: Record<string, string>;
 }
 
 /** #542 — is this check to run: the master switch, then the check's own setting or its default. */
 export function isDiagnosticEnabled(id: DiagnosticCheckId): boolean {
     if (!serverSettings.diagnostics.enabled) return false;
     return serverSettings.diagnostics.checks[id] ?? checkDefault(id);
+}
+
+// LSP DiagnosticSeverity values (kept numeric here so this leaf module stays free of
+// the vscode-languageserver import).
+const SEVERITY_VALUE: Record<string, number> = { error: 1, warning: 2, information: 3, hint: 4 };
+
+/**
+ * #543 — apply the user's severity for a check to the diagnostics it produced.
+ * Absent or 'default' leaves each diagnostic's built-in severity alone. Applied at the
+ * facade after each validator runs, keyed by the same id the on/off gate uses.
+ */
+export function applyCheckSeverity<T extends { severity?: number }>(id: DiagnosticCheckId, diagnostics: T[]): T[] {
+    const choice = serverSettings.diagnostics.severities[id];
+    const value = choice ? SEVERITY_VALUE[choice] : undefined;
+    if (value === undefined) return diagnostics;
+    for (const d of diagnostics) d.severity = value;
+    return diagnostics;
 }
 
 const KNOWN_CHECK_IDS = new Set<string>(DIAGNOSTIC_CHECKS.map(c => c.id));
@@ -128,6 +149,19 @@ export function applyFeatureFlags(params: FeatureFlagParams): string[] {
         const current = serverSettings.diagnostics.checks[checkId] ?? checkDefault(checkId);
         serverSettings.diagnostics.checks[checkId] = next;
         if (current !== next) changed.push(`diagnostics.${id}`);
+    }
+    // #543 — severities. 'default' clears the override; a value outside the choices is ignored.
+    for (const [id, value] of Object.entries(params.diagnosticSeverities ?? {})) {
+        if (!KNOWN_CHECK_IDS.has(id)) continue;
+        if (!(SEVERITY_CHOICES as readonly string[]).includes(value)) continue;
+        const checkId = id as DiagnosticCheckId;
+        const current = serverSettings.diagnostics.severities[checkId];
+        if (value === 'default') {
+            if (current !== undefined) { delete serverSettings.diagnostics.severities[checkId]; changed.push(`severity.${id}`); }
+        } else if (current !== value) {
+            serverSettings.diagnostics.severities[checkId] = value;
+            changed.push(`severity.${id}`);
+        }
     }
     return changed;
 }

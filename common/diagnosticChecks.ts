@@ -54,25 +54,44 @@ export function checkDefault(id: DiagnosticCheckId): boolean {
     return DIAGNOSTIC_CHECKS.find(c => c.id === id)?.default ?? true;
 }
 
+/** #543 — the choices for `clarion.diagnostics.<id>.severity`; `default` keeps the check's own. */
+export const SEVERITY_CHOICES = ['default', 'error', 'warning', 'information', 'hint'] as const;
+export type SeverityChoice = typeof SEVERITY_CHOICES[number];
+
+/** The user setting that sets one check's severity (#543). */
+export function severitySettingKeyFor(id: DiagnosticCheckId): string {
+    return `clarion.diagnostics.${id}.severity`;
+}
+
 /** What the client sends the server — at startup in clarion/updatePaths and live in
  *  clarion/updateDiagnosticSettings (#541). */
 export interface DiagnosticSettingsPayload {
     diagnosticsEnabled: boolean;
     diagnosticChecks: Record<DiagnosticCheckId, boolean>;
+    /** #543 — one of SEVERITY_CHOICES per check. */
+    diagnosticSeverities: Record<DiagnosticCheckId, SeverityChoice>;
 }
 
 /**
- * Build the payload by reading each setting through `read(key, default)` — in
- * production a `WorkspaceConfiguration.get` on the `clarion` section, which is why the
- * keys here are relative to it (`diagnostics.<id>.enabled`, `diagnostics.enabled`).
+ * Build the payload by reading each setting through `readBool(key, default)` /
+ * `readString(key, default)` — in production a `WorkspaceConfiguration.get` on the
+ * `clarion` section, which is why the keys here are relative to it
+ * (`diagnostics.<id>.enabled`, `diagnostics.<id>.severity`, `diagnostics.enabled`).
  */
-export function buildDiagnosticSettingsPayload(read: (key: string, def: boolean) => boolean): DiagnosticSettingsPayload {
+export function buildDiagnosticSettingsPayload(
+    readBool: (key: string, def: boolean) => boolean,
+    readString: (key: string, def: string) => string = (_key, def) => def
+): DiagnosticSettingsPayload {
     const diagnosticChecks = {} as Record<DiagnosticCheckId, boolean>;
+    const diagnosticSeverities = {} as Record<DiagnosticCheckId, SeverityChoice>;
     for (const c of DIAGNOSTIC_CHECKS) {
-        diagnosticChecks[c.id] = read(`diagnostics.${c.id}.enabled`, c.default) === true;
+        diagnosticChecks[c.id] = readBool(`diagnostics.${c.id}.enabled`, c.default) === true;
+        const sev = readString(`diagnostics.${c.id}.severity`, 'default');
+        diagnosticSeverities[c.id] = (SEVERITY_CHOICES as readonly string[]).includes(sev) ? sev as SeverityChoice : 'default';
     }
     return {
-        diagnosticsEnabled: read('diagnostics.enabled', true) === true,
+        diagnosticsEnabled: readBool('diagnostics.enabled', true) === true,
         diagnosticChecks,
+        diagnosticSeverities,
     };
 }

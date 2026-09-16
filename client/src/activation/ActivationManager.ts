@@ -230,7 +230,8 @@ export async function setupFolderDependentFeatures(
                     return;
                 }
                 const payload = buildDiagnosticSettingsPayload(
-                    (key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def)
+                    (key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def),
+                    (key, def) => workspace.getConfiguration("clarion").get<string>(key, def) // #543
                 );
                 client.sendNotification('clarion/updateDiagnosticSettings', payload);
                 logger.info(`🔄 Diagnostics settings changed — sent to the server: ${JSON.stringify(payload)}`);

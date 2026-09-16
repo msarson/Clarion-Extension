@@ -4,7 +4,7 @@ import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { DiagnosticProvider } from '../providers/DiagnosticProvider';
 import { serverSettings, applyFeatureFlags, isDiagnosticEnabled } from '../serverSettings';
-import { DIAGNOSTIC_CHECKS, settingKeyFor, DIAGNOSTICS_MASTER_SETTING } from '../../../common/diagnosticChecks';
+import { DIAGNOSTIC_CHECKS, settingKeyFor, severitySettingKeyFor, DIAGNOSTICS_MASTER_SETTING } from '../../../common/diagnosticChecks';
 
 /**
  * #542 — every check has its own switch and there is a master switch. The sync pass
@@ -85,7 +85,11 @@ suite('Per-check diagnostics settings and the master switch (#542)', () => {
         const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'package.json'), 'utf8'));
         const props = pkg.contributes.configuration.properties as Record<string, { default: boolean }>;
         const declared = Object.keys(props).filter(k => k.startsWith('clarion.diagnostics.')).sort();
-        const expected = [DIAGNOSTICS_MASTER_SETTING, ...DIAGNOSTIC_CHECKS.map(c => settingKeyFor(c.id))].sort();
+        const expected = [
+            DIAGNOSTICS_MASTER_SETTING,
+            ...DIAGNOSTIC_CHECKS.map(c => settingKeyFor(c.id)),
+            ...DIAGNOSTIC_CHECKS.map(c => severitySettingKeyFor(c.id)), // #543
+        ].sort();
         assert.deepStrictEqual(declared, expected);
         for (const c of DIAGNOSTIC_CHECKS) assert.strictEqual(props[settingKeyFor(c.id)].default, c.default, c.id);
         assert.strictEqual(props[DIAGNOSTICS_MASTER_SETTING].default, true);

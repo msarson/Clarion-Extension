@@ -412,7 +412,10 @@ export async function initializeSolution(
             unresolvedProcedureCallsEnabled: globalSettings.unresolvedProcedureCallsEnabled, // #517 opt-in
             indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
             // #542 — the master switch and every per-check setting, from the shared table.
-            ...buildDiagnosticSettingsPayload((key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def)),
+            ...buildDiagnosticSettingsPayload(
+                (key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def),
+                (key, def) => workspace.getConfiguration("clarion").get<string>(key, def) // #543
+            ),
             referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled, // #185 opt-out
             inlayHintsParameterNames: globalSettings.inlayHintsParameterNames,   // inlay opt-out
             inlayHintsImplicitTypes: globalSettings.inlayHintsImplicitTypes      // inlay opt-out
