@@ -354,6 +354,9 @@ export class FileRelationshipGraph {
      */
     private buildCacheSignature(): string {
         const parts: string[] = [String(DISK_CACHE_VERSION), serverSettings.redirectionFile ?? ''];
+        // #564 — the redirection file's [Debug]/[Release]/custom sections resolve per build
+        // configuration, so edges cached under one configuration are wrong under another.
+        parts.push(`config:${(serverSettings.configuration ?? '').split('|')[0].trim().toLowerCase()}`);
         for (const p of [...(serverSettings.libsrcPaths ?? [])].map(x => this.normalizePath(x)).sort()) {
             parts.push(p);
         }

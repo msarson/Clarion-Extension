@@ -475,6 +475,16 @@ export class SolutionManager {
     private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
 
     /**
+     * #564 — drop every file-name → path answer. They are keyed by name (and owning project), not
+     * by build configuration, so a configuration switch must not keep serving the old section's
+     * resolution.
+     */
+    public clearResolvedFileCaches(): void {
+        this.fileCache?.clear();
+        this.negativeFindCache?.clear();
+    }
+
+    /**
      * #329: `fromFsPath` is the source file this lookup acts on behalf of. When
      * present, the owning project's answer is tried before the solution-order
      * walk (same rule as #328/#315), and all three caches (positive, negative,

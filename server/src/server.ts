@@ -103,6 +103,7 @@ import { setServerInitialized, serverInitialized } from './serverState';
 import { TokenHelper } from './utils/TokenHelper';
 import { evictIncludeChainIndexes } from './services/SymbolFinderService';
 import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
+import { applyConfigurationChange } from './solution/ConfigurationChange'; // #564
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -2655,13 +2656,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
 // window it caused itself). Coalesced: a burst costs ONE pass. The FRG is also
 // REBUILT, not just reset — a bare reset left it dead until the next restart,
 // degrading every family-scoped consumer (FAR scope, sibling-walk prune, hover).
-const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
-    const passStart = Date.now();
-    // Clear the version-skip cache so validateTextDocument doesn't skip documents
-    // whose source hasn't changed but whose cwproj has.
-    lastValidatedVersions.clear();
-
-    // Rebuild the file relationship graph — the project file list may have changed.
+/**
+ * Rebuild the file relationship graph from every project's source files (reset, then the
+ * background closure build). Shared by the .cwproj-change pass (#317) and a build configuration
+ * change (#564). Returns the seed files.
+ */
+async function rebuildFileRelationshipGraph(reason: string): Promise<string[]> {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
     const graph = FileRelationshipGraph.getInstance();
     graph.reset();
@@ -2677,8 +2677,19 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
     }
     if (graphFiles.length) {
         await graph.buildInBackground(graphFiles).catch(err =>
-            logger.error(`❌ [FRG] constants-change rebuild failed: ${err}`));
+            logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`));
     }
+    return graphFiles;
+}
+
+const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
+    const passStart = Date.now();
+    // Clear the version-skip cache so validateTextDocument doesn't skip documents
+    // whose source hasn't changed but whose cwproj has.
+    lastValidatedVersions.clear();
+
+    // Rebuild the file relationship graph — the project file list may have changed.
+    const graphFiles = await rebuildFileRelationshipGraph('constants-change');
 
     // One doc at a time — same discipline as the startup revalidation chain.
     let docCount = 0;
@@ -2720,6 +2731,50 @@ connection.onNotification('clarion/updateDiagnosticSettings', async (params: Fea
         ms: Date.now() - passStart,
         doc_count: docCount,
         changed: changed.join('|')
+    });
+});
+
+// #564 — the build configuration changed in the editor (status bar, Tools pane or a settings
+// edit). It arrived only once, with the solution load, so redirection kept resolving the old
+// configuration's sections until a reload. Apply it, then re-check the open documents and
+// refresh their links, one document at a time.
+connection.onNotification('clarion/updateConfiguration', async (params: { configuration?: string }) => {
+    const next = params?.configuration ?? '';
+    const previous = serverSettings.configuration;
+    if (!applyConfigurationChange(next)) {
+        logger.info(`📥 clarion/updateConfiguration — ${next || '(empty)'} is already active`);
+        return;
+    }
+    logger.info(`📥 clarion/updateConfiguration — ${previous} → ${next}`);
+    const passStart = Date.now();
+    // The graph's INCLUDE/MEMBER/MODULE edges and the declaration index's file set were resolved
+    // through the old configuration's redirection sections; rebuild both before re-checking.
+    const graphFiles = await rebuildFileRelationshipGraph('configuration-change');
+    const smForIndex = SolutionManager.getInstance();
+    if (smForIndex?.solution) {
+        const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
+        const indexer = StructureDeclarationIndexer.getInstance();
+        indexer.clearCache();
+        const projectPaths = [...new Set(smForIndex.solution.projects.map(p => p.path).filter(Boolean))];
+        await Promise.all(projectPaths.map(p => indexer.getOrBuildIndex(p).catch(err =>
+            logger.error(`❌ [INDEX] configuration-change rebuild failed for ${p}: ${err}`))));
+    }
+    lastValidatedVersions.clear();
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'configurationChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    connection.sendNotification('clarion/refreshDocumentLinks');
+    perfLogger.perf("configurationChanged re-validation complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        frg_files: graphFiles.length,
+        configuration: next
     });
 });
 

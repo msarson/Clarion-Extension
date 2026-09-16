@@ -7,6 +7,7 @@ import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } fr
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
+import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
 logger.setLevel("error"); // Production: Only log errors
@@ -99,4 +100,10 @@ export async function applyActiveConfiguration(configuration: string): Promise<v
     await updateConfigurationStatusBar(configuration);
     updateSolutionToolbar();
     await refreshSolutionTreeView();
+    // #564 — the language server resolves files through the redirection file's sections for
+    // this configuration; it only heard the configuration at solution load until now.
+    const client = getLanguageClient();
+    if (client && isClientReady()) {
+        client.sendNotification('clarion/updateConfiguration', { configuration });
+    }
 }
