@@ -2022,6 +2022,11 @@ export class MemberLocatorService {
     }
 
     /** Loads a TextDocument and its tokens, using CrossFileCache if available. */
+    /** #552 — the loader, for the chained resolver's inline-structure lookup. */
+    public loadDocumentForPath(filePath: string): Promise<{ doc: TextDocument; tokens: Token[] } | null> {
+        return this.loadDocument(filePath);
+    }
+
     private async loadDocument(filePath: string): Promise<{ doc: TextDocument; tokens: Token[] } | null> {
         if (this.crossFileCache) {
             const cached = await this.crossFileCache.getOrLoadDocument(filePath);
