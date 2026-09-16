@@ -28,6 +28,7 @@ import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { serverSettings } from '../serverSettings'; // #559
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
@@ -2818,6 +2819,57 @@ export class ReferencesProvider {
     }
 
     /**
+     * #559 — a .cwproj lists modules only, so a use of a global name inside an INCLUDE'd
+     * file (a global instance in a data include, a class field typed with the class, a
+     * MAP prototype) was never a candidate. Walk the file graph's INCLUDE edges from the
+     * files already in the set and add each reached include whose text mentions the name.
+     *
+     * Library source folders are skipped: a vendor include cannot name a solution type,
+     * and the ABC chain alone is hundreds of files. The text check keeps an include that
+     * never mentions the name from being tokenized (the reference index covers modules
+     * only, so it cannot prune these). Returns the number of files added.
+     */
+    private addIncludedFiles(
+        allFiles: string[],
+        alwaysIncludeNames: Set<string>,
+        word: string
+    ): number {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt || !word) return 0;
+        const wordLower = word.toLowerCase();
+        const libsrcPrefixes = (serverSettings.libsrcPaths ?? [])
+            .filter(p => !!p)
+            .map(p => p.replace(/\\/g, '/').toLowerCase().replace(/\/?$/, '/'));
+        const inLibsrc = (p: string) => libsrcPrefixes.some(prefix => p.startsWith(prefix));
+        const toKey = (uri: string) => decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\\/g, '/').toLowerCase();
+
+        const inSet = new Set(allFiles.map(toKey));
+        const visited = new Set<string>(inSet);
+        let frontier = [...inSet];
+        let added = 0;
+        while (frontier.length > 0) {
+            const next: string[] = [];
+            for (const file of frontier) {
+                for (const edge of graph.getForwardEdges(file)) {
+                    if (edge.type !== 'INCLUDE') continue;
+                    const inc = edge.toFile;
+                    if (visited.has(inc)) continue;
+                    visited.add(inc);
+                    if (inLibsrc(inc)) continue;
+                    next.push(inc);
+                    if (alwaysIncludeNames.has(path.basename(inc))) continue;
+                    const text = this.readIncludeWalkSource(inc.replace(/\//g, '\\'));
+                    if (text === null || !text.toLowerCase().includes(wordLower)) continue;
+                    allFiles.push(`file:///${inc}`);
+                    added++;
+                }
+            }
+            frontier = next;
+        }
+        return added;
+    }
+
+    /**
      * #523 — a class implementation compiled through LINK() is never a .cwproj item, so
      * `project.sourceFiles` never lists it and a global symbol used inside it was
      * invisible to FAR and rename. The file graph reaches such files through the CLASS
@@ -3033,6 +3085,8 @@ export class ReferencesProvider {
                 }
 
                 const linkOnly = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, declProject.path);
+                const includedFiles = this.addIncludedFiles(allFiles, alwaysIncludeNames, symbolInfo.token.value); // #559 — the word the scan loop searches
+                logger.test(`[FAR] #559: ${includedFiles} include file(s) mention the name`);
                 logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search (${linkOnly} LINK-only implementation(s), #523)`);
                 return allFiles;
             }
@@ -3050,6 +3104,8 @@ export class ReferencesProvider {
                 }
             }
             const linkOnlyAll = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, undefined);
+            const includedAll = this.addIncludedFiles(allFiles, alwaysIncludeNames, symbolInfo.token.value); // #559 — the word the scan loop searches
+            logger.test(`[FAR] #559: ${includedAll} include file(s) mention the name`);
             logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search (${linkOnlyAll} LINK-only implementation(s), #523)`);
             return allFiles;
         }
