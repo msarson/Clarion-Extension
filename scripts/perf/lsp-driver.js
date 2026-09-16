@@ -430,6 +430,26 @@ async function runDiagStatusCheck(t0) {
     console.log(res && res.error ? `  refused: ${res.error}` : `  range: ${JSON.stringify(res)}`);
   }
 
+  // --diags: after the settle window, print every diagnostic the server published for
+  // TARGET, grouped by message (count, first line, source line) — the false-positive
+  // triage view, with the real solution loaded.
+  if (process.argv.includes('--diags')) {
+    const all = lastDiagnostics[uri] || [];
+    const groups = new Map();
+    for (const d of all) {
+      const key = `${d.code ?? ''}|${d.message.replace(/'[^']*'/g, "'…'")}`;
+      const g = groups.get(key) ?? { n: 0, first: d, msg: d.message };
+      g.n++; groups.set(key, g);
+    }
+    const srcLines = text.split(/\r?\n/);
+    console.log(`\n== diagnostics for ${path.basename(TARGET)}: ${all.length} in ${groups.size} group(s) ==`);
+    for (const g of [...groups.values()].sort((a, b) => b.n - a.n)) {
+      const d = g.first;
+      console.log(`  ${String(g.n).padStart(4)}× [${d.code ?? d.source ?? '?'}] ${g.msg.slice(0, 120)}`);
+      console.log(`        first at L${d.range.start.line + 1}:${d.range.start.character + 1}  ${(srcLines[d.range.start.line] ?? '').trim().slice(0, 100)}`);
+    }
+  }
+
   const defArg = arg('define'); // LINE:COL, 0-indexed
   if (defArg) {
     const [dl, dc] = defArg.split(':').map(Number);

@@ -98,24 +98,61 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
         return [];
     }
 
+    // #556 — line by line: a comment's bytes never reach the compiler, so everything
+    // after an unquoted `!` (or `|`, whose trailing text is a comment too) is exempt —
+    // an ASCII-art banner is not a problem. Outside comments the finding stays, ONE
+    // warning per line spanning the first to the last offending character, rather than
+    // one per character (a pasted banner in a string is one squiggle, not fifty).
     const diagnostics: Diagnostic[] = [];
-    const text = document.getText();
-
-    for (let i = 0; i < text.length;) {
-        const code = text.codePointAt(i)!;
-        const charLen = code > 0xFFFF ? 2 : 1; // astral characters (emoji) span two UTF-16 units
-        if (isUnrepresentableInAnsi(code)) {
-            const hex = code.toString(16).toUpperCase().padStart(4, '0');
-            diagnostics.push({
-                severity: DiagnosticSeverity.Warning,
-                range: { start: document.positionAt(i), end: document.positionAt(i + charLen) },
-                message: `Character '${String.fromCodePoint(code)}' (U+${hex}) can't be represented in any Windows ANSI code page and will corrupt the file for the Clarion compiler.`,
-                source: 'clarion',
-                code: 'invalid-encoding'
-            });
+    const lines = document.getText().split(/\r?\n/);
+    for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+        const line = lines[lineNo];
+        const codeEnd = commentStart(line);
+        let first = -1, lastEnd = -1, count = 0, firstCode = 0;
+        for (let i = 0; i < codeEnd;) {
+            const code = line.codePointAt(i)!;
+            const charLen = code > 0xFFFF ? 2 : 1; // astral characters (emoji) span two UTF-16 units
+            if (isUnrepresentableInAnsi(code)) {
+                if (first < 0) { first = i; firstCode = code; }
+                lastEnd = i + charLen;
+                count++;
+            }
+            i += charLen;
         }
-        i += charLen;
+        if (first < 0) continue;
+        const hex = firstCode.toString(16).toUpperCase().padStart(4, '0');
+        const which = count > 1 ? ` and ${count - 1} more (${count} characters on this line)` : '';
+        diagnostics.push({
+            severity: DiagnosticSeverity.Warning,
+            range: { start: { line: lineNo, character: first }, end: { line: lineNo, character: lastEnd } },
+            // Wording settled by compiling on Clarion 10 (#556): the compiler takes the raw
+            // UTF-8 bytes — the file builds, in a comment or a string — but a UTF-8 BOM
+            // added on save fails it with "Illegal character", and a string will not
+            // display as written on an ANSI build.
+            message: `Character '${String.fromCodePoint(firstCode)}' (U+${hex})${which} has no encoding in any Windows ANSI code page. The Clarion compiler takes the raw UTF-8 bytes, so a string will not display as written, and a UTF-8 BOM added on save breaks the compile.`,
+            source: 'clarion',
+            code: 'invalid-encoding'
+        });
     }
 
     return diagnostics;
+}
+
+/**
+ * The index where the line's comment starts — the first `!` or `|` outside a string
+ * literal ('' is an escaped quote, not a terminator) — or the line length when there
+ * is none. Text from there on never reaches the compiler.
+ */
+function commentStart(line: string): number {
+    let inString = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === "'") {
+            if (inString && line[i + 1] === "'") { i++; continue; } // '' inside a string
+            inString = !inString;
+        } else if (!inString && (ch === '!' || ch === '|')) {
+            return i;
+        }
+    }
+    return line.length;
 }
