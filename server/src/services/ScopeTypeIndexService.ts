@@ -375,8 +375,17 @@ export class ScopeTypeIndexService {
     public loadGlobalScopeFromProgramFile(programFileUri: string): Map<string, string> {
         const tokens = this.getTokensForUri(programFileUri);
         if (!tokens || tokens.length === 0) return new Map();
-        return this.buildFileVarTypeIndex(tokens).moduleScope;
+        // #550 — one module-scope index per program TOKEN ARRAY. The closed-file cache
+        // hands back the same array until the file changes on disk, so keying on it is
+        // mtime-correct for free; without this a scan over 71 modules of 17 programs
+        // rebuilt the index 71 times over the biggest files in the solution.
+        const cached = ScopeTypeIndexService.programScopeByTokens.get(tokens);
+        if (cached) return cached;
+        const scope = this.buildFileVarTypeIndex(tokens).moduleScope;
+        ScopeTypeIndexService.programScopeByTokens.set(tokens, scope);
+        return scope;
     }
+    private static readonly programScopeByTokens = new WeakMap<Token[], Map<string, string>>();
 
     /**
      * Tier 6 entry point — resolve the PROGRAM file for the cursor's MEMBER (via FRG)
@@ -396,6 +405,30 @@ export class ScopeTypeIndexService {
      *   (`671d7cd8` discovery — symmetric to `0c289e16`'s decl-vs-call cursor-side
      *   asymmetry, different axis).
      */
+    /**
+     * #550 — the global scope for a file being SCANNED, as opposed to the cursor's file:
+     * the PROGRAM-level variables visible in that file are those of ITS program. A
+     * references scan from an accessory's implementation (a bare MEMBER(), no program)
+     * loaded the cursor's — empty — scope for every file, so a call on an object declared
+     * in the program (`TemplateHelper.Method()` in a generated module) never resolved.
+     * Null when the file has no program and is not one itself.
+     */
+    public loadGlobalScopeForFileUri(fileUri: string): Map<string, string> | null {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return null;
+        const fsPath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const programFsPath = graph.getProgramFile(fsPath);
+        if (programFsPath) {
+            const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
+            if (programUri.toLowerCase() !== fileUri.toLowerCase()) return this.loadGlobalScopeFromProgramFile(programUri);
+        }
+        if (programFsPath || graph.getMemberFiles(fsPath).length > 0) {
+            // The file IS a program (self-MEMBER, or others MEMBER it): its own module scope.
+            return this.buildFileVarTypeIndex(this.tokenCache.getTokensForClosedFile(fileUri)).moduleScope;
+        }
+        return null;
+    }
+
     public loadGlobalScopeForCursor(document: TextDocument): Map<string, string> | null {
         const graph = FileRelationshipGraph.getInstance();
         if (!graph.isBuilt) {

@@ -156,11 +156,15 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
         const AT_IMPL = { line: 4, character: 9 };   // ctThing.clw "ctThing.Method PROCEDURE()" — on Method
         const edit = await provider.provideRename(docs.get('ctThing.clw')!, AT_IMPL, 'Renamed');
         assert.deepStrictEqual(editsByFile(edit), [['ap1.clw', 1], ['ctthing.clw', 1], ['ctthing.inc', 1]]);
-        // The generated browse.clw call site is neither edited nor reported here: Find All
-        // References for a class method does not reach a call site in another MEMBER module
-        // unless the cursor is in that module (#550). The skipped-and-reported behaviour
-        // itself is pinned by the #527 suite, which starts from a file the search does reach.
-        for (const [file] of editsByFile(edit)) assert.notStrictEqual(file, 'browse.clw', 'a generated file is never edited');
+        // #550 — the generated browse.clw call site is found from the implementation now
+        // (the class-method search reaches every MEMBER module of the program), so it is
+        // skipped and reported rather than silently absent.
+        const report = provider.getLastRenameReport();
+        assert.ok(report, 'the generated call site is reported');
+        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`), ['browse.clw:1']);
+        assert.ok(/cannot alter generated code/i.test(report!.message), report!.message);
+        assert.ok(/hand-coded/i.test(report!.message) && /\.app/i.test(report!.message), report!.message);
+        assert.ok(/3 hand-coded file/i.test(report!.message) && /1 occurrence/i.test(report!.message), report!.message);
     });
 
     test('a method whose declaration is generated is still refused, from a generated call site and from a hand-coded one', async () => {

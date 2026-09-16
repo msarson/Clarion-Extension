@@ -46,6 +46,10 @@ logger.setLevel("error");
 // solutions are diagnosable from the user's log instead of fixture guesswork.
 const perfLogger = LoggerManager.getLogger("ReferencesProvider.Perf", "perf");
 
+// #550 — `Label CLASS(Parent)` on its own line (a Clarion label starts in column 1). The
+// class-family walk matches this over file TEXT instead of tokenizing each candidate.
+const CLASS_DERIVATION_RE = /^([A-Za-z_][A-Za-z0-9_:]*)\s+CLASS\s*\(\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)/gim;
+
 /**
  * Canonical dedup key for a reference location (#196 follow-up).
  *
@@ -1243,11 +1247,22 @@ export class ReferencesProvider {
         let scanCount = 0;
         let prunedCount = 0;
         let ycMember = 0;
+        // #550 — the global scope a scanned file's receivers resolve against is that of
+        // the SCANNED file's program, not the cursor's: from an accessory's bare MEMBER()
+        // implementation the cursor has no program, and a generated module's call on an
+        // object declared in ITS program never resolved. One load per program, memoised.
+        const scopeByFile = new Map<string, Map<string, string> | undefined>();
         for (const fileUri of filesToSearchDeduped) {
             if (await this.yieldIfNeeded(ycMember++, token)) return null;
             if (!refIdx.mayContain(fileUri, memberName)) { prunedCount++; continue; }
             scanCount++;
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
+            const scopeKey = fileUri.toLowerCase();
+            let scanScope = scopeByFile.get(scopeKey);
+            if (!scopeByFile.has(scopeKey)) {
+                scanScope = this.scopeTypeIndex.loadGlobalScopeForFileUri(fileUri) ?? globalScope;
+                scopeByFile.set(scopeKey, scanScope);
+            }
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, scanScope);
             locations.push(...hits);
         }
         this.trace({ scan_files: scanCount, scan_pruned: prunedCount, scan_ms: Date.now() - scanStart, index_built: String(refIdx.isBuilt) });
@@ -1636,6 +1651,19 @@ export class ReferencesProvider {
                 }
             }
 
+            // #550 — a class instance declared at global level in a PROGRAM (or in an .inc
+            // the PROGRAM includes) is visible in every MEMBER module of that program, so a
+            // module can call its methods without including the class's .inc itself — the
+            // reverse-include walk alone never reached those modules, and a call site was
+            // found only when the cursor happened to be in it. Every file reached above
+            // that is a PROGRAM contributes its MEMBER modules (getMemberFiles is empty for
+            // anything else). Same rule as #524 for PROGRAM globals.
+            for (const reached of visited) {
+                for (const memberFsPath of graph.getMemberFiles(reached.replace(/\//g, '\\'))) {
+                    files.add('file:///' + memberFsPath);
+                }
+            }
+
             if (files.size > 2) {
                 logger.info(`[FRG] getMemberSearchFiles: narrowed to ${files.size} file(s) via reverse includes`);
                 return Array.from(files);
@@ -1965,21 +1993,16 @@ export class ReferencesProvider {
                 if (!mentionsFamily) continue;
                 scanned.add(uri);
                 scannedThisRound = true;
-                const tokens = this.getTokensForUri(uri);
-                if (!tokens) continue;
-                for (let i = 0; i < tokens.length; i++) {
-                    const t = tokens[i];
-                    if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
-                        // Look for ( Variable ) immediately after CLASS on the same line
-                        const next = tokens[i + 1];
-                        const parent = tokens[i + 2];
-                        if (next && next.type === TokenType.Delimiter && next.value === '(' &&
-                            next.line === t.line &&
-                            parent && parent.type === TokenType.Variable &&
-                            parent.line === t.line) {
-                            pairs.set(t.label.toLowerCase(), parent.value.toLowerCase());
-                        }
-                    }
+                // #550 — a text scan, not a tokenize: the family only needs `Label CLASS(Parent)`
+                // lines, and a Clarion label always starts in column 1. Tokenizing every
+                // candidate (108 generated modules mentioning the class on ap1.sln) cost 12.7s
+                // of a 13.7s search; reading them and matching one anchored regex does not.
+                const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
+                if (text === null) continue;
+                CLASS_DERIVATION_RE.lastIndex = 0;
+                let cm: RegExpExecArray | null;
+                while ((cm = CLASS_DERIVATION_RE.exec(text)) !== null) {
+                    pairs.set(cm[1].toLowerCase(), cm[2].toLowerCase());
                 }
             }
 
