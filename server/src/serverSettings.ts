@@ -19,6 +19,13 @@ export const serverSettings = {
     undeclaredVariablesEnabled: true,
 
     /**
+     * Issue #517 — OPT-IN (off by default) diagnostic for a call to a procedure
+     * that resolves to no declaration anywhere. Populated from
+     * `clarion.diagnostics.unresolvedProcedureCalls.enabled` via `clarion/updatePaths`.
+     */
+    unresolvedProcedureCallsEnabled: false,
+
+    /**
      * Issue #121 — diagnostic for indistinguishable procedure prototypes
      * (compile-error duplicates that Clarion's compiler rejects). Populated
      * from `clarion.diagnostics.indistinguishablePrototypes.enabled` via the

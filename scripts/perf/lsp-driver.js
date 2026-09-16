@@ -44,6 +44,8 @@ const STDERR_LOG = path.join(os.tmpdir(), 'clarion-lsp-driver-stderr.log');
 // file, publish→complete for a libsrc file, publish→deferred→…→complete when
 // opened before the pipelines are ready).
 const diagEvents = [];
+const lastDiagnostics = {};
+const UNRESOLVED_PROC = process.argv.includes('--unresolved-proc');
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -87,6 +89,7 @@ child.on('message', (msg) => {
   } else if (msg.method) {
     if (msg.method === 'textDocument/publishDiagnostics') {
       diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length });
+      lastDiagnostics[msg.params.uri] = msg.params.diagnostics || [];
     } else if (msg.method === 'clarion/diagnosticsStatus') {
       diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
     }
@@ -265,6 +268,7 @@ async function runDiagStatusCheck(t0) {
     // --undeclared: the #62 opt-in validator (off by default). Needed when
     // measuring #358-class costs — without it `Validator undeclaredVar` is a no-op.
     undeclaredVariablesEnabled: process.argv.includes('--undeclared'),
+    unresolvedProcedureCallsEnabled: UNRESOLVED_PROC,
   });
   console.log(`[${Date.now() - t0}ms] updatePaths sent — waiting for solutionReady…`);
   const ready = await waitNotification('clarion/solutionReady');
@@ -324,6 +328,27 @@ async function runDiagStatusCheck(t0) {
     try { await request('shutdown', null, 10000); notify('exit'); } catch { }
     setTimeout(() => { child.kill(); process.exit(0); }, 1000);
     return;
+  }
+
+  if (UNRESOLVED_PROC) {
+    const d = (lastDiagnostics[uri] || []).filter(x => x.code === 'unresolved-procedure-call');
+    console.log(`\n== #517 unresolved-procedure-call on ${path.basename(TARGET)}: ${d.length} ==`);
+    for (const x of d.slice(0, 40)) console.log(`  L${x.range.start.line + 1}: ${x.message}`);
+    if (d.length > 40) console.log(`  … and ${d.length - 40} more`);
+  }
+
+  const defArg = arg('define'); // LINE:COL, 0-indexed
+  if (defArg) {
+    const [dl, dc] = defArg.split(':').map(Number);
+    const res = await request('textDocument/definition', { textDocument: { uri }, position: { line: dl, character: dc } }, 60000).catch(e => ({ error: e.message }));
+    console.log(`\n== definition at ${dl + 1}:${dc} ==`);
+    const arr = Array.isArray(res) ? res : (res ? [res] : []);
+    if (!arr.length || res.error) console.log(`  (no definition${res && res.error ? ': ' + res.error : ''})`);
+    for (const loc of arr) {
+      const u = loc.uri || loc.targetUri;
+      const rg = loc.range || loc.targetRange;
+      console.log(`  -> ${u ? path.basename(decodeURIComponent(u)) : '?'}:${rg ? rg.start.line + 1 : '?'}`);
+    }
   }
 
   console.log(`\n== hover timings (cold then warm per word) ==`);

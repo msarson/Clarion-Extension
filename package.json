@@ -1365,6 +1365,11 @@
           "default": true,
           "description": "Enabled by default. Raises a Warning on a bare identifier used in executable code — an assignment target or an operand in a condition or expression — that cannot be resolved to any declaration in the current file, including a PROGRAM's own main CODE section. Prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked, and identifiers resolved across the reachable include chain are not flagged. Set to false if false-positives surface in your codebase. Toggling requires reloading the VS Code window (issue #62)."
         },
+        "clarion.diagnostics.unresolvedProcedureCalls.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disabled by default. Raises a Warning on a call to a procedure whose name is declared nowhere the extension can see — not in this file's MAP or its MAP includes, not in the MEMBER parent's MAP or the MODULE blocks of the includes those MAPs pull in (the same places Go to Definition looks), and not in the solution's declaration index. This catches typos and calls to procedures that do not exist. Conservative on purpose: a procedure that exists in the solution but is not reachable from the call is not flagged, method calls (obj.Method) are out of scope, and nothing is reported while the index is still building or when a MEMBER's parent file cannot be found. Needs a loaded solution. Toggling requires reloading the VS Code window (issue #517)."
+        },
         "clarion.diagnostics.indistinguishablePrototypes.enabled": {
           "type": "boolean",
           "default": true,

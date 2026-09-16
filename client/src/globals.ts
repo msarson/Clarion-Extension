@@ -350,6 +350,10 @@ export const globalSettings = {
         return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", true);
     },
 
+    get unresolvedProcedureCallsEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.unresolvedProcedureCalls.enabled", false);
+    },
+
     get indistinguishablePrototypesEnabled() {
         return workspace.getConfiguration("clarion").get<boolean>("diagnostics.indistinguishablePrototypes.enabled", true);
     },

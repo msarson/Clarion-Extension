@@ -18,6 +18,7 @@ import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
 import { validatePrivateProcedureCalls } from './diagnostics/PrivateProcedureDiagnostics';
+import { validateUnresolvedProcedureCalls as _validateUnresolvedProcedureCalls } from './diagnostics/UnresolvedProcedureCallDiagnostics';
 import { validateUnicodeCharacters } from './diagnostics/UnicodeDiagnostics';
 import { validateAttributeApplicability } from './diagnostics/AttributeDiagnostics';
 import { validateItemizeBlocks } from './diagnostics/ItemizeDiagnostics';
@@ -229,6 +230,18 @@ export class DiagnosticProvider {
      * `serverSettings.undeclaredVariablesEnabled`. Closes #115 (paired with
      * task `6b40d7da`); follow-up to #62.
      */
+    /**
+     * #517 — opt-in (off by default) diagnostic for a call to a procedure that
+     * resolves to no declaration in the solution. Gated by
+     * `serverSettings.unresolvedProcedureCallsEnabled`; the underlying validator
+     * additionally yields nothing until the procedure index is built, so it is
+     * safe in no-solution mode too.
+     */
+    public static async validateUnresolvedProcedureCalls(tokens: Token[], document: TextDocument): Promise<Diagnostic[]> {
+        if (!serverSettings.unresolvedProcedureCallsEnabled) return [];
+        return this.filterOmitted(await _validateUnresolvedProcedureCalls(tokens, document), tokens, document);
+    }
+
     public static async validateUndeclaredVariables(
         tokens: Token[],
         document: TextDocument,

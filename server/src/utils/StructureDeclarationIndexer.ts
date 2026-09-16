@@ -151,6 +151,8 @@ export interface StructureIndex {
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
+    /** #517 — true once any project's procedure index is built. */
+    hasProcedureIndex(): boolean;
     /** #483 — true when the index build classified this path as a PROGRAM file. */
     isProgramFile(filePath: string): boolean;
     findInFile(fileName: string, projectPath?: string): StructureDeclarationInfo[];
@@ -1053,6 +1055,12 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             if (v) return v.isProgram;
         }
         return false;
+    }
+
+    /** #517 — true once at least one project's procedure index is built, so a
+     *  consumer can tell "no declaration of this name" from "the index isn't ready". */
+    hasProcedureIndex(): boolean {
+        return this.procIndexes.size > 0;
     }
 
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[] {
