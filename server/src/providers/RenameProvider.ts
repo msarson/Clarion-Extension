@@ -10,6 +10,7 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ReferencesProvider } from './ReferencesProvider';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 import { serverSettings } from '../serverSettings';
 import LoggerManager from '../logger';
 
@@ -42,6 +43,7 @@ export class RenameProvider {
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private referencesProvider: ReferencesProvider;
+    private memberLocator: MemberLocatorService; // #547
 
     /**
      * #527 — what the last rename left alone: occurrences in generated files outside
@@ -60,6 +62,7 @@ export class RenameProvider {
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
         this.referencesProvider = new ReferencesProvider();
+        this.memberLocator = new MemberLocatorService(); // #547
     }
 
     /**
@@ -94,6 +97,25 @@ export class RenameProvider {
         if (dllReason) {
             throw new ResponseError(ErrorCodes.InvalidRequest, dllReason);
         }
+        // #547 — a dotted `Receiver.Method` resolves through the receiver's class first
+        // (the hover / F12 path). The per-file symbol finder cannot see through an object
+        // to a class declared in a library include, and the references fallback finds
+        // nothing there, so the generic "symbol not found" fired for a method that was
+        // found perfectly well — just in a file outside the solution. Name that file.
+        let resolvedThroughClass = false;
+        const lastDotIdx = word.lastIndexOf('.');
+        if (lastDotIdx > 0) {
+            const receiver = word.slice(0, lastDotIdx);
+            const member = word.slice(lastDotIdx + 1);
+            const info = await this.memberLocator.resolveDotAccess(receiver, member, document).catch(() => null);
+            if (info?.file) {
+                const libraryReason = this.getLibsrcRejectionReason(this.uriToPath(info.file), member);
+                if (libraryReason) {
+                    throw new ResponseError(ErrorCodes.InvalidRequest, libraryReason);
+                }
+                resolvedThroughClass = true;
+            }
+        }
         // #527/#528 — a generated file is owned by the templates: any edit is lost on the
         // next generate. The refusal keys on the DECLARATION's file (a hand-coded class
         // method renamed from a generated call site proceeds; a method declared in a
@@ -124,7 +146,9 @@ export class RenameProvider {
                 document, position, { includeDeclaration: true },
                 undefined, { includeOmitted: true, crossProjectDll: false } // #255 pre-flight matches provideRename; #330: rename never touches generated consumer MAPs
             );
-            if (!locations || locations.length === 0) {
+            // #547 — a method the class resolution found is renameable even when the
+            // per-file finder and the references fallback both come back empty.
+            if ((!locations || locations.length === 0) && !resolvedThroughClass) {
                 throw new ResponseError(
                     ErrorCodes.InvalidRequest,
                     `Cannot rename '${word}': symbol not found or not renameable.`
@@ -462,12 +486,16 @@ export class RenameProvider {
      * Returns a human-readable rejection reason if `filePath` is inside a known
      * Clarion library source directory, or null if the file is safe to rename.
      */
-    private getLibsrcRejectionReason(filePath: string): string | null {
+    private getLibsrcRejectionReason(filePath: string, symbol?: string): string | null {
         const normalised = filePath.toLowerCase();
 
         for (const libDir of serverSettings.libsrcPaths) {
             if (normalised.startsWith(libDir.toLowerCase())) {
-                return `Cannot rename: '${path.basename(filePath)}' is part of the Clarion standard library (${libDir}).`;
+                // #547 — with a symbol, the reason is about where it is DECLARED (the
+                // cursor may be in a solution file calling into the library).
+                return symbol
+                    ? `Cannot rename '${symbol}': it is declared in '${path.basename(filePath)}', part of the Clarion library (${libDir}), outside the solution.`
+                    : `Cannot rename: '${path.basename(filePath)}' is part of the Clarion standard library (${libDir}).`;
             }
         }
 
