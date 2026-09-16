@@ -453,7 +453,12 @@ export class ReferencesProvider {
             t.finishesAt !== undefined &&
             t.finishesAt >= position.line
         );
-        if (enclosingClass) {
+        // #560 — only the line's LABEL names a member. A cursor on a field's type
+        // (`ViewMetric &ctViewMetric`), a parameter type or an attribute asked for a member
+        // of that name, found none and returned nothing; resolve those like any other word.
+        const bodyLabel = /^[A-Za-z_][A-Za-z0-9_:]*/.exec(fullLine);
+        const cursorOnBodyLabel = !!bodyLabel && position.character <= bodyLabel[0].length;
+        if (enclosingClass && cursorOnBodyLabel) {
             const classLine = document.getText({
                 start: { line: enclosingClass.line, character: 0 },
                 end: { line: enclosingClass.line, character: 999 }
