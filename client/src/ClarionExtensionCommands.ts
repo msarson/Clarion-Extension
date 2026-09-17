@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ClarionInstallationDetector, ClarionCompilerVersion } from './utils/ClarionInstallationDetector';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, setGlobalClarionSelection, globalSettings, getClarionConfigTarget } from './globals';
 import LoggerManager from './utils/LoggerManager';
+import { versionPathSettings } from './utils/VersionPathSettings'; // #567
 const logger = LoggerManager.getLogger("ExtensionCommands");
 logger.setLevel("error");
 
@@ -393,12 +394,11 @@ export class ClarionExtensionCommands {
   private static updateGlobalSettings(selectedVersionProps: ClarionCompilerVersion | undefined) {
 
     if (selectedVersionProps) {
-      globalSettings.redirectionFile = selectedVersionProps.redirectionFile;
-      globalSettings.redirectionPath = path.dirname(selectedVersionProps.redirectionFile);
-      globalSettings.macros = selectedVersionProps.macros;
-      globalSettings.libsrcPaths = selectedVersionProps.libsrc.split(';');
-
-
+      const paths = versionPathSettings(selectedVersionProps);
+      globalSettings.redirectionFile = paths.redirectionFile;
+      globalSettings.redirectionPath = paths.redirectionPath;
+      globalSettings.macros = paths.macros;
+      globalSettings.libsrcPaths = paths.libsrcPaths;
     }
   }
 

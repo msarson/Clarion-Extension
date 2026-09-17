@@ -3,6 +3,7 @@ import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #56
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
+import { ClarionExtensionCommands } from '../ClarionExtensionCommands'; // #567
 import { rememberedSolutionState, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
@@ -397,6 +398,13 @@ export async function initializeSolution(
                 setToolbarGraphStatus(params);
             })
         );
+
+        // #567 — the paths sent below were filled only at startup (from the version remembered
+        // then) and by the Set Version picker, so a solution opened from the Solution View
+        // with another version sent the server empty or foreign paths. Load its own now.
+        if (!await ClarionExtensionCommands.loadVersionGlobalSettings(globalClarionPropertiesFile, globalClarionVersion)) {
+            logger.warn(`⚠️ ${globalClarionVersion} not found in ${globalClarionPropertiesFile}; sending the current paths`);
+        }
 
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
