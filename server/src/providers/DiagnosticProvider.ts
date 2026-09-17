@@ -149,10 +149,11 @@ export class DiagnosticProvider {
         tokens: Token[],
         document: TextDocument,
         memberLocator: MemberLocatorService,
-        getOpenDocumentContent?: (absPath: string) => string | null
+        getOpenDocumentContent?: (absPath: string) => string | null,
+        isStale?: () => boolean
     ): Promise<Diagnostic[]> {
         if (!isDiagnosticEnabled('discardedReturnValues')) return []; // #542
-        return applyCheckSeverity('discardedReturnValues', this.filterOmitted(await _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent), tokens, document)); // #543
+        return applyCheckSeverity('discardedReturnValues', this.filterOmitted(await _validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent, isStale), tokens, document)); // #543
     }
 
     /**
