@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 /**
  * Pure decision policy for #146 + #104 contracts. Lives in its own file (no
  * vscode-API dependency) so unit tests can import the helper directly without
@@ -197,4 +198,31 @@ export function versionRowLabel(effectiveVersion: string, defaultVersion: string
     }
     if (defaultVersion && defaultVersion !== effectiveVersion) return `${effectiveVersion} (default: ${defaultVersion})`;
     return effectiveVersion;
+}
+
+/**
+ * Whether the settings a folder remembers for a solution can be reused as they are when
+ * the solution is opened from the Solution View (`SmartSolutionOpener.openDetectedSolution`).
+ * Invalid settings send the opener on to its installation/version picker.
+ */
+export function validateRememberedSettings(
+    solutionPath: string,
+    propertiesFile: string,
+    version: string
+): { valid: boolean; reason?: string } {
+    if (!fs.existsSync(propertiesFile)) {
+        return { valid: false, reason: `Properties file not found: ${propertiesFile}` };
+    }
+    if (!fs.existsSync(solutionPath)) {
+        return { valid: false, reason: `Solution file not found: ${solutionPath}` };
+    }
+    if (!version || version.trim() === '') {
+        return { valid: false, reason: 'Version is empty' };
+    }
+    // #566 — a name the properties file no longer registers (#535) cannot load; left
+    // valid, the open reported success and initializeSolution then stopped silently.
+    if (rememberedSolutionState(solutionPath, propertiesFile, version, readRegisteredVersionNames(propertiesFile)) === 'stale-version') {
+        return { valid: false, reason: `${version} is no longer registered in ${path.basename(propertiesFile)}` };
+    }
+    return { valid: true };
 }
