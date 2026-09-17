@@ -20,6 +20,25 @@ logger.setLevel("error"); // Only show errors and PERF
 // per-exec is now gated behind this env flag; per-tokenize phase logs stay live.
 const TOKENIZER_TRACE = process.env.CLARION_TOKENIZER_TRACE === '1';
 
+/** #580 — the previous non-blank character before `index` is '(' or ',', or there is none. */
+function opensOptionalParameter(line: string, index: number): boolean {
+    let j = index - 1;
+    while (j >= 0 && (line[j] === ' ' || line[j] === '\t')) j--;
+    return j < 0 || line[j] === '(' || line[j] === ',';
+}
+
+/**
+ * #580 — the next non-blank character after `index` is ',' or ')'; or, while a bracket is open,
+ * '|' (continuation), '!' (comment) or the end of the line. A leading close on a continuation
+ * line (a bracket opened on an earlier line) is always followed by ',' or ')'.
+ */
+function closesOptionalParameter(line: string, index: number, bracketOpen: boolean): boolean {
+    let j = index + 1;
+    while (j < line.length && (line[j] === ' ' || line[j] === '\t')) j++;
+    if (line[j] === ',' || line[j] === ')') return true;
+    return bracketOpen && (j >= line.length || line[j] === '|' || line[j] === '!');
+}
+
 /**
  * #579 — at `position`, optional whitespace then a name ending in an implicit-variable suffix
  * (# LONG, $ REAL, " STRING(32)). Returns the name's start and end, or null. A hand scan rather than
@@ -287,8 +306,15 @@ export class ClarionTokenizer {
                         if (ch === '!') break; // rest of the line is a comment
                         if (ch === '(') parenRun++;
                         else if (ch === ')') { parenRun--; if (parenRun < parenMin) parenMin = parenRun; }
-                        else if (ch === '<') brkRun++;
-                        else if (ch === '>') { brkRun--; if (brkRun < brkMin) brkMin = brkRun; }
+                        // #580 — '<' / '>' are also comparison operators (a<b, a > b, <>, <=, >=).
+                        // Only a '<' where a parameter can start opens an optional parameter, and
+                        // only a '>' where one can end closes it; otherwise a comparison left a
+                        // bracket "open" (or dipped below zero) and demoted every later structure
+                        // keyword on the line: `IF P<2 THEN x=1. ; IF P THEN c=2.`.
+                        else if (ch === '<') { if (opensOptionalParameter(line, i)) brkRun++; }
+                        else if (ch === '>') {
+                            if (closesOptionalParameter(line, i, brkRun > 0)) { brkRun--; if (brkRun < brkMin) brkMin = brkRun; }
+                        }
                     }
                     const parenDepth = parenRun - Math.min(0, parenMin);
                     const brkDepth = brkRun - Math.min(0, brkMin);
