@@ -21,6 +21,7 @@ import { TokenType } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 import { SolutionManager } from './solution/solutionManager';
 import { serverSettings } from './serverSettings';
+import { resolutionEnvironmentKey } from './solution/resolutionEnvironmentKey'; // #568
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import LoggerManager from './logger';
 
@@ -354,6 +355,9 @@ export class FileRelationshipGraph {
      */
     private buildCacheSignature(): string {
         const parts: string[] = [String(DISK_CACHE_VERSION), serverSettings.redirectionFile ?? ''];
+        // #568 — the install: two with the same red file name and libsrc still differ in its
+        // directory and %ROOT%, which the redirection entries expand into the resolved paths.
+        parts.push(`env:${resolutionEnvironmentKey()}`);
         // #564 — the redirection file's [Debug]/[Release]/custom sections resolve per build
         // configuration, so edges cached under one configuration are wrong under another.
         parts.push(`config:${(serverSettings.configuration ?? '').split('|')[0].trim().toLowerCase()}`);

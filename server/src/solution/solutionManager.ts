@@ -112,6 +112,11 @@ export class SolutionManager {
         }
     }
 
+    /** #568 — forget the instance, so the next `create()` for the same .sln loads it afresh. */
+    public static discardInstance(): void {
+        SolutionManager.instance = null;
+    }
+
     public static getInstance(): SolutionManager | null {
         return SolutionManager.instance;
     }

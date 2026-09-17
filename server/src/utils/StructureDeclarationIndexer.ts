@@ -6,6 +6,7 @@ import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redir
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
+import { resolutionEnvironmentKey } from '../solution/resolutionEnvironmentKey'; // #568
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
 logger.setLevel('error');
@@ -946,7 +947,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
 
     /** Location of the per-project disk cache (OS temp dir — never pollutes the user's solution). */
     private diskCachePath(projectPath: string): string {
-        const hash = crypto.createHash('md5').update(this.normalizeKey(projectPath).toLowerCase()).digest('hex').slice(0, 16);
+        // #568 — per install as well as per project: the scanned file set comes from its redirection.
+        const hash = crypto.createHash('md5').update(`${this.normalizeKey(projectPath).toLowerCase()}|${resolutionEnvironmentKey()}`).digest('hex').slice(0, 16);
         return path.join(os.tmpdir(), 'clarion-extension-sdi', `sdi-${hash}.json`);
     }
 

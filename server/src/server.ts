@@ -104,6 +104,7 @@ import { TokenHelper } from './utils/TokenHelper';
 import { evictIncludeChainIndexes } from './services/SymbolFinderService';
 import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
 import { applyConfigurationChange } from './solution/ConfigurationChange'; // #564
+import { applyResolutionEnvironment } from './solution/ResolutionEnvironment'; // #568
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -2082,13 +2083,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
     
     try {
         // Update server settings
-        serverSettings.redirectionPaths = params.redirectionPaths || [];
         serverSettings.projectPaths = params.projectPaths || [];
         serverSettings.configuration = params.configuration || "Debug";
-        serverSettings.clarionVersion = params.clarionVersion || "";
-        serverSettings.macros = params.macros || {};
-        serverSettings.libsrcPaths = params.libsrcPaths || [];
-        serverSettings.redirectionFile = params.redirectionFile || "";
+        applyResolutionEnvironment(params); // #568
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
 
         // #315: lenses requested BEFORE libsrcPaths arrived bypassed the #303
