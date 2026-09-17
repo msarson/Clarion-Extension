@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -1372,7 +1372,13 @@
         },
         "clarion.diagnostics.undeclaredVariables.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the undeclaredVariables check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1383,7 +1389,13 @@
         },
         "clarion.diagnostics.unresolvedProcedureCalls.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the unresolvedProcedureCalls check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1394,7 +1406,13 @@
         },
         "clarion.diagnostics.indistinguishablePrototypes.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the indistinguishablePrototypes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1405,7 +1423,13 @@
         },
         "clarion.diagnostics.unterminatedStructures.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the unterminatedStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1416,7 +1440,13 @@
         },
         "clarion.diagnostics.omitCompileBlocks.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the omitCompileBlocks check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1427,7 +1457,13 @@
         },
         "clarion.diagnostics.fileDeclarations.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the fileDeclarations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1438,7 +1474,13 @@
         },
         "clarion.diagnostics.caseStructures.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the caseStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1449,7 +1491,13 @@
         },
         "clarion.diagnostics.executeStructures.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the executeStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1460,7 +1508,13 @@
         },
         "clarion.diagnostics.returnStatements.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the returnStatements check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1471,7 +1525,13 @@
         },
         "clarion.diagnostics.classProperties.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the classProperties check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1482,7 +1542,13 @@
         },
         "clarion.diagnostics.discardedReturnValues.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the discardedReturnValues check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1493,7 +1559,13 @@
         },
         "clarion.diagnostics.cycleBreakOutsideLoop.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the cycleBreakOutsideLoop check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1504,7 +1576,13 @@
         },
         "clarion.diagnostics.reservedKeywordLabels.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the reservedKeywordLabels check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1515,7 +1593,13 @@
         },
         "clarion.diagnostics.unicodeCharacters.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the unicodeCharacters check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1526,7 +1610,13 @@
         },
         "clarion.diagnostics.attributeApplicability.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the attributeApplicability check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1537,7 +1627,13 @@
         },
         "clarion.diagnostics.itemizeBlocks.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the itemizeBlocks check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1548,7 +1644,13 @@
         },
         "clarion.diagnostics.byRefArguments.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the byRefArguments check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1559,7 +1661,13 @@
         },
         "clarion.diagnostics.viewProjectFields.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the viewProjectFields check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1570,7 +1678,13 @@
         },
         "clarion.diagnostics.missingIncludes.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the missingIncludes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1581,7 +1695,13 @@
         },
         "clarion.diagnostics.missingConstants.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the missingConstants check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1592,7 +1712,13 @@
         },
         "clarion.diagnostics.missingMapDeclarations.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the missingMapDeclarations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1603,7 +1729,13 @@
         },
         "clarion.diagnostics.missingImplementations.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the missingImplementations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1614,7 +1746,13 @@
         },
         "clarion.diagnostics.privateProcedureCalls.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the privateProcedureCalls check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
@@ -1625,7 +1763,13 @@
         },
         "clarion.diagnostics.interfaceImplementation.severity": {
           "type": "string",
-          "enum": ["default", "error", "warning", "information", "hint"],
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
           "default": "default",
           "description": "How the interfaceImplementation check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
