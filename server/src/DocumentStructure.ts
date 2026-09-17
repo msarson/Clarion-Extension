@@ -1603,8 +1603,9 @@ export class DocumentStructure {
                     depth++;
                     continue;
                 }
+                // #584 — the word END counts only as an END statement token: a name such as
+                // `access_token:end` in `IF access_token:end > 0` is not this IF's terminator.
                 const isEnd = t.type === TokenType.EndStatement ||
-                              t.value.toUpperCase() === 'END' ||
                               t.value === '.';
                 if (!isEnd) continue;
                 if (depth > 0) {

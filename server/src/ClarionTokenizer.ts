@@ -557,6 +557,17 @@ export class ClarionTokenizer {
                                 continue;
                             }
                         }
+                        // #584 — the same for the END word of the END-statement pattern: `Pre:End`
+                        // and `Obj.End` are qualified names, not terminators (`ACCESS_TOKEN:END = …`
+                        // closed the enclosing LOOP). A period terminator is not a word and is unaffected.
+                        if (tokenType === TokenType.EndStatement) {
+                            const word = match[0].trimStart();
+                            const wordStart = position + (match[0].length - word.length);
+                            const prevChar = wordStart > 0 ? line[wordStart - 1] : '';
+                            if (/^end$/i.test(word) && (prevChar === ':' || prevChar === '.')) {
+                                continue;
+                            }
+                        }
 
                         if (TOKENIZER_TRACE) patternMatches.set(tokenType, patternMatches.get(tokenType)! + 1);
                         
