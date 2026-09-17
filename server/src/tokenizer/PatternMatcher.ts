@@ -70,6 +70,12 @@ export class PatternMatcher {
                 TokenType.Label,
                 TokenType.Directive, TokenType.ClarionDocument,
                 TokenType.ExecutionMarker, TokenType.ConditionalContinuation, TokenType.Structure, TokenType.Keyword,
+                // EndStatement is in 'upper' and belongs here too. Without it, a lowercase `end`
+                // at column 0 had no pattern that accepts it and lost its leading 'e' to the
+                // single-char fallback advance, tokenising as Variable 'nd'. It only appeared to
+                // work when indented, because the (absent) 'whitespace' class fell back to all
+                // patterns and matched EndStatement's /^\s*(END)\b/ at the preceding space.
+                TokenType.EndStatement,
                 TokenType.Type, TokenType.TypeAnnotation, // MUST be before Function
                 TokenType.TypeReference, TokenType.Attribute, TokenType.Function, TokenType.PropertyFunction, // #546: FunctionArgumentParameter no longer tried — Function accepts a space before the paren
                 TokenType.Property, TokenType.StructurePrefix, TokenType.StructureField, TokenType.Class,
@@ -80,6 +86,14 @@ export class PatternMatcher {
                 TokenType.Label, TokenType.ReferenceVariable, TokenType.Variable, 
                 TokenType.StructurePrefix, TokenType.StructureField, TokenType.Unknown
             ],
+            // getCharClass returns 'whitespace' for ' ' and '\t'. With no entry here the lookup
+            // returned undefined and fell back to all ~33 patterns — and since whitespace is ~33%
+            // of a Clarion source file and is never skipped (the loop advances one char at a time
+            // when nothing matches), that accounted for 92.5% of every regex exec the lexer ran.
+            // Nothing needs to match AT a whitespace position: LineContinuation re-matches at the
+            // '|' itself, and MODULE /^\s*MODULE/ and TOOLBAR /^[ \t]*TOOLBAR/ re-match at the
+            // keyword through their zero-width \s*.
+            'whitespace': [],
             'other': [ // Fallback - test all patterns
                 ...PatternMatcher.orderedTypes
             ]
