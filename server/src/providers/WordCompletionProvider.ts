@@ -43,6 +43,46 @@ const PROJECT_EQUATE_MIN_PREFIX = 2;
 const PROJECT_EQUATE_LIMIT = 300;
 
 /**
+ * Completion ordering tiers (#555). Lower sorts first.
+ *
+ * The provider previously set no `sortText` at all, so the client sorted every
+ * candidate alphabetically against every other one and a project-wide EQUATE
+ * could outrank a local variable on a shared prefix by pure alphabetical luck.
+ *
+ * Every candidate gets a tier, including the static catalogs. Leaving any of
+ * them unstamped would not preserve their position: the client compares an
+ * unstamped item's `label` against a stamped item's `sortText`, and since
+ * digits precede letters, every unstamped candidate would sink below every
+ * stamped one.
+ */
+const SORT_TIER = {
+    /** Locals, parameters, and this document's own EQUATEs. */
+    LOCAL: 10,
+    /** Module and PROGRAM data reached from a MEMBER file. */
+    PROGRAM_DATA: 20,
+    /** MAP procedures and file-level GlobalProcedures. */
+    PROCEDURE: 30,
+    /** Project-wide declaration index entries — see collectProjectEquates. */
+    PROJECT_INDEX: 40,
+    /** Keywords, built-ins, data types, controls, attributes, directives. */
+    CATALOG: 50,
+} as const;
+
+type SortTier = typeof SORT_TIER[keyof typeof SORT_TIER];
+
+/**
+ * `sortText` for one candidate: zero-padded tier, then the label. Padded so a
+ * tier past 9 cannot sort between 1 and 2, and lowercased because Clarion is
+ * case-insensitive — `MyConst` and `myconst` must not swap places.
+ *
+ * Two digits: the tiers above are spaced by ten, so there is room for nine more
+ * between any two existing ones and the ceiling is 99.
+ */
+function tierSortText(tier: SortTier, label: string): string {
+    return `${tier.toString().padStart(2, '0')}_${label.toLowerCase()}`;
+}
+
+/**
  * Provides general word/identifier completion for Clarion.
  *
  * Called when the user types a partial identifier (no dot trigger).
@@ -107,10 +147,22 @@ export class WordCompletionProvider {
             const isOverloadable = (k?: CompletionItemKind): boolean =>
                 k === CompletionItemKind.Function || k === CompletionItemKind.Method;
 
-            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => {
+            const add = (
+                label: string,
+                kind: CompletionItemKind,
+                detail?: string,
+                documentation?: string,
+                typeText?: string,
+                tier: SortTier = SORT_TIER.CATALOG
+            ) => {
                 const key = label.toUpperCase();
                 if (!seen.has(key)) {
-                    const item: CompletionItem = { label, kind };
+                    // #555: the tier that claims a label first also fixes its rank.
+                    // That is the same first-writer-wins rule the rest of this
+                    // closure already follows, and the collectors run in priority
+                    // order, so a local declaration keeps its place over a
+                    // project-wide one of the same name.
+                    const item: CompletionItem = { label, kind, sortText: tierSortText(tier, label) };
                     if (detail) item.detail = detail;
                     if (documentation) item.documentation = documentation;
                     // #508: the declared type sits right after the label in the list (LONG, STRING(30), KEY(ORD:ID))
@@ -128,10 +180,15 @@ export class WordCompletionProvider {
                 if (documentation && !existing.documentation) existing.documentation = documentation;
             };
 
+            /** #555 — `add` bound to one tier, for handing to a collector. */
+            const addIn = (tier: SortTier) =>
+                (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) =>
+                    add(label, kind, detail, documentation, typeText, tier);
+
             // ----------------------------------------------------------------
             // A. Callable procedures
             // ----------------------------------------------------------------
-            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
+            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, addIn(SORT_TIER.PROCEDURE));
             lap('procedures_ms');
 
             // ----------------------------------------------------------------
@@ -139,26 +196,26 @@ export class WordCompletionProvider {
             //    CompletionItemKind.Constant rather than the bare Variable
             //    entry that collectVariables would otherwise produce.
             // ----------------------------------------------------------------
-            await this.collectEquates(document, partial, add);
+            await this.collectEquates(document, partial, addIn(SORT_TIER.LOCAL), addIn(SORT_TIER.PROJECT_INDEX));
             lap('equates_ms');
 
             // ----------------------------------------------------------------
             // C. Variables / Labels
             // ----------------------------------------------------------------
-            this.collectVariables(tokens, scope, position, procDeclLines, add);
+            this.collectVariables(tokens, scope, position, procDeclLines, addIn(SORT_TIER.LOCAL));
             lap('variables_ms');
-            this.collectProgramGlobalDataSymbols(tokens, document, add);
+            this.collectProgramGlobalDataSymbols(tokens, document, addIn(SORT_TIER.PROGRAM_DATA));
             lap('program_globals_ms');
 
             // ----------------------------------------------------------------
             // D. Parameters from PROCEDURE(...) signature
             // ----------------------------------------------------------------
             if (scope?.containingProcedure) {
-                this.collectParameters(document, scope.containingProcedure, add);
+                this.collectParameters(document, scope.containingProcedure, addIn(SORT_TIER.LOCAL));
             }
             // If inside a routine, also collect parent procedure parameters
             if (scope?.containingRoutine && scope.containingProcedure) {
-                this.collectParameters(document, scope.containingProcedure, add);
+                this.collectParameters(document, scope.containingProcedure, addIn(SORT_TIER.LOCAL));
             }
 
             // ----------------------------------------------------------------
@@ -192,6 +249,18 @@ export class WordCompletionProvider {
             // H. Data types (from clarion-datatypes.json)
             // ----------------------------------------------------------------
             this.collectDataTypes(seen);
+
+            // #555: the catalogs above (controls, attributes, directives,
+            // keywords, built-ins, data types) write straight into `seen`,
+            // bypassing add(), so they carry no tier yet. Stamp the catalog
+            // tier on whatever is still unstamped — an item left without a
+            // `sortText` would be ranked by its label against everyone else's
+            // `sortText`, which puts it below every tiered candidate.
+            for (const item of seen.values()) {
+                if (!item.sortText) {
+                    item.sortText = tierSortText(SORT_TIER.CATALOG, String(item.label));
+                }
+            }
             lap('catalogs_ms');
             const total = Date.now() - startedAt;
             if (total >= SLOW_COMPLETION_MS) {
@@ -656,6 +725,7 @@ export class WordCompletionProvider {
     /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
     private static readonly programGlobalsByTokens = new WeakMap<Token[], ProgramGlobalSymbol[]>();
 
+
     /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */
     private collectProcLocals(
         tokens: Token[],
@@ -893,12 +963,16 @@ export class WordCompletionProvider {
      * (numeric/string literals) and is intentionally not used here.
      *
      * Two tiers, in priority order: this document's own EQUATEs, then the
-     * project-wide declaration index (see collectProjectEquates).
+     * project-wide declaration index (see collectProjectEquates). #555 gives
+     * the two tiers separate `add` callbacks so they can carry separate
+     * `sortText` ranks — a cross-file constant should stay in the list without
+     * competing with local-scope items for the top of it.
      */
     private async collectEquates(
         document: TextDocument,
         partial: string,
-        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void,
+        addProjectWide: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
     ): Promise<void> {
         // Single source of truth: DocumentStructure.getEquates() (Gap B).
         // Each returned token already carries `dataValue` (Gap D) and, when the
@@ -913,7 +987,7 @@ export class WordCompletionProvider {
             add(label, CompletionItemKind.Constant, detail);
         }
 
-        await this.collectProjectEquates(document, partial, add);
+        await this.collectProjectEquates(document, partial, addProjectWide);
     }
 
     /**
