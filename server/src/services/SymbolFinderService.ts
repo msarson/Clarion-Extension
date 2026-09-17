@@ -227,25 +227,44 @@ export class SymbolFinderService {
             const afterNext = lineTokens.filter(t => t.start > next.start);
             let depth = 0;
             let seenOpen = false;
-            let typeArg: Token | undefined;
+            let typeArg: string | undefined;
             // #486: a type argument is the group that IMMEDIATELY follows the keyword —
             // CLASS(WindowManager), QUEUE(ParentType). `LineQ QUEUE,PRE(LQ)` has no such
             // group; scanning on to the first '(' anywhere on the line took PRE's argument
             // and rendered the hover title as `QUEUE(LQ)`.
             const immediatelyFollows = afterNext[0]?.value === '(';
-            for (const t of immediatelyFollows ? afterNext : []) {
+            const scan = immediatelyFollows ? afterNext : [];
+            for (let i = 0; i < scan.length; i++) {
+                const t = scan[i];
                 if (t.value === '(') {
                     depth++;
                     seenOpen = true;
                 } else if (t.value === ')') {
                     depth--;
                     if (seenOpen && depth === 0) break; // closed the first group — stop
-                } else if (depth === 1 && (t.type === TokenType.Label || t.type === TokenType.Variable)) {
-                    typeArg = t;
-                    break;
+                } else if (depth === 1) {
+                    // A colon-qualified type argument — GROUP(CFG:SomeType) — reaches this
+                    // scan in two shapes, because the tokenizer's PREFIX:Field pattern caps
+                    // the prefix at 8 characters: one StructurePrefix token at or below that
+                    // length, and Variable ':' Variable above it. Accepting only
+                    // Label/Variable dropped the argument outright in the first shape and
+                    // truncated it to the bare prefix in the second.
+                    if (t.type === TokenType.StructurePrefix) {
+                        typeArg = t.value;
+                        break;
+                    }
+                    if (t.type === TokenType.Label || t.type === TokenType.Variable) {
+                        typeArg = t.value;
+                        while (scan[i + 1]?.value === ':' &&
+                            (scan[i + 2]?.type === TokenType.Label || scan[i + 2]?.type === TokenType.Variable)) {
+                            typeArg += `:${scan[i + 2].value}`;
+                            i += 2;
+                        }
+                        break;
+                    }
                 }
             }
-            return typeArg ? `${next.value.toUpperCase()}(${typeArg.value})` : next.value.toUpperCase();
+            return typeArg ? `${next.value.toUpperCase()}(${typeArg})` : next.value.toUpperCase();
         }
         if (next.type === TokenType.TypeReference) {
             // LIKE(TypeName) → "LIKE(TypeName)"
@@ -264,10 +283,6 @@ export class SymbolFinderService {
         if (next.type === TokenType.Function) {
             // EQUATE(value) — matched as Function due to trailing '('
             if (next.value.toUpperCase() === 'EQUATE') return 'EQUATE';
-        }
-        if (next.type === TokenType.FunctionArgumentParameter) {
-            // EQUATE (value) with a space — tokenizer swallows it as a single FunctionArgumentParameter token
-            if (/^EQUATE\s*\(/i.test(next.value)) return 'EQUATE';
         }
         return 'UNKNOWN';
     }

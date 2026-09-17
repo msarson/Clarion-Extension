@@ -4,8 +4,10 @@ import { SolutionScanner, DetectedSolution } from '../utils/SolutionScanner';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { setGlobalClarionSelection } from '../globals';
-import { readActiveConfigFromSlnCache, configNameFromFull } from './SlnCacheUtils';
+import { readActiveConfigFromSlnCache } from './SlnCacheUtils';
+import { chooseConfiguration, explicitConfigurationFor } from './ConfigurationPrecedence';
 import { resolveValidConfiguration } from './ConfigurationValidator';
+import { validateRememberedSettings } from './SolutionFallbackPolicy';
 import LoggerManager from './LoggerManager';
 import { PathUtils } from '../PathUtils';
 import * as path from 'path';
@@ -20,32 +22,6 @@ export interface PreSelectedSettings {
 }
 
 export class SmartSolutionOpener {
-    /**
-     * Checks if existing settings for a solution are still valid
-     */
-    private static validateExistingSettings(
-        solutionPath: string,
-        propertiesFile: string,
-        version: string
-    ): { valid: boolean; reason?: string } {
-        // Check if properties file exists
-        if (!fs.existsSync(propertiesFile)) {
-            return { valid: false, reason: `Properties file not found: ${propertiesFile}` };
-        }
-
-        // Check if solution file exists
-        if (!fs.existsSync(solutionPath)) {
-            return { valid: false, reason: `Solution file not found: ${solutionPath}` };
-        }
-
-        // Check if version string is reasonable
-        if (!version || version.trim() === '') {
-            return { valid: false, reason: 'Version is empty' };
-        }
-
-        return { valid: true };
-    }
-
     /**
      * Attempts to load existing settings for a solution from the solutions array
      */
@@ -101,7 +77,7 @@ export class SmartSolutionOpener {
             const existingSettings = this.getExistingSolutionSettings(solutionPath);
             
             if (existingSettings) {
-                const validation = this.validateExistingSettings(
+                const validation = validateRememberedSettings(
                     solutionPath,
                     existingSettings.propertiesFile,
                     existingSettings.version
@@ -113,7 +89,7 @@ export class SmartSolutionOpener {
                         - version: ${existingSettings.version}
                         - configuration: ${existingSettings.configuration}`);
 
-                    // #437 — `validateExistingSettings` above checks that the files
+                    // #437 — `validateRememberedSettings` above checks that the files
                     // exist and the version is non-empty; it deliberately says
                     // nothing about the configuration. That check used to live only
                     // in `initializeSolution`, which `clarion.openDetectedSolution`
@@ -214,17 +190,21 @@ export class SmartSolutionOpener {
             // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
             const configurations = this.extractConfigurationsFromSolution(solutionPath);
 
-            // Check .sln.cache for the last-used config (written by Clarion IDE/MSBuild)
-            // configurations may be full "Config|Platform" strings; match by config name prefix
-            const cachedFullConfig = readActiveConfigFromSlnCache(solutionPath);
-            const cachedConfigName = cachedFullConfig ? configNameFromFull(cachedFullConfig) : null;
-            const matchedConfig = cachedConfigName
-                ? configurations.find(c => configNameFromFull(c) === cachedConfigName) ?? null
-                : null;
+            // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
+            // is only a hint behind it (see SolutionOpener for the same rule).
+            const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
+            const choice = chooseConfiguration({
+                explicit: explicitConfigurationFor(
+                    solutionPath,
+                    clarionConfig.get<string>('configuration', ''),
+                    clarionConfig.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', [])),
+                slnCache: readActiveConfigFromSlnCache(solutionPath),
+                available: configurations,
+            });
 
-            if (matchedConfig) {
-                selectedConfig = matchedConfig;
-                logger.info(`⚙️ Auto-detected configuration from .sln.cache: ${matchedConfig}`);
+            if (choice.configuration) {
+                selectedConfig = choice.configuration;
+                logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
             } else if (configurations.length > 1) {
                 const configChoice = await window.showQuickPick(configurations, {
                     placeHolder: "Select build configuration"

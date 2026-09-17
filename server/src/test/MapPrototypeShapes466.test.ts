@@ -70,7 +70,7 @@ async function diagnose(proto: string, name: string, implParams = ''): Promise<s
     const uri = 'file:///' + file.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, (_m, d) => d + '%3A');
     const doc = TextDocument.create(uri, 'clarion', 1, member);
     const diags = await validateMissingMapDeclarations(new ClarionTokenizer(member).tokenize(), doc);
-    return (diags ?? []).map(d => d.message);
+    return (diags ?? []).map(d => String(d.message));
 }
 
 suite('MAP prototype shapes (#466, #477)', () => {

@@ -58,7 +58,7 @@ suite('#287 undeclared-variable diagnostic suppressed in no-solution mode', () =
         smSlot.instance = {} as unknown as SolutionManager; // non-null → gate passes
         const diags = await run('file:///t287-sln.clw');
         assert.strictEqual(diags.length, 1);
-        assert.ok(diags[0].message.includes('GlobalResponse'), diags[0].message);
+        assert.ok(String(diags[0].message).includes('GlobalResponse'), String(diags[0].message));
     });
 
     test('the enable setting still wins even with a solution loaded', async () => {

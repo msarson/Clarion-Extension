@@ -68,7 +68,7 @@ suite('Issue #464 — PROJECT fields are scoped to their JOIN', () => {
         ]);
 
         assert.deepStrictEqual(
-            diags.map(d => d.message), [],
+            diags.map(d => String(d.message)), [],
             'a correct VIEW with a JOIN should produce no diagnostics'
         );
     });
@@ -86,11 +86,11 @@ suite('Issue #464 — PROJECT fields are scoped to their JOIN', () => {
 
         assert.strictEqual(diags.length, 1, 'the bogus joined field must still be reported');
         assert.ok(
-            diags[0].message.includes("'CUS:NoSuchField'"),
+            String(diags[0].message).includes("'CUS:NoSuchField'"),
             `expected the bogus field to be named, got: ${diags[0].message}`
         );
         assert.ok(
-            diags[0].message.includes("FILE 'Customer'"),
+            String(diags[0].message).includes("FILE 'Customer'"),
             `must be attributed to the JOINED file, not the FROM file. Got: ${diags[0].message}`
         );
     });
@@ -108,7 +108,7 @@ suite('Issue #464 — PROJECT fields are scoped to their JOIN', () => {
 
         assert.strictEqual(diags.length, 1, 'the bogus primary field must still be reported');
         assert.ok(
-            diags[0].message.includes("'INV:NoSuchField'") && diags[0].message.includes("FILE 'Invoice'"),
+            String(diags[0].message).includes("'INV:NoSuchField'") && String(diags[0].message).includes("FILE 'Invoice'"),
             `expected INV:NoSuchField against Invoice, got: ${diags[0].message}`
         );
     });
@@ -128,7 +128,7 @@ suite('Issue #464 — PROJECT fields are scoped to their JOIN', () => {
         ]);
 
         assert.deepStrictEqual(
-            diags.map(d => d.message), [],
+            diags.map(d => String(d.message)), [],
             'INV:CustomerId after the JOIN END should resolve against Invoice'
         );
     });

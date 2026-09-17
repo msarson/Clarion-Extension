@@ -31,12 +31,15 @@ suite('#82 validateUnicodeCharacters (code-page-aware)', () => {
     test('flags an emoji once, spanning its surrogate pair', () => {
         const d = diags("S = '\u{1F600}'");
         assert.strictEqual(d.length, 1);
-        assert.ok(d[0].message.includes('U+1F600'), d[0].message);
+        assert.ok(String(d[0].message).includes('U+1F600'), String(d[0].message));
         assert.strictEqual(d[0].range.end.character - d[0].range.start.character, 2, 'range covers both UTF-16 units');
     });
 
-    test('flags box-drawing characters', () => {
-        assert.strictEqual(diags('─│').length, 2);
+    test('flags box-drawing characters — one warning for the line, naming how many (#556)', () => {
+        const d = diags('─│');
+        assert.strictEqual(d.length, 1);
+        assert.ok(/2 characters/.test(String(d[0].message)), String(d[0].message));
+        assert.deepStrictEqual([d[0].range.start.character, d[0].range.end.character], [0, 2]);
     });
 
     test('no diagnostics for plain ASCII', () => {

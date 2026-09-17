@@ -6,6 +6,8 @@ import * as path from 'path';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
+import { SolutionManager } from '../solution/solutionManager';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ScopeResolver } from '../scope/ScopeResolver';
@@ -17,7 +19,68 @@ import { DirectiveService } from '../utils/DirectiveService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
+// Completion timing breakdown — emitted only for a slow request, so it stays readable in a user's log.
+const perfLogger = LoggerManager.getLogger("WordCompletionProvider.Perf", 'perf');
+const SLOW_COMPLETION_MS = 150;
+
+/** #565 — one recorded PROGRAM global symbol, with everything add() receives. */
+interface ProgramGlobalSymbol {
+    label: string;
+    kind: CompletionItemKind;
+    detail?: string;
+    documentation?: string;
+    typeText?: string;
+}
 logger.setLevel("error");
+
+/**
+ * Minimum typed characters before project-wide EQUATEs join the candidate list.
+ * The document's own EQUATEs are never gated this way.
+ */
+const PROJECT_EQUATE_MIN_PREFIX = 2;
+
+/** Upper bound on project-wide EQUATEs added to a single completion response. */
+const PROJECT_EQUATE_LIMIT = 300;
+
+/**
+ * Completion ordering tiers (#555). Lower sorts first.
+ *
+ * The provider previously set no `sortText` at all, so the client sorted every
+ * candidate alphabetically against every other one and a project-wide EQUATE
+ * could outrank a local variable on a shared prefix by pure alphabetical luck.
+ *
+ * Every candidate gets a tier, including the static catalogs. Leaving any of
+ * them unstamped would not preserve their position: the client compares an
+ * unstamped item's `label` against a stamped item's `sortText`, and since
+ * digits precede letters, every unstamped candidate would sink below every
+ * stamped one.
+ */
+const SORT_TIER = {
+    /** Locals, parameters, and this document's own EQUATEs. */
+    LOCAL: 10,
+    /** Module and PROGRAM data reached from a MEMBER file. */
+    PROGRAM_DATA: 20,
+    /** MAP procedures and file-level GlobalProcedures. */
+    PROCEDURE: 30,
+    /** Project-wide declaration index entries — see collectProjectEquates. */
+    PROJECT_INDEX: 40,
+    /** Keywords, built-ins, data types, controls, attributes, directives. */
+    CATALOG: 50,
+} as const;
+
+type SortTier = typeof SORT_TIER[keyof typeof SORT_TIER];
+
+/**
+ * `sortText` for one candidate: zero-padded tier, then the label. Padded so a
+ * tier past 9 cannot sort between 1 and 2, and lowercased because Clarion is
+ * case-insensitive — `MyConst` and `myconst` must not swap places.
+ *
+ * Two digits: the tiers above are spaced by ten, so there is room for nine more
+ * between any two existing ones and the ceiling is 99.
+ */
+function tierSortText(tier: SortTier, label: string): string {
+    return `${tier.toString().padStart(2, '0')}_${label.toLowerCase()}`;
+}
 
 /**
  * Provides general word/identifier completion for Clarion.
@@ -54,10 +117,16 @@ export class WordCompletionProvider {
      */
     async provide(document: TextDocument, position: Position, partial: string): Promise<CompletionItem[]> {
         try {
+            const startedAt = Date.now();
+            const step: Record<string, number> = {};
+            let mark = startedAt;
+            const lap = (name: string) => { const now = Date.now(); step[name] = now - mark; mark = now; };
             const tokens = this.tokenCache.getTokens(document);
             if (!tokens || tokens.length === 0) return [];
+            lap('tokens_ms');
 
             const scope = this.scopeAnalyzer.getTokenScope(document, position);
+            lap('scope_ms');
 
             // Build a set of lines that have a PROCEDURE or ROUTINE keyword on them.
             // Label tokens on these lines are the procedure/routine *names*, not variables.
@@ -78,12 +147,26 @@ export class WordCompletionProvider {
             const isOverloadable = (k?: CompletionItemKind): boolean =>
                 k === CompletionItemKind.Function || k === CompletionItemKind.Method;
 
-            const add = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => {
+            const add = (
+                label: string,
+                kind: CompletionItemKind,
+                detail?: string,
+                documentation?: string,
+                typeText?: string,
+                tier: SortTier = SORT_TIER.CATALOG
+            ) => {
                 const key = label.toUpperCase();
                 if (!seen.has(key)) {
-                    const item: CompletionItem = { label, kind };
+                    // #555: the tier that claims a label first also fixes its rank.
+                    // That is the same first-writer-wins rule the rest of this
+                    // closure already follows, and the collectors run in priority
+                    // order, so a local declaration keeps its place over a
+                    // project-wide one of the same name.
+                    const item: CompletionItem = { label, kind, sortText: tierSortText(tier, label) };
                     if (detail) item.detail = detail;
                     if (documentation) item.documentation = documentation;
+                    // #508: the declared type sits right after the label in the list (LONG, STRING(30), KEY(ORD:ID))
+                    if (typeText) item.labelDetails = { detail: ` ${typeText}` };
                     seen.set(key, item);
                     return;
                 }
@@ -97,33 +180,42 @@ export class WordCompletionProvider {
                 if (documentation && !existing.documentation) existing.documentation = documentation;
             };
 
+            /** #555 — `add` bound to one tier, for handing to a collector. */
+            const addIn = (tier: SortTier) =>
+                (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) =>
+                    add(label, kind, detail, documentation, typeText, tier);
+
             // ----------------------------------------------------------------
             // A. Callable procedures
             // ----------------------------------------------------------------
-            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, add);
+            await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, addIn(SORT_TIER.PROCEDURE));
+            lap('procedures_ms');
 
             // ----------------------------------------------------------------
             // B. Equates — must run before variables so user EQUATEs land as
             //    CompletionItemKind.Constant rather than the bare Variable
             //    entry that collectVariables would otherwise produce.
             // ----------------------------------------------------------------
-            this.collectEquates(document, tokens, add);
+            await this.collectEquates(document, partial, addIn(SORT_TIER.LOCAL), addIn(SORT_TIER.PROJECT_INDEX));
+            lap('equates_ms');
 
             // ----------------------------------------------------------------
             // C. Variables / Labels
             // ----------------------------------------------------------------
-            this.collectVariables(tokens, scope, position, procDeclLines, add);
-            this.collectProgramGlobalDataSymbols(tokens, document, add);
+            this.collectVariables(tokens, scope, position, procDeclLines, addIn(SORT_TIER.LOCAL));
+            lap('variables_ms');
+            this.collectProgramGlobalDataSymbols(tokens, document, addIn(SORT_TIER.PROGRAM_DATA));
+            lap('program_globals_ms');
 
             // ----------------------------------------------------------------
             // D. Parameters from PROCEDURE(...) signature
             // ----------------------------------------------------------------
             if (scope?.containingProcedure) {
-                this.collectParameters(document, scope.containingProcedure, add);
+                this.collectParameters(document, scope.containingProcedure, addIn(SORT_TIER.LOCAL));
             }
             // If inside a routine, also collect parent procedure parameters
             if (scope?.containingRoutine && scope.containingProcedure) {
-                this.collectParameters(document, scope.containingProcedure, add);
+                this.collectParameters(document, scope.containingProcedure, addIn(SORT_TIER.LOCAL));
             }
 
             // ----------------------------------------------------------------
@@ -157,6 +249,26 @@ export class WordCompletionProvider {
             // H. Data types (from clarion-datatypes.json)
             // ----------------------------------------------------------------
             this.collectDataTypes(seen);
+
+            // #555: the catalogs above (controls, attributes, directives,
+            // keywords, built-ins, data types) write straight into `seen`,
+            // bypassing add(), so they carry no tier yet. Stamp the catalog
+            // tier on whatever is still unstamped — an item left without a
+            // `sortText` would be ranked by its label against everyone else's
+            // `sortText`, which puts it below every tiered candidate.
+            for (const item of seen.values()) {
+                if (!item.sortText) {
+                    item.sortText = tierSortText(SORT_TIER.CATALOG, String(item.label));
+                }
+            }
+            lap('catalogs_ms');
+            const total = Date.now() - startedAt;
+            if (total >= SLOW_COMPLETION_MS) {
+                perfLogger.perf("WordCompletion slow", {
+                    ms: total, ...step, candidates: seen.size, partial,
+                    uri: document.uri.split('/').pop() ?? '',
+                });
+            }
 
             // ----------------------------------------------------------------
             // Filter by prefix
@@ -193,6 +305,10 @@ export class WordCompletionProvider {
                         .map(tail => tail.substring(tail.lastIndexOf(':') + 1).toUpperCase())
                 );
 
+                // #507: the list shows the field name (what follows the typed qualifier)
+                // and carries the qualified name as detail. VS Code's word at the cursor
+                // stops at the colon, so a bare label is a plain prefix match for the typed
+                // letters; the qualified name stays visible in the detail column.
                 return qualifierMatches
                     .filter(item => {
                         const tail = String(item.label).substring(fullQualifier.length);
@@ -200,11 +316,14 @@ export class WordCompletionProvider {
                         return !nestedTailLastSegments.has(tail.toUpperCase());
                     })
                     .map(item => {
-                        const label = String(item.label);
-                        const qualifierTail = label.substring(fullQualifier.length);
+                        const qualified = String(item.label);
+                        const qualifierTail = qualified.substring(fullQualifier.length);
                         const remainder = qualifierTail.substring(typedSuffix.length);
                         return {
                             ...item,
+                            label: qualifierTail,
+                            detail: qualified,
+                            labelDetails: { ...(item.labelDetails ?? {}), description: qualified },
                             insertText: remainder,
                         };
                     });
@@ -461,7 +580,7 @@ export class WordCompletionProvider {
     /** Collect PRE-qualified structure fields in global scope as Prefix:Field labels. */
     private collectGlobalPrefixedFields(
         tokens: Token[],
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         const firstProcLine = tokens.find(t =>
             TokenHelper.isProcedureOrFunction(t) &&
@@ -475,7 +594,7 @@ export class WordCompletionProvider {
         tokens: Token[],
         startExclusive: number,
         endExclusive: number,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         this.collectCanonicalPrefixedFields(tokens, line => line > startExclusive && line < endExclusive, add);
     }
@@ -484,47 +603,76 @@ export class WordCompletionProvider {
     private collectCanonicalPrefixedFields(
         tokens: Token[],
         includeLine: (line: number) => boolean,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
-        const byLine = new Map<number, { prefix: string; fieldTokens: Token[] }>();
+        const byLine = new Map<number, { prefix: string }>();
         for (const t of tokens) {
             if (!t.isStructureField || !t.structurePrefix) continue;
             if (!includeLine(t.line)) continue;
-            const lineEntry = byLine.get(t.line);
-            if (lineEntry) {
-                lineEntry.fieldTokens.push(t);
-            } else {
-                byLine.set(t.line, { prefix: t.structurePrefix, fieldTokens: [t] });
-            }
+            if (!byLine.has(t.line)) byLine.set(t.line, { prefix: t.structurePrefix });
         }
 
+        // #565 — gather every wanted line's tokens in ONE pass. Filtering the whole token array
+        // per field line was quadratic: a PROGRAM carrying the dictionary's FILE declarations
+        // (thousands of PRE fields over ~68k tokens) cost 1.5-3 s per completion request.
+        const tokensByLine = new Map<number, Token[]>();
+        for (const line of byLine.keys()) tokensByLine.set(line, []);
+        for (const t of tokens) tokensByLine.get(t.line)?.push(t);
+
+        const identifier = /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*$/i;
         for (const [line, lineEntry] of byLine.entries()) {
-            const fieldTokens = lineEntry.fieldTokens.sort((a, b) => a.start - b.start);
-            const lineTokens = tokens
-                .filter(t => t.line === line)
-                .sort((a, b) => a.start - b.start);
+            const lineTokens = (tokensByLine.get(line) ?? []).sort((a, b) => a.start - b.start);
             const prefix = lineEntry.prefix;
 
-            const explicitPrefixed = lineTokens.find(t =>
-                /^[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)+$/i.test(t.value)
-            );
+            // #499: the structure's own header line (`Orders FILE,...,PRE(ORD)`) declares
+            // no field — the PRE() argument is flagged as a field token, but it is not one.
+            if (lineTokens.some(t =>
+                t.type === TokenType.Structure &&
+                t.structurePrefix?.toUpperCase() === prefix.toUpperCase()
+            )) continue;
 
-            const simpleName = fieldTokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable || t.type === TokenType.ReferenceVariable) &&
-                /^[A-Za-z_][A-Za-z0-9_]*$/i.test(t.value)
-            );
-
-            const suffix = explicitPrefixed?.value ?? simpleName?.value;
-            if (!suffix) continue;
-            add(`${prefix}:${suffix}`, CompletionItemKind.Variable, 'prefixed field');
+            // A declaration names its field only through the column-0 label: plain (`ID`)
+            // or colon-carrying (`GLO:SessionId`, completed as TGLO:GLO:SessionId). Any
+            // other identifier on the line — a KEY's `ORD:ID` argument, an attribute such
+            // as OPT — is not a field, however the token flags read (#499).
+            const labelToken = lineTokens.find(t => t.start === 0 && t.type !== TokenType.Comment);
+            if (!labelToken || !identifier.test(labelToken.value)) continue;
+            add(`${prefix}:${labelToken.value}`, CompletionItemKind.Variable, 'prefixed field', undefined,
+                WordCompletionProvider.declaredTypeFromTokens(lineTokens, labelToken));
         }
+    }
+
+    /**
+     * #508: the declared type as written on the line — the tokens after the label up to
+     * the first comma at paren depth 0. `STRING(30),NAME('nm')` -> `STRING(30)`;
+     * `KEY(ORD:ID),NOCASE,OPT` -> `KEY(ORD:ID)`; `DECIMAL(9,2)` keeps its inner comma;
+     * `Ref &StringTheory` -> `&StringTheory`. Same rule as the hover card (#488).
+     */
+    private static declaredTypeFromTokens(lineTokens: Token[], labelToken: Token): string | undefined {
+        const idx = lineTokens.indexOf(labelToken);
+        if (idx < 0) return undefined;
+        let depth = 0;
+        let text = '';
+        let prevEnd = -1;
+        for (const t of lineTokens.slice(idx + 1)) {
+            if (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) break;
+            if (t.value === ',' && depth === 0) break;
+            if (prevEnd >= 0 && t.start > prevEnd) text += ' ';
+            text += t.value;
+            prevEnd = t.start + t.value.length;
+            for (const ch of t.value) {
+                if (ch === '(') depth++;
+                else if (ch === ')') depth--;
+            }
+        }
+        return text || undefined;
     }
 
     /** Add PROGRAM-file global labels + PRE-qualified fields for MEMBER-file completion parity. */
     private collectProgramGlobalDataSymbols(
         tokens: Token[],
         document: TextDocument,
-        add: (label: string, kind: CompletionItemKind, detail?: string) => void
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
     ): void {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
@@ -542,6 +690,19 @@ export class WordCompletionProvider {
         if (!result || result.tokens.length === 0) return;
 
         const programTokens = result.tokens;
+        // #565 — the PROGRAM's global labels and prefixed fields depend only on its tokens, and
+        // the token array is replaced when the file changes: replay a recorded list instead of
+        // walking a large PROGRAM again on every keystroke.
+        const cachedGlobals = WordCompletionProvider.programGlobalsByTokens.get(programTokens);
+        if (cachedGlobals) {
+            for (const g of cachedGlobals) add(g.label, g.kind, g.detail, g.documentation, g.typeText);
+            return;
+        }
+        const recorded: ProgramGlobalSymbol[] = [];
+        const record = (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => {
+            recorded.push({ label, kind, detail, documentation, typeText });
+            add(label, kind, detail, documentation, typeText);
+        };
         const procDeclLines = new Set<number>();
         for (const t of programTokens) {
             if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
@@ -556,9 +717,14 @@ export class WordCompletionProvider {
             (!t.parent || t.parent.type !== TokenType.Structure) &&
             !procDeclLines.has(t.line);
 
-        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, add);
-        this.collectGlobalPrefixedFields(programTokens, add);
+        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, record);
+        this.collectGlobalPrefixedFields(programTokens, record);
+        WordCompletionProvider.programGlobalsByTokens.set(programTokens, recorded);
     }
+
+    /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
+    private static readonly programGlobalsByTokens = new WeakMap<Token[], ProgramGlobalSymbol[]>();
+
 
     /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */
     private collectProcLocals(
@@ -795,12 +961,19 @@ export class WordCompletionProvider {
      * completions. These tokens are tokenized as TokenType.Label, not
      * TokenType.Constant — the latter is the lexer's literal-value class
      * (numeric/string literals) and is intentionally not used here.
+     *
+     * Two tiers, in priority order: this document's own EQUATEs, then the
+     * project-wide declaration index (see collectProjectEquates). #555 gives
+     * the two tiers separate `add` callbacks so they can carry separate
+     * `sortText` ranks — a cross-file constant should stay in the list without
+     * competing with local-scope items for the top of it.
      */
-    private collectEquates(
+    private async collectEquates(
         document: TextDocument,
-        _tokens: Token[],
-        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
-    ): void {
+        partial: string,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void,
+        addProjectWide: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): Promise<void> {
         // Single source of truth: DocumentStructure.getEquates() (Gap B).
         // Each returned token already carries `dataValue` (Gap D) and, when the
         // EQUATE is declared inside an ITEMIZE,PRE(...) block, `prefixedEquateName`
@@ -813,6 +986,72 @@ export class WordCompletionProvider {
                 : 'EQUATE';
             add(label, CompletionItemKind.Constant, detail);
         }
+
+        await this.collectProjectEquates(document, partial, addProjectWide);
+    }
+
+    /**
+     * EQUATEs declared elsewhere in the project, from StructureDeclarationIndexer.
+     *
+     * getEquates() above only sees the document being edited, and a data-section
+     * `INCLUDE('Constants.inc')` is never inlined into that document's token
+     * stream — only MAP-nested INCLUDEs are, via getMapTokensWithIncludes. So an
+     * EQUATE the compiler resolves through a plain INCLUDE (directly, or through
+     * the PROGRAM file for a MEMBER module) had no tier that could see it, and
+     * never appeared as a completion. This is the same role the index already
+     * plays as hover's third tier: ".inc files not in the INCLUDE chain".
+     *
+     * Gated on a typed prefix: the index spans every RED search path plus libsrc,
+     * so on an empty prefix this would be thousands of constants nobody asked
+     * for, piled onto a candidate list that is already large. Once a couple of
+     * characters are typed the matching set is small and directly relevant —
+     * which is exactly the position the user is in when typing a constant's
+     * leading characters.
+     */
+    private async collectProjectEquates(
+        document: TextDocument,
+        partial: string,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string) => void
+    ): Promise<void> {
+        if (partial.length < PROJECT_EQUATE_MIN_PREFIX) return;
+
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const project = SolutionManager.getInstance()?.findProjectForFile(docPath);
+        if (!project?.path) return;
+
+        const sdi = StructureDeclarationIndexer.getInstance();
+        // Never make a keystroke wait on a cold scan. Consult the index only once
+        // it is already built — the diagnostics pass builds it shortly after the
+        // solution loads, and it is disk-cached across sessions, so in practice
+        // this is a Map read rather than a scan.
+        if (!sdi.isIndexed(project.path)) return;
+        const index = await sdi.getOrBuildIndex(project.path);
+
+        // byName keys are lowercased names; ITEMIZE_EQUATE entries are already
+        // PRE-expanded (`clr:red`), which is the form the caller types and the
+        // form the qualifier branch of the prefix filter expects.
+        const needle = partial.toLowerCase();
+        let emitted = 0;
+        for (const [key, decls] of index.byName) {
+            if (!key.startsWith(needle)) continue;
+            const equate = decls.find(d =>
+                d.structureType === 'EQUATE' || d.structureType === 'ITEMIZE_EQUATE'
+            );
+            if (!equate) continue;
+            add(
+                equate.name,
+                CompletionItemKind.Constant,
+                WordCompletionProvider.equateDetailFromLine(equate.lineContent),
+                `Declared in ${path.basename(equate.filePath)}`
+            );
+            if (++emitted >= PROJECT_EQUATE_LIMIT) break;
+        }
+    }
+
+    /** `MAX_ROWS EQUATE(100)` -> `EQUATE(100)`; a valueless EQUATE -> `EQUATE`. */
+    private static equateDetailFromLine(lineContent: string | undefined): string {
+        const m = /\bEQUATE\s*\(([^)]*)\)/i.exec(lineContent ?? '');
+        return m ? `EQUATE(${m[1].trim()})` : 'EQUATE';
     }
 
     // -------------------------------------------------------------------------

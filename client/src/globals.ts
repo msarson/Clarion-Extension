@@ -1,4 +1,5 @@
 import { workspace, ConfigurationTarget, window, Uri, WorkspaceConfiguration, ExtensionContext } from 'vscode';
+import { sameSolutionFile, isUnsetInEveryScope, targetForKey } from './utils/SolutionSettingsScope'; // #563
 import * as fs from 'fs';
 import { parseStringPromise } from 'xml2js';
 import { ClarionExtensionCommands } from './ClarionExtensionCommands';
@@ -19,7 +20,7 @@ export interface ClarionSolutionSettings {
 // #146 explicit-close flag and fallback-policy helper live in
 // `./utils/SolutionFallbackPolicy` (vscode-free so unit tests can import
 // them without dragging in the workspace/ExtensionContext surface).
-import { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, readRegisteredVersionNames, shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY } from './utils/SolutionFallbackPolicy';
 export { shouldUseSolutionFallback, SOLUTION_EXPLICITLY_CLOSED_KEY };
 
 /**
@@ -150,7 +151,7 @@ export async function activateClarionVersionState(context?: ExtensionContext): P
             await config.update('versionMigrated', true, ConfigurationTarget.Global);
         } else {
             // Look for a legacy solutions[].version to auto-promote to L1.
-            const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+            const solutions = SettingsStorageManager.clarionSettings().get<ClarionSolutionSettings[]>('solutions', []); // #563
             const legacy = solutions.find(s => s.version && s.propertiesFile);
             if (legacy) {
                 logger.info(`🔄 Migrating legacy version from solutions[]: ${legacy.version} → L1 default`);
@@ -170,7 +171,7 @@ export async function activateClarionVersionState(context?: ExtensionContext): P
     if (context) {
         const l3Backfilled = config.get<boolean>('solutionVersionMemoryBackfilled', false);
         if (!l3Backfilled) {
-            const solutions = config.get<ClarionSolutionSettings[]>('solutions', []);
+            const solutions = SettingsStorageManager.clarionSettings().get<ClarionSolutionSettings[]>('solutions', []); // #563
             const candidates = solutions.filter(s => s.solutionFile && s.version);
             if (candidates.length > 0) {
                 logger.info(`🔄 #141 B3 — backfilling L3 solutionVersionMemory from ${candidates.length} legacy solutions[] entr${candidates.length === 1 ? 'y' : 'ies'}`);
@@ -228,6 +229,18 @@ export async function ensureActiveClarionVersion(): Promise<boolean> {
     const { commands } = await import('vscode');
     await commands.executeCommand('clarion.setActiveVersion');
     return !!globalClarionVersion;
+}
+
+/**
+ * #498 — true only when a solution is remembered AND its Clarion version and
+ * ClarionProperties.xml are known. The Solution View, the `clarion.solutionOpen`
+ * context and the initializer key off this, not off `globalSolutionFile` alone: a
+ * remembered solution with no version is shown as a found solution to set up, never
+ * as a loaded one with an empty tree.
+ */
+export function isSolutionConfigured(): boolean {
+    return rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
+        readRegisteredVersionNames(globalClarionPropertiesFile)) === 'ready';   // #535: a stale name is not configured
 }
 
 export async function setGlobalClarionSelection(
@@ -288,26 +301,18 @@ export async function setGlobalClarionSelection(
 
         // ✅ Ensure lookup extensions are written (only if we have a folder)
         if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-            const workspaceFolder = workspace.workspaceFolders[0];
-            const config = workspace.getConfiguration("clarion", workspaceFolder.uri);
-            const target = ConfigurationTarget.WorkspaceFolder;
-
-            const fileSearchExtensions = config.inspect<string[]>("fileSearchExtensions");
-            const defaultLookupExtensions = config.inspect<string[]>("defaultLookupExtensions");
-
-            const updatePromises: Thenable<void>[] = [];
-
-            // Check if not set at folder level
-            if (!fileSearchExtensions?.workspaceFolderValue) {
-                updatePromises.push(config.update("fileSearchExtensions", DEFAULT_EXTENSIONS, target));
+            // #563 — only when the user has set the list NOWHERE, and beside the solution settings.
+            // Checking the folder alone wrote a folder copy of the defaults over a list kept in the
+            // .code-workspace file (Mark's adds .pr/.prj), silently replacing it.
+            const store = SettingsStorageManager.clarionSettings();
+            let applied = 0;
+            for (const key of ["fileSearchExtensions", "defaultLookupExtensions"]) {
+                if (isUnsetInEveryScope(store.inspect<string[]>(key))) {
+                    await store.update(key, DEFAULT_EXTENSIONS, targetForKey(store, key));
+                    applied++;
+                }
             }
-
-            if (!defaultLookupExtensions?.workspaceFolderValue) {
-                updatePromises.push(config.update("defaultLookupExtensions", DEFAULT_EXTENSIONS, target));
-            }
-
-            if (updatePromises.length > 0) {
-                await Promise.all(updatePromises);
+            if (applied > 0) {
                 logger.info("✅ Default lookup settings applied.");
             }
         } else {
@@ -336,6 +341,10 @@ export const globalSettings = {
 
     get undeclaredVariablesEnabled() {
         return workspace.getConfiguration("clarion").get<boolean>("diagnostics.undeclaredVariables.enabled", true);
+    },
+
+    get unresolvedProcedureCallsEnabled() {
+        return workspace.getConfiguration("clarion").get<boolean>("diagnostics.unresolvedProcedureCalls.enabled", false);
     },
 
     get indistinguishablePrototypesEnabled() {
@@ -538,19 +547,22 @@ export const globalSettings = {
         await this.migrateToSolutionsArray();
 
         // Get the current solution from settings
-        const currentSolution = workspace.getConfiguration().get<string>("clarion.currentSolution", "");
+        // #563 — read through the first folder: a resource-less read skips folder settings in a
+        // multi-root workspace and disagreed with every write (Mark's picks reverting to Debug).
+        const clarionSettings = SettingsStorageManager.clarionSettings();
+        const currentSolution = clarionSettings.get<string>("currentSolution", "");
 
         // ✅ Read workspace settings
-        let solutionFile = workspace.getConfiguration().get<string>("clarion.solutionFile", "") || "";
-        let clarionPropertiesFile = workspace.getConfiguration().get<string>("clarion.propertiesFile", "") || "";
-        let clarionVersion = workspace.getConfiguration().get<string>("clarion.version", "") || "";
-        let clarionConfiguration = workspace.getConfiguration().get<string>("clarion.configuration", "") || "Release";
+        let solutionFile = clarionSettings.get<string>("solutionFile", "") || "";
+        let clarionPropertiesFile = clarionSettings.get<string>("propertiesFile", "") || "";
+        let clarionVersion = clarionSettings.get<string>("version", "") || "";
+        let clarionConfiguration = clarionSettings.get<string>("configuration", "") || "Release";
 
-        const solutions = workspace.getConfiguration().get<ClarionSolutionSettings[]>("clarion.solutions", []);
+        const solutions = clarionSettings.get<ClarionSolutionSettings[]>("solutions", []);
 
         // If we have a current solution, try to find it in the solutions array
         if (currentSolution) {
-            const solution = solutions.find(s => s.solutionFile === currentSolution);
+            const solution = solutions.find(s => sameSolutionFile(s.solutionFile, currentSolution)); // #563
 
             if (solution) {
                 logger.info(`✅ Found current solution in solutions array: ${solution.solutionFile}`);

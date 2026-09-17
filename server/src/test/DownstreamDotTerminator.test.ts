@@ -118,7 +118,7 @@ x LONG
             
             // Should NOT have diagnostic for IF being unterminated
             const ifDiagnostic = diagnostics.find(d =>
-                d.message.includes('IF') && d.message.includes('not terminated')
+                String(d.message).includes('IF') && String(d.message).includes('not terminated')
             );
             
             assert.strictEqual(ifDiagnostic, undefined,
@@ -145,7 +145,7 @@ i LONG
             
             // Should NOT have diagnostic for LOOP being unterminated
             const loopDiagnostic = diagnostics.find(d =>
-                d.message.includes('LOOP') && d.message.includes('not terminated')
+                String(d.message).includes('LOOP') && String(d.message).includes('not terminated')
             );
             
             assert.strictEqual(loopDiagnostic, undefined,
@@ -173,7 +173,7 @@ choice LONG
             
             // Should NOT have diagnostic for CASE being unterminated
             const caseDiagnostic = diagnostics.find(d =>
-                d.message.includes('CASE') && d.message.includes('not terminated')
+                String(d.message).includes('CASE') && String(d.message).includes('not terminated')
             );
             
             assert.strictEqual(caseDiagnostic, undefined,
@@ -197,7 +197,7 @@ x LONG
             
             // SHOULD have diagnostic for IF being unterminated
             const ifDiagnostic = diagnostics.find(d =>
-                d.message.includes('IF') && d.message.includes('not terminated')
+                String(d.message).includes('IF') && String(d.message).includes('not terminated')
             );
             
             assert.ok(ifDiagnostic,

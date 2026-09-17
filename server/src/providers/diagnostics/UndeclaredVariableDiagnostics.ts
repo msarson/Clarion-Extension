@@ -159,6 +159,30 @@ function buildScopeContext(tokens: Token[], document: TextDocument): ScopeContex
         if (t.executionMarker === undefined || t.finishesAt === undefined) continue;
         codeRanges.push({ codeStart: t.executionMarker.line, end: t.finishesAt });
     }
+
+    // #516 — a PROGRAM's own main CODE section is executable code too, but it is not a
+    // procedure implementation, so the loop above misses it. Its CODE marker is an
+    // ExecutionMarker token that no procedure/routine claims as its own executionMarker.
+    // Add it as a code range from that marker to just before the first procedure/method
+    // implementation (or EOF), so its identifiers are checked — and, as importantly, are
+    // NOT added to declaredNames below as if they were declarations. MEMBER files have no
+    // main CODE, so this only fires for a PROGRAM.
+    const isProgram = tokens.some(t => t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'PROGRAM');
+    if (isProgram) {
+        const claimedMarkerLines = new Set<number>();
+        for (const t of tokens) if (t.executionMarker) claimedMarkerLines.add(t.executionMarker.line);
+        const mainCode = tokens.find(t => t.type === TokenType.ExecutionMarker && !claimedMarkerLines.has(t.line));
+        if (mainCode) {
+            let end = tokens[tokens.length - 1].line;
+            for (const t of tokens) {
+                const isImpl = TokenHelper.isProcedureOrFunction(t) &&
+                    (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation);
+                if (isImpl && t.line > mainCode.line) { end = t.line - 1; break; }
+            }
+            if (end > mainCode.line) codeRanges.push({ codeStart: mainCode.line, end });
+        }
+    }
+
     if (codeRanges.length === 0) {
         // #62 mode-C breadcrumb: validator ran but found no procedure/function
         // implementations with both executionMarker and finishesAt set. The

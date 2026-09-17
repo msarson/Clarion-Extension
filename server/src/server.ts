@@ -58,11 +58,12 @@ import ClarionFormatter from './ClarionFormatter';
 
 import { ClarionColorResolver } from './ClarionColorResolver';
 import ClarionFoldingProvider from './ClarionFoldingProvider';
-import { serverSettings } from './serverSettings';
+import { serverSettings, applyFeatureFlags, FeatureFlagParams } from './serverSettings';
 import { TrailingCoalescer } from './utils/TrailingCoalescer';
 
 import { ClarionSolutionServer } from './solution/clarionSolutionServer';
 import { buildClarionSolution, initializeSolutionManager } from './solution/buildClarionSolution';
+import { ResponseError } from 'vscode-languageserver/node';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
@@ -102,10 +103,14 @@ import { setServerInitialized, serverInitialized } from './serverState';
 import { TokenHelper } from './utils/TokenHelper';
 import { evictIncludeChainIndexes } from './services/SymbolFinderService';
 import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
+import { applyConfigurationChange } from './solution/ConfigurationChange'; // #564
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
+import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
+import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
+import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -328,6 +333,8 @@ const hoverProvider = new HoverProvider();
 const signatureHelpProvider = new SignatureHelpProvider();
 const implementationProvider = new ImplementationProvider();
 const referencesProvider = new ReferencesProvider();
+// #509 — call hierarchy shares the definition / implementation / references resolvers.
+const callHierarchyProvider = new CallHierarchyProvider(definitionProvider, implementationProvider, referencesProvider);
 const codeLensProvider = new ClarionCodeLensProvider();
 const renameProvider = new RenameProvider();
 const documentHighlightProvider = new DocumentHighlightProvider();
@@ -433,12 +440,31 @@ connection.onInitialize((params) => {
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
 
+        // #545 — pull diagnostics, only for a client that asks for them.
+        pullDiagnosticsSupported = params.capabilities.textDocument?.diagnostic !== undefined;
+        diagnosticsRefreshSupported = params.capabilities.workspace?.diagnostics?.refreshSupport === true;
+
+        // #544 — startup phases report through window/workDoneProgress when the client
+        // can show it (VS Code: status bar). Silent otherwise.
+        StartupProgress.configure(
+            params.capabilities.window?.workDoneProgress === true,
+            async () => adaptLibraryReporter(await connection.window.createWorkDoneProgress())
+        );
+
         // #297 (revised): perf channels are opt-in via clarion.log.performance.enabled.
         // Read it here — onInitialize is the server's first breath, so when enabled the
         // whole startup timeline (bar the two module-load lines) is captured.
         const logOpts = (params.initializationOptions as
             { settings?: { log?: { performance?: { enabled?: boolean } } } } | undefined)?.settings?.log?.performance;
         LoggingConfig.PERF_CHANNELS_ENABLED = logOpts?.enabled === true;
+
+        // #440: apply the log level the client sent in settings, so a raised level
+        // reaches the server from its first breath. Live changes arrive via the
+        // clarion/setLogLevel notification below. "error" (or absent) leaves the
+        // override unset, i.e. the per-module pins, unchanged from before.
+        const initLevel = (params.initializationOptions as
+            { settings?: { log?: { level?: string } } } | undefined)?.settings?.log?.level;
+        LoggingConfig.LEVEL_OVERRIDE = LoggingConfig.normalizeOverride(initLevel);
 
         // #289: a configured solution announces itself IN the initialize request (race-free — this
         // handler runs at t≈4ms, before any validation or timer can compete). The explicit
@@ -510,6 +536,9 @@ connection.onInitialize((params) => {
                 hoverProvider: true,
                 codeActionProvider: true,
                 selectionRangeProvider: true,
+                callHierarchyProvider: true, // #509
+                // #545 — advertised only to a client that declared textDocument.diagnostic.
+                ...(pullDiagnosticsSupported ? { diagnosticProvider: { identifier: 'clarion', interFileDependencies: true, workspaceDiagnostics: false } } : {}),
                 codeLensProvider: { resolveProvider: true },
                 signatureHelpProvider: {
                     triggerCharacters: ['(', ','],
@@ -649,6 +678,49 @@ import { ContentChangeGuard } from './utils/ContentChangeGuard';
 const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
+// #460 — a completion signal alongside publishDiagnostics, so a client can tell the
+// sync pass from the finished analysis instead of guessing from a quiet period.
+//   complete   — the whole answer is published; no further publish is coming for
+//                this version (the libsrc sync-only exit, and the final combined exit).
+//   deferred   — the async pass has not run yet (pipelines not ready); a drain pass
+//                will re-validate later and emit a further status. No deadline yet.
+//   superseded — the document changed while the async pass ran; this version will
+//                never complete, a newer one is being validated.
+// `version` is the document version the status refers to, so a client can discard an
+// answer for a buffer it has since changed. Additive: nothing that ignores it changes.
+type DiagnosticsStatusState = 'complete' | 'deferred' | 'superseded';
+// #545 — pull diagnostics. When the client declares textDocument.diagnostic the server
+// answers textDocument/diagnostic from the store and does NOT push (both at once would
+// show every diagnostic twice); when it does not, the push path is unchanged. A record
+// the client has not pulled yet is announced with workspace/diagnostic/refresh
+// (debounced — the sync and async passes record within milliseconds of each other),
+// which makes the client re-pull its visible documents.
+const diagnosticsStore = new DiagnosticsStore();
+let pullDiagnosticsSupported = false;
+let diagnosticsRefreshSupported = false;
+const lastPulledResultId = new Map<string, string>();
+let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function publishDiagnostics(document: TextDocument, version: number, diagnostics: Diagnostic[], state: DiagnosticsState): void {
+    const resultId = diagnosticsStore.record(document.uri, version, state, diagnostics);
+    if (!pullDiagnosticsSupported) {
+        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        return;
+    }
+    if (!diagnosticsRefreshSupported) return;
+    if (lastPulledResultId.get(document.uri) === resultId) return;
+    if (diagnosticsRefreshTimer) clearTimeout(diagnosticsRefreshTimer);
+    diagnosticsRefreshTimer = setTimeout(() => {
+        diagnosticsRefreshTimer = null;
+        connection.languages.diagnostics.refresh().catch(err =>
+            logger.info(`[#545] diagnostics refresh request failed: ${err instanceof Error ? err.message : String(err)}`));
+    }, 150);
+}
+
+function sendDiagnosticsStatus(uri: string, version: number, state: DiagnosticsStatusState): void {
+    connection.sendNotification('clarion/diagnosticsStatus', { uri, version, state });
+}
+
 async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
     try {
         // Skip non-Clarion files
@@ -728,7 +800,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         if (isLibsrcFile) {
             // Send only sync diagnostics; skip the async Promise.all entirely.
-            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            publishDiagnostics(document, startVersion, diagnostics, 'complete');
             perfLogger.perf("validateTextDocument libsrc-skip (async validators bypassed)", {
                 total_ms: Date.now() - validateStart,
                 sync_ms: syncMs,
@@ -737,11 +809,14 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: complete — the async pass is intentionally skipped, so this sync
+            // publish is the whole answer; no further publish is coming.
+            sendDiagnosticsStatus(document.uri, startVersion, 'complete');
             return;
         }
 
         // Send sync diagnostics immediately for fast feedback
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        publishDiagnostics(document, startVersion, diagnostics, 'partial');
 
         // #158 Phase B addendum — defer async validators until solution-ready
         // when the caller is the initial `onDidOpen`. At t=63ms (first
@@ -769,6 +844,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: deferred — the async validators have not run; the drain pass will
+            // re-validate once both pipelines are ready and emit a further status.
+            sendDiagnosticsStatus(document.uri, startVersion, 'deferred');
             return;
         }
 
@@ -801,17 +879,22 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
+        // True once a newer version of this document exists. The stale-version guard after
+        // the validators discards this pass's answer in that case, so both the loop below and
+        // the long-running validators that accept it can stop early instead of finishing.
+        const isStale = () => documents.get(document.uri)?.version !== startVersion;
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
             ['viewProjectFields', () => DiagnosticProvider.validateViewProjectFields(tokens, document, getOpenDocumentContent)],
-            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
+            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent, isStale)],
             ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
             ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
             ['missingMapDecl', () => DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)],
             ['missingImpl', () => DiagnosticProvider.validateMissingImplementations(tokens, document, getOpenDocumentContent)],
             ['privateCall', () => DiagnosticProvider.validatePrivateProcedureCalls(tokens, document, getOpenDocumentContent)],
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
+            ['unresolvedProcCall', async () => DiagnosticProvider.validateUnresolvedProcedureCalls(tokens, document)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
         ];
         // #367: sequential-with-yield for EVERY caller, not just 'sdiReady'. The old
@@ -826,11 +909,18 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // proved this fixed a 20s+ starved-tree-expand.
         const validatorResults: Diagnostic[][] = [];
         for (const [name, thunk] of validatorThunks) {
+            // A newer version arrived while the previous validator ran. The stale-version
+            // guard below discards this pass's answer regardless, so stop paying for the
+            // remaining validators now — otherwise every superseded pass runs the full
+            // cross-file walk to completion, and during typing several such passes overlap
+            // and starve interactive requests (completion measured 24 ms alone, 2.5 s when
+            // two abandoned passes were still running beside it).
+            if (isStale()) break;
             validatorResults.push(await timeIt(name, thunk()));
             // Real macrotask yield between validators — lets queued requests in.
             await new Promise<void>(resolve => setImmediate(resolve));
         }
-        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, ifaceImplDiags] = validatorResults;
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -842,14 +932,17 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
                 uri: document.uri,
                 caller
             });
+            // #460: superseded — the document changed mid-pass, so this version's async
+            // answer is discarded; the validation for the newer version is the live one.
+            sendDiagnosticsStatus(document.uri, startVersion, 'superseded');
             return;
         }
 
-        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...unresolvedProcCallDiags, ...ifaceImplDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        publishDiagnostics(document, startVersion, diagnostics, 'complete');
 
         // #158 — per-document final perf summary
         perfLogger.perf("validateTextDocument complete", {
@@ -861,6 +954,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             uri: document.uri,
             caller
         });
+        // #460: complete — the final combined list (sync + async) is published; this is
+        // the whole answer for this version.
+        sendDiagnosticsStatus(document.uri, startVersion, 'complete');
     } catch (error) {
         logger.error(`❌ Error validating document: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -979,6 +1075,41 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 });
 
 // Handle selection range requests (Shift+Alt+→ expand selection)
+// #545 — textDocument/diagnostic: answer from the store; validate first if this version
+// has no record yet (the duplicate-version guard makes a repeat call cheap).
+connection.languages.diagnostics.on(async (params) => {
+    const uri = params.textDocument.uri;
+    const document = documents.get(uri);
+    if (!document) {
+        diagnosticsStore.clear(uri);
+        return { kind: 'full', items: [] };
+    }
+    const stored = diagnosticsStore.get(uri);
+    if (!stored || stored.version !== document.version) {
+        try { await validateTextDocument(document, 'pull'); }
+        catch (err) { logger.error(`❌ pull validation failed for ${uri}: ${err}`); }
+    }
+    const report = diagnosticsStore.report(uri, params.previousResultId);
+    if (report.resultId) lastPulledResultId.set(uri, report.resultId);
+    return report;
+});
+
+// #509 — call hierarchy: prepare on the item at the cursor, then incoming / outgoing per item.
+connection.languages.callHierarchy.onPrepare(async (params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    try { return await callHierarchyProvider.prepare(document, params.position, token); }
+    catch (err) { logger.error(`❌ call hierarchy prepare failed: ${err}`); return null; }
+});
+connection.languages.callHierarchy.onIncomingCalls(async (params, token) => {
+    try { return await callHierarchyProvider.incomingCalls(params.item, token); }
+    catch (err) { logger.error(`❌ call hierarchy incoming failed: ${err}`); return null; }
+});
+connection.languages.callHierarchy.onOutgoingCalls(async (params, token) => {
+    try { return await callHierarchyProvider.outgoingCalls(params.item, token); }
+    catch (err) { logger.error(`❌ call hierarchy outgoing failed: ${err}`); return null; }
+});
+
 connection.onSelectionRanges((params) => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return [];
@@ -1891,6 +2022,8 @@ documents.onDidClose(event => {
 
         // #359 — drop the content snapshot; a later reopen must re-validate.
         contentChangeGuard.clear(uri);
+        diagnosticsStore.clear(uri); // #545
+        lastPulledResultId.delete(uri);
 
         // Log all document details
         logger.info(`🗑️ [CRITICAL] Document closed: ${uri}`);
@@ -1949,6 +2082,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
     solutionFilePath?: string; // Add optional solution file path
     defaultLookupExtensions?: string[]; // Add default lookup extensions
     undeclaredVariablesEnabled?: boolean; // #62 opt-in
+    unresolvedProcedureCallsEnabled?: boolean; // #517 opt-in
     indistinguishablePrototypesEnabled?: boolean; // #121 opt-in
     referencesCodeLensEnabled?: boolean; // #185 opt-out
     inlayHintsParameterNames?: boolean;  // inlay hints opt-out
@@ -1959,13 +2093,13 @@ connection.onNotification('clarion/updatePaths', async (params: {
     
     try {
         // Update server settings
-        serverSettings.redirectionPaths = params.redirectionPaths || [];
         serverSettings.projectPaths = params.projectPaths || [];
         serverSettings.configuration = params.configuration || "Debug";
-        serverSettings.clarionVersion = params.clarionVersion || "";
-        serverSettings.macros = params.macros || {};
-        serverSettings.libsrcPaths = params.libsrcPaths || [];
-        serverSettings.redirectionFile = params.redirectionFile || "";
+        // #568 — a change of install drops everything resolved under the old one. Imported lazily, like
+        // the declaration indexer and file graph it pulls in, so none of them load before the
+        // initialize reply.
+        const { applyResolutionEnvironment } = await import('./solution/ResolutionEnvironment');
+        applyResolutionEnvironment(params);
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
 
         // #315: lenses requested BEFORE libsrcPaths arrived bypassed the #303
@@ -1989,18 +2123,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
         // Preserve the constructor default when a (legacy) client doesn't include
         // the field. Only an explicit boolean from the client wins. (#62 fix)
-        if (params.undeclaredVariablesEnabled !== undefined) {
-            serverSettings.undeclaredVariablesEnabled = params.undeclaredVariablesEnabled === true;
-        }
-        if (params.indistinguishablePrototypesEnabled !== undefined) {
-            serverSettings.indistinguishablePrototypesEnabled = params.indistinguishablePrototypesEnabled === true;
-        }
-        if (params.inlayHintsParameterNames !== undefined) {
-            serverSettings.inlayHintsParameterNames = params.inlayHintsParameterNames === true;
-        }
-        if (params.inlayHintsImplicitTypes !== undefined) {
-            serverSettings.inlayHintsImplicitTypes = params.inlayHintsImplicitTypes === true;
-        }
+        // #541 — shared with the live clarion/updateDiagnosticSettings path.
+        applyFeatureFlags(params);
         if (params.referencesCodeLensEnabled !== undefined) {
             serverSettings.referencesCodeLensEnabled = params.referencesCodeLensEnabled === true;
             if (!serverSettings.referencesCodeLensEnabled) {
@@ -2236,6 +2360,8 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 )];
                 const sdiStart = Date.now();
                 logger.info(`⏱️ [STARTUP] SDI build starting for ${projectPaths.length} project(s) at +${sdiStart - globalStartTime}ms`);
+                const sdiProgress = await StartupProgress.begin('Clarion: building declaration index', `${projectPaths.length} project folder(s)`);
+                let sdiDone = 0;
                 await Promise.all(projectPaths.map(async p => {
                     const t = Date.now();
                     await indexer.getOrBuildIndex(p).catch(err =>
@@ -2245,7 +2371,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                         ms: Date.now() - t,
                         project: path.basename(p)
                     });
+                    sdiProgress.step(++sdiDone, projectPaths.length, path.basename(p));
                 }));
+                sdiProgress.done();
                 logger.info(`⏱️ [STARTUP] SDI build complete in ${Date.now() - sdiStart}ms (total +${Date.now() - globalStartTime}ms)`);
                 perfLogger.perf("Phase: SDI structure-index build complete (background)", {
                     ms: Date.now() - sdiStart,
@@ -2306,12 +2434,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
 
                 const revalStart = Date.now();
                 let revalCount = 0;
-                for (const doc of documents.all()) {
+                const openDocsForReval = documents.all();
+                const revalProgress = await StartupProgress.begin('Clarion: checking open files', `${openDocsForReval.length} file(s)`);
+                for (const doc of openDocsForReval) {
                     try {
                         await validateTextDocument(doc, 'sdiReady');
                     } catch { /* validator errors are logged at source */ }
                     revalCount++;
+                    revalProgress.step(revalCount, openDocsForReval.length, path.basename(decodeURIComponent(doc.uri)));
                 }
+                revalProgress.done();
                 perfLogger.perf("Phase: sdiReady revalidation pass complete", {
                     ms: Date.now() - revalStart,
                     doc_count: revalCount,
@@ -2429,9 +2561,15 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     sourceFileCount,
                     unresolvedCount: unresolved.length
                 });
-                await graph.buildInBackground(allFiles).catch(err =>
+                const frgProgress = await StartupProgress.begin('Clarion: building file graph', `${allFiles.length} source file(s)`);
+                // The closure walk (#522) reaches files beyond the .cwproj seeds, so the count
+                // can pass the seed total; past it, report the count without a percentage.
+                await graph.buildInBackground(allFiles, (done, total) =>
+                    done <= total ? frgProgress.step(done, total) : frgProgress.report(`${done} files (${done - total} reached through includes)`)
+                ).catch(err =>
                     logger.error(`❌ [FRG] Background build failed: ${err}`)
                 );
+                frgProgress.done();
                 logger.info(`⏱️ [STARTUP] FRG build complete in ${Date.now() - frgStart}ms (total +${Date.now() - globalStartTime}ms)`);
                 perfLogger.perf("Phase: FRG file-relationship-graph build complete (background)", {
                     ms: Date.now() - frgStart,
@@ -2444,6 +2582,9 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     member_edges: graph.lastBuildStats?.memberEdges ?? -1,
                     include_edges: graph.lastBuildStats?.includeEdges ?? -1,
                     module_edges: graph.lastBuildStats?.moduleEdges ?? -1,
+                    // #522 — files beyond the .cwproj seeds reached through the closure walk, and its depth.
+                    closure_files: graph.lastBuildStats?.closureFiles ?? -1,
+                    closure_hops: graph.lastBuildStats?.closureHops ?? -1,
                     // #434 — file_count above counts what RESOLVED, so on its own
                     // it cannot distinguish 0-of-0 from 0-of-3016.
                     source_file_count: sourceFileCount,
@@ -2526,13 +2667,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
 // window it caused itself). Coalesced: a burst costs ONE pass. The FRG is also
 // REBUILT, not just reset — a bare reset left it dead until the next restart,
 // degrading every family-scoped consumer (FAR scope, sibling-walk prune, hover).
-const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
-    const passStart = Date.now();
-    // Clear the version-skip cache so validateTextDocument doesn't skip documents
-    // whose source hasn't changed but whose cwproj has.
-    lastValidatedVersions.clear();
-
-    // Rebuild the file relationship graph — the project file list may have changed.
+/**
+ * Rebuild the file relationship graph from every project's source files (reset, then the
+ * background closure build). Shared by the .cwproj-change pass (#317) and a build configuration
+ * change (#564). Returns the seed files.
+ */
+async function rebuildFileRelationshipGraph(reason: string): Promise<string[]> {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
     const graph = FileRelationshipGraph.getInstance();
     graph.reset();
@@ -2548,8 +2688,19 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
     }
     if (graphFiles.length) {
         await graph.buildInBackground(graphFiles).catch(err =>
-            logger.error(`❌ [FRG] constants-change rebuild failed: ${err}`));
+            logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`));
     }
+    return graphFiles;
+}
+
+const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
+    const passStart = Date.now();
+    // Clear the version-skip cache so validateTextDocument doesn't skip documents
+    // whose source hasn't changed but whose cwproj has.
+    lastValidatedVersions.clear();
+
+    // Rebuild the file relationship graph — the project file list may have changed.
+    const graphFiles = await rebuildFileRelationshipGraph('constants-change');
 
     // One doc at a time — same discipline as the startup revalidation chain.
     let docCount = 0;
@@ -2567,9 +2718,88 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
         frg_files: graphFiles.length
     });
 });
+// #541 — a clarion.diagnostics.* setting changed in the editor. Apply the flags and
+// re-check every open document so the warnings appear or clear without a reload.
+// One document at a time, the same discipline as the startup re-validation chain.
+connection.onNotification('clarion/updateDiagnosticSettings', async (params: FeatureFlagParams) => {
+    const changed = applyFeatureFlags(params ?? {});
+    logger.info(`📥 clarion/updateDiagnosticSettings — changed: ${changed.length ? changed.join(', ') : '(nothing)'}`);
+    if (changed.length === 0) return;
+    // The documents have not changed, only the rules — clear the duplicate-version
+    // guard or every re-validation below is skipped as "already validated".
+    lastValidatedVersions.clear();
+    const passStart = Date.now();
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'diagnosticSettingsChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    perfLogger.perf("diagnosticSettingsChanged re-validation complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        changed: changed.join('|')
+    });
+});
+
+// #564 — the build configuration changed in the editor (status bar, Tools pane or a settings
+// edit). It arrived only once, with the solution load, so redirection kept resolving the old
+// configuration's sections until a reload. Apply it, then re-check the open documents and
+// refresh their links, one document at a time.
+connection.onNotification('clarion/updateConfiguration', async (params: { configuration?: string }) => {
+    const next = params?.configuration ?? '';
+    const previous = serverSettings.configuration;
+    if (!applyConfigurationChange(next)) {
+        logger.info(`📥 clarion/updateConfiguration — ${next || '(empty)'} is already active`);
+        return;
+    }
+    logger.info(`📥 clarion/updateConfiguration — ${previous} → ${next}`);
+    const passStart = Date.now();
+    // The graph's INCLUDE/MEMBER/MODULE edges and the declaration index's file set were resolved
+    // through the old configuration's redirection sections; rebuild both before re-checking.
+    const graphFiles = await rebuildFileRelationshipGraph('configuration-change');
+    const smForIndex = SolutionManager.getInstance();
+    if (smForIndex?.solution) {
+        const { StructureDeclarationIndexer } = await import('./utils/StructureDeclarationIndexer');
+        const indexer = StructureDeclarationIndexer.getInstance();
+        indexer.clearCache();
+        const projectPaths = [...new Set(smForIndex.solution.projects.map(p => p.path).filter(Boolean))];
+        await Promise.all(projectPaths.map(p => indexer.getOrBuildIndex(p).catch(err =>
+            logger.error(`❌ [INDEX] configuration-change rebuild failed for ${p}: ${err}`))));
+    }
+    lastValidatedVersions.clear();
+    let docCount = 0;
+    for (const document of documents.all()) {
+        try {
+            await validateTextDocument(document, 'configurationChanged');
+        } catch (err) {
+            logger.error(`❌ Re-validation error for ${document.uri}: ${err}`);
+        }
+        docCount++;
+    }
+    connection.sendNotification('clarion/refreshDocumentLinks');
+    perfLogger.perf("configurationChanged re-validation complete", {
+        ms: Date.now() - passStart,
+        doc_count: docCount,
+        frg_files: graphFiles.length,
+        configuration: next
+    });
+});
+
 connection.onNotification('clarion/projectConstantsChanged', () => {
     logger.test('📥 clarion/projectConstantsChanged — coalescing (#317)');
     projectConstantsCoalescer.trigger();
+});
+
+// #440: live log-level changes from the client. The client owns the setting;
+// this keeps the server process's override in step without a reload.
+connection.onNotification('clarion/setLogLevel', (params: { level?: string }) => {
+    LoggingConfig.LEVEL_OVERRIDE = LoggingConfig.normalizeOverride(params?.level);
+    // Logged at error so it lands whatever the new level is (confirms the change took).
+    logger.error(`log level override set to "${LoggingConfig.LEVEL_OVERRIDE ?? 'error (none)'}"`);
 });
 
 
@@ -3130,8 +3360,16 @@ connection.onRenameRequest(async (params: RenameParams) => {
     if (!document) return null;
 
     try {
-        return await renameProvider.provideRename(document, params.position, params.newName);
+        const edit = await renameProvider.provideRename(document, params.position, params.newName);
+        // #527 — occurrences in generated files outside the cursor's project were left
+        // alone; say so, and where the durable change belongs.
+        const report = renameProvider.getLastRenameReport();
+        if (report) void connection.window.showWarningMessage(report.message);
+        return edit;
     } catch (error) {
+        // #527 — a refusal with a reason (generated file) must reach the client so VS
+        // Code shows it, exactly as onPrepareRename does.
+        if (error instanceof ResponseError) throw error;
         logger.error(`❌ Error providing rename: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }

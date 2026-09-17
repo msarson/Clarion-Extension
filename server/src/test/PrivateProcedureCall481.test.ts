@@ -124,13 +124,13 @@ suite('#481 — a call to a PRIVATE MAP prototype from another module is reporte
         const doc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(filePath, 'latin1'));
         const tokens = TokenCache.getInstance().getTokens(doc);
         const diags = await validatePrivateProcedureCalls(tokens, doc);
-        return diags.map(d => ({ message: d.message, line: d.range.start.line, character: d.range.start.character, code: d.code }));
+        return diags.map(d => ({ message: String(d.message), line: d.range.start.line, character: d.range.start.character, code: d.code }));
     }
 
     function assertOneWarningFor(diags: { message: string; line: number; character: number; code?: string | number }[], name: string, line: number, character: number): void {
         assert.strictEqual(diags.length, 1, `expected exactly one warning, got: ${JSON.stringify(diags)}`);
-        assert.ok(diags[0].message.includes(name), `the warning must name ${name}: ${diags[0].message}`);
-        assert.ok(/PRIVATE/.test(diags[0].message), `the warning must say why: ${diags[0].message}`);
+        assert.ok(String(diags[0].message).includes(name), `the warning must name ${name}: ${diags[0].message}`);
+        assert.ok(/PRIVATE/.test(String(diags[0].message)), `the warning must say why: ${diags[0].message}`);
         assert.strictEqual(diags[0].code, 'private-procedure-call');
         assert.deepStrictEqual({ line: diags[0].line, character: diags[0].character }, { line, character },
             'the warning must sit on the call, not the line start');
@@ -296,7 +296,7 @@ suite('#481 — a call to a PRIVATE MAP prototype from another module is reporte
         });
         const diags = await diagnose('modB.clw');
         assertOneWarningFor(diags, 'HiddenProc', 4, 2);
-        assert.ok(diags[0].message.includes('modA.clw'), `must name the owning module: ${diags[0].message}`);
+        assert.ok(String(diags[0].message).includes('modA.clw'), `must name the owning module: ${diags[0].message}`);
     });
 
     // ── Overloads ──────────────────────────────────────────────────────────────

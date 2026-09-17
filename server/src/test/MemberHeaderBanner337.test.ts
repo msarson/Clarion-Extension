@@ -99,8 +99,8 @@ suite('Issue #337 — MEMBER header below a comment banner', () => {
 
         const diags = await validateUndeclaredVariablesAsync(tokens, memberDoc, symbolFinder);
         assert.strictEqual(
-            diags.find(d => d.message.includes("'ParentGlobal'")), undefined,
-            `expected NO diagnostic on ParentGlobal; got: ${JSON.stringify(diags.map(d => d.message))}`);
+            diags.find(d => String(d.message).includes("'ParentGlobal'")), undefined,
+            `expected NO diagnostic on ParentGlobal; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test('DocumentStructure.getMemberParentFile sees the banner-headed MEMBER', () => {

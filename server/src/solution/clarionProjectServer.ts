@@ -265,6 +265,10 @@ export class ClarionProjectServer {
                             }
                             
                             // Only use fallback if we couldn't extract a file name
+                            // #527 — `<Generated>true</Generated>` under the Compile item (xml2js:
+                            // lower-cased tag, single element as a string).
+                            const generated = typeof file === 'object' && file !== null &&
+                                String((file as { generated?: unknown }).generated ?? '').toLowerCase() === 'true';
                             if (!fileName) {
                                 fileName = `unknown-file-${index}-${Math.random().toString(36).substring(2, 10)}`;
                                 logger.warn(`⚠️ Using fallback file name: ${fileName}`);
@@ -279,7 +283,9 @@ export class ClarionProjectServer {
                             if (resolvedPath) {
                                 const relativePath = path.relative(this.path, resolvedPath);
                                 logger.info(`✅ Resolved path for ${fileName}: ${relativePath}`);
-                                return new ClarionSourcerFileServer(fileName, relativePath, this);
+                                const resolvedSf = new ClarionSourcerFileServer(fileName, relativePath, this);
+                                resolvedSf.generated = generated;
+                                return resolvedSf;
                             } else {
                                 logger.warn(`❌ Could not resolve file: ${fileName}, but will still include it in the project`);
                                 // Still include the file even if we can't resolve its path
@@ -291,7 +297,9 @@ export class ClarionProjectServer {
                                     this.lastLoadUnresolvedSample.push(fileName);
                                 }
                                 logger.info(`📂 Including file with original name: ${fileName}`);
-                                return new ClarionSourcerFileServer(fileName, fileName, this);
+                                const unresolvedSf = new ClarionSourcerFileServer(fileName, fileName, this);
+                                unresolvedSf.generated = generated;
+                                return unresolvedSf;
                             }
                         } catch (fileError) {
                             logger.error(`❌ Error processing file: ${fileError instanceof Error ? fileError.message : String(fileError)}`);

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { globalSolutionFile, globalClarionVersion, globalSettings, globalClarionPropertiesFile } from '../globals';
+import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
@@ -89,6 +90,10 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                     // #132 / dd87633f B3 — Clarion Tools pane picker entry point.
                     vscode.commands.executeCommand('clarion.setActiveVersion');
                     break;
+                case 'setConfiguration':
+                    // #530 — the Config row in the summary table.
+                    vscode.commands.executeCommand('clarion.setConfiguration');
+                    break;
             }
         });
 
@@ -122,8 +127,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _getSummaryRows(): { label: string; value: string }[] {
-        const rows: { label: string; value: string }[] = [];
+    private _getSummaryRows(): SummaryRow[] {
+        const rows: SummaryRow[] = [];
 
         // #132 / dd87633f B3 — Clarion version row always shows (even without
         // a solution open). Falls back to "Not set — click to choose" when
@@ -138,14 +143,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         // effective active.
         const effectiveVersion = globalClarionVersion;
         const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
-        let versionLabel: string;
-        if (!effectiveVersion) {
-            versionLabel = 'Not set — use Set Version';
-        } else if (defaultVersion && defaultVersion !== effectiveVersion) {
-            versionLabel = `${effectiveVersion} (default: ${defaultVersion})`;
-        } else {
-            versionLabel = effectiveVersion;
-        }
+        // #535 — a name the selected ClarionProperties.xml no longer registers says so.
+        const versionLabel = versionRowLabel(effectiveVersion, defaultVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
         rows.push({ label: 'Clarion', value: versionLabel });
 
         // #479 — the compile-target name stopped being a unique identifier once a
@@ -169,7 +168,9 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         const config = globalSettings.configuration;
         if (config) {
-            rows.push({ label: 'Config', value: config.split('|')[0] });
+            // #530 — clickable: the same picker as the status bar item and
+            // "Clarion: Set Configuration". Nobody found either.
+            rows.push({ label: 'Config', value: config.split('|')[0], command: 'setConfiguration', title: 'Change the build configuration' });
         }
 
         const solutionInfo = SolutionCache.getInstance().getSolutionInfo();
@@ -217,9 +218,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         );
 
         const summaryRows = this._getSummaryRows();
-        const summaryHtml = summaryRows.map(r =>
-            `<tr><td class="lbl">${escapeHtml(r.label)}</td><td class="val">${escapeHtml(r.value)}</td></tr>`
-        ).join('');
+        const summaryHtml = summaryRows.map(r => renderSummaryRow(r, escapeHtml)).join('');
 
         // #141 Q9 directive #2 — initial render must honour solution-loaded
         // state. Without this, the data-solution-only toolbar buttons would
@@ -253,6 +252,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     background: transparent;
     overflow: hidden;
   }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { text-decoration: underline; }
   .toolbar {
     display: flex;
     align-items: center;
@@ -348,14 +349,25 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
       });
     }
 
+    // #530 — a summary row carrying data-cmd (the Config row) posts its command,
+    // like the toolbar buttons. Delegated on tbody so re-rendered rows keep it.
+    var tbodyEl = document.querySelector('table tbody');
+    if (tbodyEl) {
+      tbodyEl.addEventListener('click', function(ev) {
+        var row = ev.target && ev.target.closest ? ev.target.closest('tr[data-cmd]') : null;
+        if (row) vscode.postMessage({ command: row.dataset.cmd });
+      });
+    }
+    function renderRow(r) {
+      var attrs = r.command ? ' data-cmd="' + escapeHtml(r.command) + '" class="clickable" title="' + escapeHtml(r.title || '') + '"' : '';
+      return '<tr' + attrs + '><td class="lbl">' + escapeHtml(r.label) +
+             '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
+    }
     window.addEventListener('message', function(e) {
       if (e.data && e.data.command === 'updateContent') {
         const tbody = document.querySelector('table tbody');
         if (tbody && Array.isArray(e.data.summaryRows)) {
-          tbody.innerHTML = e.data.summaryRows.map(function(r) {
-            return '<tr><td class="lbl">' + escapeHtml(r.label) +
-                   '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
-          }).join('');
+          tbody.innerHTML = e.data.summaryRows.map(renderRow).join('');
         }
         if (typeof e.data.solutionLoaded === 'boolean') {
           applySolutionLoaded(e.data.solutionLoaded);
@@ -372,6 +384,15 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
  * #148 — Cryptographically-random 32-char nonce for CSP `'nonce-...'` source.
  * Standard VS Code webview helper pattern.
  */
+/** #530 — a summary-table row; `command` makes it clickable (posted like a toolbar button). */
+export interface SummaryRow { label: string; value: string; command?: string; title?: string; }
+
+/** #530 — one `<tr>` of the summary table; exported so the markup can be tested without a webview. */
+export function renderSummaryRow(r: SummaryRow, esc: (s: string) => string): string {
+    const attrs = r.command ? ` data-cmd="${esc(r.command)}" class="clickable" title="${esc(r.title ?? '')}"` : '';
+    return `<tr${attrs}><td class="lbl">${esc(r.label)}</td><td class="val">${esc(r.value)}</td></tr>`;
+}
+
 function getNonce(): string {
     let text = '';
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

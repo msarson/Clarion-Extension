@@ -5197,6 +5197,38 @@
       ]
     },
     {
+      "name": "REGISTEREVENT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "event",
+              "optional": false
+            },
+            {
+              "name": "handler",
+              "optional": false
+            },
+            {
+              "name": "object",
+              "optional": false
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Alias prototype of REGISTER (the help: \"Can also be prototyped as REGISTEREVENT\"). Registers an event handler procedure to be called by the ACCEPT loop whenever the specified event occurs. handler is the ADDRESS of the procedure. object is a unique 32-bit identifier (typically ADDRESS(SELF)). Multiple handlers can be registered for the same event; they execute in reverse registration order.",
+          "syntax": "REGISTEREVENT(event, handler, object [, window] [, control])"
+        }
+      ]
+    },
+    {
       "name": "UNREGISTER",
       "signatures": [
         {
@@ -5225,6 +5257,38 @@
           "returnType": "",
           "description": "Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration. Can also be prototyped as UNREGISTEREVENT.",
           "syntax": "UNREGISTER([event] [, handler] [, object] [, window] [, control])"
+        }
+      ]
+    },
+    {
+      "name": "UNREGISTEREVENT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "event",
+              "optional": true
+            },
+            {
+              "name": "handler",
+              "optional": true
+            },
+            {
+              "name": "object",
+              "optional": true
+            },
+            {
+              "name": "window",
+              "optional": true
+            },
+            {
+              "name": "control",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Alias prototype of UNREGISTER (the help: \"Can also be prototyped as UNREGISTEREVENT\"). Unregisters a previously REGISTERed event handler. Omitting parameters unregisters all matching handlers (e.g., omit event to unregister all events for the object). The runtime automatically unregisters all handlers when a window closes, so explicit UNREGISTER is only needed for early deregistration.",
+          "syntax": "UNREGISTEREVENT([event] [, handler] [, object] [, window] [, control])"
         }
       ]
     },
@@ -5493,6 +5557,294 @@
           "returnType": "",
           "description": "Unloads a Windows standard .DLL that was left resident by CALL with flags bit 0 set. Use when the DLL is no longer needed to free memory.",
           "syntax": "UNLOAD(file)"
+        }
+      ]
+    },
+    {
+      "name": "COMPRESS",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "srcBuf",
+              "optional": false
+            },
+            {
+              "name": "level",
+              "optional": true
+            },
+            {
+              "name": "result",
+              "optional": true
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Compresses the data in the passed buffer and returns the compressed data. The optional level sets the compression level (default -1); the optional result receives a status code. The caller is responsible for disposing the returned buffer.",
+          "syntax": "COMPRESS(srcBuf, [level], [result])"
+        }
+      ]
+    },
+    {
+      "name": "DEBUGHOOK",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "element",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Includes a data element into the debugger stack trace list, so its value is visible in the debugger.",
+          "syntax": "DEBUGHOOK(element)"
+        }
+      ]
+    },
+    {
+      "name": "DECOMPRESS",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "destBuf",
+              "optional": false
+            },
+            {
+              "name": "srcBuf",
+              "optional": false
+            },
+            {
+              "name": "result",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Decompresses the data in the source buffer into the destination buffer. The optional result receives a status code.",
+          "syntax": "DECOMPRESS(destBuf, srcBuf, [result])"
+        }
+      ]
+    },
+    {
+      "name": "HTTPWEBREQUEST",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "httpWebAddress",
+              "optional": false
+            },
+            {
+              "name": "httpVerbMethod",
+              "optional": false
+            },
+            {
+              "name": "postData",
+              "optional": false
+            },
+            {
+              "name": "requestParameters",
+              "optional": false
+            },
+            {
+              "name": "contentType",
+              "optional": true
+            },
+            {
+              "name": "headers",
+              "optional": true
+            },
+            {
+              "name": "responseOut",
+              "optional": false
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Sends a request via HTTP or HTTPS and receives the response into a string buffer.",
+          "syntax": "HTTPWEBREQUEST(httpWebAddress, httpVerbMethod, postData, requestParameters, [contentType], [headers], responseOut)"
+        }
+      ]
+    },
+    {
+      "name": "HTTPWEBREQUESTTOFILE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "httpWebAddress",
+              "optional": false
+            },
+            {
+              "name": "httpVerbMethod",
+              "optional": false
+            },
+            {
+              "name": "postData",
+              "optional": false
+            },
+            {
+              "name": "requestParameters",
+              "optional": false
+            },
+            {
+              "name": "contentType",
+              "optional": true
+            },
+            {
+              "name": "headers",
+              "optional": true
+            },
+            {
+              "name": "errorOut",
+              "optional": false
+            },
+            {
+              "name": "outputFilename",
+              "optional": false
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Sends a request via HTTP or HTTPS and writes the response to the named output file.",
+          "syntax": "HTTPWEBREQUESTtoFile(httpWebAddress, httpVerbMethod, postData, requestParameters, [contentType], [headers], errorOut, outputFilename)"
+        }
+      ]
+    },
+    {
+      "name": "IMAGEROTATEFLIP",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "fileNameIn",
+              "optional": false
+            },
+            {
+              "name": "fileNameOut",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Rotates and/or flips an image file. When fileNameOut is omitted the input file is overwritten.",
+          "syntax": "ImageRotateFlip(fileNameIn, [fileNameOut])"
+        }
+      ]
+    },
+    {
+      "name": "IMAGETOPNG",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "fileNameIn",
+              "optional": false
+            },
+            {
+              "name": "fileNameOut",
+              "optional": true
+            }
+          ],
+          "returnType": "",
+          "description": "Converts an image file to PNG format. When fileNameOut is omitted the input file is replaced.",
+          "syntax": "ImageToPng(fileNameIn, [fileNameOut])"
+        }
+      ]
+    },
+    {
+      "name": "PRINTERDIALOGA",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "title",
+              "optional": true
+            },
+            {
+              "name": "flag",
+              "optional": true
+            },
+            {
+              "name": "prn",
+              "optional": true
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Variant of PRINTERDIALOG for an opened report. Displays the Windows printer choice, Print Setup, or Page Setup dialog based on flag and returns 1 if the user pressed OK, 0 if Cancel. With the last parameter omitted it is identical to PRINTERDIALOG.",
+          "syntax": "PRINTERDIALOGA([title], [flag], [prn])"
+        }
+      ]
+    },
+    {
+      "name": "SETLAYOUT",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "window",
+              "optional": false
+            },
+            {
+              "name": "layout",
+              "optional": false
+            }
+          ],
+          "returnType": "",
+          "description": "Sets the orientation (layout) of a window or report, for example a right-to-left layout.",
+          "syntax": "SETLAYOUT(window, layout)"
+        }
+      ]
+    },
+    {
+      "name": "QUOTE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "string",
+              "optional": false
+            },
+            {
+              "name": "flag",
+              "optional": false
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Expands (unpacks) string data, doubling single quotes and un-paired left angle brackets so the result is safe to use as a string constant. The flag selects which characters are expanded.",
+          "syntax": "QUOTE(string, flag)"
+        }
+      ]
+    },
+    {
+      "name": "UNQUOTE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "value",
+              "optional": false
+            }
+          ],
+          "returnType": "STRING",
+          "description": "Contracts the value's string data, singling up doubled single quotes and doubled un-paired left angle brackets — the inverse of QUOTE.",
+          "syntax": "UNQUOTE(value)"
+        }
+      ]
+    },
+    {
+      "name": "WHERE",
+      "signatures": [
+        {
+          "params": [
+            {
+              "name": "group",
+              "optional": false
+            },
+            {
+              "name": "field",
+              "optional": false
+            }
+          ],
+          "returnType": "LONG",
+          "description": "Returns a field's ordinal position within a GROUP, RECORD, CLASS, or QUEUE structure.",
+          "syntax": "WHERE(group, field)"
         }
       ]
     }

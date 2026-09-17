@@ -2,7 +2,7 @@
 
 All notable changes to the "clarion-extension" extension will be documented in this file.
 
-This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x and earlier), see [docs/archive/CHANGELOG-HISTORICAL.md](docs/archive/CHANGELOG-HISTORICAL.md).
+This changelog contains versions **0.7.0 and newer**. For older releases (0.6.x and earlier), see [dev/docs-internal/changelogs/CHANGELOG-HISTORICAL.md](dev/docs-internal/changelogs/CHANGELOG-HISTORICAL.md).
 
 ---
 

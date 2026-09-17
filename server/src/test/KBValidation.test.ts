@@ -23,7 +23,7 @@ CUS:ID    LONG
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const driverError = diagnostics.find(d => 
-            d.message.includes('missing required DRIVER')
+            String(d.message).includes('missing required DRIVER')
         );
         
         assert.ok(driverError, 'Should have DRIVER error');
@@ -40,7 +40,7 @@ Customer FILE,DRIVER('TOPSPEED')
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const recordError = diagnostics.find(d => 
-            d.message.includes('missing required RECORD')
+            String(d.message).includes('missing required RECORD')
         );
         
         assert.ok(recordError, 'Should have RECORD error');
@@ -62,7 +62,7 @@ CUS:Name  STRING(50)
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const fileErrors = diagnostics.filter(d => 
-            d.message.includes('FILE') && d.message.includes('missing')
+            String(d.message).includes('FILE') && String(d.message).includes('missing')
         );
         
         assert.strictEqual(fileErrors.length, 0, 'Should not have FILE errors');
@@ -87,7 +87,7 @@ CODE
         
         // Should NOT have errors - CASE without OF is valid
         const caseErrors = diagnostics.filter(d => 
-            d.message.includes('CASE') || d.message.includes('OF')
+            String(d.message).includes('CASE') || String(d.message).includes('OF')
         );
         
         assert.strictEqual(caseErrors.length, 0, 'CASE without OF should be valid');
@@ -106,7 +106,7 @@ CODE
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const orofError = diagnostics.find(d => 
-            d.message.includes('OROF must be preceded by an OF')
+            String(d.message).includes('OROF must be preceded by an OF')
         );
         
         assert.ok(orofError, 'Should have OROF error');
@@ -131,7 +131,7 @@ CODE
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const caseErrors = diagnostics.filter(d => 
-            d.message.includes('CASE') || d.message.includes('OROF')
+            String(d.message).includes('CASE') || String(d.message).includes('OROF')
         );
         
         assert.strictEqual(caseErrors.length, 0, 'Should not have CASE errors');
@@ -156,7 +156,7 @@ CODE
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const caseErrors = diagnostics.filter(d => 
-            d.message.includes('CASE') || d.message.includes('OF')
+            String(d.message).includes('CASE') || String(d.message).includes('OF')
         );
         
         assert.strictEqual(caseErrors.length, 0, 'Should not have CASE/OF errors');
@@ -177,7 +177,7 @@ CODE
         
         // CHOOSE should not generate any errors
         const chooseErrors = diagnostics.filter(d => 
-            d.message.includes('CHOOSE')
+            String(d.message).includes('CHOOSE')
         );
         
         assert.strictEqual(chooseErrors.length, 0, 'Should not have CHOOSE errors');
@@ -199,7 +199,7 @@ CODE
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const executeWarning = diagnostics.find(d => 
-            d.message.includes('EXECUTE expression should evaluate to a numeric')
+            String(d.message).includes('EXECUTE expression should evaluate to a numeric')
         );
         
         assert.ok(executeWarning, 'Should have EXECUTE warning');
@@ -219,7 +219,7 @@ CODE
         const diagnostics = DiagnosticProvider.validateDocument(document);
         
         const executeErrors = diagnostics.filter(d => 
-            d.message.includes('EXECUTE')
+            String(d.message).includes('EXECUTE')
         );
         
         assert.strictEqual(executeErrors.length, 0, 'Should not have EXECUTE errors');

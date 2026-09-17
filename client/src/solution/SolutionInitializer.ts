@@ -1,11 +1,17 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
+import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
+import { shadowedSettingKeys, removeFolderCopies } from '../utils/SolutionSettingsScope'; // #587
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
+import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
+import { ClarionExtensionCommands } from '../ClarionExtensionCommands'; // #567
+import { rememberedSolutionState, readRegisteredVersionNames, rememberedSolutionPromptCommand } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
 import {
     completeInitializationStatusBar,
     failInitializationStatusBar,
+    hideInitializationStatusBar,
     updateConfigurationStatusBar,
     updateBuildProjectStatusBar,
     updateInitializationStatusBar
@@ -59,7 +65,7 @@ export async function workspaceHasBeenTrusted(
     // welcome-view branch when `globalSolutionFile` stays empty.
 
     // Read current solution directly from workspace settings
-    const solutionFileFromSettings = workspace.getConfiguration().get<string>("clarion.currentSolution", "")
+    const solutionFileFromSettings = SettingsStorageManager.clarionSettings().get<string>("currentSolution", "") // #563
         || workspace.getConfiguration().get<string>("clarion.solutionFile", "");
     logger.info(`🔍 Solution file from workspace settings: ${solutionFileFromSettings || 'not set'}`);
 
@@ -127,13 +133,41 @@ export async function workspaceHasBeenTrusted(
         // version picker (#134 two-stage) which writes the new-format value
         // to L1 default. The warning at line ~174 already offers that as the
         // "Configure Now" action.
-        if (!globalClarionPropertiesFile || !globalClarionVersion) {
+        // #535 — a remembered version the selected ClarionProperties.xml no longer
+        // registers (the IDE was updated) is a stale name: same handling as a missing one.
+        const rememberedState = rememberedSolutionState(
+            globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
+            readRegisteredVersionNames(globalClarionPropertiesFile));
+        if (rememberedState === 'needs-version' || rememberedState === 'stale-version') {
+            const stale = rememberedState === 'stale-version';
+            // #498: initializing now can only end in "Initialization failed" with an empty
+            // Solution View. Leave the solution remembered, show the found-solutions list
+            // (which marks it) and offer the version picker; the tree keys off
+            // isSolutionConfigured(), so nothing renders as a loaded solution.
             logger.warn(
-                `⚠️ Missing Clarion properties file or version after upstream load — ` +
-                `globalClarionPropertiesFile="${globalClarionPropertiesFile || 'MISSING'}", ` +
-                `globalClarionVersion="${globalClarionVersion || 'MISSING'}". ` +
-                `Surfacing diagnostic at line ~174 instead of writing legacy defaults that would stomp user state.`
+                `⚠️ Solution "${globalSolutionFile}" is remembered but has no Clarion version ` +
+                `(propertiesFile="${globalClarionPropertiesFile || 'MISSING'}", version="${globalClarionVersion || 'MISSING'}"). ` +
+                `Not initializing; offering Set Version (#498).`
             );
+            hideInitializationStatusBar();
+            await commands.executeCommand("setContext", "clarion.solutionOpen", false);
+            await refreshSolutionTreeView();
+            const action = await vscodeWindow.showWarningMessage(
+                stale
+                    ? `"${path.basename(globalSolutionFile)}" remembers Clarion version "${globalClarionVersion}", but ` +
+                      `${path.basename(globalClarionPropertiesFile)} no longer registers it (the IDE may have been updated). ` +
+                      `Choose the version to use.`
+                    : `"${path.basename(globalSolutionFile)}" is remembered for this folder but has no Clarion version. ` +
+                      `Set one to load it.`,
+                "Set Version",
+                "Open Solution..."
+            );
+            // #572 — Set Version recovers the solution through the solution opener (pick, save, load).
+            const next = rememberedSolutionPromptCommand(action, globalSolutionFile);
+            if (next) {
+                await commands.executeCommand(next.command, ...next.args);
+            }
+            return;
         }
         
         // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
@@ -221,6 +255,7 @@ export async function initializeSolution(
 ): Promise<void> {
     const solutionName = globalSolutionFile ? path.basename(globalSolutionFile) : undefined;
     updateInitializationStatusBar('loading-solution', solutionName);
+    void offerToRemoveShadowedFolderSettings();
 
     logger.info("🔄 Initializing Clarion Solution...");
     
@@ -354,6 +389,13 @@ export async function initializeSolution(
             })
         );
 
+        // #567 — the paths sent below were filled only at startup (from the version remembered
+        // then) and by the Set Version picker, so a solution opened from the Solution View
+        // with another version sent the server empty or foreign paths. Load its own now.
+        if (!await ClarionExtensionCommands.loadVersionGlobalSettings(globalClarionPropertiesFile, globalClarionVersion)) {
+            logger.warn(`⚠️ ${globalClarionVersion} not found in ${globalClarionPropertiesFile}; sending the current paths`);
+        }
+
         // Send notification to initialize the server-side solution manager
         client.sendNotification('clarion/updatePaths', {
             redirectionPaths: [globalSettings.redirectionPath],
@@ -366,7 +408,13 @@ export async function initializeSolution(
             libsrcPaths: globalSettings.libsrcPaths,
             defaultLookupExtensions: globalSettings.defaultLookupExtensions, // Add default lookup extensions
             undeclaredVariablesEnabled: globalSettings.undeclaredVariablesEnabled, // #62 opt-in
+            unresolvedProcedureCallsEnabled: globalSettings.unresolvedProcedureCallsEnabled, // #517 opt-in
             indistinguishablePrototypesEnabled: globalSettings.indistinguishablePrototypesEnabled, // #121 opt-in
+            // #542 — the master switch and every per-check setting, from the shared table.
+            ...buildDiagnosticSettingsPayload(
+                (key, def) => workspace.getConfiguration("clarion").get<boolean>(key, def),
+                (key, def) => workspace.getConfiguration("clarion").get<string>(key, def) // #543
+            ),
             referencesCodeLensEnabled: globalSettings.referencesCodeLensEnabled, // #185 opt-out
             inlayHintsParameterNames: globalSettings.inlayHintsParameterNames,   // inlay opt-out
             inlayHintsImplicitTypes: globalSettings.inlayHintsImplicitTypes      // inlay opt-out
@@ -490,4 +538,40 @@ export async function reinitializeEnvironment(
     
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
+}
+
+/**
+ * #587 — settings a version before #563 wrote into the first folder's .vscode/settings.json
+ * override the .code-workspace file for these resource-scoped keys, so a workspace file that
+ * carries Clarion settings is ignored with nothing said (Mark's Release|Win32 and .pr/.prj list
+ * lost to a folder copy of Debug|Win32 and the default extensions). #563 stopped writing such
+ * copies; it cannot remove the ones already there, and the extension must not delete a user's
+ * settings unasked. So: report the conflict once per session and offer to remove the folder copy.
+ */
+let shadowedSettingsOffered = false;
+async function offerToRemoveShadowedFolderSettings(): Promise<void> {
+    if (shadowedSettingsOffered) return;
+    try {
+        const store = SettingsStorageManager.clarionSettings();
+        const shadowed = shadowedSettingKeys(store);
+        if (shadowed.length === 0) return;
+        shadowedSettingsOffered = true;
+        const folder = workspace.workspaceFolders?.[0];
+        const folderFile = folder ? path.join(folder.uri.fsPath, '.vscode', 'settings.json') : 'the folder settings';
+        const names = shadowed.map(k => `clarion.${k}`).join(', ');
+        logger.warn(`⚠️ #587 — folder settings shadow the workspace file: ${names}`);
+        const choice = await vscodeWindow.showWarningMessage(
+            `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.`,
+            'Remove from folder settings',
+            'Keep as is'
+        );
+        if (choice !== 'Remove from folder settings') return;
+        await removeFolderCopies(store, shadowed);
+        vscodeWindow.showInformationMessage(
+            `Removed ${names} from the folder settings. The workspace file is now in force — reload the window if a value looks stale.`
+        );
+        logger.info(`✅ #587 — removed folder copies: ${names}`);
+    } catch (error) {
+        logger.warn(`⚠️ #587 — could not check the folder settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }

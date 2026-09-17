@@ -6,7 +6,16 @@
  * to get project information and build the solution or individual projects.
  */
 
-import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection } from "vscode";
+import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection, OutputChannel } from "vscode";
+import { describeConfiguration, formatBuildHeader } from "./utils/ClarionBuildArgs";
+
+// #531 — one persistent "Clarion Build" channel: the header of every build lands
+// here first, and the MSBuild log is appended after it when the panel option is on.
+let buildOutputChannel: OutputChannel | undefined;
+function getBuildOutputChannel(): OutputChannel {
+    if (!buildOutputChannel) buildOutputChannel = window.createOutputChannel("Clarion Build");
+    return buildOutputChannel;
+}
 import { globalSolutionFile, globalSettings, globalClarionPropertiesFile } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
@@ -284,6 +293,8 @@ export function prepareBuildParameters(buildConfig: {
     buildLogPath: string;
     buildTarget: "Solution" | "Project";
     targetName: string;
+    /** #531 — the configuration the arguments were built from, as stored (`Debug|Win32` or `Debug`). */
+    configuration: string;
 } {
     const solutionDir = path.dirname(globalSolutionFile);
     const clarionBinPath = globalSettings.redirectionPath.replace(/redirection.*/i, "bin");
@@ -403,7 +414,8 @@ export function prepareBuildParameters(buildConfig: {
         buildArgs,
         buildLogPath,
         buildTarget: buildConfig.buildTarget,
-        targetName
+        targetName,
+        configuration: selectedConfig
     };
 }
 
@@ -422,9 +434,15 @@ export async function executeBuildTask(params: {
     buildLogPath: string;
     buildTarget: "Solution" | "Project";
     targetName: string;
+    configuration: string;
     diagnosticCollection: DiagnosticCollection;   // ✅ add
 }): Promise<void> {
-    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, diagnosticCollection } = params;
+    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, configuration, diagnosticCollection } = params;
+    // #531 — say what is being built, in which configuration, and the exact MSBuild
+    // command line, where the user can see it (the task terminal is hidden by default).
+    const buildOut = getBuildOutputChannel();
+    for (const line of formatBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs })) buildOut.appendLine(line);
+    buildOut.show(true);
 
     logger.info(`🔄 Executing build task for ${buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
     logger.info(`🔹 Working directory: ${solutionDir}`);
@@ -467,6 +485,7 @@ export async function executeBuildTask(params: {
                     buildLogPath,
                     buildTarget,
                     targetName,
+                    configuration,
                     diagnosticCollection
                 );
             }
@@ -534,6 +553,7 @@ function processTaskCompletion(
     buildLogPath: string,
     buildTarget: "Solution" | "Project",
     targetName: string,
+    configuration: string,
     diagnosticCollection: DiagnosticCollection   // ✅ add this
 ) {
     fs.readFile(buildLogPath, "utf8", (err, data) => {
@@ -545,15 +565,15 @@ function processTaskCompletion(
                 diagnosticCollection.clear();
                 const successMessage =
                     buildTarget === "Solution"
-                        ? `✅ Building Clarion Solution Complete: ${targetName}`
-                        : `✅ Building Clarion Project Complete: ${targetName}`;
+                        ? `✅ Building Clarion Solution Complete: ${targetName} — ${describeConfiguration(configuration)}`
+                        : `✅ Building Clarion Project Complete: ${targetName} — ${describeConfiguration(configuration)}`;
                 window.showInformationMessage(successMessage);
                 succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
             } else {
                 const failureMessage =
                     buildTarget === "Solution"
-                        ? `❌ Build Failed (Solution: ${targetName}) - Check terminal output for details`
-                        : `❌ Build Failed (Project: ${targetName}) - Check terminal output for details`;
+                        ? `❌ Build Failed (Solution: ${targetName}, ${describeConfiguration(configuration)}) - see the Clarion Build output`
+                        : `❌ Build Failed (Project: ${targetName}, ${describeConfiguration(configuration)}) - see the Clarion Build output`;
                 window.showErrorMessage(failureMessage);
                 failOperationStatusBar("build", failureMessage.replace(/^❌\s*/, ""));
             }
@@ -566,8 +586,7 @@ function processTaskCompletion(
         // Check if we should also show in Output panel
         const showInOutputPanel = workspace.getConfiguration("clarion.build").get<boolean>("showInOutputPanel", false);
         if (showInOutputPanel) {
-            const outputChannel = window.createOutputChannel("Clarion Build");
-            outputChannel.clear();
+            const outputChannel = getBuildOutputChannel();   // #531 — after the header, same channel
             outputChannel.append(data);
             outputChannel.show(true);
         }
@@ -591,7 +610,7 @@ function processTaskCompletion(
 
             // Only show error message if we actually found errors or warnings
             if (totalErrors > 0 || warningCount > 0) {
-                let message = `❌ Build Failed (${targetInfo}): `;
+                let message = `❌ Build Failed (${targetInfo}, ${describeConfiguration(configuration)}): `;
 
                 if (totalErrors > 0) {
                     message += `${totalErrors} error${totalErrors !== 1 ? "s" : ""}`;
@@ -613,8 +632,8 @@ function processTaskCompletion(
                 
                 const successMessage =
                     buildTarget === "Solution"
-                        ? `✅ Building Clarion Solution Complete: ${targetName}`
-                        : `✅ Building Clarion Project Complete: ${targetName}`;
+                        ? `✅ Building Clarion Solution Complete: ${targetName} — ${describeConfiguration(configuration)}`
+                        : `✅ Building Clarion Project Complete: ${targetName} — ${describeConfiguration(configuration)}`;
                 window.showInformationMessage(successMessage);
                 succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
             }
@@ -624,8 +643,8 @@ function processTaskCompletion(
 
             const successMessage =
                 buildTarget === "Solution"
-                    ? `✅ Building Clarion Solution Complete: ${targetName}`
-                    : `✅ Building Clarion Project Complete: ${targetName}`;
+                    ? `✅ Building Clarion Solution Complete: ${targetName} — ${describeConfiguration(configuration)}`
+                    : `✅ Building Clarion Project Complete: ${targetName} — ${describeConfiguration(configuration)}`;
             window.showInformationMessage(successMessage);
             succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
         }

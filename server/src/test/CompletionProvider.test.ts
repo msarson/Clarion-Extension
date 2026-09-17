@@ -267,9 +267,9 @@ suite('CompletionProvider — dot-triggered member completion', function () {
             this.timeout(10000);
             const content = [
                 'ThisWindow.Init PROCEDURE',
-                '  TestGloGroup GROUP,PRE(TGLO)',
-                '  Var1 LONG',
-                '  GLO:TGLO LONG',
+                'TestGloGroup GROUP,PRE(TGLO)',   // #499: labels start at column 0 — indented ones do not compile
+                'Var1 LONG',
+                'GLO:TGLO LONG',
                 '  END',
                 '  CODE',
                 '  TestGloGroup.'
@@ -289,8 +289,8 @@ suite('CompletionProvider — dot-triggered member completion', function () {
 
             const items = await localProvider.onCompletion(params, localDoc);
             const names = items.map(i => (i.label as string).toUpperCase());
-            assert.ok(names.includes('TGLO:VAR1'), `Expected TGLO:Var1 in: [${names.join(', ')}]`);
-            assert.ok(names.includes('TGLO:GLO:TGLO'), `Expected TGLO:GLO:TGLO in: [${names.join(', ')}]`);
+            assert.ok(names.includes('VAR1'), `Expected TGLO:Var1 in: [${names.join(', ')}]`);
+            assert.ok(names.includes('GLO:TGLO'), `Expected TGLO:GLO:TGLO in: [${names.join(', ')}]`);
         });
 
         test('reference LIKE alias dot-completion surfaces queue members (rq.)', async function () {

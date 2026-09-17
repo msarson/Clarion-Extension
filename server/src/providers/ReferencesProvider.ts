@@ -28,6 +28,7 @@ import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { serverSettings } from '../serverSettings'; // #559
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
@@ -45,6 +46,13 @@ logger.setLevel("error");
 // counts, prune stats, per-phase ms) so slow/wrong-scope reports from real
 // solutions are diagnosable from the user's log instead of fixture guesswork.
 const perfLogger = LoggerManager.getLogger("ReferencesProvider.Perf", "perf");
+
+// #557 — an INCLUDE directive and its file name, matched over file text.
+const INCLUDE_LINE_RE = /\bINCLUDE\s*\(\s*'([^']+)'/gi;
+
+// #550 — `Label CLASS(Parent)` on its own line (a Clarion label starts in column 1). The
+// class-family walk matches this over file TEXT instead of tokenizing each candidate.
+const CLASS_DERIVATION_RE = /^([A-Za-z_][A-Za-z0-9_:]*)\s+CLASS\s*\(\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)/gim;
 
 /**
  * Canonical dedup key for a reference location (#196 follow-up).
@@ -178,6 +186,17 @@ export class ReferencesProvider {
         };
         let resultCount = -1; // -1 = null result
         try {
+            // #557 — "who includes this file?" answers with INCLUDE lines wherever they sit:
+            // one inside an OMIT block is still an include statement, and the #255 omitted-
+            // line filter below would otherwise tokenize every file with a hit (876 files,
+            // 28s, for an ABC header) just to decide. Straight out, deduped.
+            const includeRefs = this.provideIncludeReferences(document, position);
+            if (includeRefs) {
+                this.trace({ route: 'include', word: path.basename(decodeURIComponent(document.uri)) });
+                const deduped = this.dedupeByNormalizedLocation(includeRefs);
+                resultCount = deduped.length;
+                return deduped;
+            }
             const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token, opts?.crossProjectDll !== false);
             // #322: dedup by NORMALIZED path — the cursor document's URI casing can
             // differ from the file-walk casing (CloneScript.clw:196 AND
@@ -434,7 +453,12 @@ export class ReferencesProvider {
             t.finishesAt !== undefined &&
             t.finishesAt >= position.line
         );
-        if (enclosingClass) {
+        // #560 — only the line's LABEL names a member. A cursor on a field's type
+        // (`ViewMetric &ctViewMetric`), a parameter type or an attribute asked for a member
+        // of that name, found none and returned nothing; resolve those like any other word.
+        const bodyLabel = /^[A-Za-z_][A-Za-z0-9_:]*/.exec(fullLine);
+        const cursorOnBodyLabel = !!bodyLabel && position.character <= bodyLabel[0].length;
+        if (enclosingClass && cursorOnBodyLabel) {
             const classLine = document.getText({
                 start: { line: enclosingClass.line, character: 0 },
                 end: { line: enclosingClass.line, character: 999 }
@@ -1243,11 +1267,22 @@ export class ReferencesProvider {
         let scanCount = 0;
         let prunedCount = 0;
         let ycMember = 0;
+        // #550 — the global scope a scanned file's receivers resolve against is that of
+        // the SCANNED file's program, not the cursor's: from an accessory's bare MEMBER()
+        // implementation the cursor has no program, and a generated module's call on an
+        // object declared in ITS program never resolved. One load per program, memoised.
+        const scopeByFile = new Map<string, Map<string, string> | undefined>();
         for (const fileUri of filesToSearchDeduped) {
             if (await this.yieldIfNeeded(ycMember++, token)) return null;
             if (!refIdx.mayContain(fileUri, memberName)) { prunedCount++; continue; }
             scanCount++;
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, globalScope);
+            const scopeKey = fileUri.toLowerCase();
+            let scanScope = scopeByFile.get(scopeKey);
+            if (!scopeByFile.has(scopeKey)) {
+                scanScope = this.scopeTypeIndex.loadGlobalScopeForFileUri(fileUri) ?? globalScope;
+                scopeByFile.set(scopeKey, scanScope);
+            }
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, scanScope);
             locations.push(...hits);
         }
         this.trace({ scan_files: scanCount, scan_pruned: prunedCount, scan_ms: Date.now() - scanStart, index_built: String(refIdx.isBuilt) });
@@ -1562,6 +1597,76 @@ export class ReferencesProvider {
         return result;
     }
 
+    /**
+     * #557 — every INCLUDE of the file named on the cursor's INCLUDE line, across the
+     * solution: the answer to "which file pulls this into global scope?" that Find All
+     * References on the type name cannot give (an INCLUDE line never mentions the type).
+     * Direct includers come from the file graph's reverse INCLUDE edges; when an includer
+     * is itself an include file, its includers follow, each hop listing the INCLUDE line
+     * that names that hop's file, so the PROGRAM carrying it appears. Includes inside
+     * conditional COMPILE / OMIT blocks are edges like any other. Null when the cursor is
+     * not on an INCLUDE directive or its file name.
+     */
+    private provideIncludeReferences(document: TextDocument, position: { line: number; character: number }): Location[] | null {
+        const tokens = this.tokenCache.getTokens(document);
+        const directive = tokens.find(t => t.line === position.line && t.type === TokenType.Directive && t.value.toUpperCase() === 'INCLUDE');
+        if (!directive) return null;
+        const literal = tokens.find(t => t.line === position.line && t.type === TokenType.String && t.start > directive.start);
+        if (!literal) return null;
+        if (position.character < directive.start || position.character > literal.start + literal.value.length) return null;
+        const target = literal.value.replace(/^'|'$/g, '');
+        if (!target) return null;
+
+        // The INCLUDE lines naming `target` in one file, found by a TEXT scan — a
+        // tokenize per includer was 240s over ABBROWSE.INC's includers on ap1.sln.
+        const base = path.basename(target).toLowerCase();
+        const includeLinesFor = (uri: string): Location[] => {
+            const text = uri.toLowerCase() === document.uri.toLowerCase()
+                ? document.getText()
+                : this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
+            if (text === null) return [];
+            const out: Location[] = [];
+            const lines = text.split(/\r?\n/);
+            for (let ln = 0; ln < lines.length; ln++) {
+                const line = lines[ln];
+                if (/^\s*!/.test(line)) continue;
+                INCLUDE_LINE_RE.lastIndex = 0;
+                let m: RegExpExecArray | null;
+                while ((m = INCLUDE_LINE_RE.exec(line)) !== null) {
+                    if (path.basename(m[1]).toLowerCase() !== base) continue;
+                    const nameStart = m.index + m[0].length - m[1].length - 1; // inside the opening quote
+                    out.push(Location.create(uri, Range.create(ln, nameStart, ln, nameStart + m[1].length)));
+                }
+            }
+            return out;
+        };
+
+        const locations: Location[] = includeLinesFor(document.uri);
+        const graph = FileRelationshipGraph.getInstance();
+        if (graph.isBuilt) {
+            // ONE hop — the files that include this file directly. Following includers of
+            // includers turned an ABC header into the whole include graph (5,912 hits in
+            // 2,403 files). To go up a level, run References on the includer's own INCLUDE line.
+            const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+            const targetPath = graph.getForwardEdges(docFsPath)
+                .find(e => e.type === 'INCLUDE' && path.basename(e.toFile).toLowerCase() === base)?.toFile;
+            if (targetPath) {
+                for (const includer of graph.getIncludingFiles(targetPath)) {
+                    const uri = 'file:///' + includer.replace(/\\/g, '/');
+                    if (uri.toLowerCase() !== document.uri.toLowerCase()) locations.push(...includeLinesFor(uri));
+                }
+            }
+        }
+        if (locations.length === 0) return null;
+        const seenLoc = new Set<string>();
+        return locations.filter(l => {
+            const k = `${decodeURIComponent(l.uri).toLowerCase()}#${l.range.start.line}:${l.range.start.character}`;
+            if (seenLoc.has(k)) return false;
+            seenLoc.add(k);
+            return true;
+        });
+    }
+
     private getMemberSearchFiles(
         document: TextDocument,
         declarationFile: string | null,
@@ -1633,6 +1738,19 @@ export class ReferencesProvider {
                     const fromUri = 'file:///' + edge.fromFile;
                     files.add(fromUri);
                     queue.push(edge.fromFile);
+                }
+            }
+
+            // #550 — a class instance declared at global level in a PROGRAM (or in an .inc
+            // the PROGRAM includes) is visible in every MEMBER module of that program, so a
+            // module can call its methods without including the class's .inc itself — the
+            // reverse-include walk alone never reached those modules, and a call site was
+            // found only when the cursor happened to be in it. Every file reached above
+            // that is a PROGRAM contributes its MEMBER modules (getMemberFiles is empty for
+            // anything else). Same rule as #524 for PROGRAM globals.
+            for (const reached of visited) {
+                for (const memberFsPath of graph.getMemberFiles(reached.replace(/\//g, '\\'))) {
+                    files.add('file:///' + memberFsPath);
                 }
             }
 
@@ -1965,21 +2083,16 @@ export class ReferencesProvider {
                 if (!mentionsFamily) continue;
                 scanned.add(uri);
                 scannedThisRound = true;
-                const tokens = this.getTokensForUri(uri);
-                if (!tokens) continue;
-                for (let i = 0; i < tokens.length; i++) {
-                    const t = tokens[i];
-                    if (t.type === TokenType.Structure && t.subType === TokenType.Class && t.label) {
-                        // Look for ( Variable ) immediately after CLASS on the same line
-                        const next = tokens[i + 1];
-                        const parent = tokens[i + 2];
-                        if (next && next.type === TokenType.Delimiter && next.value === '(' &&
-                            next.line === t.line &&
-                            parent && parent.type === TokenType.Variable &&
-                            parent.line === t.line) {
-                            pairs.set(t.label.toLowerCase(), parent.value.toLowerCase());
-                        }
-                    }
+                // #550 — a text scan, not a tokenize: the family only needs `Label CLASS(Parent)`
+                // lines, and a Clarion label always starts in column 1. Tokenizing every
+                // candidate (108 generated modules mentioning the class on ap1.sln) cost 12.7s
+                // of a 13.7s search; reading them and matching one anchored regex does not.
+                const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
+                if (text === null) continue;
+                CLASS_DERIVATION_RE.lastIndex = 0;
+                let cm: RegExpExecArray | null;
+                while ((cm = CLASS_DERIVATION_RE.exec(text)) !== null) {
+                    pairs.set(cm[1].toLowerCase(), cm[2].toLowerCase());
                 }
             }
 
@@ -2616,6 +2729,192 @@ export class ReferencesProvider {
     /**
      * Determine the set of file URIs to scan based on the symbol's scope.
      */
+    /**
+     * #526 — the search set for exported global data, or null when the symbol is not
+     * exported data.
+     *
+     * Definer: the declaring project when its own .exp exports the name (cursor in the
+     * globals module), else the first project reached through the declaring project's
+     * ProjectReference chain whose .exp exports it. Family: the definer plus every
+     * project that references it directly (the #330 reverse lookup), plus the
+     * declaring project itself. Fallback: an EXTERNAL declaration whose chain reaches
+     * no exporter (the DLL's project is outside the solution) searches every project.
+     * Both are pruned by the reference index, so the cost follows the files that
+     * mention the name, not the family size.
+     */
+    private exportedDataFamily(symbolInfo: SymbolInfo, currentDocument: TextDocument): string[] | null {
+        const solutionManager = SolutionManager.getInstance();
+        const projects = (solutionManager?.solution?.projects ?? []) as DllProjectLike[];
+        if (projects.length === 0) return null;
+        const name = symbolInfo.searchWord ?? symbolInfo.originalWord ?? symbolInfo.token.value;
+        if (!name) return null;
+        const declUri = symbolInfo.location.uri;
+        const declPath = decodeURIComponent(declUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const declProject = (solutionManager?.findProjectForFile?.(declPath) as DllProjectLike | undefined) ?? null;
+        if (!declProject) return null;
+        // Until the reference index is built (seconds after start) nothing can be pruned,
+        // and a family of 34 projects would mean scanning the whole solution (73s cold on
+        // ap1.sln). Stay project-scoped until then, as before #526.
+        if (!ReferenceCountIndex.getInstance().isBuilt) {
+            logger.test(`[FAR] #526: reference index not built yet → project-scoped search for "${name}"`);
+            return null;
+        }
+        const exp = ExpExportIndex.getInstance();
+        const byName = new Map<string, DllProjectLike>();
+        for (const p of projects) byName.set(p.name.toLowerCase(), p);
+
+        // Definer: self, else breadth-first through ProjectReference names.
+        let definer: DllProjectLike | null = exp.isExportedData(declProject, name) ? declProject : null;
+        if (!definer) {
+            const seen = new Set<string>([declProject.name.toLowerCase()]);
+            const queue: DllProjectLike[] = [declProject];
+            while (queue.length > 0 && !definer) {
+                const p = queue.shift()!;
+                for (const ref of p.projectReferences ?? []) {
+                    const key = ref?.name?.toLowerCase();
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    const target = byName.get(key);
+                    if (!target) continue;
+                    if (exp.isExportedData(target, name)) { definer = target; break; }
+                    queue.push(target);
+                }
+            }
+        }
+
+        const isExternalDecl = (): boolean => {
+            const tokens = this.getTokensForUri(declUri);
+            return tokens.some(t => t.line === symbolInfo.location.line && t.value.toUpperCase() === 'EXTERNAL');
+        };
+        if (!definer && !isExternalDecl()) return null;
+
+        const refIdx = ReferenceCountIndex.getInstance();
+        const files: string[] = [currentDocument.uri];
+        const seenFiles = new Set<string>([decodeURIComponent(currentDocument.uri).toLowerCase()]);
+        const pushUri = (uri: string) => {
+            const key = decodeURIComponent(uri).toLowerCase();
+            if (seenFiles.has(key)) return;
+            seenFiles.add(key);
+            files.push(uri);
+        };
+        pushUri(declUri);
+        const pushProject = (project: DllProjectLike, prune: boolean) => {
+            for (const sf of project.sourceFiles || []) {
+                if (!sf?.relativePath) continue;
+                const fullPath = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                if (prune && !refIdx.mayContain(fullPath, name)) continue;
+                pushUri(`file:///${fullPath.replace(/\\/g, '/')}`);
+            }
+        };
+
+        if (definer) {
+            pushProject(definer, true);
+            pushProject(declProject, true);
+            const defNameLower = definer.name.toLowerCase();
+            for (const p of projects) {
+                if (p === definer || p === declProject) continue;
+                if ((p.projectReferences || []).some(r => r?.name && r.name.toLowerCase() === defNameLower)) pushProject(p, true);
+            }
+            logger.test(`[FAR] #526: "${name}" exported by ${definer.name} → data family spans ${files.length} file(s)`);
+            return files;
+        }
+        for (const p of projects) pushProject(p, true);
+        logger.test(`[FAR] #526: "${name}" is EXTERNAL with no exporter in the solution → all projects, ${files.length} file(s) after pruning`);
+        return files;
+    }
+
+    /**
+     * #559 — a .cwproj lists modules only, so a use of a global name inside an INCLUDE'd
+     * file (a global instance in a data include, a class field typed with the class, a
+     * MAP prototype) was never a candidate. Walk the file graph's INCLUDE edges from the
+     * files already in the set and add each reached include whose text mentions the name.
+     *
+     * Library source folders are skipped: a vendor include cannot name a solution type,
+     * and the ABC chain alone is hundreds of files. The text check keeps an include that
+     * never mentions the name from being tokenized (the reference index covers modules
+     * only, so it cannot prune these). Returns the number of files added.
+     */
+    private addIncludedFiles(
+        allFiles: string[],
+        alwaysIncludeNames: Set<string>,
+        word: string
+    ): number {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt || !word) return 0;
+        const wordLower = word.toLowerCase();
+        const libsrcPrefixes = (serverSettings.libsrcPaths ?? [])
+            .filter(p => !!p)
+            .map(p => p.replace(/\\/g, '/').toLowerCase().replace(/\/?$/, '/'));
+        const inLibsrc = (p: string) => libsrcPrefixes.some(prefix => p.startsWith(prefix));
+        const toKey = (uri: string) => decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\\/g, '/').toLowerCase();
+
+        const inSet = new Set(allFiles.map(toKey));
+        const visited = new Set<string>(inSet);
+        let frontier = [...inSet];
+        let added = 0;
+        while (frontier.length > 0) {
+            const next: string[] = [];
+            for (const file of frontier) {
+                for (const edge of graph.getForwardEdges(file)) {
+                    if (edge.type !== 'INCLUDE') continue;
+                    const inc = edge.toFile;
+                    if (visited.has(inc)) continue;
+                    visited.add(inc);
+                    if (inLibsrc(inc)) continue;
+                    next.push(inc);
+                    if (alwaysIncludeNames.has(path.basename(inc))) continue;
+                    const text = this.readIncludeWalkSource(inc.replace(/\//g, '\\'));
+                    if (text === null || !text.toLowerCase().includes(wordLower)) continue;
+                    allFiles.push(`file:///${inc}`);
+                    added++;
+                }
+            }
+            frontier = next;
+        }
+        return added;
+    }
+
+    /**
+     * #523 — a class implementation compiled through LINK() is never a .cwproj item, so
+     * `project.sourceFiles` never lists it and a global symbol used inside it was
+     * invisible to FAR and rename. The file graph reaches such files through the CLASS
+     * MODULE edge of the declaring .inc (#522): add every MODULE-target file that is not
+     * a project item, restricted to the declaring project's folder when that is known
+     * so a same-named family in another project cannot leak in (#364). Returns the
+     * number of files added.
+     */
+    private addLinkOnlyImplementations(
+        allFiles: string[],
+        alwaysInclude: Set<string>,
+        alwaysIncludeNames: Set<string>,
+        projectDir: string | undefined
+    ): number {
+        const graph = FileRelationshipGraph.getInstance();
+        if (!graph.isBuilt) return 0;
+        const solutionManager = SolutionManager.getInstance();
+        const projectItems = new Set<string>();
+        for (const project of solutionManager?.solution?.projects ?? []) {
+            for (const sf of project.sourceFiles) {
+                const abs = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+                projectItems.add(abs.replace(/\\/g, '/').toLowerCase());
+            }
+        }
+        const dirPrefix = projectDir
+            ? projectDir.replace(/\\/g, '/').toLowerCase().replace(/\/?$/, '/')
+            : undefined;
+        let added = 0;
+        for (const impl of graph.getModuleImplementationFiles()) {
+            if (projectItems.has(impl)) continue;
+            if (dirPrefix && !impl.startsWith(dirPrefix)) continue;
+            const uri = `file:///${impl}`;
+            if (alwaysInclude.has(uri) || alwaysIncludeNames.has(path.basename(impl))) continue;
+            if (allFiles.includes(uri)) continue;
+            allFiles.push(uri);
+            added++;
+        }
+        return added;
+    }
+
     private getFilesToSearch(symbolInfo: SymbolInfo, currentDocument: TextDocument, crossProjectDll: boolean = true): string[] {
         const scopeType = symbolInfo.scope.type;
         const solutionManager = SolutionManager.getInstance();
@@ -2627,6 +2926,16 @@ export class ReferencesProvider {
         if (scopeType === 'local' || scopeType === 'parameter' || scopeType === 'routine') {
             logger.test(`[FAR] Scope="${scopeType}" → searching only current file`);
             return [currentDocument.uri];
+        }
+        // #526 — exported global data (a data DLL's globals module defines it, its .exp
+        // exports `$NAME`, consumers re-declare it EXTERNAL): the family is the exporting
+        // project plus every project referencing it. Checked before the scope branches
+        // because the definition lives in a bare-MEMBER module (module data by the
+        // language rule) and the re-declarations are PROGRAM data — neither branch
+        // would look across projects. Rename keeps the #330 policy (crossProjectDll).
+        if (crossProjectDll && symbolInfo.type !== 'PROCEDURE' && symbolInfo.type !== 'FUNCTION') {
+            const family = this.exportedDataFamily(symbolInfo, currentDocument);
+            if (family) return family;
         }
 
         if (scopeType === 'module') {
@@ -2716,8 +3025,23 @@ export class ReferencesProvider {
                         }
                     }
                 }
+                // #524 — data declared in a PROGRAM file, or in a file the PROGRAM INCLUDEs at
+                // global level, is global: the Language Reference's MEMBER page makes it
+                // visible to every MEMBER('program') module, and invisible to a bare MEMBER()
+                // "universal member module". The graph encodes exactly that split: a named
+                // MEMBER produces a MEMBER edge to its program, a bare one produces none. So
+                // the search set is the declaring file, the files that include it, and the
+                // MEMBER modules of any program among them (a LINK-only class file whose
+                // MEMBER names the program is one of those since #522).
+                if (!isMember && !isProcDecl && graph.isBuilt) {
+                    const declaringPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    const programWide = this.programGlobalSearchSet(declaringPath, symbolInfo.location.uri);
+                    if (programWide.length > 1) {
+                        logger.test(`[FAR] Scope="module" PROGRAM global → searching ${programWide.length} file(s): declaring + includers + their MEMBER modules (#524)`);
+                        return programWide;
+                    }
+                }
                 // MEMBER-file module symbols are visible only within that MEMBER module.
-                // PROGRAM-file module-level data (non-procedure) also stays local.
                 logger.test(`[FAR] Scope="module" → searching only declaring file: ${path.basename(decodeURIComponent(symbolInfo.location.uri))}`);
                 return [symbolInfo.location.uri];
             }
@@ -2765,7 +3089,10 @@ export class ReferencesProvider {
                     this.expandDllExportFamily(word330, defining330, allFiles);
                 }
 
-                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search`);
+                const linkOnly = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, declProject.path);
+                const includedFiles = this.addIncludedFiles(allFiles, alwaysIncludeNames, symbolInfo.token.value); // #559 — the word the scan loop searches
+                logger.test(`[FAR] #559: ${includedFiles} include file(s) mention the name`);
+                logger.test(`[FAR] Scope="${scopeType}" → project "${declProject.name}", ${allFiles.length} file(s) to search (${linkOnly} LINK-only implementation(s), #523)`);
                 return allFiles;
             }
 
@@ -2781,7 +3108,10 @@ export class ReferencesProvider {
                     }
                 }
             }
-            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search`);
+            const linkOnlyAll = this.addLinkOnlyImplementations(allFiles, alwaysInclude, alwaysIncludeNames, undefined);
+            const includedAll = this.addIncludedFiles(allFiles, alwaysIncludeNames, symbolInfo.token.value); // #559 — the word the scan loop searches
+            logger.test(`[FAR] #559: ${includedAll} include file(s) mention the name`);
+            logger.test(`[FAR] Scope="${scopeType}" → global (no declaring project found), solution has ${solutionManager.solution.projects.length} project(s), ${allFiles.length} file(s) to search (${linkOnlyAll} LINK-only implementation(s), #523)`);
             return allFiles;
         }
 
@@ -2927,6 +3257,36 @@ export class ReferencesProvider {
      * Returns true if the given file URI contains a MEMBER statement,
      * indicating it is a member file of a Clarion program (not a standalone program).
      */
+    /**
+     * #524 — the files that can see data declared at global level in `declaringPath`:
+     * the file itself, every file that INCLUDEs it (walking upward, since a global .inc
+     * may be included by another .inc the PROGRAM includes), and the MEMBER modules of
+     * every program reached that way. A file included only by a MEMBER module yields
+     * that module and nothing else, which is module data's visibility.
+     */
+    private programGlobalSearchSet(declaringPath: string, declaringUri: string): string[] {
+        const graph = FileRelationshipGraph.getInstance();
+        const out = new Set<string>([declaringUri]);
+        const seen = new Set<string>();
+        const queue: { file: string; depth: number }[] = [{ file: declaringPath, depth: 0 }];
+        const MAX_INCLUDE_DEPTH = 8;
+        while (queue.length > 0) {
+            const { file, depth } = queue.shift()!;
+            const key = file.replace(/\\/g, '/').toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            for (const memberFsPath of graph.getMemberFiles(file)) {
+                out.add(fsPathToUri(memberFsPath.replace(/\//g, '\\')));
+            }
+            if (depth >= MAX_INCLUDE_DEPTH) continue;
+            for (const includer of graph.getIncludingFiles(file)) {
+                out.add(fsPathToUri(includer.replace(/\//g, '\\')));
+                queue.push({ file: includer, depth: depth + 1 });
+            }
+        }
+        return [...out];
+    }
+
     private isMemberFile(uri: string): boolean {
         try {
             const tokens = this.getTokensForUri(uri);
@@ -3125,6 +3485,12 @@ export class ReferencesProvider {
                            token.value.toLowerCase() === '&' + searchWordLower) {
                     // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"
                     matchStart = token.start + 1; // skip the leading '&'
+                    matchLength = searchWord.length;
+                } else if (token.type === TokenType.PointerParameter &&
+                           token.value.replace(/^\*\s*/, '').toLowerCase() === searchWordLower) {
+                    // #561 — *TypeName pointer parameter in a prototype: "Init PROCEDURE(*ctThing pThing)".
+                    // One token covers the star, any spaces after it and the type name.
+                    matchStart = token.start + (token.value.length - searchWord.length);
                     matchLength = searchWord.length;
                 } else if (scopeType === 'field' && (token.type === TokenType.StructureField || token.type === TokenType.Class)) {
                     // Field reference via dot-notation: "QZipF.version" when searching for "version"

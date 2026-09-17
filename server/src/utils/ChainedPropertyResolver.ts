@@ -1,6 +1,6 @@
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Token } from '../ClarionTokenizer';
+import { Token, TokenType } from '../ClarionTokenizer';
 import { ClassMemberResolver } from './ClassMemberResolver';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
@@ -19,6 +19,13 @@ export interface ChainedMemberInfo {
 }
 
 const MAX_CHAIN_DEPTH = 10;
+
+/** #552 — where a chain segment lives: a class, or an inline structure declared in a class body. */
+interface InlineOwner { kind: 'inline'; file: string; line: number; className: string }
+export type Owner = { kind: 'class'; name: string } | InlineOwner;
+const INLINE_STRUCTURES = new Set(['GROUP', 'QUEUE', 'RECORD']);
+/** A bare structure keyword, optionally with attributes (`GROUP`, `QUEUE,PRE(Q)`) — no type argument. */
+const BARE_STRUCTURE_RE = /^(GROUP|QUEUE|RECORD)\s*(,.*)?$/i;
 
 /**
  * Resolves chained dot-notation access like SELF.Order.MainKey or
@@ -81,23 +88,56 @@ export class ChainedPropertyResolver {
         position: Position,
         paramCount?: number
     ): Promise<ChainedMemberInfo | null> {
-        // Steps 1-2: walk the chain to the class that owns the final member.
-        const currentClassName = await this.resolveFinalClassName(beforeDot, document, position);
-        if (!currentClassName) return null;
+        // Steps 1-2: walk the chain to the owner of the final member — a class, or (#552)
+        // an inline GROUP / QUEUE / RECORD declared in a class body.
+        const owner = await this.resolveFinalOwner(beforeDot, document, position);
+        if (!owner) return null;
 
-        // Step 3: look up the final target member in the resolved class
-        logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${currentClassName}"`);
-        const result = await this.memberLocator.findMemberInClass(
-            currentClassName, memberName, document, paramCount
-        );
+        // Step 3: look up the final target member in the resolved owner
+        const ownerLabel = owner.kind === 'class' ? owner.name : `inline structure at ${owner.file}:${owner.line}`;
+        logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${ownerLabel}"`);
+        const result = owner.kind === 'class'
+            ? await this.memberLocator.findMemberInClass(owner.name, memberName, document, paramCount)
+            : await this.findFieldInInlineStructure(owner, memberName);
 
         if (result) {
-            logger.info(`ChainedPropertyResolver: ✅ resolved "${memberName}" in "${currentClassName}" at ${result.file}:${result.line}`);
+            logger.info(`ChainedPropertyResolver: ✅ resolved "${memberName}" in "${ownerLabel}" at ${result.file}:${result.line}`);
         } else {
-            logger.info(`ChainedPropertyResolver: ❌ member "${memberName}" not found in "${currentClassName}"`);
+            logger.info(`ChainedPropertyResolver: ❌ member "${memberName}" not found in "${ownerLabel}"`);
         }
 
         return result ?? null;
+    }
+
+    /**
+     * #552 — a field of an inline structure: the GROUP / QUEUE / RECORD token on
+     * `owner.line` of `owner.file` bounds the search; fields are its column-0 labels,
+     * excluding those of structures nested deeper (which chain as their own owner).
+     */
+    private async findFieldInInlineStructure(owner: InlineOwner, fieldName: string): Promise<ChainedMemberInfo | null> {
+        const filePath = decodeURIComponent(owner.file.replace(/^file:\/\/\//i, ''));
+        const loaded = await this.memberLocator.loadDocumentForPath(filePath);
+        if (!loaded) return null;
+        const { doc, tokens } = loaded;
+        const isStructure = (t: Token) => t.type === TokenType.Structure && INLINE_STRUCTURES.has(t.value.toUpperCase()) && t.finishesAt !== undefined;
+        const structure = tokens.find(t => t.line === owner.line && isStructure(t));
+        if (!structure) return null;
+        const end = structure.finishesAt!;
+        const nested = tokens
+            .filter(t => isStructure(t) && t.line > owner.line && t.line < end)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        const inNested = (line: number) => nested.some(r => line > r.start && line < r.end);
+        const lines = doc.getText().split(/\r?\n/);
+        const wanted = fieldName.toUpperCase();
+        for (const t of tokens) {
+            if (t.line <= owner.line || t.line >= end) continue;
+            if (t.start !== 0 || inNested(t.line)) continue;
+            if (t.type !== TokenType.Label && t.type !== TokenType.Variable) continue;
+            if (t.value.toUpperCase() !== wanted) continue;
+            const type = (lines[t.line] ?? '').slice(t.value.length).replace(/!.*$/, '').trim();
+            return { type, className: owner.className, line: t.line, file: owner.file };
+        }
+        return null;
     }
 
     /**
@@ -116,6 +156,18 @@ export class ChainedPropertyResolver {
         document: TextDocument,
         position: Position
     ): Promise<string | null> {
+        const owner = await this.resolveFinalOwner(beforeDot, document, position);
+        // An inline structure has no class name to give (#552); callers that need one — the
+        // argument-classification overlay — simply skip, and resolve() handles the lookup.
+        return owner?.kind === 'class' ? owner.name : null;
+    }
+
+    /** The owner of the final member: a class, or an inline structure in a class body (#552). */
+    public async resolveFinalOwner(
+        beforeDot: string,
+        document: TextDocument,
+        position: Position
+    ): Promise<Owner | null> {
         const tokens = this.tokenCache.getTokens(document);
 
         // Split beforeDot by dots to get the chain segments.
@@ -149,8 +201,9 @@ export class ChainedPropertyResolver {
 
         logger.info(`ChainedPropertyResolver: root=${root} → class="${currentClassName}", chain=[${segments.slice(1).join('.')}]`);
 
-        // Step 2: walk each intermediate segment to get to the final type
+        // Step 2: walk each intermediate segment to get to the final owner
         const intermediateSegments = segments.slice(1); // drop SELF/PARENT
+        let owner: Owner = { kind: 'class', name: currentClassName };
 
         for (let depth = 0; depth < intermediateSegments.length; depth++) {
             if (depth >= MAX_CHAIN_DEPTH) {
@@ -159,15 +212,25 @@ export class ChainedPropertyResolver {
             }
 
             const segmentName = intermediateSegments[depth];
-            logger.info(`ChainedPropertyResolver: resolving segment "${segmentName}" in "${currentClassName}"`);
+            const ownerLabel = owner.kind === 'class' ? owner.name : `inline structure at ${owner.file}:${owner.line}`;
+            logger.info(`ChainedPropertyResolver: resolving segment "${segmentName}" in "${ownerLabel}"`);
 
-            const memberInfo = await this.memberLocator.findMemberInClass(
-                currentClassName, segmentName, document
-            );
+            const memberInfo: ChainedMemberInfo | null = owner.kind === 'class'
+                ? await this.memberLocator.findMemberInClass(owner.name, segmentName, document)
+                : await this.findFieldInInlineStructure(owner, segmentName);
 
             if (!memberInfo) {
-                logger.info(`ChainedPropertyResolver: member "${segmentName}" not found in "${currentClassName}"`);
+                logger.info(`ChainedPropertyResolver: member "${segmentName}" not found in "${ownerLabel}"`);
                 return null;
+            }
+
+            // #552 — an inline GROUP / QUEUE / RECORD member is its own type: the next
+            // segment is one of ITS fields, in the declaring file. A bare structure keyword
+            // names no class, which is why this chain used to stop here.
+            if (BARE_STRUCTURE_RE.test(memberInfo.type.trim())) {
+                owner = { kind: 'inline', file: memberInfo.file, line: memberInfo.line, className: memberInfo.className };
+                logger.info(`ChainedPropertyResolver: "${segmentName}" -> inline ${memberInfo.type} at ${memberInfo.file}:${memberInfo.line}`);
+                continue;
             }
 
             const nextClass = ClassMemberResolver.extractClassName(memberInfo.type);
@@ -176,11 +239,11 @@ export class ChainedPropertyResolver {
                 return null;
             }
 
-            currentClassName = nextClass;
-            logger.info(`ChainedPropertyResolver: "${segmentName}" → type="${memberInfo.type}" → next class="${currentClassName}"`);
+            owner = { kind: 'class', name: nextClass };
+            logger.info(`ChainedPropertyResolver: "${segmentName}" -> type="${memberInfo.type}" -> next class="${nextClass}"`);
         }
 
-        return currentClassName;
+        return owner;
     }
 
     /** Extracts the class name the current scope belongs to (for SELF resolution). Public for CompletionProvider. */

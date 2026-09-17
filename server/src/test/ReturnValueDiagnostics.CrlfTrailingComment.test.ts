@@ -48,8 +48,8 @@ suite('ReturnValueDiagnostics — CRLF line + trailing same-line comment', () =>
     });
     teardown(() => TokenCache.getInstance().clearAllTokens());
 
-    const discarded = (diags: { message: string }[]) =>
-        diags.filter(d => /is discarded/.test(d.message));
+    const discarded = (diags: { message: unknown }[]) =>
+        diags.filter(d => /is discarded/.test(String(d.message)));
 
     test('CRLF file, discarded call WITH a trailing comment on the same line still warns', async () => {
         const lines = [
@@ -71,8 +71,8 @@ suite('ReturnValueDiagnostics — CRLF line + trailing same-line comment', () =>
 
         const warns = discarded(diags);
         assert.strictEqual(warns.length, 1,
-            `CRLF line with a trailing comment must still warn — got: ${warns.map(w => w.message).join(' | ')}`);
-        assert.ok(warns[0].message.includes("'obj.Method'"));
+            `CRLF line with a trailing comment must still warn — got: ${warns.map(w => String(w.message)).join(' | ')}`);
+        assert.ok(String(warns[0].message).includes("'obj.Method'"));
     });
 
     test('CRLF file, discarded call WITHOUT a trailing comment warns (control case)', async () => {

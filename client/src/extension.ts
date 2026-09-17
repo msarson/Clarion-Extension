@@ -6,15 +6,16 @@ import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
 import { StructureViewProvider } from './views/StructureViewProvider';
 import { TreeNode } from './TreeNode';
 import { unsupportedPlatformNotice } from './platformUtils';
-import { globalSolutionFile, activateClarionVersionState } from './globals';
+import { globalSolutionFile, activateClarionVersionState, isSolutionConfigured } from './globals';
 import LoggerManager from './utils/LoggerManager';
 import { LoggingConfig } from '../../common/LoggingConfig';
+import { applyConfiguredLogLevel, registerLogLevelControl } from './logging/LogLevelController';
 import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerRunCommands } from './commands/RunCommands';
-import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands } from './commands/SolutionCommands';
+import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands, registerNoFolderSolutionCommands } from './commands/SolutionCommands';
 import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
@@ -82,6 +83,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
     LoggingConfig.PERF_CHANNELS_ENABLED =
         workspace.getConfiguration('clarion').get<boolean>('log.performance.enabled', false);
 
+    // #440: apply clarion.log.level to this process NOW (before the activation awaits),
+    // so a raised level captures the client's own startup warn/info lines. Forwarding to
+    // the server is skipped here — it is not up yet; the server reads the level from
+    // initializationOptions at init. Live changes are handled by registerLogLevelControl.
+    applyConfiguredLogLevel(false);
+
     // Per-session log file — truncates on activate so each session is fresh.
     // Diagnostic sink; failures are silent. Path: <workspace>/.clarion-debug/client.log
     // (or extension log dir when no workspace is open).
@@ -134,6 +141,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // available); no need to wait on globalState/solution/LSP/folder-settings
     // before registering. Existing late-call at line ~141 removed.
     registerSolutionToolbar(context);
+
+    // #513 — register the no-folder commands (Open Solution, Set Version) NOW,
+    // before any of the activation awaits below (version state, global state,
+    // and especially the language-server startup at Phase 6). The welcome-view
+    // "Open Solution" button targets clarion.openSolution; registering it at
+    // Phase 11 meant it did not exist until ~1s into activation, so a click in
+    // that window — or any stall in the server startup — produced
+    // "command 'clarion.openSolution' not found".
+    context.subscriptions.push(...registerNoFolderSolutionCommands(context, openClarionSolution));
+
+    // #440: the log-level command + live setting watcher are folder-independent
+    // diagnostics, so register them early alongside the other no-folder commands.
+    context.subscriptions.push(...registerLogLevelControl(context));
 
     const state: ActivationManager.ActivationState = {
         client,
@@ -219,7 +239,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // indicator is solution-load feedback only, driven by SolutionInitializer.
 
     // Always create views
-    await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && !!globalSolutionFile);
+    // #498: a remembered solution with no Clarion version is not "open" — the found-solutions
+    // view must show, not the empty loaded-solution tree.
+    await commands.executeCommand("setContext", "clarion.solutionOpen", hasFolder && isSolutionConfigured());
     
     const solutionTreeResult = await createSolutionTreeView(context, treeView, solutionTreeDataProvider);
     treeView = solutionTreeResult.treeView;

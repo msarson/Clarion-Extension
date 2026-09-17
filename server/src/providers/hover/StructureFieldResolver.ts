@@ -190,6 +190,17 @@ export class StructureFieldResolver {
                         logger.info(`✅ Found structure field info for ${fullReference}`);
                         return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
                     }
+
+                    // A structure declared with a type argument may ALSO add its own inline
+                    // fields: `Q QUEUE(SomeType)` holding its own extra fields alongside the
+                    // type's has BOTH sets. The inline ones exist only in THIS declaration
+                    // block, so the type-based lookup below can never reach them — it
+                    // resolves SomeType and correctly reports that an inline field isn't in it.
+                    const inlineField = this.findFieldInTokens(structureName, fieldName, tokens, document.uri, position.line);
+                    if (inlineField) {
+                        logger.info(`✅ Found inline field "${fieldName}" in structure "${structureName}"`);
+                        return inlineField;
+                    }
                 }
 
                 // Try typed class variable: find what class type structureName is,
@@ -277,6 +288,20 @@ export class StructureFieldResolver {
         if (fromCurrentDoc) return fromCurrentDoc;
 
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+
+        // SDI tier — mirrors MemberLocatorService.findMemberInClass's step 0.5. Without this,
+        // a type declared anywhere other than the CURRENT file's own textual INCLUDE chain
+        // (reachable only via a different module's includes) was unreachable no matter how
+        // precisely the SDI names its file — the include-chain walk below only ever starts
+        // from THIS document. The requesting file's own directory is passed so a type with
+        // several declaring copies resolves to the one the compiler's redirection order
+        // would bind (`.\` before the shared paths).
+        const sdiHit = await this.memberLocator.resolveSdiDeclaration(typeName, path.dirname(filePath), filePath); // #571
+        if (sdiHit) {
+            const fromSdi = this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri);
+            if (fromSdi) return fromSdi;
+        }
+
         const result = await this.findFieldInTypeIncludes(typeName, fieldName, filePath, new Set());
         if (result) return result;
 
@@ -292,12 +317,20 @@ export class StructureFieldResolver {
      * Searches an already-tokenized token array for a field inside a named GROUP/QUEUE/FILE type.
      * Used to resolve same-file type definitions without a disk read.
      */
-    private findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string): Hover | null {
-        const labelToken = tokens.find(t =>
+    private findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number): Hover | null {
+        const matchesName = (t: Token) =>
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
             t.start === 0 &&
-            t.value.toLowerCase() === typeName.toLowerCase()
-        );
+            t.value.toLowerCase() === typeName.toLowerCase();
+
+        // `atLine` (a cursor line) selects the declaration IN SCOPE rather than the first in the
+        // file. A type name is unique per file, so the default is fine for one — but a VARIABLE
+        // name can repeat across procedures, and taking the first match in the file can land on
+        // an unrelated, empty block of the same name declared elsewhere, reporting "no such field".
+        const labelToken = atLine === undefined
+            ? tokens.find(matchesName)
+            : tokens.reduce<Token | undefined>((best, t) =>
+                matchesName(t) && t.line <= atLine && (!best || t.line > best.line) ? t : best, undefined);
         if (!labelToken) return null;
 
         const labelIdx = tokens.indexOf(labelToken);

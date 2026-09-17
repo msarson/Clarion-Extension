@@ -168,6 +168,38 @@ export function registerSolutionOpeningCommands(
  * @param showClarionQuickOpen - Function to show quick open
  * @returns Array of disposables for the registered commands
  */
+/**
+ * #513 — commands that must work with no folder open: Open Solution, Set
+ * Version, and the debug history dump. Registered at the very start of
+ * activation, BEFORE the extension awaits the language-server startup, so the
+ * welcome-view "Open Solution" button (a `command:clarion.openSolution` link)
+ * resolves the moment the extension activates rather than ~1s later once the
+ * server is ready — the window in which a click produced "command not found".
+ *
+ * These ids are therefore NOT registered again in registerMiscSolutionCommands.
+ */
+export function registerNoFolderSolutionCommands(
+    context: ExtensionContext,
+    openClarionSolution: (context: ExtensionContext) => Promise<void>
+): Disposable[] {
+    return [
+        commands.registerCommand("clarion.openSolution", openClarionSolution.bind(null, context)),
+        // #132 / dd87633f B2 — solution-free version-selector command.
+        commands.registerCommand("clarion.setActiveVersion", async () => ClarionExtensionCommands.setActiveVersionCommand()),
+        commands.registerCommand("clarion.debugSolutionHistory", async () => {
+            const refs = await GlobalSolutionHistory.getReferences();
+            const valid = await GlobalSolutionHistory.getValidReferences();
+            logger.info(`📊 Debug Solution History:
+                Total: ${refs.length}
+                Valid: ${valid.length}`);
+            refs.forEach((ref, idx) => {
+                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
+            });
+            vscodeWindow.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
+        }),
+    ];
+}
+
 export function registerMiscSolutionCommands(
     context: ExtensionContext,
     hasFolder: boolean,
@@ -207,37 +239,18 @@ export function registerMiscSolutionCommands(
         await callback();
     };
 
-    // Register commands that work without folder
-    const commandsAlwaysAvailable = [
-        { id: "clarion.openSolution", handler: openClarionSolution.bind(null, context) },
-        // #132 / dd87633f B2 — solution-free version-selector command.
-        { id: "clarion.setActiveVersion", handler: async () => ClarionExtensionCommands.setActiveVersionCommand() },
-        { id: "clarion.debugSolutionHistory", handler: async () => {
-            const refs = await GlobalSolutionHistory.getReferences();
-            const valid = await GlobalSolutionHistory.getValidReferences();
-            logger.info(`📊 Debug Solution History:
-                Total: ${refs.length}
-                Valid: ${valid.length}`);
-            refs.forEach((ref, idx) => {
-                logger.info(`  ${idx + 1}. ${ref.solutionFile} (${ref.folderPath})`);
-            });
-            vscodeWindow.showInformationMessage(`Solution History: ${refs.length} total, ${valid.length} valid. Check output log for details.`);
-        }},
-    ];
-    
+    // #513 — the no-folder commands (openSolution, setActiveVersion,
+    // debugSolutionHistory) are registered EARLY by registerNoFolderSolutionCommands,
+    // before the extension awaits the language-server startup, so the welcome-view
+    // "Open Solution" button works the moment the extension activates. They are NOT
+    // re-registered here (a second registerCommand for the same id throws).
+
     const commandsRequiringFolder = [
         { id: "clarion.openSolutionFromList", handler: openSolutionFromList.bind(null, context) },
         { id: "clarion.closeSolution", handler: closeClarionSolution.bind(null, context) },
         { id: "clarion.setConfiguration", handler: setConfiguration },
         { id: "clarion.openSolutionMenu", handler: async () => Promise.resolve() } // Empty handler for the submenu
     ];
-
-    // Register commands that work without folder
-    commandsAlwaysAvailable.forEach(command => {
-        disposables.push(
-            commands.registerCommand(command.id, command.handler)
-        );
-    });
 
     // Register commands that require folder
     commandsRequiringFolder.forEach(command => {

@@ -23,6 +23,7 @@ fixtures for perf claims.
 node scripts/perf/lsp-driver.js            # warm run against ap1.sln
 node scripts/perf/lsp-driver.js --cold     # true cold start (wipes the %TEMP% caches)
 node scripts/perf/lsp-driver.js --sln=... --file=...
+node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatus ordering (#460); exit 0 = all pass
 ```
 
 - **Cold runs:** the server persists mtime-validated caches under
@@ -67,7 +68,25 @@ feel/rendering judgments, and VM-parity absolute timings.
   runs the server suite.
 - `version-x.y.z` branches have a pre-commit hook blocking direct source
   commits — branch off, then FF-merge back (FF bypasses the hook).
-- CHANGELOG.md gets a lean entry in the same commit as any user-facing change.
+- CHANGELOG.md gets a lean entry in the same commit as any user-facing change,
+  in the #492 style: no emoji; under an area subheading (`Navigation and hover`,
+  `Diagnostics`, `Performance`, `Configuration and build`, `Syntax`, `Editing`,
+  `Maintenance`); a bold short statement ending in a full stop, one or two
+  plain sentences, the issue/PR link, then `@handle` if contributed. Cause
+  narrative, measurements and test counts stay in the issue and commit. At
+  release time the section head gets the shields.io pills
+  (`fixes` 1f6feb · `new` 2da44e · `performance` 8250df, `?style=flat-square`)
+  and a one-to-two-sentence lead; the three newest versions stay in full,
+  older ones become a Highlights block linking `dev/docs-internal/changelogs/`
+  (that folder is gitignored — `git add -f` new archives).
 - Release packaging: run `npm run bundle` before `vsce package` if the VSIX
   comes out with hundreds of files (the `rimraf` in `package:release` can miss,
   leaving the tsc tree in `out/`; a correct bundle VSIX is ~26 files).
+- **One Node runtime, declared in four places.** `engines.vscode ^1.97.0` means
+  Electron 32.2.7, which bundles Node 20 (VS Code 1.97.0 `.npmrc` → Electron
+  `DEPS`: v20.18.1). So `.nvmrc`, `engines.node`, `@types/node` and the CI
+  `setup-node` step (which reads `.nvmrc`) all say 20, and they move together
+  whenever `engines.vscode` is raised. The dev box may run a newer Node, and V8
+  differs between majors (a `(?i:` regex passed on Node 26 and failed the 1.0.3
+  dry run, #490), so run `npm run test:node20` — the suite under Node 20 via
+  `npx node@20` — before any release dry run (#491).

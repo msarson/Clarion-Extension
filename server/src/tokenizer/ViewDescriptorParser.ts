@@ -22,8 +22,8 @@ export interface ViewDescriptor {
     from?: string;
     /** Every field named in PROJECT(...) clauses in declaration order. */
     projectedFields: string[];
-    /** Each JOIN entry with the optional INNER/OUTER side. */
-    joins: { side?: 'INNER' | 'OUTER'; joinedFile: string }[];
+    /** Each JOIN entry; `side` is 'INNER' when the JOIN carries the ,INNER attribute. */
+    joins: { side?: 'INNER'; joinedFile: string }[];
 }
 
 export class ViewDescriptorParser {
@@ -52,18 +52,15 @@ export class ViewDescriptorParser {
             }
         }
 
-        // JOIN, INNER JOIN, OUTER JOIN. The optional INNER/OUTER prefix is
-        // captured in group 1; the joined file is the first positional arg.
-        const joinRe = /\b(INNER\s+JOIN|OUTER\s+JOIN|JOIN)\s*\(\s*([^,)]+)/gi;
+        // JOIN(key, fields...)[,INNER]. INNER is a trailing attribute (Language
+        // Reference > View Structures > JOIN); the default is a left outer join and
+        // there is no OUTER keyword. `INNER JOIN(` is not Clarion — the compiler
+        // answers "Expected a PROJECT statement" (#504, test-programs/ViewJoinTest).
+        const joinRe = /\bJOIN\s*\(\s*([^,)]+)[^)]*\)\s*(,\s*INNER\b)?/gi;
         let jm: RegExpExecArray | null;
         while ((jm = joinRe.exec(bodyText)) !== null) {
-            const head = jm[1].toUpperCase();
-            const side = head.startsWith('INNER')
-                ? 'INNER'
-                : head.startsWith('OUTER')
-                    ? 'OUTER'
-                    : undefined;
-            const joinedFile = jm[2].trim().replace(/^['"]|['"]$/g, '');
+            const side = jm[2] ? 'INNER' : undefined;
+            const joinedFile = jm[1].trim().replace(/^['"]|['"]$/g, '');
             descriptor.joins.push({ side, joinedFile });
         }
 

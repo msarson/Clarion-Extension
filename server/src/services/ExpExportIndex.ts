@@ -31,6 +31,7 @@ logger.setLevel('error');
 
 interface ExpCacheEntry {
     exports: Set<string> | null;   // null = no .exp resolvable (EXE / not built)
+    data: Set<string> | null;      // #526 — exported DATA labels ($NAME lines), upper-cased
     expPath: string | null;
     mtimeMs: number;
     checkedAt: number;
@@ -48,6 +49,10 @@ const NEGATIVE_TTL_MS = 30_000;
 // Plain-procedure export line: NAME@F followed by a NON-digit (a digit right
 // after @F is the class-name length prefix of a method export).
 const PROC_EXPORT_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)@F(?![0-9])/;
+// #526 — exported data line: `$NAME @?` (a data DLL's generated globals module,
+// IBSCOGLO.CLW on the real substrate, exports every global by name this way). The
+// label may carry a single-colon prefix (GVF:OWNER).
+const DATA_EXPORT_RE = /^\s*\$([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*)\s+@\?/;
 
 export class ExpExportIndex {
     private static instance: ExpExportIndex | undefined;
@@ -64,6 +69,12 @@ export class ExpExportIndex {
     }
 
     /** True when `project`'s .exp exports a plain procedure named `name`. */
+    /** #526 — true when the project's .exp exports `name` as DATA (`$NAME @?`). */
+    public isExportedData(project: ExpProjectLike, name: string): boolean {
+        const entry = this.getEntry(project);
+        return entry?.data !== null && entry?.data !== undefined && entry.data.has(name.toUpperCase());
+    }
+
     public isExportedProcedure(project: ExpProjectLike, name: string): boolean {
         const exports = this.getExportedProcedures(project);
         return exports !== null && exports.has(name.toUpperCase());
@@ -74,7 +85,15 @@ export class ExpExportIndex {
      * .exp resolves (EXE apps, unbuilt projects). Lazy + mtime-validated.
      */
     public getExportedProcedures(project: ExpProjectLike): Set<string> | null {
-        const key = path.normalize(project.path).toLowerCase();
+        return this.getEntry(project)?.exports ?? null;
+    }
+
+    /** The mtime-validated parse of the project's .exp, or null when it has none. */
+    private getEntry(project: ExpProjectLike): ExpCacheEntry | null {
+        // #526 — key on folder AND name: on the real ap1.sln every .cwproj sits in one
+        // folder, so a folder-only key handed the first parsed .exp to all 40 projects
+        // (every project "exported" IBSCommon's data, and the definer walk failed).
+        const key = `${path.normalize(project.path).toLowerCase()}|${project.name.toLowerCase()}`;
         const cached = this.cache.get(key);
         const now = Date.now();
 
@@ -84,26 +103,29 @@ export class ExpExportIndex {
             } else {
                 try {
                     const mtimeMs = fs.statSync(cached.expPath).mtimeMs;
-                    if (mtimeMs === cached.mtimeMs) return cached.exports;
+                    if (mtimeMs === cached.mtimeMs) return cached;
                 } catch { /* fall through to re-locate */ }
             }
         }
 
         const expPath = this.locateExp(project);
         if (!expPath) {
-            this.cache.set(key, { exports: null, expPath: null, mtimeMs: 0, checkedAt: now });
+            this.cache.set(key, { exports: null, data: null, expPath: null, mtimeMs: 0, checkedAt: now });
             return null;
         }
 
         try {
             const stat = fs.statSync(expPath);
-            const exports = ExpExportIndex.parseExports(fs.readFileSync(expPath, 'utf8'));
-            this.cache.set(key, { exports, expPath, mtimeMs: stat.mtimeMs, checkedAt: now });
-            logger.info(`📦 [#330] Parsed ${exports.size} exported procedure(s) from ${expPath}`);
-            return exports;
+            const content = fs.readFileSync(expPath, 'utf8');
+            const exports = ExpExportIndex.parseExports(content);
+            const data = ExpExportIndex.parseDataExports(content);
+            const entry: ExpCacheEntry = { exports, data, expPath, mtimeMs: stat.mtimeMs, checkedAt: now };
+            this.cache.set(key, entry);
+            logger.info(`📦 [#330] Parsed ${exports.size} exported procedure(s) and ${data.size} exported data label(s) from ${expPath}`);
+            return entry;
         } catch (err) {
             logger.info(`[#330] .exp read failed for ${expPath}: ${err instanceof Error ? err.message : String(err)}`);
-            this.cache.set(key, { exports: null, expPath: null, mtimeMs: 0, checkedAt: now });
+            this.cache.set(key, { exports: null, data: null, expPath: null, mtimeMs: 0, checkedAt: now });
             return null;
         }
     }
@@ -121,6 +143,16 @@ export class ExpExportIndex {
     }
 
     /** Parse EXPORTS lines for plain-procedure symbols. Exported for tests. */
+    /** #526 — exported DATA labels (`$NAME @?` lines), upper-cased. */
+    public static parseDataExports(content: string): Set<string> {
+        const out = new Set<string>();
+        for (const rawLine of content.split(/\r?\n/)) {
+            const m = rawLine.match(DATA_EXPORT_RE);
+            if (m) out.add(m[1].toUpperCase());
+        }
+        return out;
+    }
+
     public static parseExports(content: string): Set<string> {
         const out = new Set<string>();
         for (const rawLine of content.split(/\r?\n/)) {

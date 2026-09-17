@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import LoggerManager from '../logger';
+import { resolutionEnvironmentKey } from '../solution/resolutionEnvironmentKey'; // #568
 
 const logger = LoggerManager.getLogger('IncludeIndexDiskCache');
 
@@ -32,7 +33,9 @@ export interface IncludeIndexEnvelope<P> {
 }
 
 function cacheFile(bucket: string, key: string): string {
-    const hash = crypto.createHash('md5').update(key.toLowerCase()).digest('hex');
+    // #568 — per install: the payload holds files resolved through its redirection, which still
+    // exist (with their mtimes) after a switch, so the mtime gate alone would reuse them.
+    const hash = crypto.createHash('md5').update(`${key.toLowerCase()}|${resolutionEnvironmentKey()}`).digest('hex');
     return path.join(os.tmpdir(), `clarion-extension-${bucket}`, `${bucket}-${hash}.json`);
 }
 

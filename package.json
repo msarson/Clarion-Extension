@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -16,7 +16,8 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.97.0",
+    "node": "20.x"
   },
   "activationEvents": [
     "onLanguage:clarion",
@@ -573,6 +574,11 @@
         "command": "clarion.setActiveVersion",
         "title": "Set Active Version",
         "category": "Clarion"
+      },
+      {
+        "command": "clarion.setLogLevel",
+        "title": "Set Log Level",
+        "category": "Clarion"
       }
     ],
     "menus": {
@@ -933,6 +939,9 @@
       }
     ],
     "configurationDefaults": {
+      "[clarion]": {
+        "editor.wordSeparators": "`~!@#$%^&*()-=+[{]}\\|;'\",.<>/?"
+      },
       "[clarion-template]": {
         "editor.colorDecorators": false,
         "editor.defaultColorDecorators": "never"
@@ -1351,15 +1360,274 @@
           "default": true,
           "description": "Enable or disable visual dimming of unreachable code in Clarion procedures and methods. Detects code after unconditional RETURN, EXIT, or HALT statements at top execution level."
         },
+        "clarion.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for every Clarion diagnostic. Off means the extension reports nothing in the Problems tab; the individual clarion.diagnostics.*.enabled settings apply only while this is on. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
         "clarion.diagnostics.undeclaredVariables.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enabled by default. Raises a Warning on assignments whose left-hand side identifier cannot be resolved to any declaration in the current file. v1 only checks bare-identifier LHS of assignments — prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked. Set to false if false-positives surface in your codebase. Toggling requires reloading the VS Code window (issue #62)."
+          "description": "Enabled by default. Raises a Warning on a bare identifier used in executable code — an assignment target or an operand in a condition or expression — that cannot be resolved to any declaration in the current file, including a PROGRAM's own main CODE section. Prefixed (Cus:Field), dotted (obj.member), and indexed (arr[i]) forms are intentionally not checked, and identifiers resolved across the reachable include chain are not flagged. Set to false if false-positives surface in your codebase. Takes effect as soon as it is changed, no reload needed (issue #62)."
+        },
+        "clarion.diagnostics.undeclaredVariables.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the undeclaredVariables check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.unresolvedProcedureCalls.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disabled by default. Raises a Warning on a call to a procedure whose name is declared nowhere the extension can see — not in this file's MAP or its MAP includes, not in the MEMBER parent's MAP or the MODULE blocks of the includes those MAPs pull in (the same places Go to Definition looks), and not in the solution's declaration index. This catches typos and calls to procedures that do not exist. Conservative on purpose: a procedure that exists in the solution but is not reachable from the call is not flagged, method calls (obj.Method) are out of scope, and nothing is reported while the index is still building or when a MEMBER's parent file cannot be found. Needs a loaded solution. Takes effect as soon as it is changed, no reload needed (issue #517)."
+        },
+        "clarion.diagnostics.unresolvedProcedureCalls.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the unresolvedProcedureCalls check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
         "clarion.diagnostics.indistinguishablePrototypes.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enabled by default. Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. Toggling requires reloading the VS Code window (issue #121)."
+          "description": "Enabled by default. Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. Takes effect as soon as it is changed, no reload needed (issue #121)."
+        },
+        "clarion.diagnostics.indistinguishablePrototypes.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the indistinguishablePrototypes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.unterminatedStructures.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a structure (IF, LOOP, CASE, GROUP, CLASS, WINDOW and the rest) with no closing END or period. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.unterminatedStructures.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the unterminatedStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.omitCompileBlocks.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an OMIT or COMPILE block whose terminator string never appears. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.omitCompileBlocks.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the omitCompileBlocks check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.fileDeclarations.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a FILE declaration missing its DRIVER attribute or its RECORD section. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.fileDeclarations.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the fileDeclarations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.caseStructures.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an OROF in a CASE that is not preceded by an OF. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.caseStructures.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the caseStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.executeStructures.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an EXECUTE whose expression is a string literal rather than a numeric value. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.executeStructures.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the executeStructures check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.returnStatements.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a procedure declared with a return type that has no RETURN statement, or only empty ones. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.returnStatements.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the returnStatements check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.classProperties.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a QUEUE declared directly as a CLASS property, or nested inside another QUEUE, where a QUEUE reference (&QUEUE) is required. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.classProperties.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the classProperties check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.discardedReturnValues.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a call whose return value is discarded when the procedure or method is not declared with the PROC attribute. Covers plain calls and method calls. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.discardedReturnValues.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the discardedReturnValues check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.cycleBreakOutsideLoop.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports CYCLE or BREAK outside any LOOP or ACCEPT, and a CYCLE or BREAK label that names no enclosing loop. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.cycleBreakOutsideLoop.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the cycleBreakOutsideLoop check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.reservedKeywordLabels.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a label that is a reserved Clarion keyword. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.reservedKeywordLabels.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the reservedKeywordLabels check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.unicodeCharacters.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a character that no Windows ANSI code page can represent, which would corrupt the file for the Clarion compiler. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.unicodeCharacters.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the unicodeCharacters check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.attributeApplicability.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.attributeApplicability.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the attributeApplicability check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.itemizeBlocks.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a declaration other than an EQUATE inside an ITEMIZE block. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.itemizeBlocks.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the itemizeBlocks check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.byRefArguments.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a literal passed to a by-reference (*TYPE) parameter. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.byRefArguments.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the byRefArguments check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.viewProjectFields.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a PROJECT field in a VIEW or JOIN that the projected FILE does not declare. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.viewProjectFields.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the viewProjectFields check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.missingIncludes.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a type used in the file whose declaring include file is not included. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.missingIncludes.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the missingIncludes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.missingConstants.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a type whose declaring include file needs a project DEFINE constant the project does not set. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.missingConstants.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the missingConstants check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.missingMapDeclarations.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a procedure implementation with no MAP prototype, and a prototype whose signature does not match its implementation. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.missingMapDeclarations.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the missingMapDeclarations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.missingImplementations.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a MAP prototype with no implementation. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.missingImplementations.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the missingImplementations check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.privateProcedureCalls.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a call to a PRIVATE procedure from outside the module that declares it. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.privateProcedureCalls.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the privateProcedureCalls check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.diagnostics.interfaceImplementation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports a CLASS that implements an INTERFACE but leaves one of its methods unimplemented. Takes effect as soon as it is changed, no reload needed (issue #542)."
+        },
+        "clarion.diagnostics.interfaceImplementation.severity": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint"],
+          "default": "default",
+          "description": "How the interfaceImplementation check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
         "clarion.referencesCodeLens.enabled": {
           "type": "boolean",
@@ -1370,6 +1638,17 @@
           "type": "boolean",
           "default": false,
           "description": "Disabled by default. Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the 'Clarion Language Server' output channel. Enable when reporting a performance problem — these lines identify exactly which operation is slow — then attach the channel contents to your issue. Negligible overhead either way; the timers always run, only the output is gated. Toggling requires reloading the VS Code window (issue #297)."
+        },
+        "clarion.log.level": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "default": "error",
+          "markdownDescription": "How much the Clarion extension logs. `error` (the default) logs only errors, which is what end users want. Raise it to capture a diagnostic log for a bug report: `warn` adds the extension's warnings (missing settings, degraded fallbacks), `info` adds a running trace of what it is doing, and `debug` adds everything. The lines go to the 'Clarion Extension (Client)' and 'Clarion Language Server' output channels and to `.clarion-debug/client.log`. `info` and `debug` are verbose on a large solution, so raise the level only while reproducing a problem, then set it back. Applies to both processes and takes effect immediately (no reload). Run **Clarion: Set Log Level** to change it from the palette."
         },
         "clarion.activeVersion": {
           "type": "string",
@@ -1408,6 +1687,7 @@
     "package": "npm run compile:dev && vsce package",
     "package:release": "npm run compile:release && vsce package --allow-star-activation",
     "watch": "tsc -b -w",
+    "test:node20": "npx -y node@20 node_modules/mocha/bin/mocha",
     "test": "npm run test:server",
     "pretest:server": "rimraf out/server/src/test && tsc -b",
     "test:server": "mocha",
@@ -1417,7 +1697,7 @@
   },
   "devDependencies": {
     "@types/mocha": "^8.2.2",
-    "@types/node": "^22.20.1",
+    "@types/node": "^20.19.43",
     "@types/vscode": "~1.97.0",
     "@types/xml2js": "^0.4.14",
     "@typescript-eslint/parser": "^8.69.0",
@@ -1428,7 +1708,7 @@
     "husky": "^9.1.7",
     "mocha": "^11.8.0",
     "rimraf": "^6.1.3",
-    "typescript": "^4.2.4"
+    "typescript": "~6.0.3"
   },
   "dependencies": {
     "glob": "^12.0.0",
@@ -1436,9 +1716,9 @@
     "minimatch": "^10.2.6",
     "minimist": "^1.2.6",
     "mkdirp": "^3.0.1",
-    "vscode-languageclient": "^8.1.0",
-    "vscode-languageserver": "^8.1.0",
-    "vscode-languageserver-protocol": "3.17.5",
+    "vscode-languageclient": "^10.1.1",
+    "vscode-languageserver": "^10.1.1",
+    "vscode-languageserver-protocol": "^3.18.3",
     "vscode-languageserver-textdocument": "^1.0.14",
     "xml2js": "^0.6.2"
   },

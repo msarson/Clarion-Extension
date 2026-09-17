@@ -41,7 +41,7 @@ suite('Issue #332 — doc-verified attribute applicability', () => {
             '  END',
             'END',
         ]);
-        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => d.message))}`);
+        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test("OVR and INS on SPIN — no diagnostic (Edin's report)", () => {
@@ -51,7 +51,7 @@ suite('Issue #332 — doc-verified attribute applicability', () => {
             '  SPIN(@n3),AT(10,30,40,12),USE(SpinVar2),RANGE(1,999),INS',
             'END',
         ]);
-        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => d.message))}`);
+        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test("FILL on PANEL — no diagnostic (Edin's follow-up report)", () => {
@@ -60,7 +60,7 @@ suite('Issue #332 — doc-verified attribute applicability', () => {
             '  PANEL,AT(10,10,100,50),USE(?Panel1),FILL(COLOR:Silver),BEVEL(2)',
             'END',
         ]);
-        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => d.message))}`);
+        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test('sweep additions: ALRT/FLAT/SCROLL/FULL on ENTRY, MARK on COMBO, EXTEND on report TEXT — no diagnostic', () => {
@@ -70,7 +70,7 @@ suite('Issue #332 — doc-verified attribute applicability', () => {
             '  COMBO(@s20),AT(10,30,80,12),USE(C1),FROM(Que),MARK(MarkVar)',
             'END',
         ]);
-        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => d.message))}`);
+        assert.strictEqual(diags.length, 0, `expected none, got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test('sentinel: ICON on ENTRY still flagged (not documented for ENTRY)', () => {
@@ -79,7 +79,7 @@ suite('Issue #332 — doc-verified attribute applicability', () => {
             "  ENTRY(@s20),AT(10,10,80,12),USE(E1),ICON('x.ico')",
             'END',
         ]);
-        assert.strictEqual(diags.length, 1, `expected exactly the ICON diagnostic, got: ${JSON.stringify(diags.map(d => d.message))}`);
-        assert.ok(diags[0].message.includes("'ICON' is not applicable to ENTRY"), diags[0].message);
+        assert.strictEqual(diags.length, 1, `expected exactly the ICON diagnostic, got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
+        assert.ok(String(diags[0].message).includes("'ICON' is not applicable to ENTRY"), String(diags[0].message));
     });
 });

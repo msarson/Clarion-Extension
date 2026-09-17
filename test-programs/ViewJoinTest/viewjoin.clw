@@ -46,5 +46,12 @@ ViewShortEnd         VIEW(Orders)
                        .
                      END
 
+ViewInnerAttr        VIEW(Orders)
+                       PROJECT(ORD:ID)
+                       JOIN(CUS:CusKey, ORD:CusID),INNER
+                         PROJECT(CUS:Name)
+                       END
+                     END
+
   CODE
   RETURN

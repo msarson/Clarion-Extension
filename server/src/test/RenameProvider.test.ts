@@ -99,21 +99,15 @@ suite('RenameProvider', () => {
             }
         });
 
-        test('rejects when file is in a libsrc directory', async () => {
+        test('allows a rename in a libsrc directory — the developer owns the consequences (#548)', async () => {
             serverSettings.libsrcPaths = ['c:\\clarion\\clarion11.1\\libsrc\\win'];
             const code = 'SomeProc PROCEDURE\nCODE\n  RETURN';
             const doc = createDocument(code, 'file:///c%3A/Clarion/Clarion11.1/libsrc/win/ABBROWSE.CLW');
             seedCache(doc);
 
-            try {
-                await provider.prepareRename(doc, { line: 0, character: 3 });
-                assert.fail('Should have thrown for libsrc file');
-            } catch (e: any) {
-                assert.ok(
-                    e.message && e.message.toLowerCase().includes('library'),
-                    `Error should mention library, got: "${e.message}"`
-                );
-            }
+            // #548 — where the cursor sits is not a reason to refuse; only generated code is.
+            const range = await provider.prepareRename(doc, { line: 0, character: 3 });
+            assert.ok(range, 'the rename box opens');
         });
 
         test('allows rename in user file even when libsrcPaths is set', async () => {
@@ -134,7 +128,7 @@ suite('RenameProvider', () => {
 
         // ─── ,DLL / unresolvable MODULE rejection (issue #93) ─────────────────
 
-        test('rejects a MAP procedure declared with ,DLL on its prototype line', async () => {
+        test('allows a MAP procedure declared with ,DLL (#548)', async () => {
             const code = [
                 'MAP',
                 '  MODULE(\'GLREPORTS.DLL\')',
@@ -145,19 +139,12 @@ suite('RenameProvider', () => {
             const doc = createDocument(code, 'file:///f%3A/MyProject/Reports.clw');
             seedCache(doc);
 
-            try {
-                // cursor on "CalcPercent" — line 2 (zero-based)
-                await provider.prepareRename(doc, { line: 2, character: 6 });
-                assert.fail('Should have thrown for ,DLL procedure');
-            } catch (e: any) {
-                assert.ok(
-                    e.message && e.message.includes('DLL'),
-                    `Error should mention DLL, got: "${e.message}"`
-                );
-            }
+            // #548 — a ,DLL prototype is hand-written source; whether the DLL follows is the developer's call.
+            const range = await provider.prepareRename(doc, { line: 2, character: 6 });
+            assert.ok(range, 'the rename box opens');
         });
 
-        test('rejects ,DLL even when written in lowercase or with extra whitespace', async () => {
+        test('allows ,dll written in lowercase or with extra whitespace (#548)', async () => {
             const code = [
                 'MAP',
                 '  MODULE(\'glreports.dll\')',
@@ -168,20 +155,12 @@ suite('RenameProvider', () => {
             const doc = createDocument(code, 'file:///f%3A/MyProject/Reports.clw');
             seedCache(doc);
 
-            try {
-                await provider.prepareRename(doc, { line: 2, character: 6 });
-                assert.fail('Should have thrown for case-variant ,dll procedure');
-            } catch (e: any) {
-                assert.ok(
-                    e.message && e.message.toUpperCase().includes('DLL'),
-                    `Error should mention DLL, got: "${e.message}"`
-                );
-            }
+            // #548 — same rule as above, whatever the spelling.
+            const range = await provider.prepareRename(doc, { line: 2, character: 6 });
+            assert.ok(range, 'the rename box opens');
         });
 
-        test('rejects a MAP procedure inside MODULE whose filename cannot be resolved via redirection', async () => {
-            // Solution loaded, but redirection finds nothing for the referenced file
-            stubSolutionManager(/* resolvable */ []);
+        test('allows a MAP procedure inside a MODULE whose filename cannot be resolved (#548)', async () => {
 
             const code = [
                 'MAP',
@@ -193,22 +172,12 @@ suite('RenameProvider', () => {
             const doc = createDocument(code, 'file:///f%3A/MyProject/Main.clw');
             seedCache(doc);
 
-            try {
-                await provider.prepareRename(doc, { line: 2, character: 6 });
-                assert.fail('Should have thrown for unresolvable MODULE');
-            } catch (e: any) {
-                assert.ok(
-                    e.message && e.message.toLowerCase().includes('could not be resolved'),
-                    `Error should mention 'could not be resolved', got: "${e.message}"`
-                );
-                assert.ok(
-                    e.message.includes('NotInSolution.clw'),
-                    `Error should name the referenced file, got: "${e.message}"`
-                );
-            }
+            // #548 — an unresolvable MODULE is not generated code; the prototype and call sites are still the developer's to rename.
+            const range = await provider.prepareRename(doc, { line: 2, character: 6 });
+            assert.ok(range, 'the rename box opens');
         });
 
-        test('rejects a bare MODULE keyword (no parenthesised filename)', async () => {
+        test('allows a bare MODULE keyword (#548)', async () => {
             // No SolutionManager — bare MODULE rejection fires regardless of solution state
             const code = [
                 'MAP',
@@ -220,15 +189,9 @@ suite('RenameProvider', () => {
             const doc = createDocument(code, 'file:///f%3A/MyProject/Bare.clw');
             seedCache(doc);
 
-            try {
-                await provider.prepareRename(doc, { line: 2, character: 6 });
-                assert.fail('Should have thrown for bare MODULE keyword');
-            } catch (e: any) {
-                assert.ok(
-                    e.message && e.message.toLowerCase().includes('could not be resolved'),
-                    `Error should mention 'could not be resolved', got: "${e.message}"`
-                );
-            }
+            // #548 — same rule.
+            const range = await provider.prepareRename(doc, { line: 2, character: 6 });
+            assert.ok(range, 'the rename box opens');
         });
 
         test('does NOT reject when MODULE filename resolves via redirection to a real file', async () => {

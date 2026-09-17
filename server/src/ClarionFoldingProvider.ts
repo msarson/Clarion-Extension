@@ -184,17 +184,13 @@ class ClarionFoldingProvider {
             logger.info(`✅ [FoldingProvider] ROUTINE '${token.value}' with inferred CODE folded from Line ${token.line} to ${token.finishesAt}`);
         }
     
-        // ✅ Recursively process children (with safety checks)
-        if (token.children && token.children.length > 0) {
-            if (token.children.length > 1000) {
-                logger.warn(`⚠️ [FoldingProvider] Token '${token.value}' has ${token.children.length} children - skipping to prevent explosion`);
-                return;
-            }
-            
-            for (const child of token.children) {
-                this.processFolding(child);
-            }
-        }
+        // No child recursion: the top-level loop in computeFoldingRanges already
+        // scans the WHOLE token stream and calls processFolding for every foldable
+        // token, nested ones included. Recursing into token.children therefore
+        // re-reached each nested structure (a VIEW's JOIN, a QUEUE inside a GROUP,
+        // …) a second time, adding no folding range — the `processedTokens` guard
+        // caught it — but logging a misleading "circular reference" warning per
+        // nested structure. Both the redundant walk and the warning are gone.
     }
     
     

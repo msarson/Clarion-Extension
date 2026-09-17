@@ -49,9 +49,9 @@ function cursorOn(text: string, needle: string, offset = 1) {
     throw new Error(`cursorOn: '${needle}' not found`);
 }
 
-async function hoverText(fix: Fixture, needle: string): Promise<string> {
+async function hoverText(fix: Fixture, needle: string, offset = 1): Promise<string> {
     const doc = TextDocument.create(fix.uri, 'clarion', 1, fix.text);
-    const hover = await new HoverProvider().provideHover(doc, cursorOn(fix.text, needle)) as Hover | null;
+    const hover = await new HoverProvider().provideHover(doc, cursorOn(fix.text, needle, offset)) as Hover | null;
     if (!hover || !hover.contents) return '';
     const c = hover.contents as { value?: string } | string;
     return typeof c === 'string' ? c : (c.value ?? '');
@@ -102,7 +102,10 @@ suite('Issue #474 — qualified field hover with no enclosing procedure scope', 
     });
 
     test('a dotted field describes the FIELD, not the FILE that qualifies it', async () => {
-        const text = await hoverText(writeFixture('dotted.clw', DATA_SECTION), 'Customer.ID');
+        // #540 — cursor on the FIELD half. The structure half now describes the structure,
+        // as it does inside a procedure; the capability this pins is that the field is
+        // looked up at all from a no-scope context.
+        const text = await hoverText(writeFixture('dotted.clw', DATA_SECTION), 'Customer.ID', 'Customer.'.length + 1);
         assert.notStrictEqual(text, '', 'PROJECT(Customer.ID) must produce a hover');
         assert.ok(/LONG/i.test(text),
             `must describe the ID field and its type, not the Customer FILE; got: ${text}`);

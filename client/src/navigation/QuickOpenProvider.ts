@@ -1,16 +1,22 @@
-import { commands, workspace, window as vscodeWindow, ExtensionContext } from 'vscode';
+import { commands, workspace, window as vscodeWindow } from 'vscode';
 import { SolutionCache } from '../SolutionCache';
 import { globalSettings } from '../globals';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import * as fs from 'fs';
+import { buildQuickOpenItems, DirEntry } from './QuickOpenList';
 
 const logger = LoggerManager.getLogger("QuickOpenProvider");
 logger.setLevel("error");
 
 /**
- * Shows a quick picker to open Clarion files from the solution
- * Searches project files, solution directory, and redirection paths
+ * Shows a quick picker to open Clarion files from the solution.
+ *
+ * #532 — the list is built by `QuickOpenList` (vscode-free, tested): the .cwproj items
+ * first, then every workspace root honouring `files.exclude` / `search.exclude` and
+ * labelled `<root> • <folder>` like VS Code, then the redirection paths outside the
+ * roots. Deduplicated by full path only, so same-named files in different folders
+ * are all listed and told apart by their description.
  */
 export async function showClarionQuickOpen(): Promise<void> {
     if (!workspace.workspaceFolders) {
@@ -27,140 +33,61 @@ export async function showClarionQuickOpen(): Promise<void> {
         return;
     }
 
-    // Collect all source files from all projects
-    const allFiles: { label: string; description: string; path: string }[] = [];
-    const seenFiles = new Set<string>();
-    const seenBaseNames = new Set<string>(); // Track base filenames to avoid duplicates
-
     // ✅ Use allowed file extensions from global settings
     const defaultSourceExtensions = [".clw", ".inc", ".equ", ".eq", ".int"];
     const allowedExtensions = [
         ...defaultSourceExtensions,
         ...globalSettings.fileSearchExtensions.map(ext => ext.toLowerCase())
     ];
-
     logger.info(`🔍 Searching for files with extensions: ${JSON.stringify(allowedExtensions)}`);
 
-    // First add all source files from projects
+    // The .cwproj items, with the project name for the description.
+    const projectFiles: { name: string; fullPath: string; project: string }[] = [];
     for (const project of solutionInfo.projects) {
         for (const sourceFile of project.sourceFiles) {
-            const fullPath = path.join(project.path, sourceFile.relativePath || "");
-            const baseName = sourceFile.name.toLowerCase();
-
-            if (!seenFiles.has(fullPath)) {
-                seenFiles.add(fullPath);
-                // Only claim this basename if the path actually exists on disk.
-                // If it doesn't exist, the redirection scan may find the real location.
-                if (fs.existsSync(fullPath)) {
-                    seenBaseNames.add(baseName);
-                }
-                allFiles.push({
-                    label: getIconForFile(sourceFile.name) + " " + sourceFile.name,
-                    description: project.name,
-                    path: fullPath
-                });
-            }
+            projectFiles.push({
+                name: sourceFile.name,
+                fullPath: path.join(project.path, sourceFile.relativePath || ""),
+                project: project.name,
+            });
         }
     }
 
-    // Get search paths from the server for each project and extension
-    const searchPaths: string[] = [];
+    // Every workspace root, with the exclude globs VS Code's own picker honours.
+    const roots = workspace.workspaceFolders.map(f => ({ name: f.name, path: f.uri.fsPath }));
+    const excludeGlobs = new Map<string, string[]>();
+    for (const folder of workspace.workspaceFolders) {
+        const on = (section: string): string[] => {
+            const map = workspace.getConfiguration(section, folder.uri).get<Record<string, boolean>>('exclude', {}) ?? {};
+            return Object.entries(map).filter(([, v]) => v === true).map(([k]) => k);
+        };
+        excludeGlobs.set(path.normalize(folder.uri.fsPath).replace(/[\\/]+$/, '').toLowerCase(), [...on('files'), ...on('search')]);
+    }
 
+    // Redirection search paths from the server for each project and extension.
+    const redirectionPaths: string[] = [];
     try {
-        logger.info("🔍 Requesting search paths from server...");
-
-        // Request search paths for each project and extension
         for (const project of solutionInfo.projects) {
             for (const ext of allowedExtensions) {
                 const paths = await solutionCache.getSearchPathsFromServer(project.name, ext);
-                if (paths.length > 0) {
-                    logger.info(`✅ Received ${paths.length} search paths for ${project.name} and ${ext}`);
-                    searchPaths.push(...paths);
-                }
+                if (paths.length > 0) redirectionPaths.push(...paths);
             }
         }
     } catch (error) {
         logger.error(`❌ Error requesting search paths: ${error instanceof Error ? error.message : String(error)}`);
     }
+    logger.info(`📂 Using search paths: ${JSON.stringify([...new Set(redirectionPaths)])}`);
 
-    // Remove duplicates from search paths
-    const uniqueSearchPaths = [...new Set(searchPaths)];
-    logger.info(`📂 Using search paths: ${JSON.stringify(uniqueSearchPaths)}`);
+    const readDir = (dir: string): DirEntry[] =>
+        fs.readdirSync(dir, { withFileTypes: true }).map(e => ({ name: e.name, isDirectory: e.isDirectory() }));
 
-    // Add files from the solution directory
-    const solutionDir = path.dirname(solutionInfo.path);
-    const additionalFiles = listFilesRecursively(solutionDir)
-        .filter(file => {
-            const ext = path.extname(file).toLowerCase();
-            return allowedExtensions.includes(ext);
-        })
-        .map(file => {
-            const relativePath = path.relative(solutionDir, file);
-            const filePath = file;
-
-            const baseName = path.basename(file).toLowerCase();
-            if (!seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                seenFiles.add(filePath);
-                seenBaseNames.add(baseName); // Add to seenBaseNames set
-                return {
-                    label: getIconForFile(file) + " " + path.basename(file),
-                    description: relativePath,
-                    path: filePath
-                };
-            }
-            return null;
-        })
-        .filter(item => item !== null) as { label: string; description: string; path: string }[];
-
-    // Add files from redirection paths
-    const redirectionFiles: { label: string; description: string; path: string }[] = [];
-
-    for (const searchPath of uniqueSearchPaths) {
-        try {
-            // Use manual recursive listing for all paths to ensure we only scan the specific directory
-            // workspace.findFiles() can scan outside the intended path if workspace root differs
-            logger.info(`📌 Scanning redirection path: ${searchPath}`);
-            
-            // Safety check: Don't scan root drives or parent directories
-            if (searchPath === 'C:\\' || searchPath === 'D:\\' || searchPath.match(/^[A-Z]:\\$/)) {
-                logger.warn(`⚠️ Skipping root drive scan: ${searchPath}`);
-                continue;
-            }
-            
-            // Safety check: Don't scan if path goes above solution directory
-            const solutionDir = path.dirname(solutionInfo.path);
-            if (!searchPath.startsWith(solutionDir) && !path.isAbsolute(searchPath)) {
-                logger.warn(`⚠️ Skipping path outside solution: ${searchPath}`);
-                continue;
-            }
-            
-            const externalFiles = listFilesRecursively(searchPath);
-
-            for (const filePath of externalFiles) {
-                const ext = path.extname(filePath).toLowerCase();
-
-                const baseName = path.basename(filePath).toLowerCase();
-                if (allowedExtensions.includes(ext) && !seenFiles.has(filePath) && !seenBaseNames.has(baseName)) {
-                    seenFiles.add(filePath);
-                    redirectionFiles.push({
-                        label: getIconForFile(filePath) + " " + path.basename(filePath),
-                        description: `Redirection: ${path.relative(searchPath, path.dirname(filePath))}`,
-                        path: filePath
-                    });
-                }
-            }
-        } catch (error) {
-            logger.warn(`⚠️ Error accessing search path: ${searchPath} - ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    // Combine and sort all files
-    const combinedFiles = [...allFiles, ...additionalFiles, ...redirectionFiles]
+    const combinedFiles = buildQuickOpenItems({ projectFiles, roots, redirectionPaths, allowedExtensions, excludeGlobs, readDir })
         .sort((a, b) => a.label.localeCompare(b.label));
 
-    // Show quick pick
+    // Show quick pick — descriptions carry the folder, so typing it narrows the list.
     const selectedFile = await vscodeWindow.showQuickPick(combinedFiles, {
         placeHolder: "Select a Clarion file to open",
+        matchOnDescription: true,
     });
 
     if (selectedFile) {
@@ -185,53 +112,5 @@ export async function showClarionQuickOpen(): Promise<void> {
         } catch (error) {
             vscodeWindow.showErrorMessage(`Failed to open file: ${selectedFile.path}`);
         }
-    }
-}
-
-/**
- * Recursively lists all files in a directory
- * @param dir - Directory to search
- * @returns Array of file paths
- */
-function listFilesRecursively(dir: string): string[] {
-    const files: string[] = [];
-
-    try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-
-            if (entry.isDirectory()) {
-                // Skip certain directories
-                if (!['node_modules', '.git', 'bin', 'obj'].includes(entry.name)) {
-                    files.push(...listFilesRecursively(fullPath));
-                }
-            } else {
-                files.push(fullPath);
-            }
-        }
-    } catch (error) {
-        logger.error(`Error reading directory ${dir}:`, error);
-    }
-
-    return files;
-}
-
-/**
- * Gets an appropriate icon for a file based on its extension
- * @param fileExt - File path or extension
- * @returns VS Code icon identifier
- */
-function getIconForFile(fileExt: string): string {
-    const ext = path.extname(fileExt).toLowerCase();
-
-    switch (ext) {
-        case '.clw': return '$(file-code)';
-        case '.inc': return '$(file-submodule)';
-        case '.equ':
-        case '.eq': return '$(symbol-constant)';
-        case '.int': return '$(symbol-interface)';
-        default: return '$(file)';
     }
 }

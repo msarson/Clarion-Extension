@@ -284,12 +284,10 @@ export class CompletionProvider {
         tokens: Token[]
     ): Promise<CompletionItem[] | null> {
         // Dot after a structure label with PRE(prefix) surfaces the same prefixed field
-        // set as qualifier completion (e.g. TestGloGroup. -> TGLO:*). Only meaningful on a
-        // bare dot; a partial after it is a field-name filter word completion already does.
-        if (partial === '') {
-            const structurePrefixItems = await this.completePrefixedStructureDot(chain, document, position, tokens);
-            if (structurePrefixItems) return structurePrefixItems;
-        }
+        // set as qualifier completion (e.g. TestGloGroup. -> TGLO:*, Orders. -> ORD:*),
+        // narrowed by the field-name letters typed after the dot (#505).
+        const structurePrefixItems = await this.completePrefixedStructureDot(chain, partial, document, position, tokens);
+        if (structurePrefixItems) return structurePrefixItems;
 
         const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
         if (!resolved) {
@@ -352,11 +350,15 @@ export class CompletionProvider {
     }
 
     /**
-     * For `StructureLabel.` where StructureLabel is a PRE(...) structure declaration
-     * in scope, return the same prefix-qualified field list as `PREFIX:`.
+     * For `StructureLabel.` (or `StructureLabel.Par`) where StructureLabel is a PRE(...)
+     * structure declaration in scope, return the same prefix-qualified field list as
+     * `PREFIX:`, filtered by the typed partial. The insert text is the whole field name:
+     * the client replaces the word at the cursor, which is the partial after the dot.
+     * FILE is included — `File.Field` is compiler-verified dot notation (#505).
      */
     private async completePrefixedStructureDot(
         chain: string,
+        partial: string,
         document: TextDocument,
         position: { line: number; character: number },
         tokens: Token[]
@@ -364,7 +366,7 @@ export class CompletionProvider {
         if (!chain || chain.includes('.')) return null;
 
         const chainUpper = chain.toUpperCase();
-        const structureKinds = new Set(['GROUP', 'QUEUE', 'RECORD']);
+        const structureKinds = new Set(['GROUP', 'QUEUE', 'RECORD', 'FILE']);
         let best: Token | undefined;
 
         for (const t of tokens) {
@@ -385,7 +387,13 @@ export class CompletionProvider {
         }
 
         if (!best) return null;
-        const items = await this.wordCompletion.provide(document, position, `${best.structurePrefix}:`);
+        // Qualifier completion already labels each item with the bare field name and
+        // carries the qualified name (ORD:CusID) as detail (#507); after a dot the whole
+        // field name is inserted, since the client replaces the partial typed after it.
+        const partialUpper = partial.toUpperCase();
+        const items = (await this.wordCompletion.provide(document, position, `${best.structurePrefix}:`))
+            .filter(item => String(item.label).toUpperCase().startsWith(partialUpper))
+            .map(item => ({ ...item, insertText: String(item.label) }));
         return items.length > 0 ? items : null;
     }
 
@@ -428,8 +436,14 @@ export class CompletionProvider {
         }
 
         // --- Plain word: variable or class name ---
-        // Try variable type resolution first
-        const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document);
+        // Try variable type resolution first. `position.line` lets resolveVariableType fall
+        // back to the enclosing procedure's parameters, which are not column-0 tokens and so
+        // are invisible to the declaration lookup — without it a PARAMETER receiver resolves
+        // to nothing here and drops through to the class-name fallback below, handing the
+        // VARIABLE's own name downstream as a class name. Every other caller that supports
+        // parameters (definition, hover's structure-field resolver, implementation) already
+        // passes it.
+        const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document, position.line);
         if (typeInfo) {
             return { className: typeInfo.typeName, callerClass };
         }
@@ -472,7 +486,9 @@ export class CompletionProvider {
                 ? await this.resolveParentOf(callerClass, document)
                 : null;
         } else {
-            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document);
+            // Same reason as the plain-word branch: a chain rooted on a PARAMETER
+            // (`pSomething.Member.`) needs the scope line to resolve its declared type.
+            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document, position.line);
             currentClass = typeInfo?.typeName ?? null;
         }
 

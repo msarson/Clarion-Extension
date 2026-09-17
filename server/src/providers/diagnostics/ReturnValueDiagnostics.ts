@@ -891,7 +891,8 @@ export async function validateDiscardedReturnValues(
     tokens: Token[],
     document: TextDocument,
     memberLocator: MemberLocatorService,
-    getOpenDocumentContent?: (absPath: string) => string | null
+    getOpenDocumentContent?: (absPath: string) => string | null,
+    isStale?: () => boolean
 ): Promise<Diagnostic[]> {
     const fnStart = Date.now();
     const diagnostics: Diagnostic[] = [];
@@ -1081,6 +1082,21 @@ export async function validateDiscardedReturnValues(
 
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
         await timeSlice();
+        // The document changed under this pass. The caller's stale-version guard discards
+        // this pass's answer regardless, so stop here rather than finish the walk: a cold
+        // pass on a large module runs for seconds, and while the user types each superseded
+        // pass would otherwise keep running beside the live one, sharing the single thread
+        // with interactive requests (a member-completion walk measured 24 ms alone and
+        // 2.5 s with two abandoned passes still resolving receivers next to it).
+        if (isStale?.()) {
+            perfLogger.perf("validateDiscardedReturnValues aborted (document changed)", {
+                ms: Date.now() - fnStart,
+                line: lineIdx,
+                lines: docLines.length,
+                uri: document.uri
+            });
+            return [];
+        }
         const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
         if (!range) continue;
 

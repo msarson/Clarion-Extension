@@ -1470,6 +1470,20 @@ export class DocumentStructure {
             }
         }
 
+        // 🛑 #504: JOIN opens a structure only inside a VIEW (or a JOIN nested in one) —
+        // Language Reference > View Structures > JOIN. Anywhere else the `Join(` shape
+        // is a prototype, a call or a label: demote it so it never eats an END.
+        if (token.value.toUpperCase() === "JOIN") {
+            const owner = this.structureStack[this.structureStack.length - 1];
+            const ownerName = owner?.value.toUpperCase();
+            if (ownerName !== "VIEW" && ownerName !== "JOIN") {
+                if (DOCSTRUCT_TRACE) logger.info(`📛 Demoting JOIN at line ${token.line} – not inside a VIEW (owner: ${ownerName ?? 'none'})`);
+                token.type = TokenType.Keyword;
+                token.subType = undefined;
+                return;
+            }
+        }
+
         // 🛑 Special handling: Skip MODULE structures that are part of CLASS attribute list
         if (token.value.toUpperCase() === "MODULE") {
             // 🚀 PERFORMANCE: Use tokensByLine index
@@ -1544,13 +1558,27 @@ export class DocumentStructure {
         // Examples: "AnswerDateTime GROUP(DateTimeType)." or "MyGroup GROUP;END"
         // Also applies to single-line control flow: "IF condition THEN statement." or "IF x THEN y END"
         // Handles line continuation: "IF x THEN | \n statement."
+        //
+        // #536 — the terminator is not necessarily the LAST token of the line. Statements may
+        // follow it after a separator:
+        //     OF DeleteKey ; IF ~RECORDS(xQ) THEN RETURN END ; GlobalRequest = Action:Delete
+        // Checking only the line's last token pushed that IF onto the stack, while the END
+        // handler (which treats any END sharing a line with a structure keyword as inline)
+        // never popped it — so the IF stayed open, swallowed the CASE's END, and the CASE was
+        // reported as unterminated. So: scan the tokens AFTER the keyword on its logical line
+        // and take the first END / period at nesting depth 0, counting structures opened
+        // further along the same line so that their END is not mistaken for ours
+        // (`IF x THEN LOOP ; BREAK ; END ; y = 1` — that END closes the LOOP).
         let endsOnSameLine = false;
         let continuationLine = token.line;
-        
+        let depth = 0;
+        let firstLine = true;
+        const lastLine = this.tokens[this.tokens.length - 1].line;
+
         // Follow line continuations to find the actual end
-        while (continuationLine < this.tokens[this.tokens.length - 1].line) {
+        scan: while (continuationLine <= lastLine) {
             const lineTokens = this.tokensByLine.get(continuationLine) || [];
-            
+
             // Find the last non-comment token on this line
             let lastSignificantToken: Token | undefined;
             for (let i = lineTokens.length - 1; i >= 0; i--) {
@@ -1560,36 +1588,54 @@ export class DocumentStructure {
                     break;
                 }
             }
-            
+
             if (!lastSignificantToken) {
                 break; // Empty line or only comments
             }
-            
-            // Check if this line has a continuation character
-            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation || 
-                                   lastSignificantToken.value === '|';
-            
-            if (hasContinuation) {
-                // Statement continues on next line
-                continuationLine++;
-                continue;
-            }
-            
-            // No continuation - check if this line ends with a terminator
-            const isEnd = lastSignificantToken.type === TokenType.EndStatement || 
-                         lastSignificantToken.value.toUpperCase() === 'END';
-            const isPeriod = lastSignificantToken.value === '.';
-            
-            if (isEnd || isPeriod) {
+
+            // On the keyword's own line only the tokens AFTER it can terminate it.
+            let i = firstLine ? lineTokens.indexOf(token) + 1 : 0;
+            firstLine = false;
+            for (; i < lineTokens.length; i++) {
+                const t = lineTokens[i];
+                if (t.type === TokenType.Comment) continue;
+                if (t.type === TokenType.Structure) {
+                    depth++;
+                    continue;
+                }
+                // #584 — the word END counts only as an END statement token: a name such as
+                // `access_token:end` in `IF access_token:end > 0` is not this IF's terminator.
+                const isEnd = t.type === TokenType.EndStatement ||
+                              t.value === '.';
+                if (!isEnd) continue;
+                if (depth > 0) {
+                    depth--; // closes a structure opened later on this line
+                    continue;
+                }
                 endsOnSameLine = true;
                 token.finishesAt = continuationLine;
+                t.inlineTerminator = true; // #578 — the END handler must not pop the stack for it
+                // #586 — and it closes THIS structure, so hovering it can say so (#575 / #582).
+                // A one-line structure is never pushed on the stack, so the END handler never
+                // links its terminator; this scan is the only place that knows the pairing.
+                t.parent = token;
                 // Mark if this spans multiple lines due to continuation
                 if (continuationLine > token.line) {
                     token.isSingleLineWithContinuation = true;
                 }
+                break scan;
             }
-            
-            break; // Found the end of the statement
+
+            // Check if this line has a continuation character
+            const hasContinuation = lastSignificantToken.type === TokenType.LineContinuation ||
+                                   lastSignificantToken.value === '|';
+
+            if (!hasContinuation) {
+                break; // Found the end of the statement
+            }
+
+            // Statement continues on next line
+            continuationLine++;
         }
         
         // If structure ends on same line, don't push to stack (no folding needed)
@@ -1941,16 +1987,15 @@ export class DocumentStructure {
     }
 
     private handleEndStatementForStructure(token: Token, index: number): void {
-        // ✅ Check if this END/period is an inline terminator
-        // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
-        const sameLine = this.tokensByLine.get(token.line) || [];
-        const structureOnSameLine = sameLine.find(t => 
-            t.type === TokenType.Structure && t !== token
-        );
-        
-        if (structureOnSameLine) {
-            // This is an inline terminator - don't pop from stack
-            if (DOCSTRUCT_TRACE) logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+        // ✅ An inline terminator closes a structure that opened on its own logical line, and was
+        // claimed as such by that structure's same-line scan (handleStructureToken, #536).
+        // #578 — this used to be "any structure keyword on the same line", which also caught an
+        // END that comes BEFORE a one-line structure (`END ; IF c THEN d = 1.`) or AFTER one that
+        // is already closed (`IF a THEN b = 1. END`): the structure the END really closes stayed
+        // open (CBWndPreview.clw, ~1,900 lines). Asking whether this token IS a claimed terminator
+        // keeps both sides of the decision in one place.
+        if (token.inlineTerminator) {
+            if (DOCSTRUCT_TRACE) logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} (not popping stack)`);
             return;
         }
         

@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 /**
  * Pure decision policy for #146 + #104 contracts. Lives in its own file (no
  * vscode-API dependency) so unit tests can import the helper directly without
@@ -93,4 +95,156 @@ export function shouldRestoreSolutionFromHistory(
     if (explicitlyClosed) return false;
     if (globalSolutionFile) return false;
     return hasWorkspaceFolder;
+}
+
+/**
+ * #498 — what the remembered solution settings amount to.
+ *
+ *   - 'none'          no solution is remembered: the no-solution UI (found solutions,
+ *                     recent solutions, Open Solution) applies.
+ *   - 'ready'         solution, ClarionProperties.xml and version are all known: the
+ *                     loaded-solution UI applies and initialization may proceed.
+ *   - 'needs-version' a solution is remembered but its Clarion version or properties
+ *                     file is not (the folder was checked out elsewhere, or
+ *                     `.vscode/settings.json` was deleted): the no-solution UI applies,
+ *                     the remembered entry is marked, and Set Version is offered.
+ *                     Initialization must NOT be attempted — it can only fail.
+ */
+export type RememberedSolutionState = 'none' | 'ready' | 'needs-version' | 'stale-version';
+
+export function rememberedSolutionState(
+    solutionFile: string,
+    propertiesFile: string,
+    version: string,
+    registeredVersions?: ReadonlyArray<string> | null
+): RememberedSolutionState {
+    if (!solutionFile) return 'none';
+    if (!propertiesFile || !version) return 'needs-version';
+    // #535 — 'stale-version': the name is remembered but the selected
+    // ClarionProperties.xml no longer registers it (the IDE was updated, a beta
+    // build replaced another). Treated like a missing version everywhere: the
+    // string being non-empty must not pose as a usable install. A registry that
+    // could not be read (null / omitted) does not judge the name.
+    if (registeredVersions && !registeredVersions.some(n => n.toLowerCase() === version.toLowerCase())) {
+        return 'stale-version';
+    }
+    return 'ready';
+}
+
+/**
+ * #535 — the Win32 version names a ClarionProperties.xml registers: the `name`
+ * of every `<Properties>` directly under `<Properties name="Clarion.Versions">`,
+ * Clarion.NET entries skipped. Regex on the XML text, so it stays free of the
+ * XML parser and can be called synchronously wherever the state is decided.
+ */
+export function registeredVersionNamesFromXml(xml: string): string[] {
+    // Walk <Properties ...> / </Properties> tags with a depth counter from the
+    // Clarion.Versions start tag: the version entries are its DIRECT children, and
+    // each carries nested <Properties> of its own, so a lazy regex to the first
+    // </Properties> stops too early.
+    const startTag = /<Properties\s+name="Clarion\.Versions"\s*\/?>/i.exec(xml);
+    if (!startTag) return [];
+    if (startTag[0].endsWith('/>')) return [];
+    const names: string[] = [];
+    const tag = /<Properties\b([^>]*?)(\/?)>|<\/Properties\s*>/g;
+    tag.lastIndex = startTag.index + startTag[0].length;
+    let depth = 1;
+    let m: RegExpExecArray | null;
+    while ((m = tag.exec(xml)) !== null) {
+        if (m[0].startsWith('</')) {
+            depth--;
+            if (depth === 0) break;
+            continue;
+        }
+        const selfClosing = m[2] === '/';
+        if (depth === 1) {
+            const nameAttr = /\bname="([^"]+)"/.exec(m[1] ?? '');
+            const name = nameAttr?.[1];
+            if (name && /^Clarion\b/i.test(name) && !/^Clarion\.NET\b/i.test(name) && !names.includes(name)) names.push(name);
+        }
+        if (!selfClosing) depth++;
+    }
+    return names;
+}
+
+const registryCache = new Map<string, { mtimeMs: number; names: string[] }>();
+
+/**
+ * #535 — the registered version names of a ClarionProperties.xml on disk, mtime-cached;
+ * null when the file cannot be read (then the remembered name is not judged).
+ */
+export function readRegisteredVersionNames(propertiesFile: string): string[] | null {
+    if (!propertiesFile) return null;
+    try {
+        const mtimeMs = fs.statSync(propertiesFile).mtimeMs;
+        const cached = registryCache.get(propertiesFile);
+        if (cached && cached.mtimeMs === mtimeMs) return cached.names;
+        const names = registeredVersionNamesFromXml(fs.readFileSync(propertiesFile, 'utf8'));
+        registryCache.set(propertiesFile, { mtimeMs, names });
+        return names;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * #535 — the Actions view's Clarion row: a stale name says so instead of posing as
+ * a usable version; a registered one shows plainly, with the default when it differs.
+ */
+export function versionRowLabel(effectiveVersion: string, defaultVersion: string, registered: ReadonlyArray<string> | null): string {
+    if (!effectiveVersion) return 'Not set — use Set Version';
+    if (registered && !registered.some(n => n.toLowerCase() === effectiveVersion.toLowerCase())) {
+        return `${effectiveVersion} — not registered, use Set Version`;
+    }
+    if (defaultVersion && defaultVersion !== effectiveVersion) return `${effectiveVersion} (default: ${defaultVersion})`;
+    return effectiveVersion;
+}
+
+/**
+ * Whether the settings a folder remembers for a solution can be reused as they are when
+ * the solution is opened from the Solution View (`SmartSolutionOpener.openDetectedSolution`).
+ * Invalid settings send the opener on to its installation/version picker.
+ */
+export function validateRememberedSettings(
+    solutionPath: string,
+    propertiesFile: string,
+    version: string
+): { valid: boolean; reason?: string } {
+    if (!fs.existsSync(propertiesFile)) {
+        return { valid: false, reason: `Properties file not found: ${propertiesFile}` };
+    }
+    if (!fs.existsSync(solutionPath)) {
+        return { valid: false, reason: `Solution file not found: ${solutionPath}` };
+    }
+    if (!version || version.trim() === '') {
+        return { valid: false, reason: 'Version is empty' };
+    }
+    // #566 — a name the properties file no longer registers (#535) cannot load; left
+    // valid, the open reported success and initializeSolution then stopped silently.
+    if (rememberedSolutionState(solutionPath, propertiesFile, version, readRegisteredVersionNames(propertiesFile)) === 'stale-version') {
+        return { valid: false, reason: `${version} is no longer registered in ${path.basename(propertiesFile)}` };
+    }
+    return { valid: true };
+}
+
+/** A command the startup prompt for an unloadable remembered solution runs, with its arguments. */
+export interface PromptCommand {
+    command: string;
+    args: unknown[];
+}
+
+/**
+ * The command behind each button of the startup prompt shown when the remembered solution has a
+ * missing or stale Clarion version (#498/#535). Undefined when the prompt was dismissed.
+ *
+ * #572 — Set Version opens the remembered solution through the solution opener, the route the
+ * Solution View takes: it rejects the missing or stale version, offers the installation and
+ * version picker, saves the choice for the solution and loads it. The general version picker it
+ * used to run changes the in-memory version only, and the save-and-reload that had to follow it
+ * here could be skipped without a word.
+ */
+export function rememberedSolutionPromptCommand(action: string | undefined, solutionFile: string): PromptCommand | undefined {
+    if (action === 'Set Version') return { command: 'clarion.openDetectedSolution', args: [solutionFile] };
+    if (action === 'Open Solution...') return { command: 'clarion.openSolution', args: [] };
+    return undefined;
 }

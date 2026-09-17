@@ -191,6 +191,24 @@ export class HoverProvider {
                     // coincidence rather than an answer.
                     return this.buildFieldEquateHover(feqToken, document, position);
                 }
+
+                // #582 — a period that terminates a structure closes it exactly as END does (#575),
+                // but `.` is not a word character, so the context builder below finds no word and
+                // hover stopped there. Resolve the terminator from the token: the one under the
+                // cursor first (`. .` holds two), else the one just before it (cursor after it).
+                const around = document.getText({
+                    start: { line: position.line, character: Math.max(0, position.character - 1) },
+                    end: { line: position.line, character: position.character + 1 }
+                });
+                if (around.includes('.')) {
+                    const onLine = preTokens.filter(t => t.line === position.line && t.type === TokenType.EndStatement && t.value === '.');
+                    const period = onLine.find(t => t.start === position.character)
+                        ?? onLine.find(t => t.start + 1 === position.character);
+                    if (period?.parent) {
+                        const periodHover = this.router.buildTerminatorHover(period, document, '**. (period)**');
+                        if (periodHover) return periodHover;
+                    }
+                }
             }
 
             // Build hover context
@@ -886,6 +904,13 @@ export class HoverProvider {
         if (!dottedToken) return null;
 
         const dot = dottedToken.value.indexOf('.');
+        // #540 — the whole reference is ONE token, so a cursor on the structure half
+        // (`ItemQ` in `ItemQ.CategoryName`) matched here too and was answered with the
+        // field's card. Only a cursor at or past the dot is asking about the field; on
+        // the structure half fall through, so the bare word the context builder
+        // extracted (`ItemQ`) resolves as the structure — the same split the scoped
+        // path already makes.
+        if (position.character < dottedToken.start + dot) return null;
         const typeName = dottedToken.value.slice(0, dot);
         const fieldName = dottedToken.value.slice(dot + 1);
         // A single qualifier is a field reference. `A.B.C` is a chained member

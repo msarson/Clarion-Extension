@@ -148,11 +148,11 @@ suite('#396 — diagnostic converges on hover\'s redirection resolver for the ME
         const diags = await runDiagnostic(member);
 
         assert.ok(
-            diags.some(d => d.message.toLowerCase().includes('reallybogus')),
+            diags.some(d => String(d.message).toLowerCase().includes('reallybogus')),
             'expected a diagnostic on reallyBogus (genuinely undeclared); got: ' + JSON.stringify(diags)
         );
         assert.strictEqual(
-            diags.find(d => d.message.toLowerCase().includes('dbgcount')),
+            diags.find(d => String(d.message).toLowerCase().includes('dbgcount')),
             undefined,
             'dbgCount must still resolve; got: ' + JSON.stringify(diags)
         );

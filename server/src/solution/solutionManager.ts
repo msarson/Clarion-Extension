@@ -112,6 +112,11 @@ export class SolutionManager {
         }
     }
 
+    /** #568 — forget the instance, so the next `create()` for the same .sln loads it afresh. */
+    public static discardInstance(): void {
+        SolutionManager.instance = null;
+    }
+
     public static getInstance(): SolutionManager | null {
         return SolutionManager.instance;
     }
@@ -473,6 +478,16 @@ export class SolutionManager {
     private inflightFinds: Map<string, Promise<{ path: string, source: string }>> = new Map();
     private negativeFindCache: Map<string, number> = new Map();
     private static readonly NEGATIVE_FIND_TTL_MS = 30_000;
+
+    /**
+     * #564 — drop every file-name → path answer. They are keyed by name (and owning project), not
+     * by build configuration, so a configuration switch must not keep serving the old section's
+     * resolution.
+     */
+    public clearResolvedFileCaches(): void {
+        this.fileCache?.clear();
+        this.negativeFindCache?.clear();
+    }
 
     /**
      * #329: `fromFsPath` is the source file this lookup acts on behalf of. When

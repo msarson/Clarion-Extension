@@ -222,6 +222,12 @@ export class RedirectionFileParserServer {
   private readonly macros: Record<string, string>;
   private static redFileCache: Map<string, RedirectionEntry[]> = new Map();
   private static includeCache: Map<string, RedirectionEntry[]> = new Map();
+
+  /** #568 — drop the parse caches; their entries hold macros expanded for the install they were parsed under. */
+  public static clearParseCaches(): void {
+    RedirectionFileParserServer.redFileCache.clear();
+    RedirectionFileParserServer.includeCache.clear();
+  }
   private entries: RedirectionEntry[] = [];
   // Track parse sequence for debugging
   private static parseSeq: number = 0;

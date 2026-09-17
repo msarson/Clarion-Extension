@@ -55,7 +55,7 @@ suite('Issue #333 — trailing comment on CODE line', () => {
         const diags = cycleBreakDiags(edinFixture(COMMENTED_CODE_LINE));
         assert.strictEqual(
             diags.length, 0,
-            `expected no diagnostics; got: ${JSON.stringify(diags.map(d => d.message))}`);
+            `expected no diagnostics; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
     });
 
     test('agreement: commented CODE line tokenizes structures identically to bare CODE', () => {
@@ -84,8 +84,8 @@ suite('Issue #333 — trailing comment on CODE line', () => {
         ].join('\r\n');
         const diags = cycleBreakDiags(code);
         assert.strictEqual(diags.length, 1,
-            `expected exactly the outside-LOOP BREAK; got: ${JSON.stringify(diags.map(d => d.message))}`);
-        assert.ok(diags[0].message.includes("'BREAK'"));
+            `expected exactly the outside-LOOP BREAK; got: ${JSON.stringify(diags.map(d => String(d.message)))}`);
+        assert.ok(String(diags[0].message).includes("'BREAK'"));
         assert.strictEqual(diags[0].range.start.line, 5);
     });
 

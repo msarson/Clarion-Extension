@@ -6,6 +6,7 @@ import { RedirectionFileParserServer, RedirectionEntry } from '../solution/redir
 import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
+import { resolutionEnvironmentKey } from '../solution/resolutionEnvironmentKey'; // #568
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
 logger.setLevel('error');
@@ -27,7 +28,18 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // v4 (#392): scanSourceForProcedures now excludes CLASS/INTERFACE member prototypes
 // from the bare-name procedure index (previously indexed identically to a
 // global procedure — see the structureStack tracking in that function).
-const DISK_CACHE_VERSION = 4;
+// v5: TYPE_PATTERN's label now accepts a colon (e.g. GLOB:SomeType). Without this bump,
+// a per-file cached entry whose mtime hasn't changed since before the fix keeps replaying
+// the OLD scan result forever — the mtime-keyed cache has no way to know the SCANNER
+// changed, only that the FILE didn't: a rebuilt index can carry tens of thousands of
+// names and still answer zero hits for a colon-qualified type until this bump forces a
+// real rescan.
+// v6: extractSearchPaths now resolves relative .red entries (`.\`) against the PROJECT
+// dir instead of the .red file's dir, so a project's OWN .inc files are finally scanned.
+// This changes the FILE SET, not just the parse — every existing cache predates those
+// files entirely (a real project's own source directory can go from contributing a
+// single incidental file to dozens of genuine local declarations once this lands).
+const DISK_CACHE_VERSION = 6;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -139,7 +151,11 @@ export interface StructureIndex {
 /** Minimal interface consumed by providers — allows easy substitution/testing */
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
+    /** #571 — lookup on behalf of a file: its project's redirection order first, then any index. */
+    findFor(name: string, fromFile?: string | null): StructureDeclarationInfo[];
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
+    /** #517 — true once any project's procedure index is built. */
+    hasProcedureIndex(): boolean;
     /** #483 — true when the index build classified this path as a PROGRAM file. */
     isProgramFile(filePath: string): boolean;
     findInFile(fileName: string, projectPath?: string): StructureDeclarationInfo[];
@@ -152,8 +168,12 @@ export interface IStructureDeclarationIndex {
 // ---------------------------------------------------------------------------
 // Regex patterns — all require label to start at column 0
 // ---------------------------------------------------------------------------
+// The label may be colon-qualified (e.g. GLOB:SomeType), same shape as EQUATE_PATTERN
+// below. A `[A-Za-z_]\w*`-only label silently dropped every colon-prefixed
+// CLASS/QUEUE/GROUP/etc. declaration from the index (no match at all — the character
+// right after the bare-name portion isn't whitespace, so the whole line missed).
 const TYPE_PATTERN =
-    /^([A-Za-z_]\w*)\s+(CLASS|INTERFACE|QUEUE|GROUP|RECORD|FILE|VIEW)\b/i;
+    /^([A-Za-z_][\w:]*)\s+(CLASS|INTERFACE|QUEUE|GROUP|RECORD|FILE|VIEW)\b/i;
 const ITEMIZE_PATTERN =
     /^([A-Za-z_]\w*)\s+ITEMIZE\b/i;
 /** Blank-label ITEMIZE: indented keyword with no label at col 0, e.g. "          ITEMIZE,PRE(CLType)" */
@@ -669,7 +689,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             const redStart = Date.now();
             const redirectionParser = new RedirectionFileParserServer();
             const entries = await redirectionParser.parseRedFileAsync(projectPath);
-            const searchPaths = this.extractSearchPaths(entries);
+            const searchPaths = this.extractSearchPaths(entries, projectPath);
 
             if (serverSettings.libsrcPaths?.length) {
                 for (const p of serverSettings.libsrcPaths) {
@@ -929,7 +949,8 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
 
     /** Location of the per-project disk cache (OS temp dir — never pollutes the user's solution). */
     private diskCachePath(projectPath: string): string {
-        const hash = crypto.createHash('md5').update(this.normalizeKey(projectPath).toLowerCase()).digest('hex').slice(0, 16);
+        // #568 — per install as well as per project: the scanned file set comes from its redirection.
+        const hash = crypto.createHash('md5').update(`${this.normalizeKey(projectPath).toLowerCase()}|${resolutionEnvironmentKey()}`).digest('hex').slice(0, 16);
         return path.join(os.tmpdir(), 'clarion-extension-sdi', `sdi-${hash}.json`);
     }
 
@@ -973,6 +994,27 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         } catch (err) {
             logger.debug(`[SDI] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+
+    /**
+     * #571 — lookup on behalf of a file (path or file URI): the index of the project that compiles
+     * it first, then any index. Each project index lists a name's declarations in that project's
+     * redirection order, so its first entry is the copy the compiler binds to; an unscoped
+     * `find(name)` answers with whichever project index was built first. A file no project
+     * compiles (an include opened on its own), or a name its project does not index, falls back to
+     * the unscoped lookup.
+     */
+    findFor(name: string, fromFile?: string | null): StructureDeclarationInfo[] {
+        if (fromFile) {
+            try {
+                const project = SolutionManager.getInstance()?.findProjectForFile(this.normalizeKey(fromFile));
+                if (project?.path) {
+                    const hit = this.indexes.get(this.normalizeKey(project.path))?.byName.get(name.toLowerCase());
+                    if (hit?.length) return hit;
+                }
+            } catch { /* no solution loaded — unscoped below */ }
+        }
+        return this.find(name);
     }
 
     /** Case-insensitive name lookup across all indexed projects (or a specific one) */
@@ -1038,6 +1080,12 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
             if (v) return v.isProgram;
         }
         return false;
+    }
+
+    /** #517 — true once at least one project's procedure index is built, so a
+     *  consumer can tell "no declaration of this name" from "the index isn't ready". */
+    hasProcedureIndex(): boolean {
+        return this.procIndexes.size > 0;
     }
 
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[] {
@@ -1179,13 +1227,23 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         return byProcName;
     }
 
-    private extractSearchPaths(entries: RedirectionEntry[]): string[] {
+    private extractSearchPaths(entries: RedirectionEntry[], projectPath?: string): string[] {
         const paths = new Set<string>();
         for (const entry of entries ?? []) {
             for (const dirPath of entry?.paths ?? []) {
                 let resolved = dirPath;
                 if (!path.isAbsolute(dirPath)) {
-                    resolved = path.resolve(path.dirname(entry.redFile), dirPath);
+                    // Relative entries (`.`, `.\`, `.\classes`) resolve against the PROJECT
+                    // directory, per Clarion 11.1 docs — RedirectionFileParserServer already
+                    // does exactly this (see its 01d635ef / cfaa7584 comments); this method
+                    // re-implemented the resolution and kept the wrong base. The .red dir is
+                    // wrong for the global-fallback file (%ClarionRoot%\bin\Clarion110.red):
+                    // `.\` there resolved to the Clarion install's bin folder, so a project
+                    // whose own .inc files live next to its .app/.clw — the common Clarion
+                    // layout — had EVERY local declaration silently missing from the index,
+                    // while shared-library paths (absolute) indexed fine. Fall back to the
+                    // .red dir only when no project dir is available.
+                    resolved = path.resolve(projectPath ?? path.dirname(entry.redFile), dirPath);
                 }
                 resolved = path.normalize(resolved);
                 try {

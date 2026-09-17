@@ -50,25 +50,22 @@ If you don't see this, try:
 
 When you open a Clarion solution for the first time, the extension will prompt you to configure:
 
-#### 1. Clarion Version/Path
-- **What it's for:** Locates `ClarionCl.exe` for compilation
-- **When prompted:** Select your Clarion installation folder
-- **Example:** `C:\Clarion11\Bin`
+#### 1. Clarion Version
+- **What it's for:** everything — the `bin` folder used to build, the redirection file used to resolve includes, and the libsrc search paths all come from the version you pick
+- **When prompted:** choose from the versions your Clarion IDE has registered, listed by the name you gave them
+- **Example:** `Clarion 11.1`
 
 **Manual configuration:**
 1. Press `Ctrl+Shift+P`
-2. Type "Clarion: Set Clarion Path"
-3. Browse to your Clarion BIN directory
+2. Type **"Clarion: Set Active Version"** (or click the version in the status bar)
+3. Pick the version this solution builds with — it is remembered for that solution, and can be changed later without reloading
 
 #### 2. Clarion Properties File
-- **What it's for:** Redirection configuration (where to find included files)
-- **When prompted:** Select your `.clarion.properties` file
-- **Can be:** Project-specific or global
+- **What it's for:** `ClarionProperties.xml` is the file the Clarion IDE writes; it is what registers the installed versions and names each one's redirection file
+- **Where it normally lives:** `%APPDATA%\SoftVelocity\Clarion\<major>\ClarionProperties.xml`
+- **When prompted:** accept the one found, or pick another if you keep IDE settings in a checked-out tree
 
-**Manual configuration:**
-1. Press `Ctrl+Shift+P`
-2. Type "Clarion: Set Clarion Properties"
-3. Browse to your properties file
+**Manual configuration:** the version picker's list ends with **Browse for ClarionProperties.xml…** for a file anywhere else.
 
 #### 3. Build Configuration
 - **What it's for:** Debug vs Release builds
@@ -200,7 +197,7 @@ MyProject/
 ├── MyApp.app                   # Application
 ├── MyApp.clw                   # Source files
 ├── includes/                   # Include files
-└── .clarion.properties         # Redirection (optional)
+└── MySolution.red              # Project redirection (optional)
 ```
 
 ### Opening Solutions
@@ -246,16 +243,17 @@ MyProject/
 - Build fails with "ClarionCl.exe not found"
 
 **Solutions:**
-1. Manually set Clarion path:
-   - `Ctrl+Shift+P` → "Clarion: Set Clarion Path"
-   - Browse to Clarion BIN folder (e.g., `C:\Clarion11\Bin`)
-2. Check `settings.json`:
+1. Pick the Clarion version again — the `bin` folder comes from it, not from a path setting:
+   - `Ctrl+Shift+P` → **"Clarion: Set Active Version"**, or click the version in the status bar
+2. Check `settings.json` (or the `.code-workspace` file) names a version your machine registers:
    ```json
    {
-     "clarion.clarionPath": "C:\\Clarion11\\Bin"
+     "clarion.propertiesFile": "C:\\Users\\you\\AppData\\Roaming\\SoftVelocity\\Clarion\\11.0\\ClarionProperties.xml",
+     "clarion.version": "Clarion 11.1"
    }
    ```
-3. Ensure path uses double backslashes (`\\`)
+3. If the version was renamed or uninstalled in the IDE, the extension reports it as missing — pick a current one
+4. Ensure paths use double backslashes (`\\`)
 
 ---
 
@@ -278,15 +276,10 @@ MyProject/
 
 If you have multiple Clarion versions installed:
 
-1. Set the path explicitly in settings:
-   ```json
-   {
-     "clarion.clarionPath": "C:\\Clarion11\\Bin"
-   }
-   ```
-2. Or use the picker:
-   - `Ctrl+Shift+P` → "Clarion: Set Clarion Path"
-   - Select the version you want to use
+1. Use the picker — `Ctrl+Shift+P` → **"Clarion: Set Active Version"** — and choose the one this solution builds with
+2. The pick is remembered **per solution**, so solutions on different versions don't fight over one setting
+3. You can change it while the solution is open; the editor and the build both follow immediately, with no reload
+4. Versions are listed by the name the Clarion IDE registered them under in `ClarionProperties.xml`; if yours isn't listed, the list ends with **Browse for ClarionProperties.xml…**
 
 ---
 

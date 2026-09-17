@@ -3,7 +3,7 @@ import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver/nod
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { TokenHelper } from '../../utils/TokenHelper';
-import { serverSettings } from '../../serverSettings';
+import { isDiagnosticEnabled } from '../../serverSettings';
 
 /**
  * Issue #121 — diagnostic for indistinguishable procedure prototypes that the
@@ -33,7 +33,7 @@ import { serverSettings } from '../../serverSettings';
  * non-idempotent per `project_documentstructure_idempotency.md`). Tokens
  * already have `.subType` + `.finishesAt` populated from the tokenizer pass.
  *
- * Gate: `serverSettings.indistinguishablePrototypesEnabled` (default true).
+ * Gate: `isDiagnosticEnabled('indistinguishablePrototypes')` (default true; #542).
  */
 
 const MESSAGES = {
@@ -55,7 +55,7 @@ export function validateIndistinguishablePrototypes(
     tokens: Token[],
     document: TextDocument
 ): Diagnostic[] {
-    if (!serverSettings.indistinguishablePrototypesEnabled) return [];
+    if (!isDiagnosticEnabled('indistinguishablePrototypes')) return [];
 
     const containers = tokens.filter(t =>
         t.type === TokenType.Structure &&

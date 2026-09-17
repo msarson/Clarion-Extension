@@ -56,8 +56,8 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
             '  RETURN',
         ]);
         assert.strictEqual(d.length, 1,
-            `expected one missing-impl warning (Goodbye); got: ${JSON.stringify(d.map(x => x.message))}`);
-        assert.ok(/Goodbye/i.test(d[0].message), `should name Goodbye; got: ${d[0].message}`);
+            `expected one missing-impl warning (Goodbye); got: ${JSON.stringify(d.map(x => String(x.message)))}`);
+        assert.ok(/Goodbye/i.test(String(d[0].message)), `should name Goodbye; got: ${d[0].message}`);
     });
 
     test('class implementing all interface methods in the same module — no warning', async () => {
@@ -80,7 +80,7 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
             '  RETURN',
         ]);
         assert.strictEqual(d.length, 0,
-            `fully-implemented same-file class must not warn; got: ${JSON.stringify(d.map(x => x.message))}`);
+            `fully-implemented same-file class must not warn; got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 
     test('derived class inherits interface implementations from parent — no warning', async () => {
@@ -109,7 +109,7 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
             '  RETURN',
         ]);
         assert.strictEqual(d.length, 0,
-            `derived class must inherit interface implementations from parent; got: ${JSON.stringify(d.map(x => x.message))}`);
+            `derived class must inherit interface implementations from parent; got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 
     test('same-name interface overloads are matched by parameter count', async () => {
@@ -132,7 +132,7 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
             '  RETURN',
         ]);
         assert.strictEqual(d.length, 0,
-            `same-name overloads should be matched by parameter count; got: ${JSON.stringify(d.map(x => x.message))}`);
+            `same-name overloads should be matched by parameter count; got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 
     test('declaration-only .inc with no MODULE — skipped (impls live in an unknown module)', async () => {
@@ -147,6 +147,6 @@ suite('Issue #181 — same-file class+interface implementation (no MODULE attrib
         const tokens = TokenCache.getInstance().getTokens(doc);
         const d = await validateClassInterfaceImplementationAsync(tokens, doc, new MemberLocatorService());
         assert.strictEqual(d.length, 0,
-            `declaration-only .inc must be skipped (no false positive); got: ${JSON.stringify(d.map(x => x.message))}`);
+            `declaration-only .inc must be skipped (no false positive); got: ${JSON.stringify(d.map(x => String(x.message)))}`);
     });
 });

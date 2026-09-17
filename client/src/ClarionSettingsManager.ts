@@ -26,7 +26,7 @@ export class ClarionSettingsManager {
 
     private loadSettings(): void {
         const config = workspace.getConfiguration("clarion");
-        this.configuration = config.get("configuration", "Debug");
+        this.configuration = SettingsStorageManager.clarionSettings().get<string>("configuration", "Debug"); // #563
         this.defaultLookupExtensions = config.get("defaultLookupExtensions", [".clw", ".inc", ".equ", ".eq", ".int"]);
         this.fileSearchExtensions = config.get("fileSearchExtensions", []);
         this.redirectionPath = config.get("redirectionPath", "");

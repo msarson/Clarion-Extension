@@ -64,7 +64,7 @@ function instrument(locator: MemberLocatorService) {
     return counts;
 }
 
-const discarded = (diags: { message: string }[]) => diags.filter(d => /is discarded/.test(d.message));
+const discarded = (diags: { message: unknown }[]) => diags.filter(d => /is discarded/.test(String(d.message)));
 
 suite('ReturnValueDiagnostics #358-cold — memos persist across a restart', () => {
 

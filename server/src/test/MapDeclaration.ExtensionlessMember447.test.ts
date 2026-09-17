@@ -73,7 +73,7 @@ suite('#447 — extension-less MEMBER resolves to the parent PROGRAM', () => {
         const doc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(clwPath, 'latin1'));
         const tokens = TokenCache.getInstance().getTokens(doc);
         const diags = await validateMissingMapDeclarations(tokens, doc);
-        return diags.map(d => d.message);
+        return diags.map(d => String(d.message));
     }
 
     test('bug-pin: MEMBER without an extension no longer warns', async () => {

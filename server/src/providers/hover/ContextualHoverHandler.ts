@@ -84,50 +84,23 @@ export class ContextualHoverHandler {
     }
 
     /**
-     * Handle TO keyword - can be in LOOP or CASE structure
+     * Handle hover over the TO keyword — belongs to a LOOP counter range
+     * (`LOOP i = 1 TO 10`) or a CASE range (`OF 'A' TO 'Z'`).
+     *
+     * Previously scanned backward up to 50 lines checking
+     * `token.type === TokenType.Keyword` for LOOP/OF/OROF — but LOOP
+     * tokenizes as `TokenType.Structure` and OF/OROF as
+     * `TokenType.ConditionalContinuation`, never `TokenType.Keyword`, so
+     * those checks could never match (issue #529). Reads the structure the
+     * tokenizer/parser already recorded instead: the LOOP's own Structure
+     * token for the LOOP case, and the owning CASE's `branches` entry for
+     * the CASE case. The card text itself is unchanged from before — LOOP
+     * and CASE are already visible right next to TO on the same line, so a
+     * label or the range text would only echo what's already on screen;
+     * the fix is entirely about correctly reaching this text at all.
      */
-    handleToKeyword(tokens: Token[], position: { line: number; character: number }, line: string): Hover | null {
-        // Search backwards and on current line for LOOP, CASE, or OF keywords
-        let foundLoop = false;
-        let foundCaseOf = false;
-        
-        // Check current line first for OF (CASE OF...TO pattern)
-        const currentLineText = line.toUpperCase();
-        if (currentLineText.includes('OF') && currentLineText.includes('TO')) {
-            foundCaseOf = true;
-        }
-        
-        // If not found on current line, search backwards
-        if (!foundCaseOf) {
-            for (let searchLine = position.line; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-                const searchLineTokens = tokens.filter(t => t.line === searchLine);
-                
-                for (const token of searchLineTokens) {
-                    const upperValue = token.value.toUpperCase();
-                    if (upperValue === 'LOOP' && token.type === TokenType.Keyword) {
-                        foundLoop = true;
-                        break;
-                    } else if ((upperValue === 'OF' || upperValue === 'OROF') && token.type === TokenType.Keyword) {
-                        foundCaseOf = true;
-                        break;
-                    } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                        break;
-                    }
-                }
-                
-                if (foundLoop || foundCaseOf) break;
-            }
-        }
-        
-        // Provide context-specific documentation
-        if (foundLoop) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**TO** (Keyword - in LOOP structure)\n\n**Syntax:** \`i = initial TO limit [BY step]\`\n\nSpecifies the terminating value in a LOOP iteration. When counter exceeds limit (or is less than, if step is negative), loop terminates. The limit expression is evaluated once at loop start.`
-                }
-            };
-        } else if (foundCaseOf) {
+    handleToKeyword(tokens: Token[], position: { line: number; character: number }): Hover | null {
+        if (this.isInCaseRangeAt(tokens, position.line)) {
             return {
                 contents: {
                     kind: 'markdown',
@@ -135,55 +108,48 @@ export class ContextualHoverHandler {
                 }
             };
         }
-        
+
+        const inLoop = tokens.some(t =>
+            t.type === TokenType.Structure &&
+            t.value.toUpperCase() === 'LOOP' &&
+            t.line === position.line
+        );
+        if (inLoop) {
+            return {
+                contents: {
+                    kind: 'markdown',
+                    value: `**TO** (Keyword - in LOOP structure)\n\n**Syntax:** \`i = initial TO limit [BY step]\`\n\nSpecifies the terminating value in a LOOP iteration. When counter exceeds limit (or is less than, if step is negative), loop terminates. The limit expression is evaluated once at loop start.`
+                }
+            };
+        }
+
         return null;
     }
 
     /**
-     * Handle ELSE keyword - can be in IF or CASE structure
+     * True when `line` is a CASE's own OF/OROF clause line (`OF 1 TO 5`) —
+     * i.e. `line` matches an OF/OROF branch's `keywordToken.line` exactly,
+     * not just somewhere inside that branch's body. A branch's
+     * `[startLine, endLine]` covers its entire body (everything up to the
+     * next branch or the CASE's END), which can contain its own nested
+     * structures — a LOOP with its own unrelated TO, for instance — so
+     * matching on that whole span (an earlier version of this check did)
+     * misattributes a TO deep inside a branch's body to that branch's
+     * OF/OROF range.
+     *
+     * Restricted to OF/OROF (not ELSE/ELSIF, and not IF — IF has no
+     * `value TO value` range syntax) since only those can have a TO range.
      */
-    handleElseKeyword(tokens: Token[], position: { line: number; character: number }): Hover | null {
-        // Search backwards for CASE or IF keyword to determine context
-        let foundCase = false;
-        let foundIf = false;
-        
-        for (let searchLine = position.line - 1; searchLine >= Math.max(0, position.line - 50); searchLine--) {
-            const searchLineTokens = tokens.filter(t => t.line === searchLine);
-            
-            for (const token of searchLineTokens) {
-                const upperValue = token.value.toUpperCase();
-                if (upperValue === 'CASE' && token.type === TokenType.Keyword) {
-                    foundCase = true;
-                    break;
-                } else if (upperValue === 'IF' && token.type === TokenType.Keyword) {
-                    foundIf = true;
-                    break;
-                } else if (upperValue === 'END' && token.type === TokenType.EndStatement) {
-                    break;
-                }
-            }
-            
-            if (foundCase || foundIf) break;
+    private isInCaseRangeAt(tokens: Token[], line: number): boolean {
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure || t.value.toUpperCase() !== 'CASE' || !t.branches) continue;
+
+            const hasRangeOnThisLine = t.branches.some(b =>
+                (b.kind === 'OF' || b.kind === 'OROF') && b.keywordToken.line === line
+            );
+            if (hasRangeOnThisLine) return true;
         }
-        
-        // Provide context-specific documentation
-        if (foundCase) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**ELSE** (Keyword - in CASE structure)\n\nStatements following ELSE execute when all preceding OF and OROF options have been evaluated as not equivalent. ELSE is optional but must be last option in CASE structure if used.`
-                }
-            };
-        } else if (foundIf) {
-            return {
-                contents: {
-                    kind: 'markdown',
-                    value: `**ELSE** (Keyword - in IF structure)\n\nStatements following ELSE execute when all preceding IF and ELSIF conditions evaluate as false. ELSE is optional but must be last option in IF structure if used.`
-                }
-            };
-        }
-        
-        return null;
+        return false;
     }
 
     /**

@@ -58,15 +58,15 @@ function runDiagnostic(code: string): Diagnostic[] {
 /** Assert no diagnostic fires for the named identifier. */
 function expectNoFire(diags: Diagnostic[], name: string, msg?: string): void {
     const offending = diags.filter(d =>
-        typeof d.message === 'string' && d.message.includes(`'${name}'`));
+        typeof d.message === 'string' && String(d.message).includes(`'${name}'`));
     assert.strictEqual(offending.length, 0,
-        msg ?? `'${name}' must NOT be flagged as undeclared (got: ${offending.map(d => d.message).join(', ')})`);
+        msg ?? `'${name}' must NOT be flagged as undeclared (got: ${offending.map(d => String(d.message)).join(', ')})`);
 }
 
 /** Assert at least one diagnostic fires for the named identifier (GREEN sentinel preservation). */
 function expectFires(diags: Diagnostic[], name: string, msg?: string): void {
     const offending = diags.filter(d =>
-        typeof d.message === 'string' && d.message.includes(`'${name}'`));
+        typeof d.message === 'string' && String(d.message).includes(`'${name}'`));
     assert.ok(offending.length >= 1,
         msg ?? `'${name}' MUST still be flagged as undeclared (preservation sentinel); got 0 matching diagnostics`);
 }

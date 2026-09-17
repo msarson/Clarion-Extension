@@ -1,28 +1,66 @@
 {
-"comments": {
-"lineComment": "!"
-},
-"brackets": [
-["{", "}"],
-["[", "]"],
-["(", ")"]
-],
-"autoClosingPairs": [
-["{", "}"],
-["[", "]"],
-["(", ")"],
-{ "open": "'", "close": "'", "notIn": ["string", "comment"] }
-],
-"surroundingPairs": [
-["{", "}"],
-["[", "]"],
-["(", ")"],
-["'", "'"]
-],
-"folding": {
-"markers": {
-"start": "^\\s*s*!region\\b",
-"end": "^\\s*!endregion\\b"
-}
-}
+  "comments": {
+    "lineComment": "!"
+  },
+  "brackets": [
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ]
+  ],
+  "autoClosingPairs": [
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ],
+    {
+      "open": "'",
+      "close": "'",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "{",
+      "}"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "(",
+      ")"
+    ],
+    [
+      "'",
+      "'"
+    ]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*s*!region\\b",
+      "end": "^\\s*!endregion\\b"
+    }
+  },
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([A-Za-z_]\\w*(?::{1,2}[A-Za-z_]\\w*)*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)"
 }

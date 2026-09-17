@@ -347,7 +347,7 @@ suite('UndeclaredVariableDiagnostics — cross-file scope (6b40d7da, #115)', () 
             ' — fix widened too far if both are silent'
         );
         assert.ok(
-            bogusOnLine6.message.toLowerCase().includes('bogus'),
+            String(bogusOnLine6.message).toLowerCase().includes('bogus'),
             'expected diagnostic message to reference `bogus`; got: ' + JSON.stringify(bogusOnLine6)
         );
     });

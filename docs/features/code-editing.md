@@ -8,7 +8,7 @@ Productivity features to write Clarion code faster.
 
 The Clarion Extension provides powerful code editing tools:
 
-- **50+ code snippets** - Quick insertion of common structures
+- **99 code snippets** - Quick insertion of common structures
 - **Paste as Clarion String** - Convert text to Clarion string format
 - **Add Method Implementation** - Generate method stubs automatically
 - **Create New Class** - Interactive class creation wizard
@@ -184,7 +184,7 @@ END
 4. Text pasted as Clarion string
 
 **Or:**
-1. `Ctrl+Shift+P` → "Clarion: Paste as Clarion String"
+1. `Ctrl+Shift+P` → "Clarion: Paste as String"
 
 ---
 
@@ -282,7 +282,7 @@ ORDER BY CustomerName
 
 ```json
 {
-  "clarion.pasteAsClarionString.lineTerminator": "space"  // Default
+  "clarion.pasteAsString.lineTerminator": "space"  // Default
 }
 ```
 
@@ -314,7 +314,7 @@ ORDER BY CustomerName
 
 ```json
 {
-  "clarion.pasteAsClarionString.trimLeading": true  // Default
+  "clarion.pasteAsString.trimLeadingWhitespace": true  // Default
 }
 ```
 
@@ -565,8 +565,7 @@ END
 
 ## Flatten Continuation Lines
 
-**Keyboard shortcut:** `Ctrl+.` on a continuation block  
-**Command:** "Clarion: Flatten Continuation Lines"
+**Quick fix:** `Ctrl+.` on a continuation block → **Flatten continuation lines** (a code action, not a palette command)
 
 Joins `|`-continued lines into a single line:
 - Trims whitespace from continuation segments
