@@ -195,7 +195,7 @@ export class ClarionExtensionCommands {
     try {
       // Lazy imports to avoid circular-import pitfalls with globals.ts.
       const globals = await import('./globals');
-      const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
+      const { globalClarionPropertiesFile, globalClarionVersion } = globals;
       const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
       const { buildCompileTargetItems, buildInstallationItems, buildSetAsDefaultFooterItem, buildBrowseFooterItem } = await import('./utils/VersionPickerItems');
       const { SettingsStorageManager } = await import('./utils/SettingsStorageManager');
@@ -297,17 +297,8 @@ export class ClarionExtensionCommands {
         }
 
         // Apply the picked Compile Target.
-        const applied = await setActiveClarionVersion(pickedTarget.targetName!, currentInstallation.propertiesPath);
-        if (!applied) {
-          window.showErrorMessage(
-            `Compile target '${pickedTarget.targetName}' could not be applied (not found in ${currentInstallation.propertiesPath}).`
-          );
-          return;
-        }
-
-        window.showInformationMessage(
-          `Active compile target: '${pickedTarget.targetName}' (Clarion ${currentInstallation.ideVersion} Installation).`
-        );
+        await ClarionExtensionCommands.applyPickedVersion(
+          pickedTarget.targetName!, currentInstallation.propertiesPath, currentInstallation.ideVersion);
         return;
       }
     } catch (error) {
@@ -329,7 +320,7 @@ export class ClarionExtensionCommands {
    */
   private static async setActiveVersionViaFilePicker(): Promise<void> {
     const globals = await import('./globals');
-    const { setActiveClarionVersion, globalClarionPropertiesFile, globalClarionVersion } = globals;
+    const { globalClarionPropertiesFile, globalClarionVersion } = globals;
     const { ClarionInstallationDetector } = await import('./utils/ClarionInstallationDetector');
     const { buildCompileTargetItems } = await import('./utils/VersionPickerItems');
 
@@ -371,14 +362,41 @@ export class ClarionExtensionCommands {
       return;
     }
 
-    const applied = await setActiveClarionVersion(pickedTarget.targetName!, selectedFilePath);
+    await ClarionExtensionCommands.applyPickedVersion(pickedTarget.targetName!, selectedFilePath, installation.ideVersion);
+  }
+
+  /**
+   * #573 — apply a compile target picked through Set Version (either picker). What else the pick
+   * changes is decided by `versionPickEffect`.
+   */
+  private static async applyPickedVersion(targetName: string, propertiesFile: string, ideVersion: string): Promise<void> {
+    const globals = await import('./globals');
+    const { versionPickEffect } = await import('./utils/VersionPickPolicy');
+    const pick = {
+      solutionLoaded: !!globals.globalSolutionFile && globals.isSolutionConfigured(),
+      previousVersion: globals.globalClarionVersion,
+      previousPropertiesFile: globals.globalClarionPropertiesFile,
+      pickedVersion: targetName,
+      pickedPropertiesFile: propertiesFile,
+    };
+
+    const applied = await globals.setActiveClarionVersion(targetName, propertiesFile);
     if (!applied) {
-      window.showErrorMessage(`Compile target '${pickedTarget.targetName}' could not be applied.`);
+      window.showErrorMessage(`Compile target '${targetName}' could not be applied (not found in ${propertiesFile}).`);
       return;
     }
+    if (versionPickEffect(pick) !== 'save-and-reinitialize') {
+      window.showInformationMessage(`Active compile target: '${targetName}' (Clarion ${ideVersion} Installation).`);
+      return;
+    }
+
+    // Saved first: the reinitialization sends the paths of the solution's own version (#567).
+    const solutionFile = globals.globalSolutionFile;
+    await globals.setGlobalClarionSelection(solutionFile, propertiesFile, targetName, globals.globalSettings.configuration);
     window.showInformationMessage(
-      `Active compile target: '${pickedTarget.targetName}' (Clarion ${installation.ideVersion} Installation).`
+      `${path.basename(solutionFile)} now uses '${targetName}' (Clarion ${ideVersion} Installation). Reloading the solution.`
     );
+    await commands.executeCommand('clarion.reinitializeSolution');
   }
 
   /**
