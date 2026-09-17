@@ -62,7 +62,8 @@ suite('Find All References on a class lists parameter types (#561)', () => {
             'Spaced      PROCEDURE(* ctThing pThing)',                       // 5
             'Two         PROCEDURE(<ctThing pThing>, *ctThing q)',           // 6
             'Longer      PROCEDURE(*ctThingy pThing)',                       // 7
-            '  END',                                                         // 8
+            'Plain       PROCEDURE(ctThing pThing, LONG n)',                 // 8 — a CLASS passes by address with or without the star
+            '  END',                                                         // 9
         ],
     };
 
@@ -151,6 +152,13 @@ suite('Find All References on a class lists parameter types (#561)', () => {
         const hits = await refs('thing.inc', 0, 'ctThing');
         const count = (line: number) => hits.filter(h => h === `protos.clw:${line}`).length;
         assert.deepStrictEqual([2, 3, 4, 5, 6, 7].map(count), [1, 1, 1, 1, 2, 0], JSON.stringify(hits));
+    });
+
+    test('the same parameter written without the star is listed too', async () => {
+        // A complex type is always passed by address, so PROCEDURE(ctThing p) and
+        // PROCEDURE(*ctThing p) declare the same parameter; both spellings are uses of the class.
+        const hits = await refs('thing.inc', 0, 'ctThing');
+        assert.strictEqual(hits.filter(h => h === 'protos.clw:8').length, 1, JSON.stringify(hits));
     });
 
     test('a module whose only use is a pointer parameter is searched, not skipped by the index pre-filter', async () => {
