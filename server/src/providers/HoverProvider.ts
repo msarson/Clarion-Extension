@@ -191,6 +191,24 @@ export class HoverProvider {
                     // coincidence rather than an answer.
                     return this.buildFieldEquateHover(feqToken, document, position);
                 }
+
+                // #582 — a period that terminates a structure closes it exactly as END does (#575),
+                // but `.` is not a word character, so the context builder below finds no word and
+                // hover stopped there. Resolve the terminator from the token: the one under the
+                // cursor first (`. .` holds two), else the one just before it (cursor after it).
+                const around = document.getText({
+                    start: { line: position.line, character: Math.max(0, position.character - 1) },
+                    end: { line: position.line, character: position.character + 1 }
+                });
+                if (around.includes('.')) {
+                    const onLine = preTokens.filter(t => t.line === position.line && t.type === TokenType.EndStatement && t.value === '.');
+                    const period = onLine.find(t => t.start === position.character)
+                        ?? onLine.find(t => t.start + 1 === position.character);
+                    if (period?.parent) {
+                        const periodHover = this.router.buildTerminatorHover(period, document, '**. (period)**');
+                        if (periodHover) return periodHover;
+                    }
+                }
             }
 
             // Build hover context

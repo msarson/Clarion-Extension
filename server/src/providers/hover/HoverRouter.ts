@@ -463,11 +463,20 @@ export class HoverRouter {
             position.character <= t.start + t.value.length
         );
         if (!endToken || !endToken.parent) return null;
+        return this.buildTerminatorHover(endToken, document, '**END**');
+    }
 
-        const opener = endToken.parent;
+    /**
+     * The "closes …" card for a structure terminator — END (#575) or a period (#582): the structure
+     * it closes with its label, the opening line, and a link to it. Null when the parser recorded no
+     * opener (a one-line structure's terminator, or an unmatched one).
+     */
+    buildTerminatorHover(terminator: Token, document: any, title: string): Hover | null {
+        const opener = terminator.parent;
+        if (!opener) return null;
         const keyword = opener.value.toUpperCase();
         const labelText = opener.label ? ` \`${opener.label}\`` : '';
-        const lines: string[] = [`**END** — closes ${keyword}${labelText}`];
+        const lines: string[] = [`${title} — closes ${keyword}${labelText}`];
 
         try {
             const openerLine = document.getText().split(/\r?\n/)[opener.line];
