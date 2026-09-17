@@ -81,6 +81,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Performance
 
+- **Tokenizing a source file is about three times faster.** Every space and tab was tested against all of the tokenizer's patterns, although nothing can start there; whitespace now skips them. Across 7,237 files tokenizing time fell from 67 s to 19 s, and the longest event-loop block while loading the DirectSystems solution from 1.4 s to 0.9 s. A lowercase `end` at the start of a line is also recognised now instead of being read as `nd`. [#581](https://github.com/msarson/Clarion-Extension/pull/581) @geircodes
 - **Word completion in a MEMBER module no longer takes seconds per keystroke.** Completion collected the PROGRAM file's prefix-qualified globals by scanning the whole file once per field, so a program carrying a dictionary's file declarations spent one and a half to three seconds on every request. The fields are now gathered in one pass and remembered until the program file changes. Member completion after a dot was already fast. [#565](https://github.com/msarson/Clarion-Extension/issues/565)
 - **Dot completion on a class whose header is found in more than one search folder no longer pauses for seconds.** A project keeping its own copy of a shared class header made every such class look ambiguous, so completion walked and tokenized the whole include chain, once for each ancestor. Copies of the same file are now read from the one the redirection file lists first, as the compiler binds it. [#569](https://github.com/msarson/Clarion-Extension/pull/569) @geircodes
 
