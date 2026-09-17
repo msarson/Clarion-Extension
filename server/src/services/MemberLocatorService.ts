@@ -2154,9 +2154,13 @@ export class MemberLocatorService {
                 ? tokenMembersGroup
                 : tokenMembersQueue;
         if (tokenMembers.length > 0) return tokenMembers;
-        const diskMembersClass = scanClassBodyForAllMembers(docPath, className, 'CLASS');
-        const diskMembersGroup = scanClassBodyForAllMembers(docPath, className, 'GROUP');
-        const diskMembersQueue = scanClassBodyForAllMembers(docPath, className, 'QUEUE');
+        // Scan the live buffer, not the file on disk: an unsaved edit is otherwise invisible
+        // here, and re-reading a large open document three times per class (once per
+        // structure type) on every enumeration is a measurable share of a validation pass.
+        const docText = document.getText();
+        const diskMembersClass = scanClassBodyForAllMembers(docPath, className, 'CLASS', docText);
+        const diskMembersGroup = scanClassBodyForAllMembers(docPath, className, 'GROUP', docText);
+        const diskMembersQueue = scanClassBodyForAllMembers(docPath, className, 'QUEUE', docText);
         const diskMembers = diskMembersClass.length > 0
             ? diskMembersClass
             : diskMembersGroup.length > 0
@@ -2270,10 +2274,14 @@ export class MemberLocatorService {
                         ? membersGroup
                         : membersQueue;
                 if (members.length > 0) return members;
-                // Fallback to disk scan if token-based found nothing (e.g. file not yet tokenized)
-                const diskMembersClass = scanClassBodyForAllMembers(resolvedPath, className, 'CLASS');
-                const diskMembersGroup = scanClassBodyForAllMembers(resolvedPath, className, 'GROUP');
-                const diskMembersQueue = scanClassBodyForAllMembers(resolvedPath, className, 'QUEUE');
+                // Fallback to a line scan if token-based found nothing. Scan the text that was
+                // just loaded and tokenized rather than reading the file again: the walk visits
+                // every reachable include for every class it cannot place, so three
+                // readFileSync calls per visited file dominated the cost of a whole pass.
+                const loadedText = data.doc.getText();
+                const diskMembersClass = scanClassBodyForAllMembers(resolvedPath, className, 'CLASS', loadedText);
+                const diskMembersGroup = scanClassBodyForAllMembers(resolvedPath, className, 'GROUP', loadedText);
+                const diskMembersQueue = scanClassBodyForAllMembers(resolvedPath, className, 'QUEUE', loadedText);
                 const diskMembers = diskMembersClass.length > 0
                     ? diskMembersClass
                     : diskMembersGroup.length > 0
