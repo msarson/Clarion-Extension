@@ -56,7 +56,15 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     [TokenType.Comment]: /!.*/i,
     [TokenType.LineContinuation]: /&?\s*\|.*/i,
     [TokenType.String]: /'([^']|'')*'/i,
-    [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=\s|!|$)|(\.)(?=\s|!|$)/i,  // END keyword or dot terminator
+    // END keyword or dot terminator.
+    // #589 — the lookahead also admits `;` and a following `.`. A terminator can legally
+    // butt straight up against the next thing on the line: `;` is the optional statement
+    // separator (`IF a THEN b.; IF c THEN d.`, shipped in libsrc), and adjacent periods are
+    // the documented way to close several nested structures at once (`IF a THEN IF b THEN c=1..`).
+    // Without them no pattern matched the period at all — it was dropped, not misclassified,
+    // and its structure stayed open for the rest of the file. Decimals are unaffected because
+    // EndStatement is ordered after Number, and `obj.field` still fails the lookahead.
+    [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=[\s;.!]|$)|(\.)(?=[\s;.!]|$)/i,
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
     [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
     // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
