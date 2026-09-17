@@ -24,6 +24,9 @@ Works in the current file with no solution open; opens out across files when a s
 - Hover cards that say what a thing is: a FILE with its driver, prefix and keys; a MAP prototype labelled Global, Module or Private; a structure field the same from its declaration or any qualified use.
 - Reference counts above every procedure, method, class and routine, exact once the index is warm.
 - Rename across the workspace, document highlight, workspace symbol search, and chained access such as `SELF.Order.RangeList.Init` resolved through CLASS, QUEUE and GROUP types.
+- Call hierarchy (Shift+Alt+H) for procedures, methods and routines, in both directions.
+- Hover on a keyword that only makes sense in context: an `END` or a period says which structure it closes and links back to it; `ELSE`, `ELSIF`, `OF` and `OROF` say which IF or CASE they belong to.
+- In a solution with several projects, a name is resolved through the redirection of the project that compiles the file you are in.
 - [Navigation in detail](docs/features/navigation.md)
 
 ### IntelliSense and signature help
@@ -43,6 +46,8 @@ Reported as you type, following the compiler's rules; where the rule was unclear
 - Missing INCLUDE and missing project DefineConstants, each with a quick fix that adds the line.
 - Discarded return values, a literal passed by reference, a call to a PRIVATE procedure from another module, undeclared variables, missing implementations and indistinguishable overloads.
 - Character-set validation that respects every Windows ANSI code page and the Clarion 12 `!UTF8` directive.
+- Every check has its own setting and its own severity, with one switch for all of them; changes take effect as you make them.
+- Opt-in: a call to a procedure that no MAP, MODULE, include or indexed file declares.
 - [Diagnostics in detail](docs/features/diagnostics.md)
 
 ### Refactoring and quick fixes
@@ -55,7 +60,9 @@ On Ctrl+.: Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, and 
 
 - Open a folder; the extension finds the `.sln`, reads the projects, and follows Clarion's redirection files exactly as the IDE does, including per-configuration sections.
 - Installed Clarion versions are discovered from the IDE's settings; a `ClarionProperties.xml` kept anywhere else can be chosen, and the build follows it.
-- Build from the Solution View with live output, projects ordered by dependency. A solution that loads in a degraded state says so instead of silently returning nothing.
+- Build from the Solution View with live output, projects ordered by dependency, and each build states what it is building, in which configuration, and the MSBuild command line. A solution that loads in a degraded state says so instead of silently returning nothing.
+- The Clarion version is remembered per solution and can be changed while it is loaded: the editor and the build follow the new install at once, without a reload. A version the properties file no longer registers is reported rather than used.
+- Settings are read and written in one place, so a pick sticks in a multi-root workspace; settings an earlier version wrote into a folder, which override the `.code-workspace` file, are reported with an offer to remove them.
 - [Solution management in detail](docs/features/solution-management.md)
 
 <img src="docs/images/solution-view.png" width="344" alt="The Clarion Tools side bar: Actions with the selected Clarion version and configuration, the Solution View with the loaded solution and its project, and the Structure view of the open file">
@@ -66,7 +73,7 @@ Syntax highlighting for Clarion and the template language, including the Clarion
 
 ### Performance
 
-Indexes persist across sessions and background work is time-sliced, so a 40-project solution is ready in about two seconds and interactive in about five, and typing, hover and navigation are never blocked. Opt-in tracing (`clarion.log.performance.enabled`) produces a full timeline for support.
+Indexes persist across sessions and background work is time-sliced, so a 40-project solution is ready in about two seconds and interactive in about five, and typing, hover and navigation are never blocked. Reading a source file is about three times faster than in 1.0.3, and background checking stops as soon as you type rather than finishing work your edit has already replaced. Opt-in tracing (`clarion.log.performance.enabled`) produces a full timeline for support, and `clarion.log.level` captures a diagnostic log for a bug report.
 
 ---
 
@@ -82,20 +89,20 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.3 (2026-09-13)
+### 1.0.4 (2026-09-17)
 
-Most of this release is about reading generated code correctly: the MAP shapes a generated app emits, the procedure names it shares between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath. Several rules were settled by compiling a fixture, and the same work removed the last second-long cold starts on large programs.
+Seventy-seven changes. Most of them come from running the extension against real solutions: which Clarion version and which settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks.
 
-- Every documented MAP prototype shape is recognised and navigable, and none is reported as undeclared; a `MODULE()`-wrapped prototype in the global MAP is labelled Global, a `,PRIVATE` one is called out.
-- New diagnostic: a call to a PRIVATE procedure from another module, matching the compiler's *Invalid use of PRIVATE procedure*.
-- Hover and references from a call site stay inside the project that can reach the declaration, so a name shared between an EXE and a DLL never answers with the wrong side.
-- `PROJECT`, a VIEW's `JOIN` and a FILE's `KEY` hover; JOIN fields are checked against the parent file; dot notation in a VIEW is understood; F12 on the field half of `Customer.Name` works.
-- Hover cards tell the truth about kind and scope: a FILE or QUEUE label is a structure, a field is one card from any of its three spellings, a PROGRAM's global is Global from inside a procedure.
-- First hover, F12 or references on a generated program went from about two seconds to tens of milliseconds, and a quadratic tokenizer phase is gone.
-- A `ClarionProperties.xml` outside `%APPDATA%` can be browsed for, and the build follows it.
-- With contributions from [@geircodes](https://github.com/geircodes) and [@ClarionLive](https://github.com/ClarionLive).
+- The Clarion version a solution uses is remembered, can be changed while the solution is loaded, and a version the properties file no longer registers is reported instead of silently failing; a solution opened from the Solution View resolves its library classes at once.
+- Settings behave in a multi-root workspace: a configuration pick sticks, the change reaches the language server immediately, and settings an earlier version wrote into a folder — which quietly override your `.code-workspace` file — are reported with an offer to remove them.
+- In a solution with several projects, a class found in more than one search folder resolves to the copy the open file's own project uses.
+- Find All References covers more of what a name touches: the include files a program reaches, a type inside a CLASS body, `*Class` parameters in prototypes, an INCLUDE line's includers, and every module of a program for a class method.
+- Clarion written the way the compiler allows is read correctly: implicit variables named like keywords (`END#`), a comparison before a structure on the same line, an `END` sharing its line with a one-line `IF`, and qualified names ending in `END`.
+- Hover on an `END`, a period, or a branch keyword tells you what it closes or belongs to, with a link back; call hierarchy arrives for procedures, methods and routines; every diagnostic check gains its own setting and severity.
+- Editing large modules is quicker: reading a file is about three times faster, completion into classes no longer walks the include chain for every lookup, and background checking stops as soon as you type.
+- With contributions from [@geircodes](https://github.com/geircodes).
 
-**Earlier:** 1.0.2 (2026-09-06) made degraded solution loads report themselves and implemented the `%THISDIR%` family of redirection macros; 1.0.1 (2026-08-09) removed the startup freezes and the cold first interaction on large solutions. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.3 (2026-09-13) made generated code read correctly — the MAP shapes an app generator emits, names shared between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath — and removed the last second-long cold starts; 1.0.2 (2026-09-06) made degraded solution loads report themselves and implemented the `%THISDIR%` family of redirection macros. [Full changelog](CHANGELOG.md).
 
 ---
 

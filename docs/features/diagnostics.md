@@ -284,6 +284,26 @@ Applies to `*TYPE` reference parameters and complex types (`QUEUE`/`GROUP`/`FILE
 
 ---
 
+### Unresolved Procedure Calls (opt-in)
+
+**Flags a call to a procedure whose name is declared nowhere the extension can see** — not in this file's MAP or its MAP includes, not in the MEMBER parent's MAP or the MODULE blocks those MAPs pull in (the same places F12 looks), and not in the solution's declaration index. It catches typos and calls to procedures that no longer exist.
+
+**Off by default** — turn it on with:
+
+```json
+{
+  "clarion.diagnostics.unresolvedProcedureCalls.enabled": true
+}
+```
+
+Conservative on purpose:
+- A procedure that exists in the solution but isn't reachable from the call is not flagged
+- Method calls (`obj.Method`) are out of scope
+- Nothing is reported while the index is still building, or when a MEMBER's parent file can't be found
+- Needs a loaded solution
+
+---
+
 ### Indistinguishable Prototypes
 
 **Flags MAP overloads that a call could never disambiguate** (same name and effectively identical parameter shapes). Opt-out: `clarion.diagnostics.indistinguishablePrototypes.enabled`.
@@ -295,6 +315,8 @@ Applies to `*TYPE` reference parameters and complex types (`QUEUE`/`GROUP`/`FILE
 **Flags characters that can't be represented in any Windows ANSI code page (1250–1258)** — pasted emoji, box-drawing characters, other-script contamination.
 
 National letters for every locale (`č`, `ć`, `š`, `ž`, `đ`, Cyrillic, Greek, Turkish, …) pass clean — the check is *"representable in some ANSI code page"*, not *"is Windows-1252"*. The **Fix all** quick fix uses the same test, so it never deletes valid characters.
+
+Comments are left alone, and a line reports once rather than once per character — an ASCII-art banner in comments is not a problem for the compiler, which takes those bytes as they are.
 
 ---
 
@@ -324,6 +346,7 @@ af   &FileManager    ! ⚠️ Warning: 'FileManager' is defined in 'ABFile.inc' 
 - Checks global-scope variable declarations (column 0) whose type is a known `CLASS` or `INTERFACE`
 - Walks the full transitive include chain (any depth, cycle-safe) — a type included via `A.inc → B.inc` is correctly resolved
 - Also checks the `MEMBER` parent file's includes if the current file has a `MEMBER('parent.clw')` statement
+- Also checks the files that *include this one*: a class-typed declaration in a data include is not reported when every module that pulls the include in can already see the class
 
 **Quick fix (`Ctrl+.`):**
 - **Add INCLUDE to this file** — inserts `INCLUDE('type.inc'),ONCE` at module scope
@@ -436,9 +459,9 @@ The diagnostic clears immediately once the constants are added (the extension wa
 
 ## Configuration
 
-### Enable/Disable Diagnostics
+Every check has its own pair of settings, and there is one master switch over all of them. Changes take effect as you make them — no reload, no reopening the solution.
 
-**Turn all diagnostics off:**
+### Turn everything off
 
 ```json
 {
@@ -446,48 +469,33 @@ The diagnostic clears immediately once the constants are added (the extension wa
 }
 ```
 
+Nothing is reported while this is `false`, whatever the individual checks say.
+
 ---
 
-### Disable Specific Validations
+### Turn one check off
 
-**Structure validation:**
 ```json
 {
-  "clarion.diagnostics.validateStructures": false
-}
-```
-
-**FILE validation:**
-```json
-{
-  "clarion.diagnostics.validateFiles": false
-}
-```
-
-**RETURN validation:**
-```json
-{
-  "clarion.diagnostics.validateReturns": false
+  "clarion.diagnostics.unterminatedStructures.enabled": false,
+  "clarion.diagnostics.unicodeCharacters.enabled": false
 }
 ```
 
 ---
 
-### Adjust Severity Levels
+### Report a check at a different severity
 
-**Make warnings errors:**
 ```json
 {
-  "clarion.diagnostics.missingReturn": "error"  // Default: "warning"
+  "clarion.diagnostics.undeclaredVariables.severity": "error",
+  "clarion.diagnostics.discardedReturnValues.severity": "hint"
 }
 ```
 
-**Suppress warnings:**
-```json
-{
-  "clarion.diagnostics.missingReturn": "information"
-}
-```
+`default` keeps the check's own level; `error`, `warning`, `information` and `hint` override it. So a check you find useful but not blocking can be demoted, and one your team treats as a build rule promoted.
+
+The full list of check ids, their defaults and what each one reports is in the **[Settings Reference](../reference/settings.md#diagnostics)**.
 
 ---
 
@@ -586,17 +594,13 @@ CODE
 
 ### Performance Impact
 
-**If diagnostics slow down editor:**
+Checking runs in the background and stops as soon as you type, so a result your edit has already invalidated is abandoned rather than finished. Typing is never blocked waiting for diagnostics.
 
-1. Disable validations you don't need
-2. Larger files take longer to validate
-3. Consider disabling for very large files (10K+ lines)
+**If you still want less work done:**
 
-```json
-{
-  "clarion.diagnostics.validateOnChange": false  // Validate on save only
-}
-```
+1. Turn off the checks you don't use (`clarion.diagnostics.<check>.enabled`)
+2. Turn everything off with `clarion.diagnostics.enabled` while working in a very large generated module
+3. `clarion.log.performance.enabled` writes a timeline if you want to report where the time goes
 
 ---
 

@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.2**.
+Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.4**.
 
 Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` directly.
 
@@ -23,10 +23,44 @@ Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` di
 
 ## Diagnostics
 
+Every check can be turned off on its own and reported at the severity you choose. A change takes effect as you make it — no reload.
+
 | Setting | Default | Description |
 |---|---|---|
-| `clarion.diagnostics.undeclaredVariables.enabled` | `true` | Warns when an identifier in executable code resolves to no declaration through the full scope model (cross-file aware; automatically suppressed until a solution is loaded). |
-| `clarion.diagnostics.indistinguishablePrototypes.enabled` | `true` | Warns when two procedure declarations in the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the compiler. |
+| `clarion.diagnostics.enabled` | `true` | The master switch. Turn it off and nothing is reported, whatever the individual checks say. |
+| `clarion.diagnostics.<check>.enabled` | see below | Turns one check off or on. |
+| `clarion.diagnostics.<check>.severity` | `"default"` | Reports one check as `error`, `warning`, `information` or `hint`. `default` keeps the check's own level, so a check that is useful but not blocking can be demoted, and one your team treats as a build rule promoted. |
+
+### The checks
+
+`<check>` is one of the 24 ids below — for example `"clarion.diagnostics.undeclaredVariables.severity": "error"`, or `"clarion.diagnostics.unicodeCharacters.enabled": false`.
+
+| Check | Default | What it reports |
+|---|---|---|
+| `undeclaredVariables` | on | Raises a Warning on a bare identifier used in executable code — an assignment target or an operand in a condition or expression — that cannot be resolved to any declaration in the current file, including a PROGRAM's own main CODE section. |
+| `unresolvedProcedureCalls` | **off** | Raises a Warning on a call to a procedure whose name is declared nowhere the extension can see — not in this file's MAP or its MAP includes, not in the MEMBER parent's MAP or the MODULE blocks of the includes those MAPs pull in (the same places Go to Definition looks), and not in the solution's declaration index. |
+| `indistinguishablePrototypes` | on | Raises a Warning when two procedure declarations within the same scope (CLASS / INTERFACE / MAP) are indistinguishable to the Clarion compiler — both callable with zero arguments via defaults, identical parameter shapes, or duplicates where `*` is implicit for complex types. |
+| `unterminatedStructures` | on | Reports a structure (IF, LOOP, CASE, GROUP, CLASS, WINDOW and the rest) with no closing END or period. |
+| `omitCompileBlocks` | on | Reports an OMIT or COMPILE block whose terminator string never appears. |
+| `fileDeclarations` | on | Reports a FILE declaration missing its DRIVER attribute or its RECORD section. |
+| `caseStructures` | on | Reports an OROF in a CASE that is not preceded by an OF. |
+| `executeStructures` | on | Reports an EXECUTE whose expression is a string literal rather than a numeric value. |
+| `returnStatements` | on | Reports a procedure declared with a return type that has no RETURN statement, or only empty ones. |
+| `classProperties` | on | Reports a QUEUE declared directly as a CLASS property, or nested inside another QUEUE, where a QUEUE reference (&QUEUE) is required. |
+| `discardedReturnValues` | on | Reports a call whose return value is discarded when the procedure or method is not declared with the PROC attribute. Covers plain calls and method calls. |
+| `cycleBreakOutsideLoop` | on | Reports CYCLE or BREAK outside any LOOP or ACCEPT, and a CYCLE or BREAK label that names no enclosing loop. |
+| `reservedKeywordLabels` | on | Reports a label that is a reserved Clarion keyword. |
+| `unicodeCharacters` | on | Reports a character that no Windows ANSI code page can represent, which would corrupt the file for the Clarion compiler. |
+| `attributeApplicability` | on | Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON. |
+| `itemizeBlocks` | on | Reports a declaration other than an EQUATE inside an ITEMIZE block. |
+| `byRefArguments` | on | Reports a literal passed to a by-reference (*TYPE) parameter. |
+| `viewProjectFields` | on | Reports a PROJECT field in a VIEW or JOIN that the projected FILE does not declare. |
+| `missingIncludes` | on | Reports a type used in the file whose declaring include file is not included. |
+| `missingConstants` | on | Reports a type whose declaring include file needs a project DEFINE constant the project does not set. |
+| `missingMapDeclarations` | on | Reports a procedure implementation with no MAP prototype, and a prototype whose signature does not match its implementation. |
+| `missingImplementations` | on | Reports a MAP prototype with no implementation. |
+| `privateProcedureCalls` | on | Reports a call to a PRIVATE procedure from outside the module that declares it. |
+| `interfaceImplementation` | on | Reports a CLASS that implements an INTERFACE but leaves one of its methods unimplemented. |
 
 ## Build
 
@@ -77,6 +111,7 @@ Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` di
 
 | Setting | Default | Description |
 |---|---|---|
+| `clarion.log.level` | `"error"` | How much the extension logs: `error` (the default) logs only errors, `warn` adds missing settings and degraded fallbacks, `info` a running trace, `debug` everything. The lines go to the *Clarion Extension (Client)* and *Clarion Language Server* output channels and to `.clarion-debug/client.log` in the workspace. Raise it while reproducing a problem, then set it back; it applies to both processes at once, with no reload. The command **Clarion: Set Log Level** changes it from the palette. |
 | `clarion.log.performance.enabled` | `false` | **Support/diagnostic switch.** Emits performance-timing lines (startup phases, index builds, per-validator timings, slow-request attribution) to the *Clarion Language Server* output channel. The instrumentation always runs at negligible cost — flip this on (plus a window reload) to produce a full diagnostic timeline when reporting a performance issue. |
 | `clarion.trace.server` | `"off"` | LSP wire tracing: `off`, `messages`, or `verbose`. |
 | `clarion.telemetry.enabled` | `true` | Anonymous usage telemetry. No personal information is collected. |

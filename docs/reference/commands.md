@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.2**.
+Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.4**.
 
 Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the editor and Solution View, or the keyboard shortcuts listed below. In the palette every command is grouped under the **`Clarion:`** category, so typing `clarion` lists all of them — the tables below give the underlying command IDs rather than the palette labels. Settings are documented separately in **[Settings Reference](settings.md)**.
 
@@ -15,6 +15,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `F12` | Go to Definition | editor |
 | `Ctrl+F12` | Go to Implementation | editor |
 | `Shift+F12` | Find All References | editor |
+| `Shift+Alt+H` | Show Call Hierarchy — who calls this procedure, method or routine, and what it calls | editor |
 | `F2` | Rename Symbol | editor |
 | `Ctrl+T` | Workspace Symbol Search | anywhere |
 | `Ctrl+.` | Quick fixes & refactors (Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, Create Routine, missing INCLUDE/constants) | editor |
@@ -50,6 +51,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | Command | Description |
 |---|---|
 | `clarion.buildSolution` | Build the solution (`Ctrl+Shift+B`) |
+| `clarion.buildSolutionDirect` | Build the whole solution in dependency order from the Solution View's solution node, without the "what do you want to build?" prompt |
 | `clarion.buildCurrentProject` | Build the project containing the active file |
 | `clarion.buildProject` | Build a specific project (Solution View context menu) |
 | `clarion.buildAllProjects` | Build every project |
@@ -65,6 +67,7 @@ Available in the Solution View for solutions with `.app` files under version con
 |---|---|
 | `clarion.generateApp` | Generate one application's source |
 | `clarion.generateAllApps` | Generate all applications |
+| `clarion.buildProjectFromApp` | Build the project that matches an `.app` node, without generating first |
 | `clarion.generateAndBuildApp` | Generate + build one project |
 | `clarion.generateAllAppsThenBuildSolution` | Generate all, then build the solution |
 | `clarion.exportAppToVersionControl` / `clarion.exportAllAppsToVersionControl` | Export APP(s) to TXA-based version control |
@@ -108,8 +111,10 @@ Available in the Solution View for solutions with `.app` files under version con
 
 | Command | Description |
 |---|---|
+| `clarion.setLogLevel` | Pick how much the extension logs (`error` … `debug`) for the run of a problem, without editing settings |
 | `clarion.debugSolutionHistory` | Inspect the recent-solutions memory |
 | `clarion.debug.showFileRelationshipGraph` | Dump the MODULE/INCLUDE/MEMBER file graph (support/debug) |
+| `clarion.debug.showServerVersion` | Report the language server build actually running — the first thing to check when a fix appears not to have landed |
 
 ---
 

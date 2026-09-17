@@ -2,14 +2,16 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Master code navigation with F12, Ctrl+F12, and hover tooltips.
+Master code navigation with F12, Ctrl+F12, Shift+Alt+H and hover tooltips.
 
 ## Overview
 
-The Clarion Extension provides three powerful ways to navigate your code:
+The Clarion Extension provides several ways to navigate your code:
 
 - **Go to Definition (F12)** - Find where something is declared
 - **Go to Implementation (Ctrl+F12)** - See the actual code
+- **Find All References (Shift+F12)** - Every place a name is used
+- **Call Hierarchy (Shift+Alt+H)** - Who calls this, and what it calls
 - **Hover Tooltips** - Preview without leaving your current file
 
 All navigation features are **scope-aware** and work across files in your solution.
@@ -288,6 +290,25 @@ INCLUDE('MyFile.inc', 'MySection')  ! Hover shows MySection content
 
 ---
 
+### Hover Over a Terminator or a Branch Keyword
+
+Clarion keywords that only mean something in context say what that context is, and link back to it.
+
+- **`END`** — names the structure it closes, with its label and line, and a link to open it.
+- **A period** — the same, for the `.` form of a terminator, including the period that ends a one-line structure.
+- **`ELSE`, `ELSIF`, `OF`, `OROF`** — name the `IF` or `CASE` they belong to.
+
+**Example:**
+```clarion
+IF Customer:Status = 'A'    ! ← the hover on END points back to this line
+  DoSomething()
+ELSE                        ! ← hover says "part of IF on line 1"
+  DoSomethingElse()
+END                         ! ← hover says "closes IF (line 1)"
+```
+
+This is most useful in deeply nested generated code, where the structure a terminator closes is hundreds of lines above it.
+
 ---
 
 ## CodeLens — Inline Reference Counts
@@ -309,9 +330,28 @@ A `N references` count appears above every procedure, method, CLASS declaration,
 - **Overload-aware**: on an overloaded procedure/method, only the matching overload's declaration, implementation, and call sites are returned (calls are classified by argument types; ambiguous calls stay included for rename safety)
 - **Routines**: works from a `ROUTINE` label or any `DO` site — returns the label plus every `DO` in the owning procedure, including generated `::` names (`Menu::MENUBAR1`); same-named routines in other procedures are excluded
 - **Module-callout procedures**: from the implementation of a procedure declared via a `MODULE('impl.clw')` INC that consumer modules INCLUDE into their MAPs, references reach every including module
+- **Class methods**: from a method of a class a PROGRAM uses, references reach every module of that program, not just the one you started in
+- **Types**: a type named inside a CLASS body — a member declared `LIKE(SomeGroup)`, a `,TYPE` reference — counts as a reference to that type
+- **Prototype parameters**: `*ClassName` and `ClassName` parameters in a prototype are both found (Clarion passes a complex type by reference whether or not the `*` is written)
+- **INCLUDE lines**: from an `INCLUDE('file.inc')` line, references list every file that includes it
+- **Include files a PROGRAM reaches**: the candidate set follows the include closure, so a symbol declared in an `.inc` is found wherever that `.inc` is pulled in
 - Occurrences inside unconditional `OMIT` blocks are excluded (they're not in the active build)
 - Works for procedures, classes, variables, methods, type names in declarations
 - Results grouped by file with line previews
+
+---
+
+## Call Hierarchy (Shift+Alt+H)
+
+**What it does:** Shows who calls a procedure and what it calls, as a tree you can expand in either direction.
+
+- Works on **procedures, class methods and routines**
+- **Incoming calls** — every call site, expandable to that caller's own callers
+- **Outgoing calls** — every call the body makes, expandable downwards
+- Uses the same scoped resolution as Find All References, so overloads, routines and DLL-boundary calls behave the same way
+- Also available from the editor context menu as **Show Call Hierarchy**
+
+Useful before a refactor ("what breaks if I change this signature?") and when reading unfamiliar generated code from the entry point downwards.
 
 ---
 
@@ -401,6 +441,10 @@ CODE
   MyVar = 'test'  ! ← F12 goes to local STRING, not global LONG
 ```
 
+### Which Project's Redirection Applies
+
+In a solution with several projects, a name can resolve to more than one file — two projects with their own copy of a class in different search folders is common. Navigation resolves through **the redirection of the project that compiles the file you are in**, not the first match anywhere in the solution, so F12 from `OrderClass.clw` in project A lands in A's `OrderClass.inc` even when project B has one too. A file that no project claims falls back to a solution-wide search.
+
 ### Routine Variable Access
 Variables in routines are accessible from the parent procedure.
 
@@ -420,13 +464,14 @@ MyVar     LONG
 
 ## Performance
 
-**Blazing Fast:** All navigation features use optimized caching and indexing.
+Navigation is index-backed rather than search-backed, and the indexes persist between sessions.
 
-- **MAP resolution**: Direct lookup, no scanning hundreds of files
-- **Parent scope lookups**: O(1) operations with parent index
-- **Cross-file resolution**: Efficient file-based caching
+- **MAP resolution**: direct lookup, no scanning hundreds of files
+- **Parent scope lookups**: O(1) through the parent index
+- **Cross-file resolution**: the declaration index and the file-relationship graph are built once and reloaded from disk on the next session
+- **Candidate sets, not whole-solution scans**: a reference search starts from the files where the symbol can be visible
 
-Even in large codebases (1000+ files), navigation is instant.
+On a 40-project, 3,000-source solution the first navigation after opening is available in about five seconds, and navigation afterwards is immediate.
 
 ---
 
@@ -447,8 +492,9 @@ Even in large codebases (1000+ files), navigation is instant.
 3. Include paths not resolving
 
 **Solution:**
-- Use hover tooltip to verify you're on the correct symbol
-- Check `.clarion.properties` redirection settings
+- Use the hover tooltip to verify you're on the correct symbol
+- Check that the solution's Clarion version is the one you build with — the redirection (`.red`) file it points at decides where a name resolves (**Clarion: Set Active Version**)
+- In a multi-project solution, remember the open file's own project decides the search order (above)
 
 ### Cross-File Navigation Not Working
 

@@ -133,31 +133,25 @@ Clarion Tools
 
 When opening a solution for the first time, you'll configure:
 
-#### 1. Clarion Path
-**What:** Path to Clarion BIN directory  
-**Used for:** Building with `ClarionCl.exe`
+#### 1. Clarion Version
 
-**Example:** `C:\Clarion11\Bin`
+**What:** which installed Clarion the solution is edited and built with.
 
-**Set manually:**
-- `Ctrl+Shift+P` → "Clarion: Set Clarion Path"
+The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "DirectSystems", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
 
----
+**Set or change it:**
+- `Ctrl+Shift+P` → **Clarion: Set Active Version**
+- Or click the version in the status bar
 
-#### 2. Clarion Properties File
-**What:** `.clarion.properties` file for redirection  
-**Used for:** Finding included files
+If only one version is registered you are still asked which properties file to use, because a machine can have more than one.
 
-**Can be:**
-- Project-specific: `C:\MyProject\.clarion.properties`
-- Global: `C:\Clarion11\.clarion.properties`
+**Changing the version while the solution is open** is supported and takes effect at once: the editor and the build both follow the new install, without reloading the window. A version that `ClarionProperties.xml` no longer registers — renamed or uninstalled since you last opened the solution — is reported rather than silently used, with an offer to pick a current one.
 
-**Set manually:**
-- `Ctrl+Shift+P` → "Clarion: Set Clarion Properties"
+**Remembered per solution:** the version you pick is stored against that solution, so opening a solution that builds with 11.1 and another that builds with 10 does not mean re-picking each time.
 
 ---
 
-#### 3. Build Configuration
+#### 2. Build Configuration
 **What:** Debug or Release build  
 **Default:** Release|Win32
 
@@ -171,23 +165,32 @@ The active build configuration is now **auto-detected from the `.sln.cache` file
 
 ### Settings Storage
 
-**All settings saved in `.vscode/settings.json` within solution folder:**
+**Written automatically when you open a solution and pick a Clarion version:**
 
 ```json
 {
   "clarion.solutionFile": "C:\\MyProject\\MySolution.sln",
-  "clarion.propertiesFile": "C:\\Clarion11\\bin\\ClarionProperties.xml",
+  "clarion.propertiesFile": "C:\\Users\\you\\AppData\\Roaming\\SoftVelocity\\Clarion\\11.0\\ClarionProperties.xml",
   "clarion.version": "Clarion 11.1",
   "clarion.configuration": "Release"
 }
 ```
 
-These are written automatically when you open a solution and pick a Clarion version.
-
 **Benefits:**
-- Persists when reopening solution
+- Persists when reopening the solution
 - Can be committed to version control
-- Team members share same configuration
+- Team members share the same configuration
+
+#### Where they are written
+
+- **A plain folder** — `.vscode/settings.json` inside the folder.
+- **A `.code-workspace` file** — the workspace file, not the folder. Reads and writes both go to the same place, so a version or configuration you pick sticks instead of appearing to revert on the next reload.
+
+#### Settings an older version left in a folder
+
+Before v1.0.4 these settings could be written into a folder's `.vscode/settings.json` even when the workspace was opened from a `.code-workspace` file. VS Code gives the folder copy priority, so the workspace file's values are silently ignored and the solution keeps opening with the old version or configuration.
+
+When that is detected, the extension says which settings are shadowed and offers to remove the folder copies for you — take the offer, and the `.code-workspace` values take over immediately. It asks once per session, and it never touches settings that agree with the workspace file.
 
 ---
 
@@ -219,15 +222,18 @@ These are written automatically when you open a solution and pick a Clarion vers
 
 ### Build Output
 
-**Live output in integrated terminal:**
+**Live output in the Clarion Build output channel**, which opens without taking focus:
+- A header saying what is being built, in which configuration, and the exact MSBuild command line — so a Release build started by mistake is visible at a glance
 - Compilation progress
 - Error messages (in red)
 - Warnings (in yellow)
-- Success message
+- A result message that names the configuration too
 
 **Click errors to jump to source:**
 - Error messages show file and line number
-- Click to open file at error location
+- Click to open the file at the error location
+
+`clarion.build.showInOutputPanel`, `clarion.build.revealOutput`, `clarion.build.preserveLogFile` and `clarion.build.logFilePath` control where the output goes and whether the log is kept.
 
 ---
 
@@ -254,8 +260,8 @@ These are written automatically when you open a solution and pick a Clarion vers
 #### "ClarionCl.exe not found"
 
 **Fix:**
-1. `Ctrl+Shift+P` → "Clarion: Set Clarion Path"
-2. Browse to Clarion BIN folder
+1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"** and pick the version this solution builds with
+2. If it is missing from the list, it is no longer registered in `ClarionProperties.xml` — re-register it in the Clarion IDE, or browse to another properties file
 3. Try building again
 
 ---
@@ -283,28 +289,30 @@ These are written automatically when you open a solution and pick a Clarion vers
 
 ### What Are Redirection Files?
 
-Clarion uses `.clarion.properties` files to map logical paths to physical paths.
+A redirection file (`.red`) tells Clarion where to look for each kind of file — sources, includes, libraries, generated output — as a list of search folders per extension. The extension parses the same file the compiler uses, so what resolves in the editor is what compiles.
 
 **Example:**
-```properties
-# Redirections
-%CW% = C:\Clarion11
-%INCLUDE% = %CW%\Accessory\Libsrc
 ```
+[Debug]
+-- Directories only used when building with Debug configuration
+*.obj = obj\debug
+*.lib = obj\debug
+
+[Common]
+*.clw = .; %ROOT%\libsrc\win
+*.inc = .; %ROOT%\libsrc\win; %ROOT%\Accessory\libsrc\win
+*.*   = .; %ROOT%\libsrc\win; %ROOT%\images; %ROOT%\template\win
+```
+
+Supported as the compiler supports them: `[Common]` plus name-matched sections, `{include}` of another `.red`, per-configuration sections, and the `%ROOT%` / `%BIN%` / `%THISDIR%` family of macros. A `.red` lists **directories** to search, never file names.
 
 ---
 
-### Types of Redirection
+### Which Redirection File Is Used
 
-#### Global Redirection
-**Location:** Clarion installation folder  
-**Example:** `C:\Clarion11\.clarion.properties`  
-**Used for:** System-wide paths like `%CW%`
+**One per Clarion version:** the version's `ClarionProperties.xml` names its redirection file (for example `Clarion110.red`), and a solution or project may point at its own.
 
-#### Local Redirection
-**Location:** Project folder  
-**Example:** `C:\MyProject\.clarion.properties`  
-**Used for:** Project-specific paths
+**In a multi-project solution**, a name is resolved through the redirection of *the project that compiles the file you are editing* — so two projects that each keep their own copy of a shared class header each resolve to their own copy, as the compiler does.
 
 ---
 
@@ -336,15 +344,17 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 
 ### Working with Multiple Solutions
 
-**VS Code limitation:** Only one folder open at a time
+**One solution is active at a time**, whatever the window contains.
 
 **Workflow:**
-1. Open first solution folder
+1. Open the first solution folder
 2. Work on it
-3. **File → Open Folder** to open second solution
-4. First solution closes automatically
+3. **File → Open Folder** to open the second solution
+4. The first solution closes automatically
 
-**Tip:** Use **Recent Solutions** list to quickly switch between solutions.
+**Tip:** use the **Recent Solutions** list to switch quickly.
+
+**Multi-root workspaces** (a `.code-workspace` file with several folders) are supported: the solution settings live in the workspace file, so a version or configuration you pick applies to the window rather than to whichever folder happened to be first. See [Settings an older version left in a folder](#settings-an-older-version-left-in-a-folder) if picks seem to revert.
 
 ---
 
@@ -354,12 +364,15 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 
 **Access via `Ctrl+Shift+P`:**
 
-- **Clarion: Set Clarion Path** - Configure Clarion installation
-- **Clarion: Set Clarion Properties** - Configure properties file
-- **Clarion: Set Configuration** - Change Debug/Release
-- **Clarion: Generate Application** - Build application
-- **Clarion: Show Extension Status** - Health check
-- **Clarion: Refresh Solution** - Reload solution tree
+- **Clarion: Open Solution...** - the main entry point: detected solutions, browse, or recents
+- **Clarion: Set Active Version** - pick the installed Clarion this solution uses
+- **Clarion: Set Configuration** - change Debug/Release
+- **Clarion: Generate Application** - generate an app's source
+- **Clarion: Show Extension Status** - health check
+- **Clarion: Refresh Solution** - re-read the `.sln` and projects
+- **Clarion: Set Log Level** - raise logging while reproducing a problem
+
+The full list is in the **[Commands Reference](../reference/commands.md)**.
 
 ---
 
@@ -367,15 +380,15 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 
 ### Clarion Status Items
 
-**Bottom-right status bar shows:**
+**The status bar shows:**
 
-1. **Clarion Version** - e.g., "Clarion 11"
-   - Click to change Clarion path
+1. **Clarion Version** - e.g., "Clarion 11.1"
+   - Click to pick a different registered version; the change applies at once, to the editor and the build
 
 2. **Build Configuration** - e.g., "Release|Win32"
    - Click to change configuration
 
-3. **Current Document** - File name and language mode
+3. **Startup project**, when one is set - the target of `F5` / `Ctrl+F5`
 
 ---
 
@@ -390,17 +403,18 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 ```
 MySolution/
 ├── .vscode/
-│   └── settings.json    ← Solution-specific settings
-├── .clarion.properties  ← Local redirections
+│   └── settings.json    ← Solution-specific settings (folder workspaces)
+├── MySolution.red       ← Project redirection, if the solution has its own
 ├── MySolution.sln
 ├── MyApp.app
 └── MyApp.clw
 ```
 
 ### Team Collaboration
-- Commit `.vscode/settings.json` to version control
+- Commit `.vscode/settings.json` — or the `.code-workspace` file — to version control
 - Use relative paths where possible
 - Document redirection setup in README
+- Note that `clarion.version` names a version as *this machine* registered it, so a teammate whose install is registered under another name will be asked to pick once
 
 ### Terminal Management
 - Build output uses dedicated terminal

@@ -10,7 +10,7 @@ User-facing documentation for the Clarion Extension, versioned with each release
 
 ## ✨ Features
 
-- **[Navigation](features/navigation.md)** — F12, references, CodeLens, rename
+- **[Navigation](features/navigation.md)** — F12, references, call hierarchy, CodeLens, rename
 - **[Signature Help & IntelliSense](features/signature-help.md)** — parameter hints, completions, hover
 - **[Diagnostics](features/diagnostics.md)** — what each validation checks
 - **[Code Editing](features/code-editing.md)** — refactors, snippets, wizards
