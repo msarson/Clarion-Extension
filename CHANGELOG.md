@@ -39,6 +39,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Editing
 
+- **Dot completion on a procedure parameter offers its type's members.** A parameter such as `pThing` in `PROCEDURE(ctThing pThing)` completed nothing after a pause, although a local of the same type and hover on the parameter both worked. [#570](https://github.com/msarson/Clarion-Extension/pull/570) @geircodes
 - **Word completion offers EQUATEs declared in another file.** A constant declared in an include the module reaches only through the PROGRAM's own INCLUDE never appeared as a completion, since only the current document's equates were collected. Once two characters are typed, the project's declaration index contributes its EQUATE and ITEMIZE entries too, each with its value and declaring file, capped at 300 and never waiting on an index still being built; the document's own declaration still wins on a name clash. [#554](https://github.com/msarson/Clarion-Extension/pull/554) @geircodes
 - **A VIEW's JOIN folds, and the VIEW's own fold now reaches its own END.** JOIN was never treated as a structure, so its END closed the enclosing VIEW one line early and the JOIN itself could not be folded. The compiler confirmed the shape: every JOIN needs its own END or period, JOINs nest, and INNER is a trailing attribute (`JOIN(...),INNER`), not a prefix. [#504](https://github.com/msarson/Clarion-Extension/issues/504)
 - **Prefix completion on a FILE no longer offers its PRE() argument or a KEY's field arguments as fields.** After `ORD:` the list read `ORD:ORD` and `ORD:ORD:ID` and left out `ORD:ID` itself; a structure line now contributes only its column-0 label, so fields, keys and the record group are offered by name. [#499](https://github.com/msarson/Clarion-Extension/issues/499)
@@ -73,6 +74,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Performance
 
 - **Word completion in a MEMBER module no longer takes seconds per keystroke.** Completion collected the PROGRAM file's prefix-qualified globals by scanning the whole file once per field, so a program carrying a dictionary's file declarations spent one and a half to three seconds on every request. The fields are now gathered in one pass and remembered until the program file changes. Member completion after a dot was already fast. [#565](https://github.com/msarson/Clarion-Extension/issues/565)
+- **Dot completion on a class whose header is found in more than one search folder no longer pauses for seconds.** A project keeping its own copy of a shared class header made every such class look ambiguous, so completion walked and tokenized the whole include chain, once for each ancestor. Copies of the same file are now read from the one the redirection file lists first, as the compiler binds it. [#569](https://github.com/msarson/Clarion-Extension/pull/569) @geircodes
 
 #### Syntax
 
