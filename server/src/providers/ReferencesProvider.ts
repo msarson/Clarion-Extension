@@ -3486,6 +3486,12 @@ export class ReferencesProvider {
                     // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"
                     matchStart = token.start + 1; // skip the leading '&'
                     matchLength = searchWord.length;
+                } else if (token.type === TokenType.PointerParameter &&
+                           token.value.replace(/^\*\s*/, '').toLowerCase() === searchWordLower) {
+                    // #561 — *TypeName pointer parameter in a prototype: "Init PROCEDURE(*ctThing pThing)".
+                    // One token covers the star, any spaces after it and the type name.
+                    matchStart = token.start + (token.value.length - searchWord.length);
+                    matchLength = searchWord.length;
                 } else if (scopeType === 'field' && (token.type === TokenType.StructureField || token.type === TokenType.Class)) {
                     // Field reference via dot-notation: "QZipF.version" when searching for "version"
                     const dotIndex = token.value.lastIndexOf('.');
