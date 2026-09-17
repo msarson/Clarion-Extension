@@ -226,3 +226,25 @@ export function validateRememberedSettings(
     }
     return { valid: true };
 }
+
+/** A command the startup prompt for an unloadable remembered solution runs, with its arguments. */
+export interface PromptCommand {
+    command: string;
+    args: unknown[];
+}
+
+/**
+ * The command behind each button of the startup prompt shown when the remembered solution has a
+ * missing or stale Clarion version (#498/#535). Undefined when the prompt was dismissed.
+ *
+ * #572 — Set Version opens the remembered solution through the solution opener, the route the
+ * Solution View takes: it rejects the missing or stale version, offers the installation and
+ * version picker, saves the choice for the solution and loads it. The general version picker it
+ * used to run changes the in-memory version only, and the save-and-reload that had to follow it
+ * here could be skipped without a word.
+ */
+export function rememberedSolutionPromptCommand(action: string | undefined, solutionFile: string): PromptCommand | undefined {
+    if (action === 'Set Version') return { command: 'clarion.openDetectedSolution', args: [solutionFile] };
+    if (action === 'Open Solution...') return { command: 'clarion.openSolution', args: [] };
+    return undefined;
+}

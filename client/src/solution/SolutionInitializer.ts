@@ -4,7 +4,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands'; // #567
-import { rememberedSolutionState, readRegisteredVersionNames } from '../utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, readRegisteredVersionNames, rememberedSolutionPromptCommand } from '../utils/SolutionFallbackPolicy';
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
 import {
@@ -161,22 +161,10 @@ export async function workspaceHasBeenTrusted(
                 "Set Version",
                 "Open Solution..."
             );
-            if (action === "Set Version") {
-                await commands.executeCommand('clarion.setActiveVersion');
-                if (rememberedSolutionState(globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion,
-                        readRegisteredVersionNames(globalClarionPropertiesFile)) === 'ready') {
-                    // The picker sets the effective version in memory only; remember it for
-                    // this solution so the next reopen does not land here again.
-                    await setGlobalClarionSelection(
-                        globalSolutionFile,
-                        globalClarionPropertiesFile,
-                        globalClarionVersion,
-                        globalSettings.configuration || 'Release'
-                    );
-                    await commands.executeCommand('clarion.reinitializeSolution');
-                }
-            } else if (action === "Open Solution...") {
-                await commands.executeCommand('clarion.openSolution');
+            // #572 — Set Version recovers the solution through the solution opener (pick, save, load).
+            const next = rememberedSolutionPromptCommand(action, globalSolutionFile);
+            if (next) {
+                await commands.executeCommand(next.command, ...next.args);
             }
             return;
         }
