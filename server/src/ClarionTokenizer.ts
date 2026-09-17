@@ -40,6 +40,58 @@ function closesOptionalParameter(line: string, index: number, bracketOpen: boole
 }
 
 /**
+ * #590 — structure keywords that can name the TYPE of a parameter. Exactly the declaration
+ * structures the Variable pattern excludes: because it excludes them, a keyword that reaches
+ * that pattern matches from its SECOND character (QUEUE -> "UEUE"), which is how the type of
+ * `<REPORT R>` or `DoIt(a,QUEUE q)` lost its first letter. Executable structures (IF, LOOP,
+ * CASE...) and the namespace-like MAP/MODULE are deliberately absent: they never name a type.
+ */
+const PARAMETER_TYPE_KEYWORDS = ['APPLICATION', 'INTERFACE', 'RECORD', 'REPORT', 'WINDOW', 'QUEUE', 'CLASS', 'GROUP', 'FILE', 'VIEW'];
+
+/**
+ * #590 — the structure keyword at `position` when it is naming a parameter's type, else null.
+ *
+ * A parameter type is introduced by ',' or '<' (`DoIt(a,QUEUE q)`, `<REPORT R>`). The caller emits
+ * it as a Keyword, the same token #416 already produced for a keyword inside (...) or <...>; doing
+ * it here rather than in the Structure branch keeps it independent of each structure pattern's own
+ * trailing lookahead — WINDOW's requires '(' or ',' after the word, so `<WINDOW wnd>` (16 times in
+ * the shipped builtins.clw) never reached that branch at all.
+ *
+ * Qualified names are NOT included: ':' and '.' are handled by the Structure branch, which lets
+ * them fall through to the patterns that match the whole name.
+ */
+function parameterTypeKeywordAt(line: string, position: number): string | null {
+    if (position === 0) return null;
+    const prev = line[position - 1];
+    if (prev !== ',' && prev !== '<') return null;
+    for (const keyword of PARAMETER_TYPE_KEYWORDS) {
+        if (line.length - position < keyword.length) continue;
+        if (line.substr(position, keyword.length).toUpperCase() !== keyword) continue;
+        const after = line[position + keyword.length];
+        // A whole word: the next character cannot continue an identifier. `<QUEUEDItem q>` is a
+        // name that merely starts with QUEUE, and `,FILES` is not FILE.
+        if (after !== undefined && /[A-Za-z0-9_:.]/.test(after)) continue;
+
+        if (prev === '<') {
+            // An omittable parameter — `<REPORT R>` and the abbreviated `<QUEUE>` alike. A call
+            // never writes an argument as `<Window>`, so no name is required here. The '<' must
+            // actually open a parameter though: in `IF a<Window` it is a comparison (#580's rule).
+            return opensOptionalParameter(line, position - 1) ? line.substr(position, keyword.length) : null;
+        }
+
+        // After ',' the two readings collide: `(...,VIEW V,...)` is a prototype's parameter type,
+        // but `INIMgr.Fetch('Main',Window)` passes a structure as an ARGUMENT and must stay a
+        // variable — it is a real reference that F12 and Find All References have to resolve.
+        // Only a following parameter NAME tells them apart; no call writes two names side by side.
+        let j = position + keyword.length;
+        while (j < line.length && (line[j] === ' ' || line[j] === '\t')) j++;
+        const startsName = j < line.length && /[A-Za-z_]/.test(line[j]);
+        return startsName ? line.substr(position, keyword.length) : null;
+    }
+    return null;
+}
+
+/**
  * #579 — at `position`, optional whitespace then a name ending in an implicit-variable suffix
  * (# LONG, $ REAL, " STRING(32)). Returns the name's start and end, or null. A hand scan rather than
  * a regex: it runs at every position of every line, and `^\s*` over an aligned run of spaces would
@@ -273,6 +325,24 @@ export class ClarionTokenizer {
                     }
                 }
 
+                // #590 — a structure keyword directly after ',' or '<' is the TYPE of a parameter,
+                // not a structure opener and not a variable. Emitted here, before the pattern loop,
+                // it keeps its first character; left to the patterns it reached the Variable
+                // pattern, which excludes structure keywords and so matched from the second one.
+                // The ',' / '<' test is inline: this runs at every position of every line, and a
+                // call per position measured ~4% of tokenize time across the corpus (#581 territory).
+                const beforeToken = position > 0 ? line[position - 1] : '';
+                const parameterType = (beforeToken === ',' || beforeToken === '<')
+                    ? parameterTypeKeywordAt(line, position)
+                    : null;
+                if (parameterType) {
+                    this.tokens.push({ type: TokenType.Keyword, value: parameterType, line: lineNumber, start: position, maxLabelLength: 0 });
+                    position += parameterType.length;
+                    column += parameterType.length;
+                    tokensOnCurrentLine++;
+                    continue;
+                }
+
                 // 🚀 PERFORMANCE: Character-class filtering - classify once, test only relevant patterns
                 const firstChar = substring[0];
                 const charClass = PatternMatcher.getCharClass(firstChar);
@@ -433,9 +503,12 @@ export class ClarionTokenizer {
                                 // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
                                 // - Inside optional parameters like <report pReport> (inside unclosed <...>)
                                 // - Inside parameter lists like PROCEDURE(...,REPORT,...) (inside unclosed (...))
+                                // ':' and '.' introduce a QUALIFIED NAME (nts:case, obj.case); falling
+                                // through is right for those, because the StructurePrefix/StructureField
+                                // patterns match the whole name and nothing is lost. ',' and '<'
+                                // introduce a parameter TYPE and are handled before this loop (#590).
                                 if (position > 0) {
                                     const prevChar = line[position - 1];
-                                    // Skip if preceded by qualifier characters or comma (parameter separator)
                                     if (prevChar === ':' || prevChar === '.' || prevChar === ',' || prevChar === '<') {
                                         if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at position ${position} - preceded by '${prevChar}'`);
                                         continue; // Try next structure pattern
