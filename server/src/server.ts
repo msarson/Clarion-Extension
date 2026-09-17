@@ -104,7 +104,6 @@ import { TokenHelper } from './utils/TokenHelper';
 import { evictIncludeChainIndexes } from './services/SymbolFinderService';
 import { bumpCrossFileEpoch } from './utils/crossFileEpoch';
 import { applyConfigurationChange } from './solution/ConfigurationChange'; // #564
-import { applyResolutionEnvironment } from './solution/ResolutionEnvironment'; // #568
 import { IncludeVerifier } from './utils/IncludeVerifier';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -2085,7 +2084,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
         // Update server settings
         serverSettings.projectPaths = params.projectPaths || [];
         serverSettings.configuration = params.configuration || "Debug";
-        applyResolutionEnvironment(params); // #568
+        // #568 — a change of install drops everything resolved under the old one. Imported lazily, like
+        // the declaration indexer and file graph it pulls in, so none of them load before the
+        // initialize reply.
+        const { applyResolutionEnvironment } = await import('./solution/ResolutionEnvironment');
+        applyResolutionEnvironment(params);
         serverSettings.solutionFilePath = params.solutionFilePath || ""; // Store solution file path
 
         // #315: lenses requested BEFORE libsrcPaths arrived bypassed the #303
