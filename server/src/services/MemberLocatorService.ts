@@ -2159,9 +2159,10 @@ export class MemberLocatorService {
         // walk below loads + tokenizes every reachable INC until the class turns up —
         // ~1.2s per cold ancestor on a real solution (8.5s for one generated module's 7
         // receiver hierarchies), while the mtime-persisted index answers in one lookup.
-        // Ambiguous names (several declaring files — e.g. generated `ThisWindow` in every
+        // Several declaring files with DIFFERENT names (e.g. generated `ThisWindow` in every
         // module, though those are normally caught by the current-document tier above)
-        // keep the scoped chain walk so the closest declaration wins.
+        // keep the scoped chain walk so the closest declaration wins; several copies of the
+        // same filename are resolved in redirection order — see the branch below.
         await this.ensureIndexBuilt();
         const infos = this.sdi.find(className);
         const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
@@ -2172,6 +2173,30 @@ export class MemberLocatorService {
                 return fromSdi;
             }
         } else if (distinctFiles.size > 1) {
+            // Copies of the SAME filename in different search paths are not a real ambiguity.
+            // The compiler binds to whichever search path the redirection file lists first,
+            // and the index already holds the declarations in that order — buildIndex scans
+            // `extractSearchPaths(...)` in .red order. So the first entry IS the compiler's
+            // pick, and falling through to the chain walk only spends seconds rediscovering
+            // it (measured ~2.1s and ~3.0s for the two levels of one derived class, enough to
+            // exhaust a host's completion timeout by itself and leave the list empty).
+            // A project that keeps its own copy of a shared header hits this for EVERY class
+            // it declares — the same "duplicates are the norm" case resolveSdiDeclaration
+            // already chose to resolve rather than bail on.
+            // DIFFERENT filenames still take the walk: that is the generated-`ThisWindow`-
+            // per-module shape the #310 guard protects, where include-chain PROXIMITY picks
+            // the right declaration and redirection order says nothing useful.
+            const distinctNames = new Set(infos.map(d => path.basename(d.filePath).toLowerCase()));
+            if (distinctNames.size === 1) {
+                // Pass ONLY the first entry: enumerateMembersFromSdiInfo prefers a non-TYPE
+                // declaration, which would otherwise reorder the very precedence being relied
+                // on here (every declaration in a DLL-mode codebase carries TYPE).
+                const fromRedirectionOrder = await this.enumerateMembersFromSdiInfo([infos[0]], className);
+                if (fromRedirectionOrder.length > 0) {
+                    this.trace(`findAllMembersInClass "${className}" via SDI tier (redirection order, ${distinctFiles.size} copies): ${infos[0].filePath}`);
+                    return fromRedirectionOrder;
+                }
+            }
             // #310 follow-up: the ambiguity guard punts to the (expensive) chain walk —
             // make that decision visible so real traces show WHICH classes bounce.
             this.trace(`findAllMembersInClass "${className}" SDI ambiguous (${distinctFiles.size} files: ${[...distinctFiles].join('; ')}) — falling to chain walk`);
