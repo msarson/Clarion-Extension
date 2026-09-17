@@ -1613,6 +1613,7 @@ export class DocumentStructure {
                 }
                 endsOnSameLine = true;
                 token.finishesAt = continuationLine;
+                t.inlineTerminator = true; // #578 — the END handler must not pop the stack for it
                 // Mark if this spans multiple lines due to continuation
                 if (continuationLine > token.line) {
                     token.isSingleLineWithContinuation = true;
@@ -1981,16 +1982,15 @@ export class DocumentStructure {
     }
 
     private handleEndStatementForStructure(token: Token, index: number): void {
-        // ✅ Check if this END/period is an inline terminator
-        // If there's a structure keyword on the same line, this END/period terminates that structure, not the stack
-        const sameLine = this.tokensByLine.get(token.line) || [];
-        const structureOnSameLine = sameLine.find(t => 
-            t.type === TokenType.Structure && t !== token
-        );
-        
-        if (structureOnSameLine) {
-            // This is an inline terminator - don't pop from stack
-            if (DOCSTRUCT_TRACE) logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} for '${structureOnSameLine.value}' (not popping stack)`);
+        // ✅ An inline terminator closes a structure that opened on its own logical line, and was
+        // claimed as such by that structure's same-line scan (handleStructureToken, #536).
+        // #578 — this used to be "any structure keyword on the same line", which also caught an
+        // END that comes BEFORE a one-line structure (`END ; IF c THEN d = 1.`) or AFTER one that
+        // is already closed (`IF a THEN b = 1. END`): the structure the END really closes stayed
+        // open (CBWndPreview.clw, ~1,900 lines). Asking whether this token IS a claimed terminator
+        // keeps both sides of the decision in one place.
+        if (token.inlineTerminator) {
+            if (DOCSTRUCT_TRACE) logger.info(`🔚 Inline terminator '${token.value}' at Line ${token.line} (not popping stack)`);
             return;
         }
         
