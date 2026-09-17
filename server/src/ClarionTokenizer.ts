@@ -20,6 +20,30 @@ logger.setLevel("error"); // Only show errors and PERF
 // per-exec is now gated behind this env flag; per-tokenize phase logs stay live.
 const TOKENIZER_TRACE = process.env.CLARION_TOKENIZER_TRACE === '1';
 
+/**
+ * #579 — at `position`, optional whitespace then a name ending in an implicit-variable suffix
+ * (# LONG, $ REAL, " STRING(32)). Returns the name's start and end, or null. A hand scan rather than
+ * a regex: it runs at every position of every line, and `^\s*` over an aligned run of spaces would
+ * backtrack. Several keyword patterns (END among them) start with \s* and match from the gap, so
+ * the whitespace has to be looked through here.
+ */
+function implicitVariableAt(line: string, position: number): { start: number; end: number } | null {
+    let i = position;
+    while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i++;
+    const start = i;
+    const first = line.charCodeAt(i);
+    const isLetter = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+    if (!isLetter(first)) return null;
+    i++;
+    while (i < line.length) {
+        const c = line.charCodeAt(i);
+        if (isLetter(c) || (c >= 48 && c <= 57)) i++;
+        else break;
+    }
+    const suffix = line[i];
+    return suffix === '#' || suffix === '$' || suffix === '"' ? { start, end: i + 1 } : null;
+}
+
 // Re-export types for backward compatibility
 export { TokenType, Token } from './tokenizer/TokenTypes';
 
@@ -207,6 +231,25 @@ export class ClarionTokenizer {
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
+
+                // #579 — a name immediately followed by an implicit-variable suffix (# LONG, $ REAL,
+                // " STRING) is that variable, whatever the name: END#, IF#, LOOP#, RETURN#, Msg"
+                // all compile. Every keyword, structure, directive and attribute pattern matches
+                // at the word boundary BEFORE the suffix, so ImplicitVariable (late in the order)
+                // never got the chance: END# closed the enclosing LOOP. Column 0 stays with the
+                // Label pattern, and a name continuing a qualifier (Pre:Name#, Obj.Name#) is left
+                // to the prefix/field patterns; a picture's letters (@K###K) are the picture's.
+                const implicit = implicitVariableAt(line, position);
+                if (implicit && implicit.start > 0) {
+                    const prev = line[implicit.start - 1];
+                    if (prev !== ':' && prev !== '.' && prev !== '@' && !/\w/.test(prev)) {
+                        this.tokens.push({ type: TokenType.ImplicitVariable, value: line.slice(implicit.start, implicit.end), line: lineNumber, start: implicit.start, maxLabelLength: 0 });
+                        column += implicit.end - position;
+                        position = implicit.end;
+                        tokensOnCurrentLine++;
+                        continue;
+                    }
+                }
 
                 // 🚀 PERFORMANCE: Character-class filtering - classify once, test only relevant patterns
                 const firstChar = substring[0];
