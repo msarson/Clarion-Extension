@@ -171,6 +171,11 @@ export class HoverRouter {
         const { word, line, tokens, position, document, isInMapBlock, isInClassBlock, documentStructure, currentLineTokens } = context;
         const upperWord = word.toUpperCase();
 
+        if (upperWord === 'END') {
+            const endHover = this.handleEndKeyword(position, tokens, document);
+            if (endHover) return endHover;
+        }
+
         if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
             const branchHover = this.handleBranchKeyword(upperWord, position, tokens, document);
             if (branchHover) return branchHover;
@@ -430,6 +435,53 @@ export class HoverRouter {
 
         const content: MarkupContent = { kind: 'markdown', value: lines.join('\n') };
         return { contents: content };
+    }
+
+    /**
+     * Handle hover over an END keyword — shows which structure/control-flow
+     * block it closes and links back to that block's opening line.
+     *
+     * `DocumentStructure.handleEndStatementForStructure` already sets
+     * `endToken.parent` to the opening token when it pops the structure stack
+     * (RECORD/GROUP/QUEUE/CLASS/IF/LOOP/CASE/WINDOW/MAP/…, anything pushed by
+     * `handleStructureToken`), so this only needs to read it back — no new
+     * matching logic. Returns null (falling through to the generic END
+     * keyword doc) when the END has no resolved opener: an inline terminator
+     * on the same line as its structure (`IF x THEN y END`), a `.` terminator,
+     * or an unmatched END in unparsable/error source.
+     */
+    private handleEndKeyword(
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const endToken = tokens.find(t =>
+            t.type === TokenType.EndStatement &&
+            t.value.toUpperCase() === 'END' &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!endToken || !endToken.parent) return null;
+
+        const opener = endToken.parent;
+        const keyword = opener.value.toUpperCase();
+        const labelText = opener.label ? ` \`${opener.label}\`` : '';
+        const lines: string[] = [`**END** — closes ${keyword}${labelText}`];
+
+        try {
+            const openerLine = document.getText().split(/\r?\n/)[opener.line];
+            if (openerLine && openerLine.trim()) {
+                lines.push('');
+                lines.push('```clarion');
+                lines.push(openerLine.trim());
+                lines.push('```');
+            }
+        } catch { /* best-effort source preview */ }
+
+        lines.push(this.formatter.locationLink(document.uri, opener.line));
+
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
     }
 
     /**
