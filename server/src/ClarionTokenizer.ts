@@ -228,6 +228,9 @@ export class ClarionTokenizer {
                 }
             }
 
+            // #579 — most lines hold no implicit-variable suffix at all; skip the per-position check there.
+            const lineMayHoldImplicit = line.includes('#') || line.includes('$') || line.includes('"');
+
             while (position < line.length) {
                 const substring = line.slice(position);
                 let matched = false;
@@ -239,7 +242,7 @@ export class ClarionTokenizer {
                 // never got the chance: END# closed the enclosing LOOP. Column 0 stays with the
                 // Label pattern, and a name continuing a qualifier (Pre:Name#, Obj.Name#) is left
                 // to the prefix/field patterns; a picture's letters (@K###K) are the picture's.
-                const implicit = implicitVariableAt(line, position);
+                const implicit = lineMayHoldImplicit ? implicitVariableAt(line, position) : null;
                 if (implicit && implicit.start > 0) {
                     const prev = line[implicit.start - 1];
                     if (prev !== ':' && prev !== '.' && prev !== '@' && !/\w/.test(prev)) {

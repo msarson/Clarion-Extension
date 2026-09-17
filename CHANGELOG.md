@@ -85,6 +85,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Syntax
 
+- **An implicit variable named like a keyword is read as a variable.** Clarion accepts names such as `END#`, `IF#`, `LOOP$` or `Name"`, but the keyword was matched first: `END# = RECORDS(Q)` closed the enclosing LOOP, `IF#` opened a structure that never closed, and `Line#` or `Name"` were read as a control or attribute. That upset folding, the structure view and the unterminated-structure checks for the rest of the procedure. A name ending in `#`, `$` or `"` is now always the implicit variable. [#579](https://github.com/msarson/Clarion-Extension/issues/579)
 - **Eight catalogued built-in functions are now highlighted, and `REGISTEREVENT` and `UNREGISTEREVENT` are recognised.** `CALLBACK`, `NULL`, `SQL`, `SQLCALLBACK` and the four `HTTPWEBREQUEST` and image functions added in 1.0.4 had hover and completion but were painted as plain identifiers; the two event-handler alias prototypes had the reverse gap. A test now checks that every name in the built-in catalog is matched by the grammar. [#521](https://github.com/msarson/Clarion-Extension/issues/521)
 
 #### Maintenance
