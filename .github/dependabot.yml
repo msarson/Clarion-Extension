@@ -25,7 +25,7 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    target-branch: "version-1.0.4"
+    target-branch: "version-1.0.5"
     directories:
       - "/"
       - "/client"
