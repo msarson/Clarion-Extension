@@ -365,7 +365,7 @@ export class MemberLocatorService {
         // guaranteed full-chain COLD misses in that case (the class lives nowhere else):
         // hover on PARENT._FindFirstBreak measured 12.1s walking them before the ascent.
         await this.ensureIndexBuilt();
-        const sdiInfos = this.sdi.find(className);
+        const sdiInfos = this.sdi.findFor(className, docPath); // #571
         const sdiDeclFiles = new Set(sdiInfos.map(d => d.filePath.toLowerCase()));
         if (sdiDeclFiles.size === 1) {
             const info = sdiInfos.find(d => !d.isType) || sdiInfos[0];
@@ -387,7 +387,7 @@ export class MemberLocatorService {
         // 1. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInIncludeChain(
             className, memberName, tokens, path.dirname(docPath), paramCount,
-            new Set([docPath.toLowerCase()])
+            new Set([docPath.toLowerCase()]), docPath
         );
         if (fromInclude) {
             this.trace(`findMemberInClass hit include chain file="${fromInclude.file}" line=${fromInclude.line}`);
@@ -416,7 +416,8 @@ export class MemberLocatorService {
                         parentData.tokens,
                         path.dirname(parentPath),
                         paramCount,
-                        new Set([docPath.toLowerCase(), parentPath.toLowerCase()])
+                        new Set([docPath.toLowerCase(), parentPath.toLowerCase()]),
+                        docPath
                     );
                     if (fromMemberIncludes) {
                         this.trace(`findMemberInClass hit MEMBER include chain file="${fromMemberIncludes.file}" line=${fromMemberIncludes.line}`);
@@ -467,12 +468,12 @@ export class MemberLocatorService {
         if (local) return local;
 
         const fromInclude = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
-            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()]), undefined, docPath
         );
         if (fromInclude) return fromInclude;
 
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(ifaceName);
+        const infos = this.sdi.findFor(ifaceName, docPath); // #571
         if (infos.length > 0) {
             const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
             const data = await this.loadDocument(info.filePath);
@@ -567,14 +568,16 @@ export class MemberLocatorService {
      * Tiebreak: prefer a declaration in `preferDir` (the requesting document's own directory).
      * That matches the redirection search order the compiler itself follows — `.\` precedes the
      * shared paths in the `.red` `*.inc` line — so the copy the compiler would bind to is the
-     * copy the hover describes.
+     * copy the hover describes. `fromFile` (#571) is the requesting file: the index answers in the
+     * redirection order of the project that compiles it.
      */
     public async resolveSdiDeclaration(
         typeName: string,
-        preferDir?: string
+        preferDir?: string,
+        fromFile?: string
     ): Promise<{ doc: TextDocument; tokens: Token[]; filePath: string; structureType?: string } | null> {
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(typeName);
+        const infos = this.sdi.findFor(typeName, fromFile); // #571
         if (infos.length === 0) return null;
 
         const preferred = preferDir
@@ -877,12 +880,13 @@ export class MemberLocatorService {
         visited: Set<string>,
         // #367: ONE slicer across the whole recursive include walk (this loaded +
         // tokenized every reachable INC with no yield at all — an ifaceImpl freeze).
-        timeSlice: () => Promise<void> = makeTimeSlicer()
+        timeSlice: () => Promise<void> = makeTimeSlicer(),
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<Array<{ name: string; paramCount: number }> | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
             await timeSlice();
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -894,7 +898,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChainWithParamCounts(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice, fromFile
                 );
                 if (nested) return nested;
             }
@@ -1124,12 +1128,13 @@ export class MemberLocatorService {
         paramCount: number | undefined,
         visited: Set<string>,
         // #367: ONE slicer across the whole recursive include walk (previously no yield).
-        timeSlice: () => Promise<void> = makeTimeSlicer()
+        timeSlice: () => Promise<void> = makeTimeSlicer(),
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<MemberInfo | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
             await timeSlice();
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -1139,7 +1144,7 @@ export class MemberLocatorService {
                 if (result) return result;
 
                 const nested = await this.findInterfaceInIncludeChain(
-                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited, timeSlice
+                    ifaceName, methodName, data.tokens, path.dirname(resolvedPath), paramCount, visited, timeSlice, fromFile
                 );
                 if (nested) return nested;
             }
@@ -1167,13 +1172,13 @@ export class MemberLocatorService {
         // 2. Walk INCLUDE chain reachable from this document
         const fromInclude = await this.findInterfaceInIncludeChain(
             ifaceName, methodName, tokens, path.dirname(docPath), paramCount,
-            new Set([docPath.toLowerCase()])
+            new Set([docPath.toLowerCase()]), undefined, docPath
         );
         if (fromInclude) return fromInclude;
 
         // 3. StructureDeclarationIndexer (covers libsrc / accessory paths)
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(ifaceName);
+        const infos = this.sdi.findFor(ifaceName, docPath); // #571
         if (infos.length > 0) {
             const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
             const result = await this.scanBodyForMember(info.filePath, ifaceName, methodName, paramCount, 'INTERFACE');
@@ -1210,13 +1215,13 @@ export class MemberLocatorService {
 
         // 2. INCLUDE chain reachable from this document
         const fromInclude = await this.enumerateInterfaceMembersInIncludeChain(
-            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+            ifaceName, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()]), undefined, docPath
         );
         if (fromInclude) return fromInclude;
 
         // 3. StructureDeclarationIndexer (libsrc / accessory paths)
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(ifaceName);
+        const infos = this.sdi.findFor(ifaceName, docPath); // #571
         if (infos.length > 0) {
             const info = infos.find(d => d.structureType === 'INTERFACE') ?? infos[0];
             const data = await this.loadDocument(info.filePath);
@@ -1390,7 +1395,7 @@ export class MemberLocatorService {
         // walkParentChain ascents (12.1s hover on PARENT._FindFirstBreak). Unambiguous
         // SDI hit wins; ambiguous names keep the scoped chain walk as tie-breaker.
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
+        const infos = this.sdi.findFor(className, currentPath); // #571
         const distinctDeclFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
         if (distinctDeclFiles.size === 1) {
             const fromIndex = infos.find(d => !d.isType) || infos[0];
@@ -1403,7 +1408,8 @@ export class MemberLocatorService {
             className,
             tokens,
             path.dirname(currentPath),
-            new Set([currentPath.toLowerCase()])
+            new Set([currentPath.toLowerCase()]),
+            currentPath
         );
         if (fromInclude) {
             this.trace(`resolveClassDeclarationInfo "${className}" from include "${fromInclude.filePath}" line=${fromInclude.line}`);
@@ -1459,11 +1465,12 @@ export class MemberLocatorService {
         className: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<StructureDeclarationInfo | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -1477,7 +1484,7 @@ export class MemberLocatorService {
                 className,
                 data.tokens,
                 path.dirname(resolvedPath),
-                visited
+                visited, fromFile
             );
             if (nested) return nested;
         }
@@ -1490,12 +1497,13 @@ export class MemberLocatorService {
         tokens: Token[],
         fromDir: string,
         visited: Set<string>,
-        timeSlice: () => Promise<void> = makeTimeSlicer() // #367: shared across the recursion
+        timeSlice: () => Promise<void> = makeTimeSlicer(), // #367: shared across the recursion
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<string[] | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
             await timeSlice();
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -1505,7 +1513,7 @@ export class MemberLocatorService {
                 if (found) return found;
 
                 const nested = await this.enumerateInterfaceMembersInIncludeChain(
-                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice
+                    ifaceName, data.tokens, path.dirname(resolvedPath), visited, timeSlice, fromFile
                 );
                 if (nested) return nested;
             }
@@ -1577,11 +1585,12 @@ export class MemberLocatorService {
         tokens: Token[],
         fromDir: string,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<MemberInfo | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -1618,7 +1627,7 @@ export class MemberLocatorService {
                 if (diskResult) return diskResult;
 
                 const nested = await this.findInIncludeChain(
-                    className, memberName, data.tokens, path.dirname(resolvedPath), paramCount, visited
+                    className, memberName, data.tokens, path.dirname(resolvedPath), paramCount, visited, fromFile
                 );
                 if (nested) return nested;
             }
@@ -1647,7 +1656,7 @@ export class MemberLocatorService {
         }
         if (!classInfo) {
             await this.ensureIndexBuilt();
-            const classInfos = this.sdi.find(className);
+            const classInfos = this.sdi.findFor(className, document?.uri); // #571
             if (classInfos.length === 0) return null;
             classInfo = classInfos.find(d => !d.isType) || classInfos[0];
         }
@@ -2087,7 +2096,7 @@ export class MemberLocatorService {
             parentClassName = classInfo.parentClass;
         } else {
             await this.ensureIndexBuilt();
-            const indexed = this.sdi.find(className);
+            const indexed = this.sdi.findFor(className, document.uri); // #571
             if (indexed.length > 0) {
                 parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentName;
             }
@@ -2164,7 +2173,7 @@ export class MemberLocatorService {
         // keep the scoped chain walk so the closest declaration wins; several copies of the
         // same filename are resolved in redirection order — see the branch below.
         await this.ensureIndexBuilt();
-        const infos = this.sdi.find(className);
+        const infos = this.sdi.findFor(className, docPath); // #571
         const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
         if (distinctFiles.size === 1) {
             const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);
@@ -2204,7 +2213,7 @@ export class MemberLocatorService {
 
         // 3. INCLUDE chain (scoped resolution — also the ambiguity tie-breaker)
         const fromInclude = await this.findAllMembersInIncludeChain(
-            className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()])
+            className, tokens, path.dirname(docPath), new Set([docPath.toLowerCase()]), docPath
         );
         if (fromInclude.length > 0) {
             this.trace(`findAllMembersInClass "${className}" via include-chain walk: ${fromInclude[0].file}`);
@@ -2240,11 +2249,12 @@ export class MemberLocatorService {
         className: string,
         tokens: Token[],
         fromDir: string,
-        visited: Set<string>
+        visited: Set<string>,
+        fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
     ): Promise<MemberEnumItem[]> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
-            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
+            const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir, fromFile);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
 
@@ -2272,7 +2282,7 @@ export class MemberLocatorService {
                 if (diskMembers.length > 0) return diskMembers;
 
                 const nested = await this.findAllMembersInIncludeChain(
-                    className, data.tokens, path.dirname(resolvedPath), visited
+                    className, data.tokens, path.dirname(resolvedPath), visited, fromFile
                 );
                 if (nested.length > 0) return nested;
             }

@@ -410,7 +410,7 @@ export class ClassMemberResolver {
                 const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
                 if (parentMatch) {
                     const parentResult = this.findMemberInParentChain(
-                        parentMatch[1], memberName, paramCount, new Set([className!.toLowerCase()])
+                        parentMatch[1], memberName, paramCount, new Set([className!.toLowerCase()]), document.uri
                     );
                     if (parentResult) return parentResult;
                 }
@@ -538,7 +538,7 @@ export class ClassMemberResolver {
                         const parentMatch = includeLine.match(/(?:CLASS|QUEUE|GROUP)\s*\(\s*(\w+)\s*\)/i);
                         if (parentMatch) {
                             const parentResult = this.findMemberInParentChain(
-                                parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()])
+                                parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
                             );
                             if (parentResult) return parentResult;
                         }
@@ -658,7 +658,7 @@ export class ClassMemberResolver {
                 const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
                 if (parentMatch) {
                     return this.findMemberInParentChain(
-                        parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()])
+                        parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
                     );
                 }
                 return null; // Class found but has no parent
@@ -668,7 +668,7 @@ export class ClassMemberResolver {
         // Class not in current file — find its declaration in includes to extract the parent
         const parentClassName = this.findParentClassNameInIncludes(className, document);
         if (parentClassName) {
-            return this.findMemberInParentChain(parentClassName, memberName, paramCount, new Set([className.toLowerCase()]));
+            return this.findMemberInParentChain(parentClassName, memberName, paramCount, new Set([className.toLowerCase()]), document.uri);
         }
         return null;
     }
@@ -735,7 +735,7 @@ export class ClassMemberResolver {
 
         // Resolve the parent class MODULE file from the classIndexer
         let moduleFile: string | undefined;
-        const parentInfos = this.sdi.find(parentClassName);
+        const parentInfos = this.sdi.findFor(parentClassName, document.uri); // #571
         if (parentInfos.length > 0) {
             const parentInfo = parentInfos.find(d => !d.isType) || parentInfos[0];
             const moduleMatch = parentInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
@@ -788,7 +788,7 @@ export class ClassMemberResolver {
         }
 
         // Also try the StructureDeclarationIndexer (covers libsrc paths)
-        const classInfos = this.sdi.find(className);
+        const classInfos = this.sdi.findFor(className, filePath); // #571
         if (classInfos.length > 0) {
             const def = classInfos.find(d => !d.isType) || classInfos[0];
             return def.parentName || null;
@@ -807,7 +807,8 @@ export class ClassMemberResolver {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        fromFile?: string // #571 — the requesting file: the index answers in its project's redirection order
     ): MemberInfo | null {
         const key = className.toLowerCase();
         if (visited.has(key)) {
@@ -818,7 +819,7 @@ export class ClassMemberResolver {
 
         logger.info(`Searching parent class ${className} for member ${memberName}`);
 
-        const classInfos = this.sdi.find(className);
+        const classInfos = this.sdi.findFor(className, fromFile); // #571
         if (classInfos.length === 0) {
             logger.info(`Parent class ${className} not found in index`);
             return null;
@@ -832,7 +833,7 @@ export class ClassMemberResolver {
 
         // Recurse into grandparent if present
         if (classInfo.parentName) {
-            return this.findMemberInParentChain(classInfo.parentName, memberName, paramCount, visited);
+            return this.findMemberInParentChain(classInfo.parentName, memberName, paramCount, visited, fromFile);
         }
 
         return null;
@@ -930,7 +931,7 @@ export class ClassMemberResolver {
 
         await this.ensureIndexBuilt(document);
 
-        const infos = this.sdi.find(structureName);
+        const infos = this.sdi.findFor(structureName, document.uri); // #571
         if (infos.length > 0) {
             const info = infos.find(d => !d.isType) || infos[0];
             const result = this.searchFileForMember(info.filePath, structureName, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
@@ -938,7 +939,7 @@ export class ClassMemberResolver {
             // Walk the parent chain — CLASS(Base) inherits members, and
             // QUEUE(Type)/GROUP(Type) inherit the parent's fields the same way.
             if (inheritsMembersFromParent(info.structureType) && info.parentName) {
-                return this.findMemberInParentChain(info.parentName, memberName, paramCount, new Set([structureName.toLowerCase()]));
+                return this.findMemberInParentChain(info.parentName, memberName, paramCount, new Set([structureName.toLowerCase()]), document.uri);
             }
         }
         return null;

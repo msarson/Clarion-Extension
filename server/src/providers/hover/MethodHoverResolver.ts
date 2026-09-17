@@ -561,9 +561,13 @@ export class MethodHoverResolver {
     private resolveModuleFile(className: string, declarationFileUri: string): string | null {
         // 1. Look up the class in the indexer for a MODULE attribute
         const sdi = StructureDeclarationIndexer.getInstance();
-        const classInfos = sdi.find(className);
+        const declarationPath = decodeURIComponent(declarationFileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const classInfos = sdi.findFor(className, declarationPath);
         if (classInfos.length > 0) {
-            const classInfo = classInfos.find(d => !d.isType) || classInfos[0];
+            // #571 — the entry for the declaration being described first: another copy of the
+            // class (another project's redirection) may name a different MODULE.
+            const classInfo = classInfos.find(d => d.filePath.toLowerCase() === declarationPath.toLowerCase())
+                || classInfos.find(d => !d.isType) || classInfos[0];
             const moduleMatch = classInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             if (moduleMatch) {
                 logger.info(`✅ Resolved MODULE from class definition: ${moduleMatch[1]}`);

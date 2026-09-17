@@ -151,6 +151,8 @@ export interface StructureIndex {
 /** Minimal interface consumed by providers — allows easy substitution/testing */
 export interface IStructureDeclarationIndex {
     find(name: string, projectPath?: string): StructureDeclarationInfo[];
+    /** #571 — lookup on behalf of a file: its project's redirection order first, then any index. */
+    findFor(name: string, fromFile?: string | null): StructureDeclarationInfo[];
     findProcedure(name: string, projectPath?: string): ProcedureDeclarationInfo[];
     /** #517 — true once any project's procedure index is built. */
     hasProcedureIndex(): boolean;
@@ -992,6 +994,27 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
         } catch (err) {
             logger.debug(`[SDI] disk cache save failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
+    }
+
+    /**
+     * #571 — lookup on behalf of a file (path or file URI): the index of the project that compiles
+     * it first, then any index. Each project index lists a name's declarations in that project's
+     * redirection order, so its first entry is the copy the compiler binds to; an unscoped
+     * `find(name)` answers with whichever project index was built first. A file no project
+     * compiles (an include opened on its own), or a name its project does not index, falls back to
+     * the unscoped lookup.
+     */
+    findFor(name: string, fromFile?: string | null): StructureDeclarationInfo[] {
+        if (fromFile) {
+            try {
+                const project = SolutionManager.getInstance()?.findProjectForFile(this.normalizeKey(fromFile));
+                if (project?.path) {
+                    const hit = this.indexes.get(this.normalizeKey(project.path))?.byName.get(name.toLowerCase());
+                    if (hit?.length) return hit;
+                }
+            } catch { /* no solution loaded — unscoped below */ }
+        }
+        return this.find(name);
     }
 
     /** Case-insensitive name lookup across all indexed projects (or a specific one) */

@@ -45,17 +45,17 @@ suite('MemberLocatorService.resolveSdiDeclaration — ambiguous declarations sti
     function serviceReporting(files: string[]): MemberLocatorService {
         const svc = new MemberLocatorService() as any;
         svc.ensureIndexBuilt = async () => { /* index state is supplied directly below */ };
-        svc.sdi = {
-            find: () => files.map(filePath => ({
-                name: 'DupType',
-                filePath,
-                line: 0,
-                structureType: 'QUEUE',
-                isType: true,
-                parentName: undefined,
-                lineContent: 'DupType QUEUE,TYPE'
-            }))
-        };
+        const declarations = () => files.map(filePath => ({
+            name: 'DupType',
+            filePath,
+            line: 0,
+            structureType: 'QUEUE',
+            isType: true,
+            parentName: undefined,
+            lineContent: 'DupType QUEUE,TYPE'
+        }));
+        // #571: lookups on behalf of a file go through findFor; no solution here, so both answer alike.
+        svc.sdi = { find: declarations, findFor: declarations };
         return svc as MemberLocatorService;
     }
 

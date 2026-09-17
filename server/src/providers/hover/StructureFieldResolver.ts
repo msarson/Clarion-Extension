@@ -296,7 +296,7 @@ export class StructureFieldResolver {
         // from THIS document. The requesting file's own directory is passed so a type with
         // several declaring copies resolves to the one the compiler's redirection order
         // would bind (`.\` before the shared paths).
-        const sdiHit = await this.memberLocator.resolveSdiDeclaration(typeName, path.dirname(filePath));
+        const sdiHit = await this.memberLocator.resolveSdiDeclaration(typeName, path.dirname(filePath), filePath); // #571
         if (sdiHit) {
             const fromSdi = this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri);
             if (fromSdi) return fromSdi;
