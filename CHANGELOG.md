@@ -8,9 +8,9 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.4] - 2026-09-17
 
-![62 fixes](https://img.shields.io/badge/fixes-62-1f6feb?style=flat-square) ![11 new](https://img.shields.io/badge/new-11-2da44e?style=flat-square) ![4 performance](https://img.shields.io/badge/performance-4-8250df?style=flat-square)
+![64 fixes](https://img.shields.io/badge/fixes-64-1f6feb?style=flat-square) ![11 new](https://img.shields.io/badge/new-11-2da44e?style=flat-square) ![4 performance](https://img.shields.io/badge/performance-4-8250df?style=flat-square)
 
-Seventy-seven changes, most of them about the things a real solution runs into: which Clarion version and settings are actually in force, how a name is resolved across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks. Editing large modules is also markedly quicker — tokenizing a file is about three times faster, and background checking now stops as soon as you type.
+Seventy-nine changes, most of them about the things a real solution runs into: which Clarion version and settings are actually in force, how a name is resolved across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks. Editing large modules is also markedly quicker — tokenizing a file is about three times faster, and background checking now stops as soon as you type.
 
 #### Navigation and hover
 

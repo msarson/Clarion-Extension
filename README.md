@@ -91,7 +91,7 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ### 1.0.4 (2026-09-17)
 
-Seventy-seven changes. Most of them come from running the extension against real solutions: which Clarion version and which settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks.
+Seventy-nine changes. Most of them come from running the extension against real solutions: which Clarion version and which settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks.
 
 - The Clarion version a solution uses is remembered, can be changed while the solution is loaded, and a version the properties file no longer registers is reported instead of silently failing; a solution opened from the Solution View resolves its library classes at once.
 - Settings behave in a multi-root workspace: a configuration pick sticks, the change reaches the language server immediately, and settings an earlier version wrote into a folder — which quietly override your `.code-workspace` file — are reported with an offer to remove them.
