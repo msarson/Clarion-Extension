@@ -79,8 +79,8 @@ suite('Hovering a period terminator shows what it closes (#582)', () => {
         assert.match(await hoverAt(FILE_SOURCE, 16, at + 1), /closes LOOP/);
     });
 
-    test('guard: a one-line IF period, a decimal point and a member dot get no terminator card', async () => {
-        assert.doesNotMatch(await hoverAt(FILE_SOURCE, 17, col(FILE_SOURCE, 17, '0.') + 1), /closes/);
+    test('a one-line IF period names its IF (#586), while a decimal point and a member dot get no terminator card', async () => {
+        assert.match(await hoverAt(FILE_SOURCE, 17, col(FILE_SOURCE, 17, '0.') + 1), /closes IF/);
         assert.doesNotMatch(await hoverAt(FILE_SOURCE, 15, col(FILE_SOURCE, 15, '1.5') + 1), /closes/);
         const member = ['  PROGRAM', '  MAP', '  END', 'C CLASS', 'Go PROCEDURE', '  END', '  CODE', '  C.Go()', '  RETURN'];
         assert.doesNotMatch(await hoverAt(member, 7, col(member, 7, '.')), /closes/);

@@ -1615,6 +1615,10 @@ export class DocumentStructure {
                 endsOnSameLine = true;
                 token.finishesAt = continuationLine;
                 t.inlineTerminator = true; // #578 — the END handler must not pop the stack for it
+                // #586 — and it closes THIS structure, so hovering it can say so (#575 / #582).
+                // A one-line structure is never pushed on the stack, so the END handler never
+                // links its terminator; this scan is the only place that knows the pairing.
+                t.parent = token;
                 // Mark if this spans multiple lines due to continuation
                 if (continuationLine > token.line) {
                     token.isSingleLineWithContinuation = true;

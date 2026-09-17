@@ -84,6 +84,7 @@ suite('An END before a one-line structure on the same line closes the open struc
         assert.strictEqual(at(tokens, 7, 'LOOP').finishesAt, 7);
         assert.strictEqual(at(tokens, 7, 'IF').finishesAt, 8);
         assert.strictEqual(at(tokens, 9, 'IF').finishesAt, 10);
-        assert.deepStrictEqual(ends(tokens).filter(t => t.parent).map(t => t.line), [5, 8], 'only the multi-line closers are linked');
+        // #586 — one-line terminators know their structure too, so every terminator here is linked.
+        assert.deepStrictEqual(ends(tokens).filter(t => t.parent).map(t => t.line), [1, 4, 5, 6, 7, 8, 10], 'every terminator is linked');
     });
 });
