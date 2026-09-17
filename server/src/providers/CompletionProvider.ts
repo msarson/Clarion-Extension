@@ -436,8 +436,14 @@ export class CompletionProvider {
         }
 
         // --- Plain word: variable or class name ---
-        // Try variable type resolution first
-        const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document);
+        // Try variable type resolution first. `position.line` lets resolveVariableType fall
+        // back to the enclosing procedure's parameters, which are not column-0 tokens and so
+        // are invisible to the declaration lookup — without it a PARAMETER receiver resolves
+        // to nothing here and drops through to the class-name fallback below, handing the
+        // VARIABLE's own name downstream as a class name. Every other caller that supports
+        // parameters (definition, hover's structure-field resolver, implementation) already
+        // passes it.
+        const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document, position.line);
         if (typeInfo) {
             return { className: typeInfo.typeName, callerClass };
         }
@@ -480,7 +486,9 @@ export class CompletionProvider {
                 ? await this.resolveParentOf(callerClass, document)
                 : null;
         } else {
-            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document);
+            // Same reason as the plain-word branch: a chain rooted on a PARAMETER
+            // (`pSomething.Member.`) needs the scope line to resolve its declared type.
+            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document, position.line);
             currentClass = typeInfo?.typeName ?? null;
         }
 
