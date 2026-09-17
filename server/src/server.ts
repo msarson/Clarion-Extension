@@ -879,11 +879,15 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
+        // True once a newer version of this document exists. The stale-version guard after
+        // the validators discards this pass's answer in that case, so both the loop below and
+        // the long-running validators that accept it can stop early instead of finishing.
+        const isStale = () => documents.get(document.uri)?.version !== startVersion;
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
             ['viewProjectFields', () => DiagnosticProvider.validateViewProjectFields(tokens, document, getOpenDocumentContent)],
-            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent)],
+            ['discardedReturn', () => DiagnosticProvider.validateDiscardedReturnValues(tokens, document, memberLocator, getOpenDocumentContent, isStale)],
             ['missingIncludes', () => DiagnosticProvider.validateMissingIncludes(tokens, document)],
             ['missingConstants', () => DiagnosticProvider.validateMissingConstants(tokens, document)],
             ['missingMapDecl', () => DiagnosticProvider.validateMissingMapDeclarations(tokens, document, getOpenDocumentContent)],
@@ -905,6 +909,13 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // proved this fixed a 20s+ starved-tree-expand.
         const validatorResults: Diagnostic[][] = [];
         for (const [name, thunk] of validatorThunks) {
+            // A newer version arrived while the previous validator ran. The stale-version
+            // guard below discards this pass's answer regardless, so stop paying for the
+            // remaining validators now — otherwise every superseded pass runs the full
+            // cross-file walk to completion, and during typing several such passes overlap
+            // and starve interactive requests (completion measured 24 ms alone, 2.5 s when
+            // two abandoned passes were still running beside it).
+            if (isStale()) break;
             validatorResults.push(await timeIt(name, thunk()));
             // Real macrotask yield between validators — lets queued requests in.
             await new Promise<void>(resolve => setImmediate(resolve));
