@@ -134,3 +134,29 @@ export function isUnsetInEveryScope(inspection: { globalValue?: unknown; workspa
         && inspection?.workspaceValue === undefined
         && inspection?.workspaceFolderValue === undefined;
 }
+
+/** The Clarion settings that an older build could write into a folder, shadowing the workspace file. */
+export const SCOPED_SOLUTION_KEYS = ['solutions', 'currentSolution', 'configuration', 'fileSearchExtensions', 'defaultLookupExtensions'] as const;
+
+/**
+ * #587 — keys a folder's settings.json and the .code-workspace file both set to DIFFERENT values.
+ * The folder wins for these resource-scoped settings, so the workspace file's value is silently
+ * ignored; #563 stopped writing such copies but cannot remove the ones older builds left.
+ */
+export function shadowedSettingKeys(store: ClarionSettingsStore): string[] {
+    if (!store.hasWorkspaceFile) return []; // no workspace file, so nothing can be shadowed
+    const shadowed: string[] = [];
+    for (const key of SCOPED_SOLUTION_KEYS) {
+        const own = store.inspect<unknown>(key);
+        if (own?.workspaceFolderValue === undefined || own?.workspaceValue === undefined) continue;
+        if (JSON.stringify(own.workspaceFolderValue) !== JSON.stringify(own.workspaceValue)) shadowed.push(key);
+    }
+    return shadowed;
+}
+
+/** #587 — drop the folder copies of `keys`, leaving the workspace file's values in force. */
+export async function removeFolderCopies(store: ClarionSettingsStore, keys: readonly string[]): Promise<void> {
+    for (const key of keys) {
+        await store.update(key, undefined, 'WorkspaceFolder');
+    }
+}

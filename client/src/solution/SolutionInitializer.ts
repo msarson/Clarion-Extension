@@ -1,5 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
+import { shadowedSettingKeys, removeFolderCopies } from '../utils/SolutionSettingsScope'; // #587
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
@@ -254,6 +255,7 @@ export async function initializeSolution(
 ): Promise<void> {
     const solutionName = globalSolutionFile ? path.basename(globalSolutionFile) : undefined;
     updateInitializationStatusBar('loading-solution', solutionName);
+    void offerToRemoveShadowedFolderSettings();
 
     logger.info("🔄 Initializing Clarion Solution...");
     
@@ -536,4 +538,40 @@ export async function reinitializeEnvironment(
     
     const endTime = performance.now();
     logger.info(`✅ Environment reinitialized in ${(endTime - startTime).toFixed(2)}ms`);
+}
+
+/**
+ * #587 — settings a version before #563 wrote into the first folder's .vscode/settings.json
+ * override the .code-workspace file for these resource-scoped keys, so a workspace file that
+ * carries Clarion settings is ignored with nothing said (Mark's Release|Win32 and .pr/.prj list
+ * lost to a folder copy of Debug|Win32 and the default extensions). #563 stopped writing such
+ * copies; it cannot remove the ones already there, and the extension must not delete a user's
+ * settings unasked. So: report the conflict once per session and offer to remove the folder copy.
+ */
+let shadowedSettingsOffered = false;
+async function offerToRemoveShadowedFolderSettings(): Promise<void> {
+    if (shadowedSettingsOffered) return;
+    try {
+        const store = SettingsStorageManager.clarionSettings();
+        const shadowed = shadowedSettingKeys(store);
+        if (shadowed.length === 0) return;
+        shadowedSettingsOffered = true;
+        const folder = workspace.workspaceFolders?.[0];
+        const folderFile = folder ? path.join(folder.uri.fsPath, '.vscode', 'settings.json') : 'the folder settings';
+        const names = shadowed.map(k => `clarion.${k}`).join(', ');
+        logger.warn(`⚠️ #587 — folder settings shadow the workspace file: ${names}`);
+        const choice = await vscodeWindow.showWarningMessage(
+            `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.`,
+            'Remove from folder settings',
+            'Keep as is'
+        );
+        if (choice !== 'Remove from folder settings') return;
+        await removeFolderCopies(store, shadowed);
+        vscodeWindow.showInformationMessage(
+            `Removed ${names} from the folder settings. The workspace file is now in force — reload the window if a value looks stale.`
+        );
+        logger.info(`✅ #587 — removed folder copies: ${names}`);
+    } catch (error) {
+        logger.warn(`⚠️ #587 — could not check the folder settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
