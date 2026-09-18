@@ -43,8 +43,17 @@ feel/rendering judgments, and VM-parity absolute timings.
 
 ## Working rules
 
-- **One branch per change.** Never work on a `version-x.y.z` branch directly —
-  cut `fix/…` or `feat/…` off it first, then FF-merge back.
+- **One branch per change — and delete it once it lands.** Never work on a
+  `version-x.y.z` branch directly: cut `fix/…` or `feat/…` off it first, FF-merge
+  back, then `git branch -d` it, and `git push origin --delete` it as well if it
+  was ever pushed. A fast-forward merge leaves the topic branch sitting on the
+  merged commit and nothing else removes it, so the backlog is silent and grows
+  once per change: by 2026-09-18 it was 93 local and 14 remote stale branches.
+  GitHub's "automatically delete head branches" does not help here — it fires
+  only on a PR merge, and our own work does not go through a PR. The same applies
+  to the `pr-NNN` refs from `git fetch origin pull/N/head:pr-N` when reviewing a
+  contributor PR locally, and to any `verify/…` branch used to test that two PRs
+  compose.
 - **TDD: red then green.** Write the failing test first and *watch it fail* for
   the right reason before touching the implementation. A test written after the
   fix proves nothing about the fix. Report the red run, not just the green one.
