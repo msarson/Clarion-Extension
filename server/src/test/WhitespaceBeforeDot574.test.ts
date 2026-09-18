@@ -7,6 +7,10 @@
  *   B   Result = Obj   .GetByID(42)      COMPILES   <- whitespace before the dot is legal
  *   E   Result = Obj   .Count            COMPILES   <- and for a property
  *   C   Result = Obj.   GetByID(42)      FAILS      <- whitespace after the dot is not
+ *   D   Result = Obj . GetByID(42)      FAILS      <- and whitespace on BOTH sides fails too,
+ *                                                     with the identical three errors, so what
+ *                                                     precedes the dot is irrelevant once a space
+ *                                                     follows it
  *
  * C's diagnostics are worth recording, because they say what the compiler actually did:
  *
@@ -78,6 +82,15 @@ suite('Whitespace around the member-access dot (#574)', () => {
         // statement. Reinterpreting it as a member access would make us accept what the compiler
         // refuses, which is worse than mirroring it.
         const toks = tokensOf('  Result = TestClass.   GetByID(42)');
+        assert.ok(terminator(toks), `expected the dot to remain an EndStatement, got ${toks.join('  ')}`);
+        assert.ok(!memberAccess(toks), `must not be read as a member access, got ${toks.join('  ')}`);
+    });
+
+    test('D — whitespace on BOTH sides is a terminator too (compiler-verified)', () => {
+        // Compiled on Clarion 12 after C: the same three errors at the same three columns, so
+        // the rule is simply that a space AFTER the dot ends the statement — what comes before
+        // it makes no difference. This pins the boundary of the #574 fix.
+        const toks = tokensOf('  Result = TestClass . GetByID(42)');
         assert.ok(terminator(toks), `expected the dot to remain an EndStatement, got ${toks.join('  ')}`);
         assert.ok(!memberAccess(toks), `must not be read as a member access, got ${toks.join('  ')}`);
     });
