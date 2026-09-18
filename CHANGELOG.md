@@ -20,6 +20,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Completion offers ROUTINE labels, and after `DO` offers only those.** Routines were the one callable kind the word list never included. After `DO ` the list was several hundred keywords, built-ins and variables, none of them legal in that position and not one of them a routine; it now lists the routines the enclosing procedure can reach, an inner scope's routine taking precedence over a repeated name further out. [#594](https://github.com/msarson/Clarion-Extension/pull/594) @geircodes
 
+#### Syntax
+
+- **A method or property written with a space before the dot is understood.** `Receiver   .Method(42)` is valid Clarion, but the space caused the dot to be dropped and the line read as a call to a procedure named after the method, so hover, Go to Definition, Find All References, rename and completion all missed those uses. A space *after* the dot still ends the statement, which is what the compiler does with it. Reported by Mark. [#574](https://github.com/msarson/Clarion-Extension/issues/574)
+
 ---
 
 ### [1.0.4] - 2026-09-17

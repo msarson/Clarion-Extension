@@ -116,7 +116,23 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // ✅ Add StructurePrefix pattern for PREFIX:Field notation
     [TokenType.StructurePrefix]: /\b[A-Z][A-Z0-9_]{0,7}\s*:\s*[A-Za-z_][A-Za-z0-9_]*/i,
     // ✅ Add StructureField pattern for Structure.Field notation
-    [TokenType.StructureField]: /\b[A-Z][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*/i,
+    //
+    // #574 — whitespace may precede the dot, and the dot must be IMMEDIATELY followed by the member
+    // name. Both halves are compiler-verified on Clarion 12:
+    //
+    //   Obj   .GetByID(42)    compiles     -> member access, so `[ \t]*` before the dot
+    //   Obj.   GetByID(42)    FAILS        -> the compiler reads the dot as a statement terminator
+    //                                         ("Unusual type conversion" on `Result = Obj`, then
+    //                                         "Expected: <statement>"), so no whitespace is allowed
+    //                                         after it and EndStatement keeps that case.
+    //
+    // Before this, `Obj   .GetByID` tokenized as Variable + Function: the dot was dropped and a
+    // member access read as a bare call to a procedure of that name, so hover, F12, references,
+    // rename, completion and the #517 check all missed those call sites.
+    //
+    // `[ \t]` rather than `\s` deliberately — a newline between the receiver and the dot would be a
+    // different statement, and `\s` would splice the two together.
+    [TokenType.StructureField]: /\b[A-Z][A-Za-z0-9_]*[ \t]*\.[A-Za-z_][A-Za-z0-9_]*/i,
     // ✅ DataTypeParameter: captures (255) in STRING(255) or (20,2) in DECIMAL(20,2)
     [TokenType.DataTypeParameter]: /\(\s*\d+\s*(?:,\s*\d+\s*)?\)/,
     // ✅ TypeReference: LIKE(TypeName) — type-mirroring keyword, matched before Function
