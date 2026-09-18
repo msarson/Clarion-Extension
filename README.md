@@ -129,7 +129,7 @@ Seventy-nine changes. Most of them come from running the extension against real 
 ## Contributors
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-12-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks to everyone who has helped improve the Clarion Language Extension through code, bug reports, testing, ideas, documentation and their knowledge of the Clarion language.
@@ -154,6 +154,7 @@ Thanks to everyone who has helped improve the Clarion Language Extension through
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jslarveEC"><img src="https://avatars.githubusercontent.com/u/112515315?v=4?s=100" width="100px;" alt="jslarveEC"/><br /><sub><b>jslarveEC</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AjslarveEC" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/narduss"><img src="https://avatars.githubusercontent.com/u/15345011?v=4?s=100" width="100px;" alt="Nardus"/><br /><sub><b>Nardus</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/commits?author=narduss" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.boxsoft.net"><img src="https://avatars.githubusercontent.com/u/1831296?v=4?s=100" width="100px;" alt="Mike Hanson"/><br /><sub><b>Mike Hanson</b></sub></a><br /><a href="#ideas-BoxSoft" title="Ideas, Planning, & Feedback">🤔</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/bill-atchison"><img src="https://avatars.githubusercontent.com/u/2093026?v=4?s=100" width="100px;" alt="William Atchison"/><br /><sub><b>William Atchison</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3Abill-atchison" title="Bug reports">🐛</a> <a href="#ideas-bill-atchison" title="Ideas, Planning, & Feedback">🤔</a></td>
     </tr>
   </tbody>
 </table>
