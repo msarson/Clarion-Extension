@@ -3004,6 +3004,38 @@ export class ReferencesProvider {
                     }
                 }
 
+                // #602 — tier 1 vs tier 2. The Language Reference's MAP page gives three levels of
+                // availability: a MAP in the PROGRAM source module declares procedures "available
+                // for use throughout the program"; a MAP in a MEMBER module, only within that
+                // module; a PROCEDURE-local MAP, only within the procedure. The narrow set above is
+                // right for the second, which is what its comment describes — but a declaration in
+                // a PROGRAM's MAP is the FIRST, and every module of that program may reference it.
+                //
+                // Both resolve to `module` scope here, so the narrow rule was applied to both. On
+                // ap1.sln that made PrintForm, declared in DMCommon.clw's MAP, answer 7 references
+                // from its declaration and 8 from one of its own call sites — the same symbol giving
+                // two answers depending on where it was right-clicked.
+                //
+                // Widen rather than replace: the graph-derived set above carries MODULE targets and
+                // including modules that project enumeration alone would miss, and the #330 family
+                // above still returns early on its own terms.
+                if (!this.isMemberFile(symbolInfo.location.uri)) {
+                    const declPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                    const program = solutionManager?.findProjectForFile?.(path.basename(declPath));
+                    if (program) {
+                        const have = new Set(implFiles.map(u => u.toLowerCase()));
+                        for (const sourceFile of program.sourceFiles) {
+                            const fullPath = path.isAbsolute(sourceFile.relativePath)
+                                ? sourceFile.relativePath
+                                : path.join(program.path, sourceFile.relativePath);
+                            const uri = `file:///${fullPath.replace(/\\/g, '/')}`;
+                            if (!have.has(uri.toLowerCase())) implFiles.push(uri);
+                        }
+                        logger.test(`[FAR] Scope="module" (MAP procedure) → declared in a PROGRAM module, widened to project "${program.name}", ${implFiles.length} file(s) (#602)`);
+                        return implFiles;
+                    }
+                }
+
                 logger.test(`[FAR] Scope="module" (MAP procedure) → searching ${implFiles.length} file(s): declaring + MODULE targets + including modules`);
                 return implFiles;
             }
