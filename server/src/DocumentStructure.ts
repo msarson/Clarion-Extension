@@ -3,6 +3,7 @@ import { BranchInfo, BranchKind } from './tokenizer/TokenTypes';
 import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
+import { resolvePrefixedName, prefixedNameStartsLine } from './utils/PrefixChain';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 import { ControlService } from './utils/ControlService';
@@ -1841,6 +1842,25 @@ export class DocumentStructure {
                 if (structureStack.length > 1) structureStack.pop();
             }
             
+            // #597 — a prototype name may carry a PRE:FIX: chain, and indented (which is
+            // how prototypes are actually written inside a MAP) the tokenizer's
+            // PREFIX:Field pattern takes over. That pattern captures exactly ONE colon,
+            // so the same name arrives in different shapes depending on how many colons
+            // it has and how long the prefix is: `WIN:Show` as one StructurePrefix token,
+            // `reg:WIN:Show` as three tokens, `LONGPREFIX:Name` as three of other types
+            // again. The type tests below were written for the unprefixed shapes only, so
+            // a one-token prefixed name was skipped on type and a split one was labelled
+            // with its tail alone — dropping the prefix that every consumer then searches
+            // for. resolvePrefixedName puts the name back together whichever way it split.
+            const prefixed = resolvePrefixedName(this.tokens, i);
+            const isChainTail = prefixed.startIndex !== i;
+            // A prefixed name only counts as a declaration when it STARTS its line. That
+            // is what keeps a prefixed TYPE ARGUMENT — `BuildIt(GROUP(CFG:Type) pG)` —
+            // from being read as a second prototype. The unprefixed shapes keep the
+            // looser test they already had, so nothing that worked before changes.
+            const isPrefixedName = (isChainTail || token.type === TokenType.StructurePrefix) &&
+                                   prefixedNameStartsLine(this.tokens, i);
+
             // Pattern 1: Look for tokens that contain an opening parenthesis in the same token value
             // In shorthand syntax, the procedure name and opening parenthesis are in the same token
             if (token.value.includes("(") && token.value !== "(" &&
@@ -1866,7 +1886,8 @@ export class DocumentStructure {
             // Pattern 2: Check if this token is followed by "(" (separate tokens)
             else if ((token.type === TokenType.Function ||
                       token.type === TokenType.Variable ||
-                      token.type === TokenType.Label) &&
+                      token.type === TokenType.Label ||
+                      isPrefixedName) &&
                      i + 1 < this.tokens.length &&
                      this.tokens[i + 1].value === "(" &&
                      // #477: these were `startsWith("module")` / `startsWith("map")`,
@@ -1876,18 +1897,22 @@ export class DocumentStructure {
                      // missing-map-declaration fired on it permanently, with no edit to
                      // the MAP able to silence it. Pattern 3 below already compares
                      // exactly; these now match it.
-                     !MAP_STRUCTURE_KEYWORD.test(token.value) &&
+                     // #597: the guards test the JOINED name, not this one token. For an
+                     // unprefixed name the two are the same string, so nothing changes;
+                     // for a chain they ask the right question — `LONGPREFIX:Name` is a
+                     // procedure, even though its tail token alone is the NAME attribute.
+                     !MAP_STRUCTURE_KEYWORD.test(prefixed.name) &&
                      !token.value.startsWith("!") &&
-                     !isAttributeKeyword(token.value)) {
+                     !isAttributeKeyword(prefixed.name)) {
                 // This looks like a shorthand procedure declaration with separate tokens
                 token.subType = TokenType.MapProcedure;
                 token.parent = mapToken;
                 this.addChildOnce(mapToken, token);
 
-                // Set the token's label to the procedure name
-                token.label = token.value;
-                
-                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${token.value} at line ${token.line}`);
+                // Set the token's label to the procedure name (#597: prefix chain included)
+                token.label = prefixed.name;
+
+                if (DOCSTRUCT_TRACE) logger.info(`📌 Found MAP shorthand procedure (separate tokens): ${prefixed.name} at line ${token.line}`);
             }
             // Pattern 3: BARE declaration - a name alone on its line, with no parameter
             // list at all. This is the shape template-generated apps emit for
@@ -1925,23 +1950,28 @@ export class DocumentStructure {
             // something else, and it is kept exactly as it was.
             else if ((token.type === TokenType.Variable ||
                       token.type === TokenType.Label ||
-                      token.type === TokenType.Function) &&
+                      token.type === TokenType.Function ||
+                      isPrefixedName) &&
                      token.subType === undefined &&
-                     !isAttributeKeyword(token.value) &&
-                     !MAP_PROTOTYPE_NON_NAME.test(token.value) &&
+                     !isAttributeKeyword(prefixed.name) &&
+                     !MAP_PROTOTYPE_NON_NAME.test(prefixed.name) &&
                      !token.value.startsWith("!") &&
-                     /^[A-Za-z_][A-Za-z0-9_:.]*$/.test(token.value) &&
-                     (this.tokens[i - 1] === undefined || this.tokens[i - 1].line !== token.line) &&
+                     /^[A-Za-z_][A-Za-z0-9_:.]*$/.test(prefixed.name) &&
+                     // #597: the starts-its-line test now asks whether the NAME starts the
+                     // line, prefix chain included. Asking it of the tail token alone
+                     // rejected every split prefixed name, because a chain sat in front of
+                     // it. For an unprefixed name this is the same test as before.
+                     prefixedNameStartsLine(this.tokens, i) &&
                      (this.tokens[i + 1] === undefined ||
                       this.tokens[i + 1].line !== token.line ||
                       this.tokens[i + 1].value === ",")) {
                 const owner = structureStack[structureStack.length - 1];
                 token.subType = TokenType.MapProcedure;
-                token.label = token.value;
+                token.label = prefixed.name;
                 token.parent = owner;
                 this.addChildOnce(owner, token);
 
-                if (DOCSTRUCT_TRACE) logger.info(`Found MAP bare procedure declaration: ${token.value} at line ${token.line} inside ${owner.value.toUpperCase()}`);
+                if (DOCSTRUCT_TRACE) logger.info(`Found MAP bare procedure declaration: ${prefixed.name} at line ${token.line} inside ${owner.value.toUpperCase()}`);
             }
         }
     }

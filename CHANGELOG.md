@@ -10,6 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Navigation and hover
 
+- **A prefixed MAP prototype written without the PROCEDURE keyword is found again.** Where a prototype's name carries a prefix, such as `reg:WIN:ShowExits()`, and is written indented inside the MAP rather than at column 0, it was recorded under the wrong name or not recorded at all, so Go to Definition, hover, workspace symbol search and the unresolved-call check all missed it. Reported by Bill Atchison. [#597](https://github.com/msarson/Clarion-Extension/issues/597)
 - **A routine hover names the procedure the routine belongs to.** ROUTINE labels repeat legally across procedures, so an identically named routine elsewhere in the file produced the same card. Hovering the declaration label also described it as a variable whose declared type is the word ROUTINE; it now gets a routine card of its own. [#595](https://github.com/msarson/Clarion-Extension/pull/595) @geircodes
 
 #### Editing
