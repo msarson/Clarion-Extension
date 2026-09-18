@@ -37,6 +37,7 @@ import { buildIncDirsToScan } from './incDirsScope';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
+import { resolvePrefixedName } from '../utils/PrefixChain';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -3531,6 +3532,23 @@ export class ReferencesProvider {
                     // MAP shorthand / structure label: the Structure/Procedure token itself carries
                     // label="ZipQueueType" but the Label token on the same line already matches.
                     matchLength = token.label!.length;
+                } else if (searchWordLower.includes(':') &&
+                           searchWordLower.endsWith(':' + token.value.toLowerCase())) {
+                    // #600: a colon-qualified name arrives as ONE token or SEVERAL depending on how
+                    // long its prefix is. StructurePrefix caps the prefix at eight characters
+                    // (`[A-Z][A-Z0-9_]{0,7}`), so an indented `GLO:Init` is a single token whose
+                    // value matches above, while `IBSCommon:Init` — nine — splits into
+                    // Variable(IBSCommon) ':' Function(Init) and matches nothing. The declaration is
+                    // unaffected because a name at column 0 is one Label whatever its length, which
+                    // is why the symbol resolved correctly and only its CALL SITES went missing.
+                    //
+                    // The endsWith test above is a cheap reject before the backward walk, which only
+                    // then rejoins the chain. Same helper as #597's classifier fix — one name
+                    // arriving as several tokens is one bug, not one per consumer.
+                    const prefixed = resolvePrefixedName(tokens, i);
+                    if (prefixed.name.toLowerCase() !== searchWordLower) continue;
+                    matchStart = prefixed.start;
+                    matchLength = prefixed.name.length;
                 } else {
                     continue;
                 }
