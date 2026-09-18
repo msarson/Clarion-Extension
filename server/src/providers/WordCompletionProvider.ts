@@ -130,9 +130,12 @@ export class WordCompletionProvider {
 
             // Build a set of lines that have a PROCEDURE or ROUTINE keyword on them.
             // Label tokens on these lines are the procedure/routine *names*, not variables.
+            // A ROUTINE keyword token is classified `type: Keyword` and carries its
+            // routine-ness in `subType` (DocumentStructure.handleRoutineToken) — the
+            // `type` comparison this used to make was never once true.
             const procDeclLines = new Set<number>();
             for (const t of tokens) {
-                if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
+                if (TokenHelper.isProcedureOrFunction(t) || t.subType === TokenType.Routine) {
                     procDeclLines.add(t.line);
                 }
             }
@@ -190,6 +193,14 @@ export class WordCompletionProvider {
             // ----------------------------------------------------------------
             await this.collectProcedures(tokens, document, scope?.containingProcedure, scope?.containingRoutine, addIn(SORT_TIER.PROCEDURE));
             lap('procedures_ms');
+
+            // ----------------------------------------------------------------
+            // A2. Routines of the enclosing procedure (#592)
+            // ----------------------------------------------------------------
+            for (const routine of this.getRoutinesInScope(document, position.line)) {
+                add(routine.label, CompletionItemKind.Method, routine.detail, routine.documentation, undefined, SORT_TIER.LOCAL);
+            }
+            lap('routines_ms');
 
             // ----------------------------------------------------------------
             // B. Equates — must run before variables so user EQUATEs land as
@@ -284,9 +295,17 @@ export class WordCompletionProvider {
                 // Qualifier mode: only return symbols that actually belong to the
                 // typed qualifier (e.g. TGLO:*). This prevents unrelated symbols
                 // from appearing when a specific prefix is requested.
+                // Method is here for the generated `Module::RoutineName` routine labels
+                // (#592): a colon in the partial routes every candidate through this
+                // branch, so a kind filter of Variable|Constant alone dropped those
+                // routines the moment the user typed the qualifier. Nothing else leaks
+                // in — a candidate still has to start with the typed qualifier, and a
+                // CLASS method's label is a bare name.
                 const qualifierMatches = Array.from(seen.values())
                     .filter(item =>
-                        (item.kind === CompletionItemKind.Variable || item.kind === CompletionItemKind.Constant)
+                        (item.kind === CompletionItemKind.Variable ||
+                         item.kind === CompletionItemKind.Constant ||
+                         item.kind === CompletionItemKind.Method)
                     )
                     .filter(item => {
                         const label = String(item.label);
@@ -456,6 +475,70 @@ export class WordCompletionProvider {
     }
 
     // -------------------------------------------------------------------------
+    // A2. Routines
+    // -------------------------------------------------------------------------
+
+    /**
+     * ROUTINE labels callable from `line`, innermost scope first (#592).
+     *
+     * Routines were the one callable kind completion never offered, although
+     * hover, F12, Ctrl+F12 and CodeLens have all resolved them since #264. The
+     * scope chain here is `getRoutineHostingScopes` — the same chain
+     * `findScopedRoutineToken` walks — so what completion offers and what F12 on
+     * the inserted name finds agree by construction, including the local derived
+     * method case (Rule 4) where a method also reaches its declaring procedure's
+     * routines.
+     *
+     * A routine label legally repeats across procedures, so only the hosting
+     * chain's own routines are candidates. Where an inner scope repeats an outer
+     * scope's name the inner one wins and the outer is dropped rather than
+     * merged: that is what `DO` would actually reach, and two routines are never
+     * overloads of each other the way two procedures can be.
+     *
+     * Public because `DO` completion returns these alone — see
+     * CompletionProvider.handleDoRoutineCompletion.
+     */
+    public getRoutinesInScope(
+        document: TextDocument,
+        line: number
+    ): { label: string; detail: string; documentation: string }[] {
+        const structure = this.tokenCache.getStructure(document);
+        const scopes = TokenHelper.getRoutineHostingScopes(structure, line);
+        if (scopes.length === 0) return [];
+
+        // Owner line -> depth in the chain, so each routine costs ONE parent lookup
+        // rather than one per scope. Two scopes in a chain cannot share a line.
+        const depthByOwnerLine = new Map<number, number>();
+        scopes.forEach((scope, depth) => depthByOwnerLine.set(scope.line, depth));
+
+        const byDepth: Token[][] = scopes.map(() => []);
+        for (const routine of structure.findRoutines()) {
+            if (!routine.label) continue;
+            const owner = TokenHelper.getParentScopeOfRoutine(structure, routine);
+            const depth = owner === undefined ? undefined : depthByOwnerLine.get(owner.line);
+            if (depth === undefined) continue;
+            byDepth[depth].push(routine);
+        }
+
+        const claimed = new Set<string>();
+        const result: { label: string; detail: string; documentation: string }[] = [];
+        for (let depth = 0; depth < byDepth.length; depth++) {
+            const ownerName = scopes[depth].label ?? scopes[depth].value;
+            for (const routine of byDepth[depth]) {
+                const key = routine.label!.toUpperCase();
+                if (claimed.has(key)) continue;
+                claimed.add(key);
+                result.push({
+                    label: routine.label!,
+                    detail: 'ROUTINE',
+                    documentation: `Routine in ${ownerName}`,
+                });
+            }
+        }
+        return result;
+    }
+
+    // -------------------------------------------------------------------------
     // B. Variables / Labels
     // -------------------------------------------------------------------------
 
@@ -474,7 +557,7 @@ export class WordCompletionProvider {
             !procDeclLines.has(t.line);
 
         const inferredProcedure = this.findEnclosingToken(tokens, position.line, t => TokenHelper.isProcedureOrFunction(t));
-        const inferredRoutine = this.findEnclosingToken(tokens, position.line, t => t.type === TokenType.Routine);
+        const inferredRoutine = this.findEnclosingToken(tokens, position.line, t => t.subType === TokenType.Routine);
 
         const containingProc = scope?.containingProcedure ?? inferredProcedure;
         const containingRoutine = scope?.containingRoutine ?? inferredRoutine;
@@ -705,7 +788,7 @@ export class WordCompletionProvider {
         };
         const procDeclLines = new Set<number>();
         for (const t of programTokens) {
-            if (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) {
+            if (TokenHelper.isProcedureOrFunction(t) || t.subType === TokenType.Routine) {
                 procDeclLines.add(t.line);
             }
         }
