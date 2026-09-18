@@ -150,21 +150,63 @@ function sample(rows, perSlice) {
     console.log('solution: ' + SLN);
 
     const files = walk(CORPUS, []).sort();
-    const naive = new Map();
+    const naive = new Map();          // corpus-wide, kept for reporting
+    const naiveByFile = new Map();    // file -> Map(name -> count), for family scoping
+    const memberParent = new Map();   // member file -> its PROGRAM's file name, lowercased
     const allDecls = [];
     for (const f of files) {
         let text;
         try { text = fs.readFileSync(f, 'latin1'); } catch { continue; }
         naiveScan(text, naive);
+        const perFile = new Map();
+        naiveScan(text, perFile);
+        naiveByFile.set(f, perFile);
+        const member = /^[^\S\r\n]*MEMBER[^\S\r\n]*\([^\S\r\n]*'([^']*)'/im.exec(text);
+        if (member) memberParent.set(f, path.basename(member[1]).toLowerCase().replace(/\.clw$/i, '') + '.clw');
         try {
             const tokens = new ClarionTokenizer(text).tokenize();
             for (const d of declarationsIn(text, tokens, f)) allDecls.push(d);
         } catch { /* a file that will not tokenize contributes no declarations */ }
     }
+
+    // PROGRAM file -> the files that are its MEMBER modules. A MAP procedure is per-PROGRAM: the
+    // same library import is declared independently in every program that links it, and each
+    // program's calls resolve against its OWN declaration.
+    const familyOf = new Map();       // program basename -> Set(files)
+    for (const [file, parent] of memberParent) {
+        if (!familyOf.has(parent)) familyOf.set(parent, new Set());
+        familyOf.get(parent).add(file);
+    }
+    /** The files whose calls could legitimately resolve against a declaration in `file`. */
+    function programFamily(file) {
+        const base = path.basename(file).toLowerCase();
+        const parent = memberParent.get(file);
+        const programBase = parent ?? base;                       // a member's family is its parent's
+        const set = new Set(familyOf.get(programBase) ?? []);
+        for (const f of files) if (path.basename(f).toLowerCase() === programBase) set.add(f);
+        set.add(file);
+        return set;
+    }
+
     // How many times each name is DECLARED anywhere in the corpus — the correction that turns a
     // raw occurrence count into a use count. See the note at the call site below.
     const declCount = new Map();
     for (const d of allDecls) declCount.set(d.lower, (declCount.get(d.lower) || 0) + 1);
+
+    /**
+     * Occurrences of `name` inside one program's family, minus that family's own declarations.
+     *
+     * The third correction (#599). A corpus-wide count compares 79 programs' call sites against ONE
+     * program's references: vwLstMove is declared in 79 programs and called from none of jm1's
+     * members, so the corpus sees 132 "uses" while FAR correctly answers 1. Scoping to the family
+     * asks the question FAR is actually answering.
+     */
+    function familyUses(nameLower, file) {
+        let total = 0;
+        for (const f of programFamily(file)) total += (naiveByFile.get(f)?.get(nameLower) || 0);
+        const declsHere = allDecls.filter(d => d.lower === nameLower && programFamily(file).has(d.file)).length;
+        return Math.max(0, total - declsHere);
+    }
 
     console.log(`corpus:   ${files.length} files, ${allDecls.length} declarations, ${naive.size} distinct names  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
@@ -224,7 +266,14 @@ function sample(rows, perSlice) {
         // Subtracting the declaration sites is what makes the remainder mean "uses".
         const declSites = declCount.get(d.lower) || 0;
         const naiveAll = naive.get(d.lower) || 0;
-        results.push({ ...d, naive: naiveAll, declSites, naiveUses: Math.max(0, naiveAll - declSites), resolved: refs ? refs.length : -1, ms, err });
+        results.push({
+            ...d,
+            naive: naiveAll,
+            declSites,
+            naiveUses: familyUses(d.lower, d.file),
+            corpusUses: Math.max(0, naiveAll - declSites),
+            resolved: refs ? refs.length : -1, ms, err,
+        });
         if ((i + 1) % 25 === 0) process.stdout.write(`  ${i + 1}/${picked.length}\n`);
     }
 
@@ -255,7 +304,7 @@ function sample(rows, perSlice) {
     if (zeros.length) {
         console.log('\nResolved to <=1 reference while the naive scan sees several USES');
         for (const r of zeros) {
-            console.log('  uses=' + String(r.naiveUses).padStart(5) + ' resolved=' + String(r.resolved).padStart(3) + '  ' + r.name
+            console.log('  family=' + String(r.naiveUses).padStart(4) + ' corpus=' + String(r.corpusUses).padStart(5) + ' resolved=' + String(r.resolved).padStart(3) + '  ' + r.name
                 + '   ' + path.relative(CORPUS, r.file).replace(/\\/g, '/') + ':' + r.line);
         }
     } else {
