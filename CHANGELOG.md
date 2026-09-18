@@ -6,6 +6,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [1.0.6] - Unreleased
+
+---
+
 ### [1.0.5] - 2026-09-18
 
 ![7 fixes](https://img.shields.io/badge/fixes-7-1f6feb?style=flat-square) ![1 new](https://img.shields.io/badge/new-1-2da44e?style=flat-square)
