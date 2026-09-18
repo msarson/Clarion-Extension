@@ -52,22 +52,20 @@ So `INCLUDE(file,'PROTOTYPES')` really does admit only the named section, and a 
 classifies an included file's prototypes **must scope them to the requested section** — it cannot
 simply take every prototype in the file. That is the rule #593's fix has to honour.
 
-## What the extension currently makes of it
+## What the extension makes of it
 
-At `version-1.0.5` (after #597 fixed the classifier's prefix handling):
+Before #593 was fixed, at `version-1.0.5` with #597 in:
 
 | file | `MapProcedure` tokens |
 |---|---|
 | `protos.inc` | **0** of 7 |
 | `prefixproto.clw` MAP | **1** — only `reg:ITEM:CashOutExists` |
 
-One declaration recognised out of eight, in a program the compiler builds cleanly. That is #593
-stated as a reproducible fact rather than a report: `processShorthandProcedures` returns early when
-the file has no MAP of its own, so an include-carried prototype is never classified, and nothing
-downstream can match a call against it.
+One declaration of eight, in a program the compiler builds cleanly.
 
-#597 fixed the *labels* (a prefixed name in a real MAP now keeps its whole name). This fixture is
-what remains: the include path.
+**After #593**, running the same merge path (`ScopeAnalyzer.getMapTokensWithIncludes`) the providers
+use: **8 of 8**, with `reg:WIN:NotInSection` correctly absent — matching the compiler, which rejects
+a call to it with `Unknown procedure label`.
 
 ## Building it
 

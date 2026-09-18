@@ -4,6 +4,7 @@ import LoggerManager from "./logger";
 import { ProcedureUtils } from './utils/ProcedureUtils';
 import { isAttributeKeyword } from './utils/AttributeKeywords';
 import { resolvePrefixedName, prefixedNameStartsLine } from './utils/PrefixChain';
+import { MAP_STRUCTURE_KEYWORD, MAP_PROTOTYPE_NON_NAME } from './utils/MapPrototypeRules';
 import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDescriptorParser';
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 import { ControlService } from './utils/ControlService';
@@ -15,14 +16,15 @@ import { ScopeResolver } from './scope/ScopeResolver';
  * `MapFields`, `Mapper` or `ModuleList`, and a prefix test rejects those as if
  * they were the keyword, leaving a real prototype unmarked for good.
  */
-const MAP_STRUCTURE_KEYWORD = /^(MODULE|MAP)$/i;
+// MAP_STRUCTURE_KEYWORD / MAP_PROTOTYPE_NON_NAME now live in utils/MapPrototypeRules so the include
+// path (#593) makes the same judgement rather than its own.
 
 /**
  * Words that cannot themselves be the NAME of a prototype in a MAP body — the
  * block keywords plus the procedure keywords, which introduce the other form
  * (`name PROCEDURE ...`) rather than being a name.
  */
-const MAP_PROTOTYPE_NON_NAME = /^(MODULE|MAP|END|PROCEDURE|FUNCTION)$/i;
+
 
 export type { WindowDescriptor } from './tokenizer/WindowDescriptorParser';
 export type { ViewDescriptor } from './tokenizer/ViewDescriptorParser';
