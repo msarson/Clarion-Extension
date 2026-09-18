@@ -21,7 +21,7 @@
  * open. Run `npm run compile` first.
  *
  * Usage:
- *   node scripts/health/reference-far-sample.js [--sln=...] [--per-slice=N] [--json=out.json]
+ *   node scripts/health/reference-far-sample.js [--sln=...] [--per-slice=N] [--settle=ms] [--json=out.json]
  */
 
 const { fork } = require('child_process');
@@ -238,7 +238,30 @@ function sample(rows, perSlice) {
         defaultLookupExtensions: ['.clw', '.inc', '.equ', '.int'],
     });
     await waitNotification('clarion/solutionReady');
-    console.log(`[${Date.now() - t0}ms] solutionReady — sampling…\n`);
+    console.log(`[${Date.now() - t0}ms] solutionReady`);
+
+    // SETTLE. solutionReady is NOT the point at which FAR can answer: the file relationship graph
+    // builds in the background afterwards, and the module-scope search set is derived from it. A
+    // sweep that samples immediately reads a half-built graph and reports misses that are really
+    // races — which is exactly what happened with #602, where an unsettled probe showed 1 reference
+    // against 8 and the settled one showed 7. Every number this tool has produced before this change
+    // was taken in that window.
+    //
+    // Waits for the real signal, clarion/graphStatus status:'built', with a timeout so a build that
+    // never reports cannot hang the run. The floor afterwards matches the ">= 15s settle" rule in
+    // CLAUDE.md, which came from the same confound in the perf lane.
+    const settleMs = Number(arg('settle') ?? 20000);
+    const graphT0 = Date.now();
+    let built = false;
+    try {
+        while (Date.now() - graphT0 < settleMs) {
+            const s = await waitNotification('clarion/graphStatus', settleMs - (Date.now() - graphT0));
+            if (s && s.status === 'built') { built = true; break; }
+        }
+    } catch { /* no further graphStatus arrived inside the window */ }
+    const remaining = settleMs - (Date.now() - graphT0);
+    if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
+    console.log(`[${Date.now() - t0}ms] settled (graph ${built ? 'reported built' : 'did not report built'}, ${settleMs}ms floor) — sampling…\n`);
 
     const opened = new Set([toUri(seed)]);
     const results = [];
