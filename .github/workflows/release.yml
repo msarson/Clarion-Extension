@@ -168,4 +168,39 @@ jobs:
       - name: Delete released version branch
         # Runs only if every prior step succeeded (merge, release, publish, next-branch).
         # History is preserved in master and the v${{ inputs.version }} tag, so the branch is safe to remove.
-        run: git push origin --delete version-${{ inputs.version }}
+        #
+        # #591: GitHub refuses to delete the repository's DEFAULT branch, and the step
+        # above can only move the default when REPO_ADMIN_TOKEN exists. Without that
+        # secret this delete could not succeed — so every release ended on
+        #
+        #     ! [remote rejected] version-X.Y.Z (refusing to delete the current branch)
+        #
+        # marking a run that had already merged, tagged, released and published to the
+        # Marketplace as FAILED. A red run for something that is not a failure is worse
+        # than the untidiness it was reporting, and it trains you to ignore a red release.
+        #
+        # So ask first. If the default has moved, delete and say so. If it has not, name
+        # the two commands that finish the job and leave the run green. A delete that
+        # fails for any OTHER reason still fails the step — which is precisely what a
+        # blanket `continue-on-error: true` here would have thrown away.
+        #
+        # Adding REPO_ADMIN_TOKEN makes this fully automatic; nothing here changes then,
+        # the first branch simply stops being taken.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASED="version-${{ inputs.version }}"
+          NEXT="version-${{ inputs.next_version }}"
+          DEFAULT="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+
+          if [ "$DEFAULT" = "$RELEASED" ]; then
+            echo "::warning::$RELEASED is still the repository default branch, so GitHub will not delete it."
+            echo "::warning::That is the missing REPO_ADMIN_TOKEN secret — see the previous step and #591."
+            echo "::warning::The release itself is COMPLETE. Finish the tidy-up by hand, in this order:"
+            echo "::warning::  gh repo edit ${GITHUB_REPOSITORY} --default-branch $NEXT"
+            echo "::warning::  git push origin --delete $RELEASED"
+            exit 0
+          fi
+
+          git push origin --delete "$RELEASED"
+          echo "✅ Deleted $RELEASED — history is in master and the v${{ inputs.version }} tag."
