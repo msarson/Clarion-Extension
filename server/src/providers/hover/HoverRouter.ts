@@ -89,6 +89,13 @@ export class HoverRouter {
             mark('routineRef');
             if (routineHover) return routineHover;
 
+            // 2.05 Handle the ROUTINE declaration label itself — before the variable
+            // tiers, which would otherwise present it as a variable whose declared
+            // type is the word ROUTINE ("Local routine variable").
+            const routineDeclHover = this.routineResolver.resolveRoutineDeclaration(document, position, line);
+            mark('routineDecl');
+            if (routineDeclHover) return routineDeclHover;
+
             // 2.1 Handle GOTO statement-label references (#321) — before the variable
             // tiers, which would otherwise present the label as an UNKNOWN-typed local.
             const gotoHover = this.routineResolver.resolveGotoLabelReference(document, position, line);
