@@ -58,12 +58,14 @@ suite('FAR on a long-prefix colon name (#600)', () => {
             "    MODULE('common.dll')",                   // 2
             'IBSCommon:Init        PROCEDURE(),DLL',      // 3  long prefix — the bug
             'Short:Init            PROCEDURE(),DLL',      // 4  short prefix — the control
-            '    END',                                    // 5
-            '  END',                                      // 6
-            '  CODE',                                     // 7
-            '  IBSCommon:Init()',                         // 8  call site that was never found
-            '  Short:Init()',                             // 9  call site that always worked
-            '  RETURN',                                   // 10
+            'reg:WIN:ShowExits     PROCEDURE(),DLL',      // 5  two colons — #596 cause 2
+            '    END',                                    // 6
+            '  END',                                      // 7
+            '  CODE',                                     // 8
+            '  IBSCommon:Init()',                         // 9  call site that was never found
+            '  Short:Init()',                             // 10 call site that always worked
+            '  reg:WIN:ShowExits()',                      // 11 two colons — #596 cause 2
+            '  RETURN',                                   // 12
         ].join('\r\n'),
     };
 
@@ -129,32 +131,54 @@ suite('FAR on a long-prefix colon name (#600)', () => {
         const at = (line: number) => tokens.filter(t => t.line === line).map(t => `${TokenType[t.type]}(${t.value})`);
 
         // Short prefix: one token, so `token.value` alone matches the search word.
-        assert.deepStrictEqual(at(9).slice(0, 1), ['StructurePrefix(Short:Init)']);
+        assert.deepStrictEqual(at(10).slice(0, 1), ['StructurePrefix(Short:Init)']);
 
         // Long prefix: three tokens, none of which equals "IBSCommon:Init".
-        assert.deepStrictEqual(at(8).slice(0, 3),
+        assert.deepStrictEqual(at(9).slice(0, 3),
             ['Variable(IBSCommon)', 'Delimiter(:)', 'Function(Init)']);
     });
 
     test('the short-prefix control finds its call site (before and after — this is the control)', async () => {
         const fromDecl = lines(await far(4, 2));
-        assert.ok(fromDecl.includes(9), `short prefix should find the call at line 9, got ${JSON.stringify(fromDecl)}`);
+        assert.ok(fromDecl.includes(10), `short prefix should find the call at line 10, got ${JSON.stringify(fromDecl)}`);
     });
 
     test('a long-prefix call site is found from the declaration', async () => {
         const refs = lines(await far(3, 2));
-        assert.ok(refs.includes(8), `expected the call at line 8, got ${JSON.stringify(refs)}`);
+        assert.ok(refs.includes(9), `expected the call at line 9, got ${JSON.stringify(refs)}`);
         assert.ok(refs.includes(3), `expected the declaration at line 3, got ${JSON.stringify(refs)}`);
     });
 
     test('a long-prefix call site is found from the call site itself', async () => {
-        const refs = lines(await far(8, 4));
-        assert.ok(refs.includes(8), `the call site must list itself, got ${JSON.stringify(refs)}`);
+        const refs = lines(await far(9, 4));
+        assert.ok(refs.includes(9), `the call site must list itself, got ${JSON.stringify(refs)}`);
         assert.ok(refs.includes(3), `expected the declaration at line 3, got ${JSON.stringify(refs)}`);
     });
 
     test('the declaration and the call are one symbol, not two results at one line', async () => {
         const refs = lines(await far(3, 2));
-        assert.deepStrictEqual(refs, [3, 8], `expected exactly the declaration and its one call, got ${JSON.stringify(refs)}`);
+        assert.deepStrictEqual(refs, [3, 9], `expected exactly the declaration and its one call, got ${JSON.stringify(refs)}`);
+    });
+
+    // ── #596 cause 2 ────────────────────────────────────────────────────────────────────────────
+    // @bill-atchison reported that a TWO-colon call site can never match, and proposed a rejoin in
+    // findReferencesInFile. The same cause as this issue: `reg:WIN:ShowExits` splits because
+    // StructurePrefix captures exactly ONE colon, so the tail token is `ShowExits` and the search
+    // word is the whole name. resolvePrefixedName walks a chain of any length, so the fix here
+    // should already cover it — asserted rather than assumed, because "should" is not evidence.
+    test('a two-colon call site is found — #596 cause 2, same helper', async () => {
+        const tokens = new ClarionTokenizer(files['ap1.clw']).tokenize();
+        const at11 = tokens.filter(t => t.line === 11).map(t => `${TokenType[t.type]}(${t.value})`);
+        assert.deepStrictEqual(at11.slice(0, 3),
+            ['StructurePrefix(reg:WIN)', 'Delimiter(:)', 'Function(ShowExits)'],
+            'the two-colon call site really does arrive as three tokens');
+
+        const fromDecl = lines(await far(5, 2));
+        assert.ok(fromDecl.includes(11), `expected the call at line 11, got ${JSON.stringify(fromDecl)}`);
+        assert.ok(fromDecl.includes(5), `expected the declaration at line 5, got ${JSON.stringify(fromDecl)}`);
+
+        const fromCall = lines(await far(11, 4));
+        assert.ok(fromCall.includes(11), `the call site must list itself, got ${JSON.stringify(fromCall)}`);
+        assert.ok(fromCall.includes(5), `expected the declaration at line 5, got ${JSON.stringify(fromCall)}`);
     });
 });
