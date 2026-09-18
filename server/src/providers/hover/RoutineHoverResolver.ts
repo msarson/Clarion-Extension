@@ -4,6 +4,7 @@ import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { TokenCache } from '../../TokenCache';
+import { Token } from '../../tokenizer/TokenTypes';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("RoutineHoverResolver");
@@ -66,6 +67,7 @@ export class RoutineHoverResolver {
                     value: [
                         `**Routine:** \`${routineName}\``,
                         '',
+                        ...this.ownerLine(structure, routineToken),
                         `📍 ${this.formatter.locationLink(document.uri, routineToken.line)}`,
                         '',
                         '```clarion',
@@ -78,6 +80,68 @@ export class RoutineHoverResolver {
 
         logger.info(`❌ Routine not found: ${routineName}`);
         return null;
+    }
+
+    /**
+     * Hover for a ROUTINE's own declaration label (`SyncDisplay ROUTINE`).
+     *
+     * There was no resolver for this, so it fell through to the variable tiers and
+     * was rendered by `HoverFormatter.formatVariable` as a variable whose declared
+     * type happens to be the word ROUTINE. That produced "🔐 Local routine
+     * variable" — which reads as "a variable local to a routine", the one thing a
+     * routine label is not.
+     *
+     * Names the owning procedure for the same reason the DO-reference hover does:
+     * routine labels legally repeat across procedures, so the name alone does not
+     * identify which routine is on screen.
+     */
+    resolveRoutineDeclaration(
+        document: TextDocument,
+        position: Position,
+        line: string
+    ): Hover | null {
+        const declMatch = line.match(ClarionPatterns.ROUTINE_LABEL);
+        if (!declMatch) return null;
+
+        // A Clarion label starts in column 1, so the label occupies [0, length).
+        const routineName = declMatch[1];
+        if (position.character > routineName.length) return null;
+
+        const structure = TokenCache.getInstance().getStructure(document);
+        const routineToken = structure.findRoutines(routineName)
+            .find(t => t.line === position.line);
+        if (!routineToken) return null;
+
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**Routine:** \`${routineName}\``,
+                    '',
+                    ...this.ownerLine(structure, routineToken),
+                    '```clarion',
+                    (document.getText().split(/\r?\n/)[routineToken.line] ?? '').trimEnd(),
+                    '```'
+                ].join('\n')
+            }
+        };
+    }
+
+    /**
+     * The "belongs to" line shared by both routine hovers, as markdown lines ready
+     * to splice in (empty when the owner cannot be resolved, which keeps the card
+     * well-formed rather than printing a dangling label).
+     *
+     * 🔐 matches the scope icon `HoverFormatter` already uses for routine scope.
+     * The method/procedure noun is chosen the way `formatVariable` chooses it — a
+     * dotted owner label is a method implementation.
+     */
+    private ownerLine(structure: ReturnType<TokenCache['getStructure']>, routineToken: Token): string[] {
+        const owner = TokenHelper.getParentScopeOfRoutine(structure, routineToken);
+        const ownerName = owner?.label ?? owner?.value;
+        if (!ownerName) return [];
+        const noun = ownerName.includes('.') ? 'method' : 'procedure';
+        return [`🔐 Routine in ${noun} \`${ownerName}\``, ''];
     }
 
     /**

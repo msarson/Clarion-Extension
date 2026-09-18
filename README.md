@@ -89,20 +89,18 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.4 (2026-09-17)
+### 1.0.5 (2026-09-18)
 
-Seventy-nine changes. Most of them come from running the extension against real solutions: which Clarion version and which settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks.
+Eight changes, most of them names the extension could not resolve in a real generated application. Each came from someone running it over their own code rather than from a test case.
 
-- The Clarion version a solution uses is remembered, can be changed while the solution is loaded, and a version the properties file no longer registers is reported instead of silently failing; a solution opened from the Solution View resolves its library classes at once.
-- Settings behave in a multi-root workspace: a configuration pick sticks, the change reaches the language server immediately, and settings an earlier version wrote into a folder — which quietly override your `.code-workspace` file — are reported with an offer to remove them.
-- In a solution with several projects, a class found in more than one search folder resolves to the copy the open file's own project uses.
-- Find All References covers more of what a name touches: the include files a program reaches, a type inside a CLASS body, `*Class` parameters in prototypes, an INCLUDE line's includers, and every module of a program for a class method.
-- Clarion written the way the compiler allows is read correctly: implicit variables named like keywords (`END#`), a comparison before a structure on the same line, an `END` sharing its line with a one-line `IF`, and qualified names ending in `END`.
-- Hover on an `END`, a period, or a branch keyword tells you what it closes or belongs to, with a link back; call hierarchy arrives for procedures, methods and routines; every diagnostic check gains its own setting and severity.
-- Editing large modules is quicker: reading a file is about three times faster, completion into classes no longer walks the include chain for every lookup, and background checking stops as soon as you type.
-- With contributions from [@geircodes](https://github.com/geircodes).
+- Find All References answers the same way wherever it is asked: at a procedure declared in a program’s MAP it now lists the uses in every module of that program, not only the modules the MAP itself names.
+- Names written the way generated applications write them resolve: a prefix that runs past eight characters, such as the `IBSCommon:Init` call every linked DLL gets, and a prefixed prototype indented inside a MAP rather than at column 0.
+- Procedures prototyped in an include file are found again — a MAP that pulls its prototypes in with `INCLUDE('file.inc','PROTOTYPES')` records them as declarations, using only the section the INCLUDE names, as the compiler does.
+- Whitespace around the member-access dot is read the way the compiler reads it: `Receiver   .Method(42)` is a method call, while a space *after* the dot ends the statement and hover no longer describes it as a member access.
+- Completion offers ROUTINE labels, and after `DO` offers only those; hovering a routine names the procedure it belongs to.
+- Reported by Bill Atchison, with contributions from [@geircodes](https://github.com/geircodes).
 
-**Earlier:** 1.0.3 (2026-09-13) made generated code read correctly — the MAP shapes an app generator emits, names shared between an EXE and its DLLs, and the FILE, VIEW and KEY structures underneath — and removed the last second-long cold starts; 1.0.2 (2026-09-06) made degraded solution loads report themselves and implemented the `%THISDIR%` family of redirection macros. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.4 (2026-09-17) was a release about what a real solution runs into — which Clarion version and settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks — and made editing large modules markedly quicker; 1.0.3 (2026-09-13) made generated code read correctly, from the MAP shapes an app generator emits to the FILE, VIEW and KEY structures underneath, and removed the last second-long cold starts. [Full changelog](CHANGELOG.md).
 
 ---
 
@@ -129,7 +127,7 @@ Seventy-nine changes. Most of them come from running the extension against real 
 ## Contributors
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-12-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks to everyone who has helped improve the Clarion Language Extension through code, bug reports, testing, ideas, documentation and their knowledge of the Clarion language.
@@ -154,6 +152,7 @@ Thanks to everyone who has helped improve the Clarion Language Extension through
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jslarveEC"><img src="https://avatars.githubusercontent.com/u/112515315?v=4?s=100" width="100px;" alt="jslarveEC"/><br /><sub><b>jslarveEC</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AjslarveEC" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/narduss"><img src="https://avatars.githubusercontent.com/u/15345011?v=4?s=100" width="100px;" alt="Nardus"/><br /><sub><b>Nardus</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/commits?author=narduss" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.boxsoft.net"><img src="https://avatars.githubusercontent.com/u/1831296?v=4?s=100" width="100px;" alt="Mike Hanson"/><br /><sub><b>Mike Hanson</b></sub></a><br /><a href="#ideas-BoxSoft" title="Ideas, Planning, & Feedback">🤔</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/bill-atchison"><img src="https://avatars.githubusercontent.com/u/2093026?v=4?s=100" width="100px;" alt="William Atchison"/><br /><sub><b>William Atchison</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3Abill-atchison" title="Bug reports">🐛</a> <a href="#ideas-bill-atchison" title="Ideas, Planning, & Feedback">🤔</a></td>
     </tr>
   </tbody>
 </table>

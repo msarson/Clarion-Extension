@@ -1,4 +1,4 @@
-import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat } from 'vscode-languageserver/node';
+import { CompletionItem, CompletionItemKind, CompletionParams, InsertTextFormat, Position } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
@@ -71,6 +71,10 @@ export class CompletionProvider {
             const fieldEquateCompletions = this.handleFieldEquateCompletion(lineText, document, position);
             if (fieldEquateCompletions) return fieldEquateCompletions;
 
+            // DO completion — the operand can only be a ROUTINE
+            const doCompletions = this.handleDoRoutineCompletion(lineText, document, position);
+            if (doCompletions) return doCompletions;
+
             // Member access is not abandoned once the line stops ending in '.'.
             // At a letter-ending position like `SELF.Th` / `oKanban.Ini` the cursor is
             // still inside a member reference — resolve the chain before the last dot and
@@ -109,6 +113,48 @@ export class CompletionProvider {
             logger.error(`CompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
             return [];
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // DO routine completion
+    // -------------------------------------------------------------------------
+
+    /**
+     * Completion for the operand of a `DO` statement (#592).
+     *
+     * `DO` takes exactly one kind of operand — a ROUTINE of the enclosing
+     * procedure — so the general word list was not merely unhelpful there but
+     * wrong: several hundred keywords, built-ins, data types, controls and
+     * variables, none of which is legal after `DO`, and not one routine among
+     * them. This returns the in-scope routines alone.
+     *
+     * An empty array is a real answer, not a failure: it means the enclosing
+     * procedure declares no routine yet (offering the word list instead would
+     * put back exactly the noise this removes). Returns null only when the line
+     * is not a `DO`, so the caller falls through to word completion.
+     *
+     * The partial is matched case-insensitively and may carry a generated
+     * `Module::Name` qualifier, which is why the character class admits colons.
+     */
+    private handleDoRoutineCompletion(
+        lineBeforeCursor: string,
+        document: TextDocument,
+        position: Position
+    ): CompletionItem[] | null {
+        // Leading boundary keeps this off the `DO` inside a longer word (UNDO);
+        // the required whitespace after it keeps it off a half-typed `DO` itself.
+        const m = lineBeforeCursor.match(/(?:^|[\s;])DO\s+([A-Za-z_][A-Za-z0-9_:]*)?$/i);
+        if (!m) return null;
+
+        const partial = (m[1] ?? '').toUpperCase();
+        return this.wordCompletion.getRoutinesInScope(document, position.line)
+            .filter(r => r.label.toUpperCase().startsWith(partial))
+            .map(r => ({
+                label: r.label,
+                kind: CompletionItemKind.Method,
+                detail: r.detail,
+                documentation: r.documentation,
+            }));
     }
 
     // -------------------------------------------------------------------------

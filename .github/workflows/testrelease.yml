@@ -30,6 +30,50 @@ jobs:
         shell: bash
 
     steps:
+      - name: Preflight — can the release move the default branch? (#591)
+        # The release workflow must point the repository default at the NEXT version
+        # branch before it can delete the one just released, because GitHub refuses to
+        # delete the current default. That needs REPO_ADMIN_TOKEN, an optional secret.
+        # When it is missing the release still completes and leaves two manual commands
+        # in its log — it no longer fails for it (#591).
+        #
+        # Checking it HERE is the whole point: a dry run is dispatched before every real
+        # release, this is the environment the secret is actually read in (which a local
+        # check cannot prove), and an expired token is found BEFORE a release instead of
+        # during one.
+        #
+        # The write is idempotent by construction: it PATCHes the default branch to
+        # whatever it already is, read back in this same step. Running this cannot change
+        # the default, whatever `version` was dispatched — which matters, because naming
+        # a branch here instead would silently RE-POINT the default on any dry run of an
+        # older version.
+        #
+        # Never fails the run. It reports; the build below is what this workflow is for.
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::REPO_ADMIN_TOKEN is not configured."
+            echo "::warning::The release will complete, then leave two manual commands in its log (#591)."
+            exit 0
+          fi
+
+          CURRENT="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch 2>/dev/null)" || CURRENT=""
+          if [ -z "$CURRENT" ]; then
+            echo "::warning::REPO_ADMIN_TOKEN is set but cannot read ${GITHUB_REPOSITORY}."
+            echo "::warning::Check the token is scoped to this repository and has not expired."
+            exit 0
+          fi
+
+          if gh api -X PATCH "repos/${GITHUB_REPOSITORY}" -f default_branch="$CURRENT" --silent; then
+            echo "REPO_ADMIN_TOKEN OK — it can set the default branch (no-op, left on $CURRENT)."
+            echo "The release will be fully automatic: default moved, released branch deleted."
+          else
+            echo "::warning::REPO_ADMIN_TOKEN is set but cannot set the default branch."
+            echo "::warning::It needs the 'Administration: read and write' repository permission."
+            echo "::warning::The release will complete and leave the two manual commands in its log (#591)."
+          fi
+
       - name: Checkout version branch
         uses: actions/checkout@v5
         with:

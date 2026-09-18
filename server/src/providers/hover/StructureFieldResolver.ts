@@ -93,6 +93,16 @@ export class StructureFieldResolver {
             return null;
         }
 
+        // #603: the dot must be IMMEDIATELY followed by the member name. A dot with whitespace after
+        // it is a statement terminator, which is how the compiler reads it (#574, compiler-verified:
+        // `Obj.   Method(42)` and `Obj . Method(42)` both fail with "Expected: <statement>") and how
+        // our tokenizer reads it — an EndStatement. Without this we answer with a member-access card
+        // for a line that will not build, because the `.trim()` below discards the deciding space.
+        if (/\s/.test(line.charAt(dotBeforeIndex + 1))) {
+            logger.info(`resolveFieldAccess: whitespace after the dot — a statement terminator, not a member access`);
+            return null;
+        }
+
         const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
         const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
         const afterDot = line.substring(dotBeforeIndex + 1).trim();

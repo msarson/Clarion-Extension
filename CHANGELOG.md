@@ -6,6 +6,31 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [1.0.5] - 2026-09-18
+
+![7 fixes](https://img.shields.io/badge/fixes-7-1f6feb?style=flat-square) ![1 new](https://img.shields.io/badge/new-1-2da44e?style=flat-square)
+
+Eight changes, most of them names the extension could not resolve in a real generated application: a prefix that runs past eight characters, a prototype an INCLUDE carries into a MAP, a prototype indented inside one, and the scope a program’s MAP actually has. Two more settle what the compiler does with whitespace on either side of the member-access dot. Reported by Bill Atchison, with contributions from [@geircodes](https://github.com/geircodes).
+
+#### Navigation and hover
+
+- **Find All References on a procedure declared in a program's MAP now lists every use in that program.** Asked at the declaration it searched only the modules the MAP itself names, so calls in the program's other modules were missing, while asking at one of those calls listed them all. The same symbol gave two different answers depending on where it was asked. [#602](https://github.com/msarson/Clarion-Extension/issues/602)
+- **Procedures prototyped in an include file are found again.** Where a MAP brings prototypes in with `INCLUDE('file.inc','PROTOTYPES')`, the include file has no MAP of its own, so those prototypes were never recorded as declarations and Go to Definition, hover and the unresolved-call check all missed every call to them. Only the section the INCLUDE names is used, as the compiler requires. Reported by Bill Atchison. [#593](https://github.com/msarson/Clarion-Extension/issues/593)
+- **Find All References lists the call sites of a DLL-imported procedure.** Where a name's prefix runs past eight characters, such as `IBSCommon:Init`, a call to it was read as several separate words while its declaration was read as one, so the result listed the declaration and nothing else. Generated applications call every linked DLL's init and kill procedure this way, so most of those calls were invisible. [#600](https://github.com/msarson/Clarion-Extension/issues/600)
+- **A prefixed MAP prototype written without the PROCEDURE keyword is found again.** Where a prototype's name carries a prefix, such as `reg:WIN:ShowExits()`, and is written indented inside the MAP rather than at column 0, it was recorded under the wrong name or not recorded at all, so Go to Definition, hover, workspace symbol search and the unresolved-call check all missed it. Reported by Bill Atchison. [#597](https://github.com/msarson/Clarion-Extension/issues/597)
+- **A routine hover names the procedure the routine belongs to.** ROUTINE labels repeat legally across procedures, so an identically named routine elsewhere in the file produced the same card. Hovering the declaration label also described it as a variable whose declared type is the word ROUTINE; it now gets a routine card of its own. [#595](https://github.com/msarson/Clarion-Extension/pull/595) @geircodes
+- **Hover no longer describes a member access where the dot ends the statement.** `Obj.   Method(42)` and `Obj . Method(42)` do not compile, because a space after the dot terminates the statement, and the tokenizer already reads them that way; hover alone still presented the following name as a method or field of the object. Reported by Mark. [#603](https://github.com/msarson/Clarion-Extension/issues/603)
+
+#### Editing
+
+- **Completion offers ROUTINE labels, and after `DO` offers only those.** Routines were the one callable kind the word list never included. After `DO ` the list was several hundred keywords, built-ins and variables, none of them legal in that position and not one of them a routine; it now lists the routines the enclosing procedure can reach, an inner scope's routine taking precedence over a repeated name further out. [#594](https://github.com/msarson/Clarion-Extension/pull/594) @geircodes
+
+#### Syntax
+
+- **A method or property written with a space before the dot is understood.** `Receiver   .Method(42)` is valid Clarion, but the space caused the dot to be dropped and the line read as a call to a procedure named after the method, so hover, Go to Definition, Find All References, rename and completion all missed those uses. A space *after* the dot still ends the statement, which is what the compiler does with it. Reported by Mark. [#574](https://github.com/msarson/Clarion-Extension/issues/574)
+
+---
+
 ### [1.0.4] - 2026-09-17
 
 ![64 fixes](https://img.shields.io/badge/fixes-64-1f6feb?style=flat-square) ![11 new](https://img.shields.io/badge/new-11-2da44e?style=flat-square) ![4 performance](https://img.shields.io/badge/performance-4-8250df?style=flat-square)
@@ -178,44 +203,15 @@ Forty-one changes, most of them about how the extension reads generated code: th
 
 ### [1.0.2] - 2026-09-06
 
-![21 fixes](https://img.shields.io/badge/fixes-21-1f6feb?style=flat-square) ![1 performance](https://img.shields.io/badge/performance-1-8250df?style=flat-square)
+**Highlights**
 
-A correctness release about silent failure: several ways a solution could load in a degraded state looked identical to a healthy load, so features returned nothing and the extension read as broken rather than misconfigured. Those now report themselves. Many of the navigation and diagnostic fixes were contributed by [@geircodes](https://github.com/geircodes).
+- Solution loads that silently degraded now report themselves: unresolved source files are counted and named in the log, the graph-status notification and the Clarion Tools panel.
+- The `%THISDIR%`, `%WinUserApplicationData%` and `%WinCommonApplicationData%` redirection macros are implemented; an unrecognised macro used to be left in the path as text, failing every directory on the line.
+- Hover, F12, completion and signature help stopped being defeated by ordinary Clarion: a bare local CLASS used as its own instance, a structure field’s own declaration, names colliding with keywords and built-ins, and a colon in the enclosing SELF or PARENT scope line.
+- Hovering an undeclared bare word in a big generated module no longer froze for about ten seconds (10.5s to 13ms).
+- Many of the navigation and diagnostic fixes were contributed by [@geircodes](https://github.com/geircodes).
 
-#### Solution and configuration
-
-- **Unresolved source files are counted and named.** They were dropped from the file graph in silence while the build still reported healthy; now a log line, the graph-status notification and the Clarion Tools panel all carry `N of M unresolved`. [#434](https://github.com/msarson/Clarion-Extension/issues/434)
-- **Re-opening a recent solution validates its stored build configuration** instead of adopting a stale one that matches no `.red` section. [#437](https://github.com/msarson/Clarion-Extension/issues/437)
-- **The `%THISDIR%`, `%WinUserApplicationData%` and `%WinCommonApplicationData%` redirection macros are implemented.** An unrecognised macro was left in the path as text, so every directory on that line failed to resolve; `%THISDIR%` expands per file inside included `.red` files. [#435](https://github.com/msarson/Clarion-Extension/issues/435)
-- **Every command carries a `Clarion` category,** so typing "clarion" in the Command Palette finds all 57, including Open Solution. [#438](https://github.com/msarson/Clarion-Extension/issues/438)
-- **Open Detected Solution is hidden from the Command Palette,** where it failed for want of the path the extension's own UI supplies. [#433](https://github.com/msarson/Clarion-Extension/issues/433), @ClarionLive
-
-#### Navigation and hover
-
-- **A bare local CLASS used as its own instance resolves** for hover, F12, Ctrl+F12, completion, signature help and the discarded-return warning, as a bare QUEUE, GROUP or FILE already did. [#439](https://github.com/msarson/Clarion-Extension/pull/439), @geircodes
-- **A GROUP, QUEUE or CLASS field's own declaration hovers as that field,** not as an unrelated same-named variable, and the card names the owning structure. [#424](https://github.com/msarson/Clarion-Extension/pull/424), @geircodes
-- **Attribute, built-in and keyword names that collide with your own names** no longer hijack the hover card or the diagnostic. [#425](https://github.com/msarson/Clarion-Extension/pull/425), @geircodes
-- **A colon in the enclosing SELF or PARENT scope line** no longer truncates identifiers and kills hover, F12, completion and signature help. [#431](https://github.com/msarson/Clarion-Extension/pull/431), @geircodes
-- **A local CLASS's indented END** no longer captures the following PROCEDURE as one of its methods. [#430](https://github.com/msarson/Clarion-Extension/pull/430), @geircodes
-- **61 built-ins that hovered as "undefined"** now show their signatures; the loader reads both shapes the built-ins data is authored in.
-- **The Outline no longer repeats `in <Parent>` after every symbol,** and filtering the Structure View by a procedure's name still shows what it declares. [#426](https://github.com/msarson/Clarion-Extension/pull/426), [#418](https://github.com/msarson/Clarion-Extension/issues/418), @geircodes
-
-#### Diagnostics
-
-- **Discarded-return warnings survive a trailing comment** on a CRLF line. [#429](https://github.com/msarson/Clarion-Extension/pull/429), @geircodes
-- **A colon-named dot-call receiver or method** (`My:StringTheory.IsEmpty()`) is checked for a discarded return value. [#427](https://github.com/msarson/Clarion-Extension/pull/427), @geircodes
-- **An undeclared bare word is no longer accepted because an unrelated CLASS or INTERFACE declares a same-named member;** the procedure index now tracks structure bodies. A class member named `Map` no longer hides the file's later method implementations from that index. [#392](https://github.com/msarson/Clarion-Extension/pull/392), @geircodes
-- **The missing-include check follows a `MEMBER` reached through an `INCLUDE('member.clw')` shim,** and understands the extension-less `MEMBER('Program')` form. [#395](https://github.com/msarson/Clarion-Extension/pull/395), @geircodes
-- **A structure keyword used as an attribute argument or parameter type** (`FROM(QUEUE)`, `PROCEDURE(FILE,KEY)`) no longer loses its first character. [#416](https://github.com/msarson/Clarion-Extension/issues/416)
-- **No false "missing END" on a WINDOW** whose control references a structure keyword on a continuation line. [#415](https://github.com/msarson/Clarion-Extension/issues/415)
-
-#### Performance
-
-- **Hovering an undeclared bare word in a big generated module** no longer freezes for about 10 seconds before showing nothing (10.5s to 13ms), and Clarion's predefined compiler flags such as `DLL_MODE` and `_DEBUG_` get a hover card instead of an undeclared warning. [#420](https://github.com/msarson/Clarion-Extension/issues/420)
-
-#### Maintenance
-
-- **The shelved ANTLR grammar experiment moved to its own archived repository,** [Clarion-ANTLR-Grammar](https://github.com/msarson/Clarion-ANTLR-Grammar); its lockfile had been raising Dependabot alerts against a toolchain the extension does not use.
+[**→ Full details**](dev/docs-internal/changelogs/CHANGELOG-1.0.2.md)
 
 ---
 

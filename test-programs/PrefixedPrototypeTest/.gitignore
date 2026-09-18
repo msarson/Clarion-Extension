@@ -1,0 +1,9 @@
+# Build output — the fixture is the source, not the binary.
+# ClaRUN.dll is SoftVelocity's runtime, copied here by the build; never commit it.
+*.exe
+*.obj
+*.map
+*.lib
+*.dll
+*.RED
+obj/

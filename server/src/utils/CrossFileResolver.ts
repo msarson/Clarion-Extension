@@ -17,6 +17,7 @@ import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
+import { ScopeAnalyzer } from './ScopeAnalyzer';
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -36,12 +37,15 @@ export interface GlobalVariableResult {
 }
 
 export class CrossFileResolver {
+    /** #593 — the include-aware MAP merge, the same one hover uses. */
+    private readonly scopeAnalyzer: ScopeAnalyzer;
     private solutionManager: SolutionManager | null;
     private tokenCache: TokenCache;
 
     constructor(tokenCache: TokenCache) {
         this.solutionManager = SolutionManager.getInstance();
         this.tokenCache = tokenCache;
+        this.scopeAnalyzer = new ScopeAnalyzer(tokenCache, this.solutionManager);
     }
 
     /**
@@ -351,26 +355,38 @@ export class CrossFileResolver {
             logger.info(`🔄 Fallback: Searching parent file MAP directly for ${procName}`);
             
             // Fallback: Search parent file MAP directly (not just MODULE references)
+            //
+            // #593 cause 3 — this used to filter `parentTokens` by the MAP's line range, i.e. the
+            // parent's OWN tokens, so a prototype the parent's MAP pulls in with
+            // INCLUDE(file,'SECTION') was never among the candidates. Hover found such a
+            // declaration and F12 did not, purely because hover goes through the include-aware
+            // MapProcedureResolver and this path did not. getMapTokensWithIncludes is that merge,
+            // and it is the same call hover makes — including its memoized result, so this costs a
+            // cache hit rather than another disk walk.
             const parentMapBlocks = documentStructure.getMapBlocks();
             for (const mapBlock of parentMapBlocks) {
-                const mapTokens = parentTokens.filter(t =>
-                    t.line >= mapBlock.line &&
-                    t.line <= (mapBlock.finishesAt || mapBlock.line) &&
+                const mergedMapTokens = this.scopeAnalyzer.getMapTokensWithIncludes(mapBlock, parentDoc, parentTokens);
+                const mapTokens = mergedMapTokens.filter(t =>
                     (t.subType === TokenType.MapProcedure || t.subType === TokenType.Function) &&
                     (t.label?.toLowerCase() === procName.toLowerCase() ||
                         t.value.toLowerCase() === procName.toLowerCase())
                 );
-                
+
                 if (mapTokens.length > 0) {
                     const token = mapTokens[0];
-                    logger.info(`✅ Found ${procName} in parent MAP at line ${token.line}`);
-                    const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                    // A token carried in by an INCLUDE belongs to the INCLUDED file, and its line
+                    // number is that file's. Reporting it against the parent would send F12 to
+                    // whatever happens to sit at that line in the parent — a plausible-looking
+                    // wrong answer, which is worse than the miss this replaces.
+                    const declaringPath = token.sourceFile ?? resolvedPath;
+                    logger.info(`✅ Found ${procName} in parent MAP at ${declaringPath}:${token.line}`);
+                    const location = Location.create(`file:///${declaringPath.replace(/\\/g, '/')}`, {
                         start: { line: token.line, character: 0 },
                         end: { line: token.line, character: token.value.length }
                     });
                     return {
                         token,
-                        file: resolvedPath,
+                        file: declaringPath,
                         line: token.line,
                         location
                     };

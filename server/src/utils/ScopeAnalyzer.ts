@@ -10,6 +10,9 @@ import { pathToCanonicalUri } from './UriUtils';
 import { getCrossFileEpoch } from './crossFileEpoch';
 import LoggerManager from '../logger';
 import * as path from 'path';
+import { resolvePrefixedName, prefixedNameStartsLine } from './PrefixChain';
+import { isPrototypeName, MAP_STRUCTURE_KEYWORD } from './MapPrototypeRules';
+import { isAttributeKeyword } from './AttributeKeywords';
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ScopeAnalyzer");
@@ -484,6 +487,14 @@ export class ScopeAnalyzer {
             const result = this.getTokensFromIncludedFileWithPath(includeInfo.filename, document.uri);
             if (result && result.tokens) {
                 logger.info(`   ✅ Loaded ${result.tokens.length} tokens from "${includeInfo.filename}"`);
+                // #593 — classify the include's prototypes HERE, because nothing else can.
+                // DocumentStructure.processShorthandProcedures returns immediately when a file has
+                // no MAP of its own, and an .inc holding prototypes under SECTION('PROTOTYPES') has
+                // none — the includer supplies it. So these tokens arrived with no subType, and
+                // every consumer that asks "is this a MAP declaration?" tests subType and saw
+                // nothing. An include pulled into a MAP is MAP content by definition, so this is
+                // where it becomes true.
+                classifyIncludedPrototypes(result.tokens, includeInfo.section);
                 // Tag each token with source file information
                 result.tokens.forEach(token => {
                     token.sourceFile = result.resolvedPath;
@@ -513,8 +524,8 @@ export class ScopeAnalyzer {
      * @param document The source document
      * @returns Array of include file information
      */
-    private findIncludesInMap(mapTokens: Token[], document: TextDocument): Array<{ filename: string, line: number }> {
-        const includes: Array<{ filename: string, line: number }> = [];
+    private findIncludesInMap(mapTokens: Token[], document: TextDocument): Array<{ filename: string, line: number, section?: string }> {
+        const includes: Array<{ filename: string, line: number, section?: string }> = [];
         
         for (let i = 0; i < mapTokens.length; i++) {
             const token = mapTokens[i];
@@ -529,7 +540,17 @@ export class ScopeAnalyzer {
                     if (parenToken.value === '(' && filenameToken.type === TokenType.String) {
                         // Remove quotes from filename
                         const filename = filenameToken.value.replace(/^'|'$/g, '');
-                        includes.push({ filename, line: token.line });
+                        // #593: the optional SECTION argument — INCLUDE('protos.inc','PROTOTYPES').
+                        // It was read and discarded, which is why classification below could only
+                        // ever be all-or-nothing. The compiler enforces it: calling a prototype
+                        // declared under a DIFFERENT section fails with "Unknown procedure label"
+                        // (proved by compiling test-programs/PrefixedPrototypeTest), so admitting
+                        // every prototype in the file would contradict the language.
+                        let section: string | undefined;
+                        if (mapTokens[i + 3]?.value === ',' && mapTokens[i + 4]?.type === TokenType.String) {
+                            section = mapTokens[i + 4].value.replace(/^'|'$/g, '');
+                        }
+                        includes.push({ filename, line: token.line, section });
                     }
                 }
             }
@@ -719,5 +740,76 @@ export class ScopeAnalyzer {
             logger.info(`         ❌ Error loading file: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+}
+
+/**
+ * #593 — mark the keyword-less prototypes of an INCLUDEd file as MAP declarations.
+ *
+ * The file has no MAP of its own, so `DocumentStructure.processShorthandProcedures` never ran over
+ * it and every token arrived with no `subType`. An include pulled into a MAP *is* MAP content, so
+ * this is the honest place to say so — it is not a patch over a missing edge, it is the edge.
+ *
+ * Scoped to `section` when the INCLUDE named one. That guard is the compiler's rule, not caution:
+ * calling a prototype declared under a different section fails to compile with "Unknown procedure
+ * label" (pinned by test-programs/PrefixedPrototypeTest), so admitting the whole file would make us
+ * resolve names the compiler rejects. When the named section is absent, nothing is classified.
+ *
+ * The NAME comes from `resolvePrefixedName`, the same helper the in-file classifier (#597) and the
+ * references provider (#600) use. A prefixed name arrives as one token or several depending on its
+ * colon count and prefix length, and re-deriving that here is precisely how this family of bugs
+ * keeps being reintroduced.
+ */
+function classifyIncludedPrototypes(tokens: Token[], section?: string): void {
+    let lo = -1;
+    let hi = Number.POSITIVE_INFINITY;
+
+    if (section) {
+        const want = section.toUpperCase();
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'SECTION') continue;
+            // The section name is the string literal on the SECTION line, however the parens
+            // tokenize around it.
+            const nameToken = tokens.slice(i + 1, i + 4).find(x => x.type === TokenType.String && x.line === t.line);
+            if (!nameToken) continue;
+            const name = nameToken.value.replace(/^['"]|['"]$/g, '').toUpperCase();
+            if (lo === -1) {
+                if (name === want) lo = t.line;
+            } else if (t.line > lo) {
+                hi = t.line;
+                break;
+            }
+        }
+        if (lo === -1) return;   // the include names a section this file does not have
+    }
+
+    let depth = 0;
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token.line <= lo || token.line >= hi) continue;
+        if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
+
+        // Only the file's top level. A CLASS or GROUP in the same section declares members, not
+        // prototypes.
+        if (token.type === TokenType.Structure) { depth++; continue; }
+        if (token.type === TokenType.EndStatement) { depth = Math.max(0, depth - 1); continue; }
+        if (depth !== 0) continue;
+
+        if (token.subType !== undefined || token.parent) continue;
+
+        const prefixed = resolvePrefixedName(tokens, i);
+        if (!isPrototypeName(prefixed.name) || MAP_STRUCTURE_KEYWORD.test(prefixed.name)) continue;
+        if (isAttributeKeyword(prefixed.name)) continue;
+        // The name must START its line, prefix chain included — the same load-bearing guard the
+        // in-file classifier uses, and what separates a prototype from a parameter or an attribute.
+        if (!prefixedNameStartsLine(tokens, i)) continue;
+
+        // A prototype is the name, then a parameter list, an attribute tail, or nothing at all.
+        const next = tokens[i + 1];
+        if (next && next.line === token.line && next.value !== '(' && next.value !== ',') continue;
+
+        token.subType = TokenType.MapProcedure;
+        token.label = prefixed.name;
     }
 }
