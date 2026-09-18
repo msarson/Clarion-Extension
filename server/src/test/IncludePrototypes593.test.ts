@@ -32,6 +32,8 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenType, Token } from '../ClarionTokenizer';
 import { serverSettings } from '../serverSettings';
 import { SolutionManager } from '../solution/solutionManager';
+import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { HoverProvider } from '../providers/HoverProvider';
 
 suite('MAP prototypes reached through INCLUDE (#593)', () => {
     let dir: string;
@@ -139,5 +141,87 @@ suite('MAP prototypes reached through INCLUDE (#593)', () => {
         // "Unknown procedure label". Taking every prototype in the file would contradict that.
         assert.ok(!declaredNames(mapTokensWithIncludes()).includes('reg:WIN:NotInSection'),
             'SECTION("OTHER") must stay out of a SECTION("PROTOTYPES") include');
+    });
+});
+
+/**
+ * #593 cause 3 — the MEMBER-parent path.
+ *
+ * A call in a MEMBER module resolves through the parent PROGRAM's MAP. Hover goes through the
+ * include-aware MapProcedureResolver; F12 goes through
+ * CrossFileResolver.findMapDeclarationInMemberFile, which scans only the parent file's OWN tokens.
+ * Both were defeated by causes 1 and 2 before, so the difference between them was invisible. With
+ * those fixed, this is what is left of the report.
+ */
+suite('INCLUDE-carried prototypes called from a MEMBER module (#593 cause 3)', () => {
+    let dir: string;
+    let savedLibsrc: string[] = [];
+    let savedRed: string;
+    let memberDoc: TextDocument;
+
+    const protosInc = [
+        "  SECTION('PROTOTYPES')",
+        '  reg:WIN:ShowExits()',
+    ].join('\r\n');
+
+    const parentClw = [
+        '  PROGRAM',
+        '  MAP',
+        "    INCLUDE('protos.inc','PROTOTYPES'),ONCE",
+        '  END',
+        '  CODE',
+        '  RETURN',
+    ].join('\r\n');
+
+    // The call at line 3 is declared only in the parent's INCLUDE, never in this file.
+    const memberClw = [
+        "  MEMBER('parent.clw')",
+        'DoThing PROCEDURE()',
+        '  CODE',
+        '  reg:WIN:ShowExits()',
+        '  RETURN',
+    ].join('\r\n');
+
+    setup(() => {
+        setServerInitialized(true);
+        savedLibsrc = serverSettings.libsrcPaths;
+        savedRed = serverSettings.redirectionFile;
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inc593m-'));
+        fs.writeFileSync(path.join(dir, 'Clarion110.red'), '[Common]\r\n*.inc = .\r\n*.clw = .\r\n');
+        serverSettings.redirectionFile = 'Clarion110.red';
+        serverSettings.libsrcPaths = [dir];
+        fs.writeFileSync(path.join(dir, 'protos.inc'), protosInc);
+        fs.writeFileSync(path.join(dir, 'parent.clw'), parentClw);
+        fs.writeFileSync(path.join(dir, 'member.clw'), memberClw);
+
+        const tc = TokenCache.getInstance();
+        tc.clearAllTokens();
+        for (const rel of ['parent.clw', 'member.clw']) {
+            const full = path.join(dir, rel);
+            const uri = 'file:///' + full.split(path.sep).join('/');
+            const doc = TextDocument.create(uri, 'clarion', 1, fs.readFileSync(full, 'utf8'));
+            tc.getTokens(doc);
+            if (rel === 'member.clw') memberDoc = doc;
+        }
+    });
+
+    teardown(() => {
+        serverSettings.libsrcPaths = savedLibsrc;
+        serverSettings.redirectionFile = savedRed;
+        TokenCache.getInstance().clearAllTokens();
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    test('hover on the call resolves through the parent MAP INCLUDE', async () => {
+        const hover = await new HoverProvider().provideHover(memberDoc, { line: 3, character: 6 });
+        assert.ok(hover, 'expected a hover for reg:WIN:ShowExits');
+    });
+
+    test('F12 on the call resolves to the prototype in the included file', async () => {
+        const def = await new DefinitionProvider().provideDefinition(memberDoc, { line: 3, character: 6 });
+        assert.ok(def, 'expected a definition for reg:WIN:ShowExits');
+        const loc = (Array.isArray(def) ? def[0] : def) as { uri: string };
+        assert.ok(String(loc.uri).toLowerCase().includes('protos.inc'),
+            `expected protos.inc, got ${JSON.stringify(loc)}`);
     });
 });
