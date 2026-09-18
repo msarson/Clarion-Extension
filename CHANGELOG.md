@@ -8,6 +8,14 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.5] - Unreleased
 
+#### Navigation and hover
+
+- **A routine hover names the procedure the routine belongs to.** ROUTINE labels repeat legally across procedures, so an identically named routine elsewhere in the file produced the same card. Hovering the declaration label also described it as a variable whose declared type is the word ROUTINE; it now gets a routine card of its own. [#595](https://github.com/msarson/Clarion-Extension/pull/595) @geircodes
+
+#### Editing
+
+- **Completion offers ROUTINE labels, and after `DO` offers only those.** Routines were the one callable kind the word list never included. After `DO ` the list was several hundred keywords, built-ins and variables, none of them legal in that position and not one of them a routine; it now lists the routines the enclosing procedure can reach, an inner scope's routine taking precedence over a repeated name further out. [#594](https://github.com/msarson/Clarion-Extension/pull/594) @geircodes
+
 ---
 
 ### [1.0.4] - 2026-09-17
