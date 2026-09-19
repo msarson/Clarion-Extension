@@ -1,8 +1,8 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver-protocol';
-import { Token, TokenType } from '../ClarionTokenizer';
+import { Token } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
-import { TokenHelper } from './TokenHelper';
+import { ClassMemberResolver } from './ClassMemberResolver';
 import { ChainedPropertyResolver } from './ChainedPropertyResolver';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
@@ -62,17 +62,9 @@ export class SelfParentClassResolver {
      * several procedures), otherwise the structure index.
      */
     private async locate(className: string, document: TextDocument, tokens: Token[], atLine: number): Promise<ClassDeclarationSite | null> {
-        const wanted = className.toLowerCase();
-        const lines = document.getText().split(/\r?\n/);
-        let best: Token | null = null;
-        for (const classToken of TokenHelper.findClassStructures(tokens)) {
-            const label = tokens.find(t =>
-                t.type === TokenType.Label && t.line === classToken.line && t.value.toLowerCase() === wanted);
-            if (!label) continue;
-            if (!best || (label.line <= atLine && (best.line > atLine || label.line > best.line))) best = label;
-        }
+        const best = ClassMemberResolver.nearestClassLabel(tokens, className, atLine);
         if (best) {
-            const text = lines[best.line] ?? '';
+            const text = document.getText().split(/\r?\n/)[best.line] ?? '';
             const parent = text.match(/\bCLASS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i);
             return {
                 className: best.value,

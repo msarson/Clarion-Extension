@@ -271,6 +271,23 @@ export class ClassMemberResolver {
      * @param paramCount Optional parameter count for overload resolution
      * @returns Member info or null if not found
      */
+    /**
+     * #608: the column-0 label of the CLASS named `className` that a method at `atLine`
+     * belongs to - the nearest such declaration above it, since a generated module can
+     * declare the same local class label in several procedures; failing that, the first.
+     */
+    public static nearestClassLabel(tokens: Token[], className: string, atLine: number): Token | null {
+        const wanted = className.toLowerCase();
+        let best: Token | null = null;
+        for (const classToken of TokenHelper.findClassStructures(tokens)) {
+            const label = tokens.find(t =>
+                t.type === TokenType.Label && t.line === classToken.line && t.value.toLowerCase() === wanted);
+            if (!label) continue;
+            if (!best || (label.line <= atLine && (best.line > atLine || label.line > best.line))) best = label;
+        }
+        return best;
+    }
+
     public findClassMemberInfo(
         memberName: string,
         document: TextDocument,
@@ -330,14 +347,11 @@ export class ClassMemberResolver {
         // Search in current file first
         const classTokens = TokenHelper.findClassStructures(tokens);
         
+        // #607: the CLASS's own label - not the parent named in `Child CLASS(Base)`.
+        // #608: of several same-named local classes, the one this method belongs to.
+        const ownLabel = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
         for (const classToken of classTokens) {
-            // #607: the CLASS's own label - not the parent named in `Child CLASS(Base)`,
-            // which would read a derived class's body as this class's.
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className!.toLowerCase()
-            );
+            const labelToken = ownLabel && ownLabel.line === classToken.line ? ownLabel : undefined;
 
             if (labelToken) {
                 logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
@@ -660,23 +674,17 @@ export class ClassMemberResolver {
         // Find this class's parent in current file tokens
         const content = document.getText();
         const lines = content.split('\n');
-        const classTokens = TokenHelper.findClassStructures(tokens);
-        for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className!.toLowerCase()
-            );
-            if (labelToken) {
-                const classDecLine = lines[labelToken.line];
-                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
-                if (parentMatch) {
-                    return this.findMemberInParentChain(
-                        parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
-                    );
-                }
-                return null; // Class found but has no parent
+        // #608: of several same-named local classes, the one this method belongs to
+        const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
+        if (labelToken) {
+            const classDecLine = lines[labelToken.line];
+            const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+            if (parentMatch) {
+                return this.findMemberInParentChain(
+                    parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
+                );
             }
+            return null; // Class found but has no parent
         }
 
         // Class not in current file — find its declaration in includes to extract the parent
@@ -723,21 +731,14 @@ export class ClassMemberResolver {
         // Try to find parent class name in current file tokens first
         const content = document.getText();
         const docLines = content.split('\n');
-        const classTokens = TokenHelper.findClassStructures(tokens);
         let parentClassName: string | null = null;
 
-        for (const classToken of classTokens) {
-            const labelToken = tokens.find(t =>
-                t.type === TokenType.Label &&
-                t.line === classToken.line &&
-                t.value.toLowerCase() === className!.toLowerCase()
-            );
-            if (labelToken) {
-                const classDecLine = docLines[labelToken.line];
-                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
-                parentClassName = parentMatch ? parentMatch[1] : null;
-                break;
-            }
+        // #608: of several same-named local classes, the one this method belongs to
+        const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
+        if (labelToken) {
+            const classDecLine = docLines[labelToken.line];
+            const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
+            parentClassName = parentMatch ? parentMatch[1] : null;
         }
 
         // Fall back to scanning include files / classIndexer
