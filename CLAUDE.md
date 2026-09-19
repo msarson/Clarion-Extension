@@ -41,6 +41,23 @@ node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatu
 What still needs a human: PWEE-embeditor scenarios (live Clarion IDE), UI
 feel/rendering judgments, and VM-parity absolute timings.
 
+## Hover and F12 must agree: run the agreement sweep
+
+Hover and Go to Definition resolve a word through separate pipelines and drift
+apart (#609). Before and after any change to either, run
+
+```
+node scripts/health/hover-definition-agreement.js   # ~70s on ap1; --json=out.json to diff runs
+```
+
+It samples ~450 code positions from ap1 (deterministic, so two runs diff
+cleanly), asks the real server for both answers, and reports `mismatch`,
+`f12-only` and `hover-only` per reference shape. The fixture counterpart is
+`server/src/test/HoverDefinitionAgreement.test.ts`; both classify with
+`server/src/test/support/hoverDefinitionAgreement.ts`. A known disagreement is
+listed in the test's `KNOWN` table with its issue; remove the entry when the
+fix makes it agree.
+
 ## Working rules
 
 - **One branch per change — and delete it once it lands.** Never work on a
