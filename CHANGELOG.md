@@ -20,6 +20,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Go to Definition works on `Relate:Customer.Open()` and other colon-named objects.** Where the object's label contained a colon, as every generated procedure's file managers and list managers do, only the part after the last colon was looked up and nothing was found; hover already resolved these. [#612](https://github.com/msarson/Clarion-Extension/issues/612)
 - **Hover shows the fields of a QUEUE declared from a type in the program file.** For `FieldQ QUEUE(tqField)`, where the program file declares `tqField QUEUE,TYPE`, hovering `FieldQ.Desc` in a member module showed nothing after a pause of several seconds; Go to Definition already found it. [#613](https://github.com/msarson/Clarion-Extension/issues/613)
 - **Go to Definition on a `?Name` field equate goes to the control.** On a name such as `?LOC:Date:Prompt` it went nowhere, or to an unrelated equate that happened to be called `Prompt`, while hover showed the control; it now uses the same rule as hover, wherever the cursor sits in the name. [#614](https://github.com/msarson/Clarion-Extension/issues/614)
+- **Go to Definition finds a prefixed name used in a program's own code.** In a PROGRAM file's main code, outside any procedure, a name such as `MatchOption:NoCase` or `CUS:Name` resolved only when its declaration was in that same file, so an ITEMIZE or FILE from an included file was not found; hover already found it. [#615](https://github.com/msarson/Clarion-Extension/issues/615)
 
 ---
 

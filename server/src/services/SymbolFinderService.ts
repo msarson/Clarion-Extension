@@ -182,6 +182,8 @@ const FILE_MEMBER_DECLARATION_KEYWORDS = new Set(['KEY', 'INDEX']);
  */
 export class SymbolFinderService {
     private symbolProvider: ClarionDocumentSymbolProvider;
+    /** #615: hover's prefix resolver, for the INCLUDE-chain step of findPrefixedField (created on first use). */
+    private chainLocator?: import('./MemberLocatorService').MemberLocatorService;
     
     constructor(
         private tokenCache: TokenCache,
@@ -1179,6 +1181,18 @@ export class SymbolFinderService {
             }
         }
 
+        // #615: the INCLUDE chain - this file's, then the MEMBER parent's - through the resolver
+        // hover already uses, so `MatchOption:NoCase` from an INCLUDEd `ITEMIZE(),PRE(MatchOption)`
+        // resolves for F12 too. Before this, F12 fell through to the bare `NoCase` and found nothing.
+        // Loaded at call time: MemberLocatorService imports this module.
+        const { MemberLocatorService } = await import('./MemberLocatorService');
+        this.chainLocator ??= new MemberLocatorService();
+        const inChain = await this.chainLocator.findPrefixFieldTokenInChain(word.substring(0, colonIndex), fieldName, document);
+        if (inChain) {
+            const fromChain = this.findPrefixedFieldInTokens(prefixUpper, fieldName, inChain.tokens, inChain.doc.uri);
+            if (fromChain) return fromChain;
+        }
+
         return null;
     }
 
@@ -1910,10 +1924,18 @@ export class SymbolFinderService {
             const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
             if (siblingModuleResult) return siblingModuleResult;
 
+            // #615: PRE:Field / Label:Member, as the scoped path tries it after the same tiers. A
+            // PROGRAM's own code has no enclosing procedure, so this branch is where it lands -
+            // and without the step `MatchOption:NoCase` there resolved nothing.
+            if (word.indexOf(':') > 0) {
+                const prefixedResult = await this.findPrefixedField(word, tokens, document);
+                if (prefixedResult) return prefixedResult;
+            }
+
             // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
             const fieldResult = this.findStructureField(word, tokens, position.line, document);
             if (fieldResult) return fieldResult;
-            
+
             return null;
         }
         
