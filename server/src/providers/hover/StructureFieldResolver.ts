@@ -341,6 +341,17 @@ export class StructureFieldResolver {
         const result = await this.findFieldInTypeIncludes(typeName, fieldName, filePath, new Set());
         if (result) return result;
 
+        // #613: the MEMBER parent and its INCLUDE chain. A generated program declares its global
+        // TYPEs in the PROGRAM file, which the structure index leaves out of its data (#483), so
+        // `UvFieldQ.AltIDToolTip` on a `UvFieldQ QUEUE(tqRwField)` found nothing on hover.
+        const parent = await this.memberLocator.loadMemberParent(document);
+        if (parent) {
+            const fromParent = this.findFieldInTokens(typeName, fieldName, parent.tokens, parent.doc.uri);
+            if (fromParent) return fromParent;
+            const fromParentIncludes = await this.findFieldInTypeIncludes(typeName, fieldName, parent.filePath, new Set([filePath.toLowerCase()]));
+            if (fromParentIncludes) return fromParentIncludes;
+        }
+
         // Fallback: check equates.clw
         const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
         if (equatesPath) {

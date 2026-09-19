@@ -660,12 +660,7 @@ export class MemberLocatorService {
      * when a parent was resolved (already-cached or freshly loaded).
      */
     public async warmMemberParent(document: TextDocument): Promise<boolean> {
-        const tokens = this.tokenCache.getTokens(document);
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
-        if (!memberToken?.referencedFile) return false;
-
-        const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
+        const parentPath = await this.memberParentPath(document);
         if (!parentPath) return false;
 
         // Already tokenized (open in the editor, or warmed by another member sharing this
@@ -675,6 +670,27 @@ export class MemberLocatorService {
 
         await this.loadDocument(parentPath); // reads + tokenizes + caches
         return true;
+    }
+
+    /**
+     * #613: the MEMBER('...') parent of `document`, tokenized - or null for a PROGRAM file or an
+     * unresolvable parent. A generated program declares its global TYPEs (`tqRow QUEUE,TYPE`)
+     * there, and since #483 the structure index deliberately leaves a PROGRAM's data out, so a
+     * lookup that needs one has to read the parent itself.
+     */
+    public async loadMemberParent(document: TextDocument): Promise<{ doc: TextDocument; tokens: Token[]; filePath: string } | null> {
+        const parentPath = await this.memberParentPath(document);
+        if (!parentPath) return null;
+        const loaded = await this.loadDocument(parentPath);
+        return loaded ? { ...loaded, filePath: parentPath } : null;
+    }
+
+    private async memberParentPath(document: TextDocument): Promise<string | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
+        if (!memberToken?.referencedFile) return null;
+        return this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
     }
 
     // -------------------------------------------------------------------------

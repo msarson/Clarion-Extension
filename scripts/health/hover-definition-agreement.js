@@ -56,12 +56,27 @@ const STATEMENT_WORDS = new Set(('IF THEN ELSE ELSIF END LOOP CODE DATA RETURN O
     + 'SELF PARENT').split(' '));
 const IDENT = /[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*/g;
 
+// Hover says nothing inside an OMIT block by design, so a position there is not a disagreement.
+// The sampler asks the product's own detector which lines those are (#613).
+const { ClarionTokenizer } = require(path.join(REPO, 'out', 'server', 'src', 'ClarionTokenizer.js'));
+const { OmitCompileDetector } = require(path.join(REPO, 'out', 'server', 'src', 'utils', 'OmitCompileDetector.js'));
+const { TextDocument } = require(path.join(REPO, 'node_modules', 'vscode-languageserver-textdocument'));
+
+function omittedLines(text) {
+    const tokens = new ClarionTokenizer(text).tokenize();
+    const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, TextDocument.create('file:///sample.clw', 'clarion', 1, text));
+    return line => OmitCompileDetector.isLineOmittedWithBlocks(line, blocks);
+}
+
 /** Candidate positions in the code sections of one file, by slice. */
 function candidatesIn(file) {
-    const lines = fs.readFileSync(file, 'latin1').split(/\r?\n/);
+    const text = fs.readFileSync(file, 'latin1');
+    const lines = text.split(/\r?\n/);
+    const isOmitted = omittedLines(text);
     const bySlice = new Map(SLICES.map(s => [s, []]));
     let inCode = false;
     lines.forEach((raw, line) => {
+        if (isOmitted(line)) return;
         if (/^[A-Za-z_][\w:.]*\s+(PROCEDURE|FUNCTION)\b/i.test(raw)) { inCode = false; return; }
         if (/^[A-Za-z_][\w:]*\s+ROUTINE\b/i.test(raw)) { inCode = true; return; }
         if (/^\s+(CODE|DATA)\s*(!.*)?$/i.test(raw)) { inCode = /CODE/i.test(raw); return; }
@@ -161,7 +176,8 @@ function evenly(list, n) {
             key: `${rel(r.file)}:${r.line + 1}:${r.character}\t${r.word}`,
             value: `${r.verdict}\thover ${loc(r.hover)}\tF12 ${loc(r.def)}`,
         }));
-        const verdictOf = v => v === undefined ? '(not sampled)' : v.split('\t')[0];
+        // compareRows hands back values as written to disk (tabs flattened), so split on space.
+        const verdictOf = v => v === undefined ? '(not sampled)' : v.split(/\s/)[0];
         const previous = JSON.parse(fs.readFileSync(AGAINST, 'utf8')).results;
         printComparison(compareRows(asRows(previous), asRows(results), (b, a) =>
             verdictOf(b) === verdictOf(a) ? `${verdictOf(a)} (locations moved)` : `${verdictOf(b)} -> ${verdictOf(a)}`), 3);
