@@ -96,8 +96,6 @@ const CASES: Array<[string, number, string, number?]> = [
  */
 const KNOWN: Record<string, { issue: number; verdict: string }> = {
     'procedure parameter':      { issue: 617, verdict: 'hover-no-link' },
-    'SELF inherited property':  { issue: 616, verdict: 'f12-only' },
-    'PARENT method':            { issue: 616, verdict: 'f12-only' },
 };
 
 suite('Hover and F12 agree on the same word (#609)', () => {

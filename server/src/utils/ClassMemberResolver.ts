@@ -850,7 +850,9 @@ export class ClassMemberResolver {
         const classInfos = this.sdi.findFor(className, fromFile); // #571
         if (classInfos.length === 0) {
             logger.info(`Parent class ${className} not found in index`);
-            return null;
+            // #616: not indexed - a file outside the solution, or a class not saved yet - but it
+            // may be declared in the requesting document itself.
+            return fromFile ? this.findMemberInDocumentClass(className, memberName, paramCount, visited, fromFile) : null;
         }
 
         // Prefer a non-TYPE definition (TYPE classes are templates, not instances)
@@ -865,6 +867,35 @@ export class ClassMemberResolver {
         }
 
         return null;
+    }
+
+    /**
+     * #616: the parent-chain step for a class the index does not know - its body in the requesting
+     * document (live text), then on up its own parent. Without it, hover on `SELF.Size` or
+     * `PARENT.Work` found nothing when the parent class was declared only in the current file.
+     */
+    private findMemberInDocumentClass(
+        className: string,
+        memberName: string,
+        paramCount: number | undefined,
+        visited: Set<string>,
+        fromFile: string
+    ): MemberInfo | null {
+        const uri = fromFile.startsWith('file:') ? fromFile : pathToCanonicalUri(fromFile);
+        const text = this.tokenCache.getDocumentText(uri) ?? this.tokenCache.getDocumentTextByUriCaseInsensitive(uri);
+        if (text === null || text === undefined) return null;
+        const header = new RegExp(`^${className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+CLASS\\b(?:\\s*\\(\\s*([A-Za-z_][\\w:]*)\\s*\\))?`, 'im').exec(text);
+        if (!header) return null;
+
+        const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const found = scanClassBodyForMember(
+            filePath, className, memberName, paramCount, 'CLASS',
+            (line) => this.countParametersInDeclaration(line),
+            (candidates, pc) => this.selectBestOverload(candidates, pc),
+            text
+        );
+        if (found) return { ...found, file: uri };
+        return header[1] ? this.findMemberInParentChain(header[1], memberName, paramCount, visited, fromFile) : null;
     }
 
     /**
