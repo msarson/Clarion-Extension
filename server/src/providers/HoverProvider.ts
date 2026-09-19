@@ -948,12 +948,6 @@ export class HoverProvider {
         return this.variableResolver.findInIncludesAndEquates(word, tokens, document);
     }
 
-    /**
-     * Check if a word is a CLASS type and provide hover with definition info
-     * @param word The word to check
-     * @param document The document
-     * @returns Hover with class definition info, or null if not a class
-     */
     /** #606: the class card for a bare SELF or PARENT, in the shape of checkClassTypeHover's. */
     private buildSelfParentHover(keyword: 'SELF' | 'PARENT', site: ClassDeclarationSite): Hover {
         const typeLabel = site.isType ? 'CLASS, TYPE' : 'CLASS';
@@ -973,6 +967,12 @@ export class HoverProvider {
         };
     }
 
+    /**
+     * Check if a word is a CLASS type and provide hover with definition info
+     * @param word The word to check
+     * @param document The document
+     * @returns Hover with class definition info, or null if not a class
+     */
     private async checkClassTypeHover(word: string, document: TextDocument, skipIncludeCheck = false): Promise<Hover | null> {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {

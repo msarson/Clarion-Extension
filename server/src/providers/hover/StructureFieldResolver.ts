@@ -190,6 +190,19 @@ export class StructureFieldResolver {
                 logger.info(`Detected structure field access: ${structureName}.${word}`);
                 
                 const tokens = this.tokenCache.getTokens(document);
+                const callParamCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
+
+                // #611: a CLASS receiver's member is found the way F12 finds it - the receiver's
+                // own class, then its ancestors, respecting the call's argument count. The
+                // local-field lookup below matched the member name alone, on any class declared
+                // in the procedure: `Focus.Init(1,2,3)` showed the local ThisWindow's Init.
+                const receiverClass = await this.memberLocator.resolveReceiverClass(structureName, tokens, document, position.line);
+                if (receiverClass) {
+                    const classHover = await this.memberHoverInClass(receiverClass.className, receiverClass.isReference, fieldName,
+                        hasParentheses, callParamCount, tokens, document, position);
+                    if (classHover) return classHover;
+                }
+
                 const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
                 const currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line); // 🚀 PERFORMANCE: O(log n) vs O(n)
                 if (currentScope) {
@@ -221,34 +234,10 @@ export class StructureFieldResolver {
                 if (varTypeInfo) {
                     const { typeName: varType, isClass, isReference } = varTypeInfo;
                     logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}, isReference=${isReference}), looking up member "${fieldName}"`);
-                    let paramCount: number | undefined;
-                    if (hasParentheses) {
-                        paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                    }
-                    // Try interface lookup first for reference variables (&InterfaceName)
-                    if (isReference) {
-                        const ifaceInfo = await this.memberLocator.findMemberInInterface(varType, fieldName, document, paramCount);
-                        if (ifaceInfo) {
-                            logger.info(`✅ Found interface method "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount, position);
-                        }
-                    }
-                    if (isClass) {
-                        // #125 — arg-classify overlay for typed-var dot-access call hovers.
-                        // Pick the matching overload before falling through to paramCount-only.
-                        if (hasParentheses) {
-                            const picked = await this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
-                            if (picked) {
-                                logger.info(`✅ Arg-classify resolved typed-var hover "${fieldName}" in "${varType}" to line ${picked.line}`);
-                                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
-                            }
-                        }
-                        // CLASS member resolver (methods, properties)
-                        const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
-                        if (memberInfo) {
-                            logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);
-                        }
+                    if (isClass || isReference) {
+                        const classHover = await this.memberHoverInClass(varType, isReference, fieldName,
+                            hasParentheses && isClass, callParamCount, tokens, document, position, isClass);
+                        if (classHover) return classHover;
                     }
                     // QUEUE/GROUP/FILE structure field (type defined in INCLUDE files)
                     const fieldHover = await this.resolveStructureTypeFieldHover(varType, fieldName, document);
@@ -259,6 +248,43 @@ export class StructureFieldResolver {
         
         return null;
     }
+    /**
+     * The member `fieldName` of class (or interface) `className`: an interface method first when
+     * the receiver is a reference, then the overload the call's argument types pick (#125), then
+     * findMemberInClass - which respects the argument count up the parent chain (#611).
+     */
+    private async memberHoverInClass(
+        className: string,
+        isReference: boolean,
+        fieldName: string,
+        classifyArgs: boolean,
+        paramCount: number | undefined,
+        tokens: Token[],
+        document: TextDocument,
+        position: Position,
+        searchClass = true
+    ): Promise<Hover | null> {
+        if (isReference) {
+            const ifaceInfo = await this.memberLocator.findMemberInInterface(className, fieldName, document, paramCount);
+            if (ifaceInfo) {
+                logger.info(`✅ Found interface method "${fieldName}" in "${className}"`);
+                return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount, position);
+            }
+        }
+        if (!searchClass) return null;
+        if (classifyArgs) {
+            const picked = await this.tryArgClassifyResolve(tokens, document, className, fieldName, position.line);
+            if (picked) {
+                logger.info(`✅ Arg-classify resolved hover "${fieldName}" in "${className}" to line ${picked.line}`);
+                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
+            }
+        }
+        const memberInfo = await this.memberLocator.findMemberInClass(className, fieldName, document, paramCount);
+        if (!memberInfo) return null;
+        logger.info(`✅ Found member "${fieldName}" in "${className}"`);
+        return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);
+    }
+
     /**
      * #125 — when a typed-variable dot-access hover targets an overloaded method,
      * classify the call's args and pick the matching overload so the hover shows

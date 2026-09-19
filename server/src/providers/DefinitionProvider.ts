@@ -320,6 +320,27 @@ export class DefinitionProvider {
                         const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
+
+                            // #611: a CLASS receiver's member - the receiver's own class first (a
+                            // local `ThisWindow CLASS(WinMgr)` is ThisWindow, not WinMgr, so its
+                            // overrides count), then its ancestors, respecting the argument count.
+                            // Hover takes the same route (StructureFieldResolver.memberHoverInClass).
+                            const receiverClass = await this.memberLocator.resolveReceiverClass(structureName, tokens, document, position.line);
+                            if (receiverClass) {
+                                if (hasParentheses) {
+                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, receiverClass.className, methodName, position.line);
+                                    if (argResolved) return argResolved;
+                                }
+                                const paramCount = hasParentheses
+                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    : undefined;
+                                const memberInfo = await this.memberLocator.findMemberInClass(receiverClass.className, methodName, document, paramCount);
+                                if (memberInfo) {
+                                    logger.info(`✅ Found "${methodName}" in receiver class "${receiverClass.className}" at ${memberInfo.file}:${memberInfo.line}`);
+                                    return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+                                }
+                            }
+
                             // Pass position.line so resolveVariableType can also check procedure
                             // parameters (e.g. `*WindowInfo Info`). Issue #215.
                             const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);

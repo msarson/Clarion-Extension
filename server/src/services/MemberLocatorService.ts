@@ -19,7 +19,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, ClassMemberResolver } from '../utils/ClassMemberResolver';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
@@ -191,6 +191,31 @@ export class MemberLocatorService {
     }
 
     /**
+     * #611: the CLASS whose members `receiver.Member` names, for hover and F12 alike - or null
+     * when the receiver is not a CLASS (a GROUP/QUEUE/FILE receiver keeps its field paths).
+     *
+     * A receiver that is itself a CLASS declaration (`ThisWindow CLASS(WinMgr)`) is that class,
+     * so its own overrides are found before the parent's; resolveVariableType answers the parent
+     * there, which F12 used and so skipped every local override. Otherwise the receiver is a
+     * variable, and its declared type counts only if that type is a CLASS.
+     */
+    async resolveReceiverClass(
+        receiver: string,
+        tokens: Token[],
+        document: TextDocument,
+        atLine: number
+    ): Promise<{ className: string; isReference: boolean } | null> {
+        const ownLabel = ClassMemberResolver.nearestClassLabel(tokens, receiver, atLine);
+        if (ownLabel) return { className: ownLabel.value, isReference: false };
+
+        const typeInfo = await this.resolveVariableType(receiver, tokens, document, atLine);
+        if (!typeInfo?.isClass) return null;
+        const isClass = ClassMemberResolver.nearestClassLabel(tokens, typeInfo.typeName, atLine) !== null
+            || (await this.resolveClassDeclarationInfo(typeInfo.typeName, document))?.structureType === 'CLASS';
+        return isClass ? { className: typeInfo.typeName, isReference: typeInfo.isReference } : null;
+    }
+
+    /**
      * Resolves the type of a named variable.
      * Search order: current file → MEMBER parent → INCLUDE chain → procedure parameters.
      * Returns { typeName, isClass, isReference } or null if not found/unresolvable.
@@ -338,6 +363,40 @@ export class MemberLocatorService {
      * Search order: current document → INCLUDE chain → ClassDefinitionIndexer → parent chain.
      */
     async findMemberInClass(
+        className: string,
+        memberName: string,
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<MemberInfo | null> {
+        const hit = await this.findMemberInClassTiers(className, memberName, document, paramCount);
+        return this.preferFittingInheritedOverload(hit, memberName, document, paramCount, new Set([className.toLowerCase()]));
+    }
+
+    /**
+     * #611: a class that declares the name but no overload the call fits does not hide an
+     * inherited one that does - `ThisWindow.Run()` on a ThisWindow overriding only
+     * Run(USHORT,BYTE) is the parent's Run(). Climb from the class the hit came from and take
+     * the first fitting overload; when none fits anywhere, keep the closest pick as before.
+     */
+    private async preferFittingInheritedOverload(
+        hit: MemberInfo | null,
+        memberName: string,
+        document: TextDocument,
+        paramCount: number | undefined,
+        visited: Set<string>
+    ): Promise<MemberInfo | null> {
+        if (!hit?.arityMismatch) return hit;
+        const decl = await this.resolveClassDeclarationInfo(hit.className, document);
+        const parent = decl?.parentName;
+        if (!parent || visited.has(parent.toLowerCase())) return hit;
+        visited.add(parent.toLowerCase());
+        const up = await this.findMemberInClassTiers(parent, memberName, document, paramCount);
+        if (!up) return hit;
+        const fitting = await this.preferFittingInheritedOverload(up, memberName, document, paramCount, visited);
+        return fitting && !fitting.arityMismatch ? fitting : hit;
+    }
+
+    private async findMemberInClassTiers(
         className: string,
         memberName: string,
         document: TextDocument,
@@ -1826,8 +1885,14 @@ export class MemberLocatorService {
         const docLines = doc.getText().split(/\r?\n/);
         const candidates: OverloadCandidate[] = [];
 
+        let prevLine = -1;
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
+            // #607: only a line's first token names a member - a later one is a type,
+            // an attribute or a parameter name inside a method prototype.
+            const firstOnLine = token.line !== prevLine;
+            prevLine = token.line;
+            if (!firstOnLine) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
             if (isInsideNested(token.line)) continue;
@@ -1847,7 +1912,8 @@ export class MemberLocatorService {
             const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
             // The structure token above was matched BY structureType, so it is the
             // kind actually found here, not an assumption.
-            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType };
+            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType,
+                arityMismatch: !overloadAcceptsArgs(bestMatch, paramCount) };
         }
         return null;
     }

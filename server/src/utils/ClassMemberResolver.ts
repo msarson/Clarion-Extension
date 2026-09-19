@@ -28,7 +28,9 @@ logger.setLevel("error");
  */
 export type MemberOwnerKind = 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
 
-export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean; structureType?: MemberOwnerKind };
+export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean; structureType?: MemberOwnerKind;
+    /** #611: no overload here takes the call's argument count - the pick was only the closest. */
+    arityMismatch?: boolean };
 
 /** Access level for a class member. */
 export type MemberAccess = 'public' | 'protected' | 'private';
@@ -212,7 +214,8 @@ export function scanClassBodyForMember(
             const bestMatch = selectBestOverload(candidates, paramCount);
             if (bestMatch) {
                 const fileUri = pathToCanonicalUri(filePath); // #251
-                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType: ownerKind };
+                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType: ownerKind,
+                    arityMismatch: !overloadAcceptsArgs(bestMatch, paramCount) };
             }
         }
     } catch (error) {
@@ -227,6 +230,16 @@ export type OverloadCandidate = { type: string; line: number; paramCount: number
  * Picks the best overload candidate given the call-site parameter count.
  * Exported so MemberLocatorService can share the same selection logic.
  */
+/**
+ * #611: whether a call with `paramCount` arguments can bind to this overload - an exact count,
+ * or one that leaves only defaulted/omittable parameters out. Undefined (no call) always fits.
+ */
+export function overloadAcceptsArgs(c: OverloadCandidate, paramCount: number | undefined): boolean {
+    if (paramCount === undefined || c.paramCount === paramCount) return true;
+    const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
+    return paramCount >= c.paramCount - defaults && paramCount <= c.paramCount;
+}
+
 export function selectBestMemberOverload(
     candidates: OverloadCandidate[],
     paramCount: number | undefined
