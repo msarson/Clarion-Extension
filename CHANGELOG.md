@@ -22,6 +22,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Go to Definition on a `?Name` field equate goes to the control.** On a name such as `?LOC:Date:Prompt` it went nowhere, or to an unrelated equate that happened to be called `Prompt`, while hover showed the control; it now uses the same rule as hover, wherever the cursor sits in the name. [#614](https://github.com/msarson/Clarion-Extension/issues/614)
 - **Go to Definition finds a prefixed name used in a program's own code.** In a PROGRAM file's main code, outside any procedure, a name such as `MatchOption:NoCase` or `CUS:Name` resolved only when its declaration was in that same file, so an ITEMIZE or FILE from an included file was not found; hover already found it. [#615](https://github.com/msarson/Clarion-Extension/issues/615)
 - **Hover finds `SELF` and `PARENT` members inherited from a class in the same file.** When the parent class was declared only in the file being edited, as in a file outside the solution or a class not yet saved, hover on an inherited member showed nothing while Go to Definition found it. [#616](https://github.com/msarson/Clarion-Extension/issues/616)
+- **A parameter's hover links to the procedure that declares it.** The card named the line as plain text, the one declaration hover without a link. [#617](https://github.com/msarson/Clarion-Extension/issues/617)
 
 ---
 

@@ -95,7 +95,6 @@ const CASES: Array<[string, number, string, number?]> = [
  * verdict, so a fix that makes the case agree fails here with a reminder to drop the entry.
  */
 const KNOWN: Record<string, { issue: number; verdict: string }> = {
-    'procedure parameter':      { issue: 617, verdict: 'hover-no-link' },
 };
 
 suite('Hover and F12 agree on the same word (#609)', () => {

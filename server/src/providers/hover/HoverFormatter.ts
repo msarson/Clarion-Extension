@@ -98,13 +98,15 @@ export class HoverFormatter {
     /**
      * Constructs hover for a parameter
      */
-    formatParameter(name: string, info: ParameterInfo, scope: Token): Hover {
+    formatParameter(name: string, info: ParameterInfo, scope: Token, documentUri?: string): Hover {
+        // #617: the declaring PROCEDURE line as a link, like every other declaration card.
+        const where = documentUri ? this.locationLink(documentUri, info.line) : `line ${info.line + 1}`;
         const markdown = [
             `**Parameter:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `${scope.value}, line ${info.line + 1}`
+            `${scope.value}, ${where}`
         ].join('\n');
 
         return {

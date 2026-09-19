@@ -50,7 +50,7 @@ export class VariableHoverResolver {
                 type: symbolInfo.type,
                 line: symbolInfo.location.line
             };
-            return this.formatter.formatParameter(word, parameterInfo, currentScope);
+            return this.formatter.formatParameter(word, parameterInfo, currentScope, symbolInfo.location.uri ?? document.uri);
         }
         return null;
     }
