@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.6] - Unreleased
 
+#### Navigation and hover
+
+- **A FILE with a key or field labelled `Key` or `Index` no longer floods the outline and workspace symbol search.** The label was taken for the KEY or INDEX keyword, so its outline entry swallowed the rest of the file; one workspace symbol search on a generated application returned 158 names over 100,000 characters and a 9 MB reply. A VIEW's `PROJECT(Project)` did the same. Reported by Bill Atchison. [#604](https://github.com/msarson/Clarion-Extension/issues/604)
+
 ---
 
 ### [1.0.5] - 2026-09-18

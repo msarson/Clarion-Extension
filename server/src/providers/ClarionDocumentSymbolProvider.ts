@@ -179,6 +179,15 @@ export class ClarionDocumentSymbolProvider {
         return kindNames[kind] || `Unknown(${kind})`;
     }
     
+    /**
+     * True when tokens[index] is a KEY/INDEX/PROJECT/JOIN-style keyword opening its
+     * parameter list - not a label spelled like one (`Key  KEY(...)`, a RECORD field
+     * `Index  LONG`) and not a reference inside another list (`PROJECT(Project)`) (#604).
+     */
+    private opensParenList(tokens: Token[], index: number): boolean {
+        return tokens[index].type !== TokenType.Label && tokens[index + 1]?.value === "(";
+    }
+
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
@@ -187,14 +196,17 @@ export class ClarionDocumentSymbolProvider {
     /**
      * Extract content from parentheses starting at the given token index.
      * Returns the content and the index after the closing parenthesis.
+     * `lastLine` bounds the scan to the owning structure, so a start index that is off
+     * by one cannot run on to the end of the file (#604).
      */
-    private extractParenContent(tokens: Token[], startIndex: number): { content: string, nextIndex: number } {
+    private extractParenContent(tokens: Token[], startIndex: number, lastLine?: number): { content: string, nextIndex: number } {
         const parenContent: string[] = [];
         let j = startIndex;
         let parenDepth = 1;
 
         while (j < tokens.length && parenDepth > 0) {
             const t = tokens[j];
+            if (lastLine !== undefined && t.line > lastLine) break;
             if (t.value === "(") parenDepth++;
             else if (t.value === ")") parenDepth--;
 
@@ -845,7 +857,8 @@ export class ClarionDocumentSymbolProvider {
         const parenContent = [];
 
         let j = index + 2;
-        let parenDepth = 1;
+        // Without its own "(" there is no list to read - the scan would run to EOF (#604)
+        let parenDepth = parenStart?.value === "(" ? 1 : 0;
 
         while (j < tokens.length && parenDepth > 0) {
             const t = tokens[j];
@@ -1167,9 +1180,14 @@ export class ClarionDocumentSymbolProvider {
                 const childToken = tokens[j];
                 const childValue = childToken.value.toUpperCase();
                 
+                // A label or a component spelled KEY/INDEX is not the keyword (#604)
+                if ((childValue === "KEY" || childValue === "INDEX") && !this.opensParenList(tokens, j)) {
+                    continue;
+                }
+
                 // Add KEY as child
                 if (childValue === "KEY") {
-                    const keyContent = this.extractParenContent(tokens, j + 2);
+                    const keyContent = this.extractParenContent(tokens, j + 2, finishesAt);
                     const keySymbol = this.createSymbol(
                         `KEY(${keyContent.content})`,
                         "",
@@ -1182,7 +1200,7 @@ export class ClarionDocumentSymbolProvider {
                 }
                 // Add INDEX as child
                 else if (childValue === "INDEX") {
-                    const indexContent = this.extractParenContent(tokens, j + 2);
+                    const indexContent = this.extractParenContent(tokens, j + 2, finishesAt);
                     const indexSymbol = this.createSymbol(
                         `INDEX(${indexContent.content})`,
                         "",
@@ -1215,9 +1233,14 @@ export class ClarionDocumentSymbolProvider {
                 const childToken = tokens[j];
                 const childValue = childToken.value.toUpperCase();
                 
+                // A field reference spelled PROJECT/JOIN is not the keyword (#604)
+                if ((childValue === "PROJECT" || childValue === "JOIN") && !this.opensParenList(tokens, j)) {
+                    continue;
+                }
+
                 // Handle PROJECT
                 if (childValue === "PROJECT") {
-                    const projectContent = this.extractParenContent(tokens, j + 2);
+                    const projectContent = this.extractParenContent(tokens, j + 2, finishesAt);
                     const projectSymbol = this.createSymbol(
                         `PROJECT(${projectContent.content})`,
                         "",
@@ -1236,7 +1259,7 @@ export class ClarionDocumentSymbolProvider {
                 }
                 // Handle JOIN
                 else if (childValue === "JOIN") {
-                    const joinContent = this.extractParenContent(tokens, j + 2);
+                    const joinContent = this.extractParenContent(tokens, j + 2, finishesAt);
                     const joinSymbol = this.createSymbol(
                         `JOIN(${joinContent.content})`,
                         "",
