@@ -28,6 +28,7 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
+import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -972,11 +973,15 @@ export class MemberLocatorService {
         );
         if (fieldMatch) return fieldMatch;
 
-        return tokens.find(t =>
+        const prefixed = tokens.find(t =>
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
             (t.value.toUpperCase() === fieldUpper || t.label?.toUpperCase() === fieldUpper)
         );
+        if (prefixed) return prefixed;
+
+        // #610: no PRE() matches - the colon form of Field Qualification, StructureLabel:Member
+        return findLabelQualifiedMember(tokens, prefix, fieldName)?.member;
     }
 
     private async searchIncludesForPrefixField(

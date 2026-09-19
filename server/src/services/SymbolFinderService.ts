@@ -35,6 +35,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from './IncludeIndexDiskCache';
+import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
 const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
@@ -1189,7 +1190,7 @@ export class SymbolFinderService {
             t.type === TokenType.Structure &&
             t.structurePrefix?.toUpperCase() === prefixUpper
         );
-        if (!structureToken) return null;
+        if (!structureToken) return this.findLabelQualifiedFieldInTokens(prefixUpper, fieldName, tokens, uri);
 
         // Find child token within the structure's range
         const childToken = tokens.find(t => {
@@ -1229,6 +1230,28 @@ export class SymbolFinderService {
             location: { uri, line: targetToken.line, character: targetToken.start },
             declaration: `${structureToken.label ?? structureToken.value} PRE(${prefixUpper})`,
             originalWord: `${prefixUpper}:${fieldName}`,
+            searchWord: resolvedName
+        };
+    }
+
+    /**
+     * #610: `StructureLabel:Member` - the colon form of Field Qualification, for a qualifier
+     * that is no structure's PRE(). Without it the caller fell back to the bare member name
+     * and `Customer:Record` went to whichever FILE's RECORD came first.
+     */
+    private findLabelQualifiedFieldInTokens(labelUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+        const hit = findLabelQualifiedMember(tokens, labelUpper, fieldName);
+        if (!hit) return null;
+        const { structure, member } = hit;
+        const resolvedName = member.type === TokenType.Structure ? (member.label ?? fieldName) : member.value;
+        logger.info(`✅ Found Label:Field "${labelUpper}:${fieldName}" — structure "${structure.label}" at line ${member.line} in ${uri}`);
+        return {
+            token: { type: TokenType.Label, value: resolvedName, line: member.line, start: member.start, maxLabelLength: 0 },
+            type: 'field',
+            scope: { token: structure, type: 'field' },
+            location: { uri, line: member.line, character: member.start },
+            declaration: `${structure.label} ${structure.value}`,
+            originalWord: `${structure.label}:${resolvedName}`,
             searchWord: resolvedName
         };
     }
