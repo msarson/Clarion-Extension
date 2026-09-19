@@ -36,6 +36,7 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { SelfParentClassResolver, ClassDeclarationSite } from '../utils/SelfParentClassResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import * as fs from 'fs';
@@ -84,6 +85,7 @@ export class HoverProvider {
     private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
     private symbolFinder: SymbolFinderService;
+    private selfParentResolver: SelfParentClassResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -114,6 +116,7 @@ export class HoverProvider {
         );
         this.includeVerifier = IncludeVerifier.getInstance();
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
+        this.selfParentResolver = new SelfParentClassResolver(this.symbolFinder);
     }
 
     /**
@@ -250,6 +253,14 @@ export class HoverProvider {
                     const ifaceToken = await this.findInterfaceToken(iface, document, tokens);
                     if (ifaceToken) return this.buildInterfaceHover(ifaceToken, iface, document);
                 }
+            }
+
+            // #606: a bare SELF or PARENT is the class it stands for; outside a method it
+            // keeps the keyword card the router gives it.
+            const selfOrParent = SelfParentClassResolver.keywordAt(line, position.character);
+            if (selfOrParent) {
+                const site = await this.selfParentResolver.resolve(selfOrParent, document, position);
+                if (site) return this.buildSelfParentHover(selfOrParent, site);
             }
 
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
@@ -943,6 +954,25 @@ export class HoverProvider {
      * @param document The document
      * @returns Hover with class definition info, or null if not a class
      */
+    /** #606: the class card for a bare SELF or PARENT, in the shape of checkClassTypeHover's. */
+    private buildSelfParentHover(keyword: 'SELF' | 'PARENT', site: ClassDeclarationSite): Hover {
+        const typeLabel = site.isType ? 'CLASS, TYPE' : 'CLASS';
+        const role = keyword === 'SELF' ? 'the object this method runs on' : 'the parent class';
+        const parentLine = site.parentName ? `\n⬆️ Extends: \`${site.parentName}\`` : '';
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**${keyword}** → **${site.className}** — ${typeLabel}`,
+                    ``,
+                    `_${role}_`,
+                    ``,
+                    `📦 Defined in ${this.formatter.locationLink(site.uri, site.line)}${parentLine}`,
+                ].join('\n'),
+            },
+        };
+    }
+
     private async checkClassTypeHover(word: string, document: TextDocument, skipIncludeCheck = false): Promise<Hover | null> {
         let timeoutId: NodeJS.Timeout | undefined;
         const timeout = new Promise<null>(resolve => {

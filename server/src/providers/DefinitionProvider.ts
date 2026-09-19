@@ -9,6 +9,7 @@ import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { SelfParentClassResolver } from '../utils/SelfParentClassResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
@@ -54,11 +55,13 @@ export class DefinitionProvider {
     private memberLocator = new MemberLocatorService();
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
+    private selfParentResolver: SelfParentClassResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
+        this.selfParentResolver = new SelfParentClassResolver(this.symbolFinder);
     }
 
     /**
@@ -135,6 +138,14 @@ export class DefinitionProvider {
                 start: { line: position.line, character: 0 },
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
+
+            // #606: a bare SELF or PARENT is the class it stands for. Answer here, even with
+            // nothing: the later paths would word-search and land on any symbol spelled so.
+            const selfOrParent = SelfParentClassResolver.keywordAt(line, position.character);
+            if (selfOrParent) {
+                const site = await this.selfParentResolver.resolve(selfOrParent, document, position);
+                return site ? Location.create(site.uri, Range.create(site.line, 0, site.line, 0)) : null;
+            }
 
             // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
             // GROUP(Type), INTERFACE(Type), or LIKE(Type) — skip all slow symbol resolution
