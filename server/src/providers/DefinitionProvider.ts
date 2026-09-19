@@ -10,6 +10,7 @@ import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { SelfParentClassResolver } from '../utils/SelfParentClassResolver';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
@@ -121,6 +122,19 @@ export class DefinitionProvider {
             // routes anywhere useful).
             if (TokenHelper.isPositionInString(tokens, position.line, position.character)) {
                 return null;
+            }
+
+            // #614: a `?Name` field equate is the control that declares it, resolved by the rule
+            // hover uses (utils/FieldEquateResolver). Terminal, like hover: the word ladder below
+            // drops the `?`, strips the name to its last segment, and `?LOC:X:Prompt` went to an
+            // unrelated `Prompt EQUATE` in a library include.
+            const feqToken = TokenHelper.getFieldEquateTokenAt(tokens, position.line, position.character);
+            if (feqToken) {
+                const target = resolveFieldEquate(this.tokenCache.getStructure(document), feqToken.value, position.line);
+                if (!target) return null;
+                const controls = target.kind === 'control' ? [target.control] : target.controls.map(c => c.control);
+                const at = (c: Token) => Location.create(document.uri, Range.create(c.line, c.start, c.line, c.start + c.value.length));
+                return controls.length === 1 ? at(controls[0]) : controls.map(at);
             }
 
             // Get the word at the current position

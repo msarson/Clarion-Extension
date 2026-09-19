@@ -37,8 +37,8 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { SelfParentClassResolver, ClassDeclarationSite } from '../utils/SelfParentClassResolver';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
-import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -1110,27 +1110,13 @@ export class HoverProvider {
     private buildFieldEquateHover(feqToken: Token, document: TextDocument, position: Position): Hover | null {
         const structure = this.tokenCache.getStructure(document);
 
-        // 1. The usual case: a window declared in the enclosing procedure. The same
-        //    `?Name` — `?Cancel` above all — recurs across unrelated windows, so the
-        //    procedure's own window is the only reading that is certain.
-        for (const proc of this.enclosingProcedures(structure, position.line)) {
-            for (const win of structure.getContainerStructuresInProcedure(proc)) {
-                const hit = structure.findControl(feqToken.value, win);
-                if (hit) {
-                    return this.renderFieldEquateCard(feqToken, hit, win, document, structure);
-                }
-            }
+        // #614: the same resolution Go to Definition uses (utils/FieldEquateResolver).
+        const target = resolveFieldEquate(structure, feqToken.value, position.line);
+        if (target?.kind === 'control') {
+            return this.renderFieldEquateCard(feqToken, target.control, target.container, document, structure);
         }
-
-        // 2. Not the enclosing procedure's — but a window can be declared in a class
-        //    or in another source entirely, so absence here is not absence. A
-        //    declaration found elsewhere in THIS file is offered as a candidate and
-        //    labelled with its owner, never as the current procedure's control.
-        const declarations = structure.findControlDeclarations(feqToken.value);
-        if (declarations.length === 1) {
-            return this.renderFieldEquateCard(feqToken, declarations[0].control, null, document, structure);
-        }
-        if (declarations.length > 1) {
+        if (target?.kind === 'candidates') {
+            const declarations = target.controls;
             // The same name across several windows is ordinary Clarion. Listing the
             // candidates is the honest answer; picking one would be a coin toss.
             const lines: string[] = [
@@ -1154,39 +1140,6 @@ export class HoverProvider {
         // 3. Declared in another source, or not at all. Either way this file cannot
         //    say which — and no card beats a confident wrong one.
         return null;
-    }
-
-    /**
-     * Procedure/method tokens whose windows a `?Name` on `line` could refer to,
-     * innermost first.
-     *
-     * The scope chain matters because of the ABC shape: a generated procedure holds
-     * its WINDOW in local data and its event handling in the methods of a locally
-     * declared `WindowManager` subclass. A `?Name` inside one of those methods is
-     * outside the method's own line range, so the method alone never resolves it —
-     * `ScopeResolver` links the method to the procedure whose local data declared
-     * its CLASS, and that is the procedure holding the window.
-     */
-    private enclosingProcedures(structure: ReturnType<TokenCache['getStructure']>, line: number): Token[] {
-        const out: Token[] = [];
-        const seen = new Set<Token>();
-        const push = (t: Token | null | undefined) => {
-            if (t && !seen.has(t)) { seen.add(t); out.push(t); }
-        };
-
-        let node: ScopeNode | null;
-        try {
-            node = structure.getScopeResolver().resolveScopeAt(line);
-        } catch {
-            return out;
-        }
-        for (let n: ScopeNode | null = node; n; n = n.parent) {
-            if (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method) {
-                push(n.token);
-            }
-            push(n.declaringProcedure?.token);
-        }
-        return out;
     }
 
     /**
