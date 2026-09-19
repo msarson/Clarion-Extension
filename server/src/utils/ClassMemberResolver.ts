@@ -331,12 +331,14 @@ export class ClassMemberResolver {
         const classTokens = TokenHelper.findClassStructures(tokens);
         
         for (const classToken of classTokens) {
+            // #607: the CLASS's own label - not the parent named in `Child CLASS(Base)`,
+            // which would read a derived class's body as this class's.
             const labelToken = tokens.find(t =>
-                (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+                t.type === TokenType.Label &&
                 t.line === classToken.line &&
                 t.value.toLowerCase() === className!.toLowerCase()
             );
-            
+
             if (labelToken) {
                 logger.info(`✅ Found class ${className} at line ${labelToken.line}`);
                 
@@ -349,17 +351,29 @@ export class ClassMemberResolver {
                 
                 // Search for member in this class by iterating through tokens
                 // This is O(n) instead of O(n²) with repeated filter calls
+                let prevLine = -1;
                 for (const token of tokens) {
                     // Only process tokens after the class start
                     if (token.line <= labelToken.line) continue;
-                    
+
+                    // #607: the CLASS's own END bounds the body. A generated local class
+                    // closes with an indented END, so a column-0 END alone let the scan
+                    // read on through every later procedure in the file.
+                    if (classToken.finishesAt !== undefined && token.line >= classToken.finishesAt) break;
+
                     // Stop at END token at column 0 (closes the CLASS body)
                     // END is tokenized as EndStatement (not Keyword)
-                    if ((token.type === TokenType.EndStatement || 
-                         (token.type === TokenType.Keyword && token.value.toUpperCase() === 'END')) && 
+                    if ((token.type === TokenType.EndStatement ||
+                         (token.type === TokenType.Keyword && token.value.toUpperCase() === 'END')) &&
                         token.start === 0) {
                         break;
                     }
+
+                    // #607: only a line's first token is a member's label - a later one is
+                    // a type, an attribute or a parameter name inside a method prototype.
+                    const firstOnLine = token.line !== prevLine;
+                    prevLine = token.line;
+                    if (!firstOnLine) continue;
                     
                     // Debug: Log all member-like tokens in the class for troubleshooting
                     // Class members are tokenized as Variable (properties) or Label (col-0 identifiers)
