@@ -317,7 +317,9 @@ export class DefinitionProvider {
                             }
                         }
 
-                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        // #612: a receiver label may carry colons (`Relate:Cust`,
+                        // `ThisListManager:Browse:1`); `\w+` kept only the last segment.
+                        const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
 
