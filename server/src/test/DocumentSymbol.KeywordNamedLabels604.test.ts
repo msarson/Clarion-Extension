@@ -71,13 +71,9 @@ suite('Structure view: labels and references spelled like KEY/INDEX/PROJECT/JOIN
     test('a KEY labelled Key and an INDEX labelled Index keep their own components', () => {
         const fileKids = childrenOf(symbols(), 'FILE (RSNTRNS)');
         const onLine = (line: number) => fileKids.filter(s => s.range.start.line === line).map(s => s.name);
-        assert.ok(onLine(5).includes('KEY(RSNP:Tx_No,RSNP:SeqNum)'), `line 5: ${JSON.stringify(onLine(5))}`);
-        assert.ok(onLine(6).includes('INDEX(RSNP:SeqNum)'), `line 6: ${JSON.stringify(onLine(6))}`);
-        // The label must not add a second entry of its own that swallows the rest of the file.
-        for (const line of [5, 6]) {
-            const overlong = onLine(line).filter(n => n.length > LINES[line].length);
-            assert.deepStrictEqual(overlong.map(n => `${n.slice(0, 60)}…(${n.length})`), [], `line ${line}`);
-        }
+        // Exactly one entry each: the label must not add a second one that swallows the file.
+        assert.deepStrictEqual(onLine(5), ['Key KEY(RSNP:Tx_No,RSNP:SeqNum)']);
+        assert.deepStrictEqual(onLine(6), ['Index INDEX(RSNP:SeqNum)']);
     });
 
     test('RECORD fields labelled Key and Index are not KEY/INDEX entries of the FILE', () => {

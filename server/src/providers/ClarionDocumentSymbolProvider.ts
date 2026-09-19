@@ -188,6 +188,21 @@ export class ClarionDocumentSymbolProvider {
         return tokens[index].type !== TokenType.Label && tokens[index + 1]?.value === "(";
     }
 
+    /**
+     * The attribute text that follows a declaration's closing paren on the same line,
+     * e.g. `NAME('x'),NOCASE,PRIMARY` - without the leading comma or a trailing comment.
+     */
+    private collectLineAttributes(tokens: Token[], startIndex: number): string {
+        const line = tokens[startIndex - 1]?.line;
+        const parts: string[] = [];
+        for (let j = startIndex; j < tokens.length && tokens[j].line === line; j++) {
+            const t = tokens[j];
+            if (t.type === TokenType.Comment || t.value === "|") break;
+            parts.push(t.value);
+        }
+        return parts.join("").replace(/^,/, "");
+    }
+
     public extractStringContents(rawString: string): string {
         const match = rawString.match(/'([^']+)'/);
         return match ? match[1] : rawString;
@@ -489,7 +504,8 @@ export class ClarionDocumentSymbolProvider {
                 continue;
             }
             if (type === TokenType.Keyword && value.toUpperCase() === "KEY") {
-                this.handleKeyToken(tokens, i, symbols, currentProcedure, currentStructure);
+                // A FILE's keys are listed by the FILE look-ahead; a second entry here
+                // duplicated every one of them (#605). KEY anywhere else is a type name.
                 continue;
             }
 
@@ -1185,31 +1201,21 @@ export class ClarionDocumentSymbolProvider {
                     continue;
                 }
 
-                // Add KEY as child
-                if (childValue === "KEY") {
-                    const keyContent = this.extractParenContent(tokens, j + 2, finishesAt);
+                // KEY and INDEX: the only source of key entries (#605), named like a field
+                // entry - `label KEY(components)` - with the attributes as the detail
+                if (childValue === "KEY" || childValue === "INDEX") {
+                    const components = this.extractParenContent(tokens, j + 2, finishesAt);
+                    const prev = tokens[j - 1];
+                    const keyLabel = prev?.type === TokenType.Label && prev.line === childToken.line ? `${prev.value} ` : "";
                     const keySymbol = this.createSymbol(
-                        `KEY(${keyContent.content})`,
-                        "",
-                        SymbolKind.Key,
+                        `${keyLabel}${childValue}(${components.content})`,
+                        this.collectLineAttributes(tokens, components.nextIndex),
+                        childValue === "KEY" ? SymbolKind.Key : SymbolKind.Field,
                         this.getTokenRange(tokens, childToken.line, childToken.line),
                         this.getTokenRange(tokens, childToken.line, childToken.line),
                         []
                     );
                     structureSymbol.children!.push(keySymbol);
-                }
-                // Add INDEX as child
-                else if (childValue === "INDEX") {
-                    const indexContent = this.extractParenContent(tokens, j + 2, finishesAt);
-                    const indexSymbol = this.createSymbol(
-                        `INDEX(${indexContent.content})`,
-                        "",
-                        SymbolKind.Field,
-                        this.getTokenRange(tokens, childToken.line, childToken.line),
-                        this.getTokenRange(tokens, childToken.line, childToken.line),
-                        []
-                    );
-                    structureSymbol.children!.push(indexSymbol);
                 }
                 // Add RECORD as container - FIXED: Don't manually create
                 else if (childValue === "RECORD") {
@@ -2284,96 +2290,6 @@ export class ClarionDocumentSymbolProvider {
             }
             // Otherwise, we'll let checkAndPopCompletedStructures handle it
         }
-    }
-
-    /**
-     * Handle KEY tokens to extract key field and options
-     */
-    private handleKeyToken(
-        tokens: Token[],
-        index: number,
-        symbols: ClarionDocumentSymbol[],
-        currentProcedure: ClarionDocumentSymbol | null,
-        currentStructure: ClarionDocumentSymbol | null
-    ): void {
-        const token = tokens[index];
-        const { line } = token;
-        const prevToken = tokens[index - 1];
-        const labelName = prevToken?.type === TokenType.Label ? prevToken.value : null;
-
-        // KEY used as a parameter type (e.g. PROCEDURE(FILE,KEY)) has no preceding label.
-        // File KEY definitions always have a label — bail out if this isn't one.
-        if (!labelName) return;
-
-        // Extract what's inside the parentheses: KEY(SHI:ShipperCode)
-        let keyField = "";
-        const keyOptions: string[] = [];
-
-        // Look for the key field in parentheses
-        const nextToken = tokens[index + 1];
-        if (nextToken && nextToken.value === "(") {
-            const parenContent: string[] = [];
-            let j = index + 2;
-            let parenDepth = 1;
-
-            while (j < tokens.length && parenDepth > 0) {
-                const t = tokens[j];
-                if (t.value === "(") parenDepth++;
-                else if (t.value === ")") parenDepth--;
-
-                if (parenDepth > 0) parenContent.push(t.value);
-                j++;
-            }
-
-            keyField = parenContent.join("").trim();
-
-            // Now collect all options after the key field until end of line or another structure
-            while (j < tokens.length) {
-                const t = tokens[j];
-
-                // Stop if we hit a new line or another structure
-                if (t.line !== line) break;
-                if (t.type === TokenType.Structure) break;
-
-                // Skip commas
-                if (t.value !== ",") {
-                    keyOptions.push(t.value);
-                }
-
-                j++;
-            }
-        }
-
-        // Create a display name with the key field and options
-        let displayParts = [];
-
-        if (labelName) {
-            displayParts.push(`KEY(${labelName})`);
-        } else {
-            displayParts.push("KEY");
-        }
-
-        if (keyField) {
-            displayParts.push(`(${keyField})`);
-        }
-
-        if (keyOptions.length > 0) {
-            displayParts.push(keyOptions.join(","));
-        }
-
-        const displayName = displayParts.join(",");
-
-        const keySymbol = this.createSymbol(
-            displayName,
-            "",  // Empty detail since we're including it in the name
-            SymbolKind.Key,
-            this.getTokenRange(tokens, line, line),
-            this.getTokenRange(tokens, line, line),
-            []
-        );
-
-        const target = currentStructure || currentProcedure;
-        this.addSymbolToParent(keySymbol, target, symbols);
     }
 
 
