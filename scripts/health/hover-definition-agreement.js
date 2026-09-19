@@ -25,13 +25,18 @@
  *
  * Usage (run `npm run compile` first):
  *   node scripts/health/hover-definition-agreement.js [--sln=...] [--files=40] [--per-slice=2]
- *        [--settle=20000] [--show=12] [--json=out.json]
+ *        [--settle=20000] [--show=12] [--json=out.json] [--against=previous.json]
+ *
+ * --against compares with an earlier run's --json, position by position, and prints every verdict
+ * that moved (and every agreeing pair whose locations moved) - how a fix shows it changed exactly
+ * its own cases and nothing else.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { startSession, REPO } = require('./lsp-session');
 const { stripNonCode } = require('./naive-scan');
+const { corpusFiles, compareRows, printComparison } = require('./corpus');
 
 const arg = n => { const a = process.argv.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
 const SLN = arg('sln') ?? 'F:\\DirectSystems\\AppDev\\ap1.sln';
@@ -39,6 +44,7 @@ const FILES = Number(arg('files') ?? 40);
 const PER_SLICE = Number(arg('per-slice') ?? 2);
 const SHOW = Number(arg('show') ?? 12);
 const JSON_OUT = arg('json');
+const AGAINST = arg('against');
 const CORPUS = path.dirname(SLN);
 
 const agreement = require(path.join(REPO, 'out', 'server', 'src', 'test', 'support', 'hoverDefinitionAgreement.js'));
@@ -49,17 +55,6 @@ const STATEMENT_WORDS = new Set(('IF THEN ELSE ELSIF END LOOP CODE DATA RETURN O
     + 'AND OR NOT XOR TRUE FALSE NULL EXIT BEGIN WHILE UNTIL TIMES ACCEPT EXECUTE GOTO ROUTINE PROCEDURE FUNCTION '
     + 'SELF PARENT').split(' '));
 const IDENT = /[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*/g;
-
-function walk(dir, out) {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-    for (const e of entries) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) walk(p, out);
-        else if (/\.clw$/i.test(e.name)) out.push(p);
-    }
-    return out;
-}
 
 /** Candidate positions in the code sections of one file, by slice. */
 function candidatesIn(file) {
@@ -107,7 +102,7 @@ function evenly(list, n) {
 
 (async () => {
     const t0 = Date.now();
-    const all = walk(CORPUS, []).sort();
+    const all = corpusFiles(CORPUS, /\.clw$/i);
     const files = evenly(all, FILES);
     const picked = [];
     for (const f of files) {
@@ -161,6 +156,16 @@ function evenly(list, n) {
     }
 
     if (JSON_OUT) { fs.writeFileSync(JSON_OUT, JSON.stringify({ sln: SLN, results }, null, 1)); console.log('\nwrote ' + JSON_OUT); }
+    if (AGAINST) {
+        const asRows = list => list.map(r => ({
+            key: `${rel(r.file)}:${r.line + 1}:${r.character}\t${r.word}`,
+            value: `${r.verdict}\thover ${loc(r.hover)}\tF12 ${loc(r.def)}`,
+        }));
+        const verdictOf = v => v === undefined ? '(not sampled)' : v.split('\t')[0];
+        const previous = JSON.parse(fs.readFileSync(AGAINST, 'utf8')).results;
+        printComparison(compareRows(asRows(previous), asRows(results), (b, a) =>
+            verdictOf(b) === verdictOf(a) ? `${verdictOf(a)} (locations moved)` : `${verdictOf(b)} -> ${verdictOf(a)}`), 3);
+    }
     console.log(`\ntotal ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     await session.close();
     setTimeout(() => process.exit(0), 1500);

@@ -41,22 +41,34 @@ node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatu
 What still needs a human: PWEE-embeditor scenarios (live Clarion IDE), UI
 feel/rendering judgments, and VM-parity absolute timings.
 
-## Hover and F12 must agree: run the agreement sweep
+## Real-code sweeps: run one before and after a change
 
-Hover and Go to Definition resolve a word through separate pipelines and drift
-apart (#609). Before and after any change to either, run
+Unit fixtures prove a case; these prove what a change did to real code (#609).
+Each writes a snapshot, and `--against=<earlier snapshot>` prints exactly which
+results moved and how. A fix should move its own cases and nothing else; a
+refactor should move nothing. Run `npm run compile` first.
 
 ```
-node scripts/health/hover-definition-agreement.js   # ~70s on ap1; --json=out.json to diff runs
+node scripts/health/hover-definition-agreement.js --json=a.json [--against=prev.json]  # ~70-100s, real server
+node scripts/health/document-symbols.js --out=a.tsv [--against=prev.tsv]               # ~30s, in-process
+node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]                   # ~4 min, in-process
 ```
 
-It samples ~450 code positions from ap1 (deterministic, so two runs diff
-cleanly), asks the real server for both answers, and reports `mismatch`,
-`f12-only` and `hover-only` per reference shape. The fixture counterpart is
-`server/src/test/HoverDefinitionAgreement.test.ts`; both classify with
-`server/src/test/support/hoverDefinitionAgreement.ts`. A known disagreement is
-listed in the test's `KNOWN` table with its issue; remove the entry when the
-fix makes it agree.
+- **hover-definition-agreement**: hover and Go to Definition resolve a word
+  through separate pipelines and drift apart. It samples ~450 code positions
+  on ap1 (deterministic), asks the running server for both, and reports
+  `mismatch`, `f12-only` and `hover-only` per reference shape. Fixture
+  counterpart: `server/src/test/HoverDefinitionAgreement.test.ts`; both
+  classify with `server/src/test/support/hoverDefinitionAgreement.ts`. A known
+  disagreement sits in the test's `KNOWN` table with its issue; remove the
+  entry when the fix makes it agree.
+- **document-symbols**: every outline entry of every file (the Structure view,
+  breadcrumbs and workspace/symbol all read it).
+- **self-members**: what each `SELF.x` resolves to through the in-document
+  class scan (no solution index in-process, so inherited members read null).
+
+Shared plumbing: `scripts/health/corpus.js` (walk, snapshot, compare) and
+`scripts/health/lsp-session.js` (server startup and settle).
 
 ## Working rules
 
