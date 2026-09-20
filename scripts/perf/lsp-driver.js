@@ -20,6 +20,7 @@
 //   node scripts/perf/lsp-driver.js --file=F:\...\SomeOther.clw
 //   node scripts/perf/lsp-driver.js --sln=... --file=... --links   # print document links for the file (#470 hypothesis)
 //   node scripts/perf/lsp-driver.js --file=... --refs=LINE:COL       # time find-all-references at a 1-based position (#526)
+//   node scripts/perf/lsp-driver.js --link-refresh                   # assert document links reach the editor on startup (#620); exit 0 = all pass
 'use strict';
 const { fork } = require('child_process');
 const fs = require('fs');
@@ -54,8 +55,14 @@ const PROGRESS = process.argv.includes('--progress');
 // #545 — declare pull-diagnostics support; the server then answers textDocument/diagnostic
 // and must NOT push. --pull runs the pull sequence after the settle window.
 const PULL = process.argv.includes('--pull');
+// #620 — assert the document-link refresh ordering. The client only re-asks for links
+// when it receives clarion/refreshDocumentLinks, and DocumentLinkProvider can only answer
+// once the file graph is built, so the refresh MUST come after the build.
+const LINK_REFRESH = process.argv.includes('--link-refresh');
 let refreshRequests = 0;
 const progressEvents = [];
+// #620 — ordered timeline of the two events whose relative order is the bug.
+const linkEvents = [];
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -111,6 +118,9 @@ child.on('message', (msg) => {
     } else if (msg.method === 'clarion/diagnosticsStatus') {
       diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
     }
+    // #620
+    if (msg.method === 'clarion/refreshDocumentLinks') linkEvents.push({ t: Date.now(), kind: 'refresh' });
+    if (msg.method === 'clarion/graphStatus' && msg.params && msg.params.status === 'built') linkEvents.push({ t: Date.now(), kind: 'graphBuilt' });
     lastNotification.set(msg.method, msg.params);
     for (let i = notificationWaiters.length - 1; i >= 0; i--) {
       const w = notificationWaiters[i];
@@ -249,6 +259,64 @@ async function runDiagStatusCheck(t0) {
   setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
 }
 
+// #620 — assert that document links actually reach the editor on a normal startup.
+// The editor restores an open .clw before the solution finishes loading, asks once for
+// links, caches whatever it gets, and only asks again when told to. So the refresh has
+// to arrive AFTER the file graph is built, not before.
+async function runLinkRefreshCheck(t0) {
+  const results = [];
+  const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
+
+  // A file that is a graph node AND carries quoted filenames to link.
+  const linkTarget = arg('file') ?? path.join(APPDEV, 'GenFiles', 'src', 'AboutScreen_IBSCommon.clw');
+  if (!fs.existsSync(linkTarget)) {
+    record('link fixture present', false, `not found: ${linkTarget}`);
+    setTimeout(() => { child.kill(); process.exit(1); }, 100);
+    return;
+  }
+  const text = fs.readFileSync(linkTarget, 'utf8');
+  const uri = toUri(linkTarget);
+  const directiveLines = text.split(/\r?\n/).filter(l => /\b(INCLUDE|MODULE|LINK)\s*\(\s*'/i.test(l)).length;
+  record('fixture carries linkable filenames', directiveLines > 0, `${directiveLines} line(s)`);
+
+  // Open before the solution is announced — what VS Code does with a restored editor.
+  notify('textDocument/didOpen', { textDocument: { uri, languageId: 'clarion', version: 1, text } });
+  console.log(`[${Date.now() - t0}ms] opened ${path.basename(linkTarget)} (pre-updatePaths)`);
+
+  sendUpdatePaths();
+  console.log(`[${Date.now() - t0}ms] updatePaths sent — waiting for solutionReady…`);
+  await waitNotification('clarion/solutionReady');
+  console.log(`[${Date.now() - t0}ms] solutionReady`);
+
+  // The first ask, exactly as the editor makes it.
+  const early = await request('textDocument/documentLink', { textDocument: { uri } }, 120000);
+  console.log(`[${Date.now() - t0}ms] documentLink #1 → ${(early ?? []).length} link(s)`);
+
+  let gs = lastNotification.get('clarion/graphStatus');
+  while (!gs || gs.status !== 'built') gs = await waitNotification('clarion/graphStatus', 300000);
+  const builtAt = Date.now();
+  console.log(`[${builtAt - t0}ms] graph built`);
+
+  // Generous window for a post-build refresh to arrive.
+  await new Promise(r => setTimeout(r, 10000));
+
+  const refreshesAfterBuild = linkEvents.filter(e => e.kind === 'refresh' && e.t >= builtAt).length;
+  const allRefreshes = linkEvents.filter(e => e.kind === 'refresh');
+  record('a link refresh is sent after the graph is built', refreshesAfterBuild > 0,
+    `${allRefreshes.length} refresh(es) total, ${refreshesAfterBuild} after build`);
+
+  // What the editor would now hold, had it been told to re-ask.
+  const late = await request('textDocument/documentLink', { textDocument: { uri } }, 120000);
+  console.log(`[${Date.now() - t0}ms] documentLink #2 → ${(late ?? []).length} link(s)`);
+  record('the provider answers with links once the graph is built', (late ?? []).length > 0,
+    `${(late ?? []).length} link(s)`);
+
+  const failed = results.filter(r => !r.pass);
+  console.log(`\n== document-link refresh assertions: ${results.length - failed.length}/${results.length} passed ==`);
+  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const t0 = Date.now();
@@ -272,6 +340,7 @@ async function runDiagStatusCheck(t0) {
   console.log(`[${Date.now() - t0}ms] initialized`);
 
   if (DIAG_STATUS) { await runDiagStatusCheck(t0); return; }
+  if (LINK_REFRESH) { await runLinkRefreshCheck(t0); return; }
 
   // Mirrors the real client's payload — SolutionInitializer.ts (clarion/updatePaths sender)
   notify('clarion/updatePaths', {

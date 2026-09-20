@@ -1857,7 +1857,7 @@ connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
     // #297: while an announced solution is still loading, the FRG's no-solution guard falls
     // through and builds a THROWAWAY degraded-mode graph for this document (measured 3.2s on
     // the queue during the busiest window). Skip — the server sends
-    // clarion/refreshDocumentLinks at solutionReady, so links populate then.
+    // clarion/refreshDocumentLinks once the FRG build finishes (#620), so links populate then.
     if (solutionAnnounced && !SolutionManager.getInstance()?.solution) return [];
     return documentLinkProvider.provideDocumentLinks(document);
 });
@@ -2307,14 +2307,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // validateTextDocument runs async; individual completion times appear
             // as `validateTextDocument complete` perf entries above.
 
-            // Doc-link refresh post-solution-ready. DocumentLinkProvider uses
-            // FRG, which isn't ready until solution-load completes; editors
-            // request links right after onDidOpen and cache the empty result.
-            // Custom notification (rather than a standard LSP refresh request,
-            // which doesn't exist for document links — see GH #160). Client
-            // re-invokes the provider per visible editor.
-            connection.sendNotification('clarion/refreshDocumentLinks');
-            logger.info("🔗 Document-link refresh notification sent to client");
+            // #620: the doc-link refresh used to be sent HERE, at solution-ready. It has
+            // moved to immediately after the FRG build below — the graph the provider reads
+            // is no longer built by this point (#297 put it on the background lane behind
+            // the SDI build and a settle), so a refresh sent here told the client to re-ask
+            // ~2.3s too early and it cached a second empty result.
 
             // #189 Phase 2 — precompute CodeLens reference counts in the background.
             // #290: moved to run AFTER the sdiReady validation pass (see the SDI prebuild block
@@ -2405,6 +2402,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // → revalidation ONE DOC AT A TIME, each pass benefiting from the built graph.
                 await new Promise<void>(resolve => setTimeout(resolve, 2000));
                 await buildFileRelationshipGraph();
+
+                // #620: NOW the client can be told to re-ask for document links, and not before.
+                // DocumentLinkProvider answers [] until the graph is built, and the editor asks
+                // once (right after onDidOpen) and caches whatever it gets. There is no standard
+                // LSP refresh request for document links (GH #160), so this custom notification is
+                // the only thing that makes the client re-invoke the provider per visible editor.
+                // It must stay adjacent to the build — every path that (re)builds the graph sends
+                // it: here, the constants-change rebuild and the configuration-change rebuild.
+                connection.sendNotification('clarion/refreshDocumentLinks');
+                logger.info("🔗 Document-link refresh notification sent to client (post-FRG build)");
 
                 // #319: the reference-count index builds BEFORE the revalidation pass.
                 // The undeclaredVar validator's cross-file miss path (the sibling-MEMBER
@@ -2712,6 +2719,9 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
         }
         docCount++;
     }
+    // #620: the graph was just rebuilt, so the links the client holds are stale — same
+    // notification the startup and configuration-change paths send.
+    connection.sendNotification('clarion/refreshDocumentLinks');
     perfLogger.perf("projectConstantsChanged coalesced pass complete", {
         ms: Date.now() - passStart,
         doc_count: docCount,
