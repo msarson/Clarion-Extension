@@ -4,7 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
-import { selectBestMemberOverload, OverloadCandidate, ClassMemberResolver } from '../../utils/ClassMemberResolver';
+import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate, ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -1222,6 +1222,18 @@ export async function validateDiscardedReturnValues(
             const candidates = members.get(methodName.toLowerCase());
             // Class known, member absent → the tiered path also resolved null here.
             if (!candidates || candidates.length === 0) continue;
+            // #621 — an overloaded name is only a discarded return when EVERY overload the call
+            // could bind to returns a value. `selectBestMemberOverload` discriminates on argument
+            // COUNT, so where two overloads accept the same count it picks one arbitrarily:
+            // VitTokenize declares `JoinToks(LONG pStart=1, LONG pEnd=0),STRING` and
+            // `JoinToks(StringTheory st, LONG pStart=1, LONG pEnd=0)` — both accept one argument,
+            // and `self.tk.JoinToks(pOut)` was reported against the STRING one though it binds to
+            // the second, which returns nothing. Only the argument's TYPE separates those, so
+            // rather than guess, stay silent when any viable overload returns nothing. A warning
+            // should prefer a false negative to a false positive; a name whose overloads ALL
+            // return a value (StringTheory's ten `Instring` prototypes) still warns.
+            const viable = candidates.filter(c => overloadAcceptsArgs(c, paramCount));
+            if (viable.length > 0 && viable.some(c => !isNonProcReturnMethod(c.type ?? ''))) continue;
             const best = selectBestMemberOverload(candidates, paramCount);
             if (!best) continue;
             typeStr = best.type;

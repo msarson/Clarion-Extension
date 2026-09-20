@@ -29,6 +29,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Diagnostics
 
+- **An overloaded method is no longer reported as discarding a return value when the overload being called has none.** Where one prototype returns a value and another does not, and both accept the number of arguments passed, the call was checked against the wrong one. A name whose prototypes all return a value is still reported. [#621](https://github.com/msarson/Clarion-Extension/issues/621)
 - **Published diagnostics say which version of the document they are for.** A slower analysis pass for one version can arrive after the editor has moved to the next, and a client that reads only the standard protocol had no way to tell, so it showed the older answer against the newer text. Reported by Bill Atchison. [#619](https://github.com/msarson/Clarion-Extension/issues/619)
 
 ---
