@@ -8,7 +8,7 @@
  * are complete - the relationship graph builds afterwards, so start() waits for
  * clarion/graphStatus 'built' and then a floor (>= 15s, the settle rule from the perf lane).
  *
- * Paths default to this machine's DirectSystems rig (see CLAUDE.md). Run `npm run compile` first.
+ * Paths default to the locally configured corpus (see CLAUDE.local.md). Run `npm run compile` first.
  */
 
 const { fork } = require('child_process');
@@ -18,8 +18,8 @@ const path = require('path');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SERVER = path.join(REPO, 'out', 'server', 'src', 'server.js');
-const APPDEV = 'F:\\DirectSystems\\AppDev';
-const CLARION_ROOT = 'F:\\DirectSystems\\Clarion10';
+const corpus = require('../corpus-config');
+const CLARION_ROOT = corpus.required('clarionRoot');
 
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^\//, '').replace(':', '%3A');
 
@@ -28,7 +28,7 @@ const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^\//, '').replace
  */
 async function startSession(opts) {
     if (!fs.existsSync(SERVER)) throw new Error(`Server build missing: ${SERVER} - run \`npm run compile\` first.`);
-    const sln = opts.sln ?? path.join(APPDEV, 'ap1.sln');
+    const sln = opts.sln ?? corpus.required('solution');
     const log = opts.log ?? (() => {});
     const t0 = Date.now();
 
@@ -92,7 +92,7 @@ async function startSession(opts) {
         projectPaths: [path.dirname(sln)],
         solutionFilePath: sln,
         configuration: 'Debug',
-        clarionVersion: 'DirectSystems',
+        clarionVersion: corpus.required('clarionVersion'),
         redirectionFile: 'Clarion100.red',
         macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
         libsrcPaths: [path.join(CLARION_ROOT, 'libsrc', 'win'), path.join(CLARION_ROOT, 'Accessory', 'libsrc', 'win')],

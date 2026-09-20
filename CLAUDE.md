@@ -3,27 +3,28 @@
 ## Perf verification: use the local real-solution rig, not synthetic fixtures
 
 For any measure-the-logs perf issue (hover/F12/references latency, startup cost,
-event-loop freezes), verify against the **real copied solution** on this machine
+event-loop freezes), verify against the **real solution copied to this machine**
 — do not build a VSIX and wait for a VM retest, and do not trust small synthetic
 fixtures for perf claims.
 
-- **Test solution:** `F:\DirectSystems\AppDev\ap1.sln` — 40 projects / 3,016
-  sources; `genfiles\src\IBSCommon.clw` (856K) is the canonical big generated
-  file. `IBS.sln` in the same folder is a small 2-project variant.
-- **Clarion install:** `F:\DirectSystems\Clarion10` (10.0.12567), registered as
-  the **"DirectSystems"** version in
-  `%APPDATA%\SoftVelocity\Clarion\10.0\ClarionProperties.xml` — redirection and
-  libsrc resolve fully on this machine.
+> **The test solution is a client's private source.** Its path, its file names and
+> its shape live in the gitignored `CLAUDE.local.md`, never here and never in a
+> commit message, issue, PR or script default — this file is checked into a public
+> repository. Report corpus results as "nothing else moved", not as file names or
+> counts that describe someone else's application.
+
 - **Headless driver:** `scripts/perf/lsp-driver.js` — forks the built server
   over IPC, mirrors the real client's startup (initialize → `clarion/updatePaths`
   → solutionReady → didOpen), runs timed requests cold-then-warm, and captures
-  every server `*.Perf` line to a log. Run `npm run compile` first.
+  every server `*.Perf` line to a log. Run `npm run compile` first. The solution
+  and file default to the ones named in `CLAUDE.local.md`.
 
 ```
-node scripts/perf/lsp-driver.js            # warm run against ap1.sln
+node scripts/perf/lsp-driver.js            # warm run against the configured solution
 node scripts/perf/lsp-driver.js --cold     # true cold start (wipes the %TEMP% caches)
 node scripts/perf/lsp-driver.js --sln=... --file=...
-node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatus ordering (#460); exit 0 = all pass
+node scripts/perf/lsp-driver.js --diag-status   # assert clarion/diagnosticsStatus ordering (#460); exit 0 = all pass
+node scripts/perf/lsp-driver.js --link-refresh  # assert document links reach the editor on startup (#620); exit 0 = all pass
 ```
 
 - **Cold runs:** the server persists mtime-validated caches under
@@ -34,19 +35,26 @@ node scripts/perf/lsp-driver.js --diag-status  # assert clarion/diagnosticsStatu
   `initializationOptions.settings.log.performance.enabled` — the `Hover slow`,
   `StartupPerf`, and `EventLoop lag | max_blocked_ms` lines are the acceptance
   evidence (`max_blocked_ms` is the "freeze" metric).
-- Reference baselines (2026-07-18, this machine): solutionReady 40 projects
-  ≈100ms; SDI cold build 4,104 files ≈2.0s; worst acceptable `max_blocked_ms`
-  ≈1.5s (one big-file tokenize).
+- Reference baselines for the configured solution are in `CLAUDE.local.md`. Always
+  compare against those rather than against a number quoted in an issue.
 
 What still needs a human: PWEE-embeditor scenarios (live Clarion IDE), UI
 feel/rendering judgments, and VM-parity absolute timings.
 
 ## Real-code sweeps: run one before and after a change
 
-Unit fixtures prove a case; these prove what a change did to real code (#609).
+**A fixture proves the fix; these do not.** What a sweep adds is surprise — a
+fixture only ever contains the cases we thought of, and a corpus catches what we
+did not predict. So lead with the fixture, and read a sweep only as "nothing else
+moved". A sweep that reports 0 changed because the corpus holds no instance of the
+shape is evidence of nothing at all: check whether the shape is even present before
+quoting the result (#618 and #623 both hit exactly that).
+
 Each writes a snapshot, and `--against=<earlier snapshot>` prints exactly which
 results moved and how. A fix should move its own cases and nothing else; a
-refactor should move nothing. Run `npm run compile` first.
+refactor should move nothing. Run `npm run compile` first. The corpus is the
+private solution configured in `CLAUDE.local.md` — never name its files in a
+commit, issue or PR.
 
 ```
 node scripts/health/hover-definition-agreement.js --json=a.json [--against=prev.json]  # ~70-100s, real server
@@ -56,7 +64,7 @@ node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]            
 
 - **hover-definition-agreement**: hover and Go to Definition resolve a word
   through separate pipelines and drift apart. It samples ~450 code positions
-  on ap1 (deterministic), asks the running server for both, and reports
+  across the corpus (deterministic), asks the running server for both, and reports
   `mismatch`, `f12-only` and `hover-only` per reference shape. Fixture
   counterpart: `server/src/test/HoverDefinitionAgreement.test.ts`; both
   classify with `server/src/test/support/hoverDefinitionAgreement.ts`. A known
@@ -90,8 +98,8 @@ Shared plumbing: `scripts/health/corpus.js` (walk, snapshot, compare) and
   help ships with every Clarion install as `bin\ClarionHelp.chm` (4,686 topic
   pages, one per keyword — e.g. `map__declare_procedure_prototypes_`,
   `private__set_procedure_private_to_a_class_or_module_`), with the Language
-  Reference and ABC Library Reference PDFs in `docs\`; on this machine the
-  install is `F:\DirectSystems\Clarion10`. If a `clarion-help` skill is
+  Reference and ABC Library Reference PDFs in `docs\`; this machine's install
+  path is in `CLAUDE.local.md`. If a `clarion-help` skill is
   available in your session, prefer it — it is a searchable conversion of the
   same help. Either way it is SoftVelocity's copyrighted material: quote from it
   to answer, never copy it into this repo. **The help mixes in Clarion.NET

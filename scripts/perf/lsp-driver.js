@@ -1,5 +1,5 @@
 // Headless LSP perf driver — drives the Clarion language server over Node IPC
-// against the real DirectSystems test solution, mirroring the VS Code client's
+// against the locally configured real test solution, mirroring the VS Code client's
 // startup sequence (initialize → initialized → clarion/updatePaths →
 // solutionReady → didOpen → timed requests). Server perf channels are enabled,
 // so every *.Perf line (HoverProvider.Perf, StartupPerf, EventLoop lag, …)
@@ -8,16 +8,16 @@
 // First used to close #361 (hover freeze) with cold/warm evidence; reuse it for
 // any measure-the-logs perf issue instead of the build-VSIX→VM-retest loop.
 //
-// Test substrate (copied real solution + matching Clarion install):
-//   F:\DirectSystems\AppDev\ap1.sln   — 40 projects / 3,016 sources (the VM perf solution)
-//   F:\DirectSystems\Clarion10        — Clarion 10.0.12567; registered as the
-//                                       "DirectSystems" version in ClarionProperties.xml
+// Test substrate: a real solution copied to this machine, plus the matching Clarion install.
+// It is a client's PRIVATE source — its paths live in the gitignored scripts/local-corpus.js
+// (or the CLARION_TEST_* environment variables), never in this file, a commit or an issue.
+// See CLAUDE.local.md.
 //
 // Usage (run `npm run compile` first — drives out/server/src/server.js):
-//   node scripts/perf/lsp-driver.js                 # warm run against ap1.sln
+//   node scripts/perf/lsp-driver.js                 # warm run against the configured solution
 //   node scripts/perf/lsp-driver.js --cold          # wipe %TEMP% clarion-extension-* caches first
-//   node scripts/perf/lsp-driver.js --sln=F:\DirectSystems\AppDev\IBS.sln
-//   node scripts/perf/lsp-driver.js --file=F:\...\SomeOther.clw
+//   node scripts/perf/lsp-driver.js --sln=...\Other.sln
+//   node scripts/perf/lsp-driver.js --file=...\SomeOther.clw
 //   node scripts/perf/lsp-driver.js --sln=... --file=... --links   # print document links for the file (#470 hypothesis)
 //   node scripts/perf/lsp-driver.js --file=... --refs=LINE:COL       # time find-all-references at a 1-based position (#526)
 //   node scripts/perf/lsp-driver.js --link-refresh                   # assert document links reach the editor on startup (#620); exit 0 = all pass
@@ -30,11 +30,13 @@ const path = require('path');
 // --- config -----------------------------------------------------------------
 const REPO = path.resolve(__dirname, '..', '..');
 const SERVER = path.join(REPO, 'out', 'server', 'src', 'server.js');
-const APPDEV = 'F:\\DirectSystems\\AppDev';
-const CLARION_ROOT = 'F:\\DirectSystems\\Clarion10';
+const corpus = require('../corpus-config');
 const arg = (name) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : undefined; };
-const SLN = arg('sln') ?? path.join(APPDEV, 'ap1.sln');
-const TARGET = arg('file') ?? path.join(APPDEV, 'genfiles', 'src', 'IBSCommon.clw');
+const SLN = arg('sln') ?? corpus.required('solution');
+const APPDEV = path.dirname(SLN);
+const CLARION_ROOT = corpus.required('clarionRoot');
+const CLARION_VERSION = corpus.required('clarionVersion');
+const TARGET = arg('file') ?? corpus.required('bigFile');
 const COLD = process.argv.includes('--cold');
 // #460: assert the clarion/diagnosticsStatus ordering instead of timing hovers.
 const DIAG_STATUS = process.argv.includes('--diag-status');
@@ -181,7 +183,7 @@ function sendUpdatePaths() {
     projectPaths: [path.dirname(SLN)],
     solutionFilePath: SLN,
     configuration: 'Debug',
-    clarionVersion: 'DirectSystems',
+    clarionVersion: CLARION_VERSION,
     redirectionFile: 'Clarion100.red',
     macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
     libsrcPaths: [
@@ -286,7 +288,7 @@ async function runLinkRefreshCheck(t0) {
   const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
 
   // A file that is a graph node AND carries quoted filenames to link.
-  const linkTarget = arg('file') ?? path.join(APPDEV, 'GenFiles', 'src', 'AboutScreen_IBSCommon.clw');
+  const linkTarget = arg('file') ?? corpus.required('linkFile');
   if (!fs.existsSync(linkTarget)) {
     record('link fixture present', false, `not found: ${linkTarget}`);
     setTimeout(() => { child.kill(); process.exit(1); }, 100);
@@ -345,7 +347,7 @@ async function runLinkRefreshCheck(t0) {
   await request('initialize', {
     processId: process.pid,
     rootUri: toUri(APPDEV),
-    workspaceFolders: [{ uri: toUri(APPDEV), name: 'AppDev' }],
+    workspaceFolders: [{ uri: toUri(APPDEV), name: path.basename(APPDEV) }],
     capabilities: {
       textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] }, ...(PULL ? { diagnostic: { dynamicRegistration: false } } : {}) },
       workspace: { configuration: true, ...(PULL ? { diagnostics: { refreshSupport: true } } : {}) },
@@ -366,7 +368,7 @@ async function runLinkRefreshCheck(t0) {
     projectPaths: [path.dirname(SLN)],
     solutionFilePath: SLN,
     configuration: 'Debug',
-    clarionVersion: 'DirectSystems',
+    clarionVersion: CLARION_VERSION,
     redirectionFile: 'Clarion100.red',
     macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
     libsrcPaths: [

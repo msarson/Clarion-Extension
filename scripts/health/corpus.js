@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..', '..');
-const DEFAULT_SLN = 'F:\\DirectSystems\\AppDev\\ap1.sln';
+const DEFAULT_SLN = require('../corpus-config').required('solution');
 
 const arg = n => { const a = process.argv.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
 

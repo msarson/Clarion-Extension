@@ -39,7 +39,7 @@ const { stripNonCode } = require('./naive-scan');
 const { corpusFiles, compareRows, printComparison } = require('./corpus');
 
 const arg = n => { const a = process.argv.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
-const SLN = arg('sln') ?? 'F:\\DirectSystems\\AppDev\\ap1.sln';
+const SLN = arg('sln') ?? require('../corpus-config').required('solution');
 const FILES = Number(arg('files') ?? 40);
 const PER_SLICE = Number(arg('per-slice') ?? 2);
 const SHOW = Number(arg('show') ?? 12);

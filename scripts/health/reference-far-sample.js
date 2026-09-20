@@ -32,10 +32,11 @@ const { naiveScan } = require('./naive-scan');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SERVER = path.join(REPO, 'out', 'server', 'src', 'server.js');
-const APPDEV = 'F:\\DirectSystems\\AppDev';
-const CLARION_ROOT = 'F:\\DirectSystems\\Clarion10';
+const corpus = require('../corpus-config');
+const CLARION_ROOT = corpus.required('clarionRoot');
 const arg = n => { const a = process.argv.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : undefined; };
-const SLN = arg('sln') ?? path.join(APPDEV, 'ap1.sln');
+const SLN = arg('sln') ?? corpus.required('solution');
+const APPDEV = path.dirname(SLN);
 const PER_SLICE = Number(arg('per-slice') ?? 60);
 const JSON_OUT = arg('json');
 const CORPUS = path.dirname(SLN);
@@ -216,7 +217,7 @@ function sample(rows, perSlice) {
     await request('initialize', {
         processId: process.pid,
         rootUri: toUri(APPDEV),
-        workspaceFolders: [{ uri: toUri(APPDEV), name: 'AppDev' }],
+        workspaceFolders: [{ uri: toUri(APPDEV), name: path.basename(APPDEV) }],
         capabilities: { textDocument: {}, workspace: { configuration: true }, window: { workDoneProgress: true } },
         initializationOptions: { settings: { log: { performance: { enabled: false } } } },
     });
@@ -231,7 +232,7 @@ function sample(rows, perSlice) {
         projectPaths: [path.dirname(SLN)],
         solutionFilePath: SLN,
         configuration: 'Debug',
-        clarionVersion: 'DirectSystems',
+        clarionVersion: corpus.required('clarionVersion'),
         redirectionFile: 'Clarion100.red',
         macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
         libsrcPaths: [path.join(CLARION_ROOT, 'libsrc', 'win'), path.join(CLARION_ROOT, 'Accessory', 'libsrc', 'win')],
