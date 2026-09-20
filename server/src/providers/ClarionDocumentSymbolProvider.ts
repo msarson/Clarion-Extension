@@ -325,6 +325,11 @@ export class ClarionDocumentSymbolProvider {
         let insideDefinitionBlock = false;
         let lastProcessedLine = -1;
         let pastCodeStatement = false; // Track if we're past CODE (no more variables allowed)
+        // #618 — DATA opens a data section only inside a ROUTINE. "The DATA statement begins a
+        // local data declaration section in a ROUTINE" (Language Reference, Program Source Code
+        // Format). A procedure's own declarations sit between its header and CODE with no DATA
+        // keyword, so a DATA token in a procedure body is an ordinary statement, not a section.
+        let insideRoutine = false;
 
         // 🚀 PERFORMANCE: Track method implementations incrementally instead of scanning tree repeatedly
         let hasMethodImplementations = false;
@@ -406,7 +411,14 @@ export class ClarionDocumentSymbolProvider {
 
             // Check if current token is DATA execution marker - allow variable processing for routines
             if (type === TokenType.ExecutionMarker && value.toUpperCase() === "DATA") {
-                pastCodeStatement = false;
+                // #618: only inside a ROUTINE. In a procedure's CODE section this token is an
+                // ordinary statement — `GetAction:Data = 1`, whose 9-character prefix the
+                // tokenizer splits at the colon, or a variable plainly called `Data`. Reopening
+                // declarations there made every following IF/OF/DO line an outline entry named
+                // after the expression with its operators dropped ("Loc:Flag AND01").
+                if (insideRoutine) {
+                    pastCodeStatement = false;
+                }
                 continue;
             }
 
@@ -579,6 +591,9 @@ export class ClarionDocumentSymbolProvider {
 
                     // Reset pastCodeStatement flag when entering new procedure/method
                     pastCodeStatement = false;
+                    // #618 — a ROUTINE is the only scope a DATA section can open in, and a new
+                    // PROCEDURE ends the previous routine's scope.
+                    insideRoutine = subType === TokenType.Routine;
                     // #533 — a ROUTINE holds declarations only when it opens a DATA section;
                     // without one it is executable code from its first line and has no CODE
                     // marker to flip the flag back, so `IF x THEN DO Name END` read as a
@@ -697,6 +712,7 @@ export class ClarionDocumentSymbolProvider {
 
                 // Reset pastCodeStatement if this routine has local data (DATA section)
                 // Variables are allowed between DATA and CODE in routines
+                insideRoutine = true;   // #618 — a DATA section is legal from here
                 if (token.hasLocalData) {
                     pastCodeStatement = false;
                 }

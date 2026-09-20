@@ -25,6 +25,8 @@ All notable changes to the Clarion Extension are documented here.
 - **A parameter's hover links to the procedure that declares it.** The card named the line as plain text, the one declaration hover without a link. [#617](https://github.com/msarson/Clarion-Extension/issues/617)
 - **The filenames on INCLUDE, MODULE and LINK lines are clickable again.** The editor asks for a file's links once when the file opens and keeps what it gets, which was nothing — the file graph the links are read from is built a few seconds later, and the refresh meant to correct that ran too early and could not reach the editor's copy anyway. Reopening the file was the only way to see them. [#620](https://github.com/msarson/Clarion-Extension/issues/620)
 
+- **A statement beginning with the word `DATA` no longer turns the rest of a procedure's code into outline entries.** Where a procedure's code assigns a name such as `GetAction:Data`, every following IF, OF and DO line was listed as a variable named after the expression with its operators dropped, `Loc:Flag AND01` — 28 of them on one 1,648-line procedure. A DATA section belongs to a ROUTINE; a procedure's code has none. Reported by Bill Atchison. [#618](https://github.com/msarson/Clarion-Extension/issues/618)
+
 #### Diagnostics
 
 - **Published diagnostics say which version of the document they are for.** A slower analysis pass for one version can arrive after the editor has moved to the next, and a client that reads only the standard protocol had no way to tell, so it showed the older answer against the newer text. Reported by Bill Atchison. [#619](https://github.com/msarson/Clarion-Extension/issues/619)
