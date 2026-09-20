@@ -704,7 +704,11 @@ let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 function publishDiagnostics(document: TextDocument, version: number, diagnostics: Diagnostic[], state: DiagnosticsState): void {
     const resultId = diagnosticsStore.record(document.uri, version, state, diagnostics);
     if (!pullDiagnosticsSupported) {
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        // #619: publish the version these diagnostics were computed for (LSP 3.15, optional).
+        // A pass for v1 can land after the client has moved to v2 — without the field the
+        // stale answer is attributed to v2. `clarion/diagnosticsStatus` (#460) tells a client
+        // that knows the custom notification; the standard field tells every other client.
+        connection.sendDiagnostics({ uri: document.uri, version, diagnostics });
         return;
     }
     if (!diagnosticsRefreshSupported) return;

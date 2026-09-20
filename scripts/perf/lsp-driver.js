@@ -113,7 +113,9 @@ child.on('message', (msg) => {
       if (PROGRESS) console.log(`  [progress ${String(msg.params.token).slice(0, 8)}] ${msg.params.value.kind}${msg.params.value.title ? ' ' + msg.params.value.title : ''}${msg.params.value.message ? ' — ' + msg.params.value.message : ''}${msg.params.value.percentage !== undefined ? ' ' + msg.params.value.percentage + '%' : ''}`);
     }
     if (msg.method === 'textDocument/publishDiagnostics') {
-      diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length });
+      // #619 — `version` is optional in LSP 3.15; record what arrived (undefined included)
+      // so the --diag-status run can assert every publish carries the version it is for.
+      diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length, version: msg.params.version });
       lastDiagnostics[msg.params.uri] = msg.params.diagnostics || [];
     } else if (msg.method === 'clarion/diagnosticsStatus') {
       diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
@@ -252,6 +254,22 @@ async function runDiagStatusCheck(t0) {
   } else {
     record('post-ready scenario', false, `fixture not found: ${fileC}`);
   }
+
+  // #619 — every publish must carry the document version it was computed for, so a plain
+  // LSP client can drop a publish for a buffer it has already changed. The custom
+  // clarion/diagnosticsStatus notification only helps a client that knows about it.
+  const publishes = diagEvents.filter(e => e.kind === 'publish');
+  const versionless = publishes.filter(e => e.version === undefined);
+  record('every publishDiagnostics carries a version', publishes.length > 0 && versionless.length === 0,
+    `${publishes.length - versionless.length}/${publishes.length} carry one`);
+  // The version published must be the one the matching status reports, not a later buffer's.
+  const mismatched = publishes.filter(e => {
+    if (e.version === undefined) return false;
+    const statuses = diagEvents.filter(s => s.kind === 'status' && s.uri === e.uri).map(s => s.version);
+    return statuses.length > 0 && !statuses.includes(e.version);
+  });
+  record('the published version is one the status pass reports', mismatched.length === 0,
+    `${mismatched.length} publish(es) with no matching status version`);
 
   const failed = results.filter(r => !r.pass);
   console.log(`\n== diagnosticsStatus assertions: ${results.length - failed.length}/${results.length} passed ==`);
