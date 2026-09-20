@@ -557,14 +557,12 @@ export class CompletionProvider {
 
     /** Finds the parent class of a given class (via ClassDefinitionIndexer). */
     private async resolveParentOf(className: string, document: TextDocument): Promise<string | null> {
-        // Quick scan in document text
-        const lines = document.getText().split('\n');
-        const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');
-        for (const line of lines) {
-            const m = line.match(pattern);
-            if (m) return m[1];
-        }
-        return null;
+        // #623: this used to scan the open document's text and stop there. A class declared in an
+        // .inc — where generated and hand-written Clarion classes normally live — has no CLASS
+        // line in the .clw being edited, so PARENT. offered nothing at all. The same shape already
+        // worked through ClassMemberResolver.getParentClassInfo, which consults the include chain
+        // and the declaration index; both now take the same two tiers.
+        return this.memberLocator.resolveParentName(className, document);
     }
 
     // -------------------------------------------------------------------------

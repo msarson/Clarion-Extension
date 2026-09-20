@@ -1,3 +1,4 @@
+import { extractParentName, DerivableKeyword } from './ParentClassName';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
@@ -39,7 +40,11 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // This changes the FILE SET, not just the parse — every existing cache predates those
 // files entirely (a real project's own source directory can go from contributing a
 // single incidental file to dozens of genuine local declarations once this lands).
-const DISK_CACHE_VERSION = 6;
+// v7 (#623): extractParent now accepts a colon in the parent's NAME, so `CLASS(MyOwn:Base)`
+// indexes with a parentName instead of none. Same trap as v5 — the file has not changed, so
+// without this bump every warm cache keeps serving the old parentless entry and the whole
+// inheritance chain stays broken for exactly the classes the fix is for.
+const DISK_CACHE_VERSION = 7;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -242,10 +247,16 @@ function extractPre(line: string): string {
     return m ? m[1] : '';
 }
 
-/** Extract parent name from TYPE(...) clause */
+/**
+ * Extract parent name from TYPE(...) clause.
+ *
+ * #623: this is the eighth and most consequential copy of the `CLASS(Parent)` read — it fills
+ * `parentName` in the index every other tier falls back to, so its `\w` (which stops at a colon)
+ * meant a class derived from `MyOwn:Base` was indexed with no parent at all, and no amount of
+ * fixing the callers would have recovered it.
+ */
 function extractParent(keyword: string, line: string): string | undefined {
-    const m = new RegExp(keyword + '\\s*\\(\\s*([A-Za-z_]\\w*)\\s*\\)', 'i').exec(line);
-    return m ? m[1] : undefined;
+    return extractParentName(line, [keyword as DerivableKeyword]) ?? undefined;
 }
 
 /** Extract MODULE('...') attribute */

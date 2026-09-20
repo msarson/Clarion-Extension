@@ -20,6 +20,7 @@ import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
@@ -1521,7 +1522,6 @@ export class MemberLocatorService {
         const lines = text.split(/\r?\n/);
         const classNamePattern = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'i');
         const modulePattern = /,\s*MODULE\s*\(\s*['"]?([^'")\s]+)['"]?\s*\)/i;
-        const parentPattern = /\bCLASS\s*\(\s*([A-Za-z_]\w*)\s*\)/i;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -1531,7 +1531,8 @@ export class MemberLocatorService {
                 filePath,
                 line: i,
                 structureType: 'CLASS',
-                parentName: parentPattern.exec(line)?.[1],
+                parentName: extractParentName(line) ?? undefined,   // #623
+
                 moduleName: modulePattern.exec(line)?.[1],
                 isType: /,\s*TYPE\b/i.test(line),
                 lineContent: line.trim()
@@ -2177,17 +2178,7 @@ export class MemberLocatorService {
         // 3. Determine the parent class (if any)
         let parentClassName: string | undefined;
 
-        // Try include chain first, then indexer
-        const classInfo = await this.findClassInfoInDoc(className, document);
-        if (classInfo?.parentClass) {
-            parentClassName = classInfo.parentClass;
-        } else {
-            await this.ensureIndexBuilt();
-            const indexed = this.sdi.findFor(className, document.uri); // #571
-            if (indexed.length > 0) {
-                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentName;
-            }
-        }
+        parentClassName = await this.resolveParentName(className, document) ?? undefined;   // #623
 
         if (!parentClassName) return filtered;
 
@@ -2390,18 +2381,33 @@ export class MemberLocatorService {
      * and its include chain (before falling back to the indexer).
      * Returns the info only if found and has a parentClass field worth following.
      */
+    /**
+     * #623 — the parent of `className`, in two tiers: the open document's own text first (it may
+     * hold unsaved edits), then the declaration index, which covers a class declared in an .inc.
+     *
+     * Public because CompletionProvider needs exactly this and had only the first tier, so
+     * `PARENT.` offered nothing whenever the class lived in an .inc. One implementation, so the
+     * two cannot drift again.
+     */
+    public async resolveParentName(className: string, document: TextDocument): Promise<string | null> {
+        const inOpenDocument = await this.findClassInfoInDoc(className, document);
+        if (inOpenDocument?.parentClass) return inOpenDocument.parentClass;
+
+        await this.ensureIndexBuilt();
+        const indexed = this.sdi.findFor(className, document.uri); // #571
+        if (indexed.length === 0) return null;
+        return (indexed.find(d => !d.isType) || indexed[0]).parentName ?? null;
+    }
+
     private async findClassInfoInDoc(
         className: string,
         document: TextDocument
     ): Promise<{ parentClass?: string } | null> {
-        // Quick scan: look for "ClassName  CLASS(ParentName)" in the document text
-        const lines = document.getText().split('\n');
-        const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');
-        for (const line of lines) {
-            const m = line.match(pattern);
-            if (m) return { parentClass: m[1] };
-        }
-        return null;
+        // #623: shared with CompletionProvider.resolveParentOf, which was the same function
+        // written out twice. Both read `\w` for the parent name, so a colon-bearing label such as
+        // `MyOwn:Base` matched nothing, and neither escaped the class name before interpolating it.
+        const parentClass = findParentInText(className, document.getText());
+        return parentClass ? { parentClass } : null;
     }
 
     /**

@@ -7,6 +7,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { TokenHelper } from './TokenHelper';
 import { resolveEnclosingClassName } from './EnclosingClassResolver';
+import { extractParentName } from './ParentClassName';
 import { StructureDeclarationIndexer, inheritsMembersFromParent } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
@@ -416,10 +417,10 @@ export class ClassMemberResolver {
 
                 // Member not in this class — walk the inheritance chain
                 const classDecLine = lines[labelToken.line];
-                const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
-                if (parentMatch) {
+                const parentName = extractParentName(classDecLine);   // #623: colon-aware, shared
+                if (parentName) {
                     const parentResult = this.findMemberInParentChain(
-                        parentMatch[1], memberName, paramCount, new Set([className!.toLowerCase()]), document.uri
+                        parentName, memberName, paramCount, new Set([className!.toLowerCase()]), document.uri
                     );
                     if (parentResult) return parentResult;
                 }
@@ -544,10 +545,10 @@ export class ClassMemberResolver {
                         }
 
                         // Member not in this class/queue/group — walk the inheritance chain
-                        const parentMatch = includeLine.match(/(?:CLASS|QUEUE|GROUP)\s*\(\s*(\w+)\s*\)/i);
-                        if (parentMatch) {
+                        const parentName = extractParentName(includeLine, ['CLASS', 'QUEUE', 'GROUP']);   // #623
+                        if (parentName) {
                             const parentResult = this.findMemberInParentChain(
-                                parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
+                                parentName, memberName, paramCount, new Set([className.toLowerCase()]), document.uri
                             );
                             if (parentResult) return parentResult;
                         }
@@ -643,10 +644,10 @@ export class ClassMemberResolver {
         const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
         if (labelToken) {
             const classDecLine = lines[labelToken.line];
-            const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
-            if (parentMatch) {
+            const parentName = extractParentName(classDecLine);   // #623: colon-aware, shared
+            if (parentName) {
                 return this.findMemberInParentChain(
-                    parentMatch[1], memberName, paramCount, new Set([className.toLowerCase()]), document.uri
+                    parentName, memberName, paramCount, new Set([className.toLowerCase()]), document.uri
                 );
             }
             return null; // Class found but has no parent
@@ -686,8 +687,8 @@ export class ClassMemberResolver {
         const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
         if (labelToken) {
             const classDecLine = docLines[labelToken.line];
-            const parentMatch = classDecLine.match(/CLASS\s*\(\s*(\w+)\s*\)/i);
-            parentClassName = parentMatch ? parentMatch[1] : null;
+            const parentName = extractParentName(classDecLine);   // #623: colon-aware, shared
+            parentClassName = parentName;
         }
 
         // Fall back to scanning include files / classIndexer
@@ -745,8 +746,8 @@ export class ClassMemberResolver {
                 const includeLines = fs.readFileSync(resolvedPath, 'utf8').split('\n');
                 for (let j = 0; j < includeLines.length; j++) {
                     if (!new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP)`, 'i').test(includeLines[j])) continue;
-                    const parentMatch = includeLines[j].match(/(?:CLASS|QUEUE|GROUP)\s*\(\s*(\w+)\s*\)/i);
-                    return parentMatch ? parentMatch[1] : null;
+                    const parentName = extractParentName(includeLines[j], ['CLASS', 'QUEUE', 'GROUP']);   // #623
+                    return parentName;
                 }
             }
         }
