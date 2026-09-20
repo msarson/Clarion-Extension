@@ -6,6 +6,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { TokenHelper } from './TokenHelper';
+import { resolveEnclosingClassName } from './EnclosingClassResolver';
 import { StructureDeclarationIndexer, inheritsMembersFromParent } from './StructureDeclarationIndexer';
 import { ClarionPatterns } from './ClarionPatterns';
 import { MethodOverloadResolver } from './MethodOverloadResolver';
@@ -311,45 +312,12 @@ export class ClassMemberResolver {
         logger.info(`🔍 findClassMemberInfo called for member: ${memberName}${paramCount !== undefined ? ` with ${paramCount} parameters` : ''}`);
         
         const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
-        
-        // Find the current scope to get the class name
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
-        if (!currentScope) {
-            logger.info('❌ No scope found');
-            return null;
-        }
-        
-        logger.info(`Scope: ${currentScope.value}`);
 
-        // If we're in a routine, get the parent scope
-        if (currentScope.subType === TokenType.Routine) {
-            logger.info(`Current scope is a routine, looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
-            if (parentScope) {
-                currentScope = parentScope;
-                logger.info(`Using parent scope: ${currentScope.value}`);
-            } else {
-                return null;
-            }
-        }
-        
-        // Extract class name from method
-        let className: string | null = null;
-        if (currentScope.value.includes('.')) {
-            className = currentScope.value.split('.')[0];
-        } else {
-            const content = document.getText();
-            const lines = content.split('\n');
-            const scopeLine = lines[currentScope.line];
-            // Clarion labels may contain ':' (MyOwn:CLASS.My:My:Method) — \w alone stops at the
-            // colon, the match fails, and every SELF.member hover inside such a method dies here
-            // with "Could not determine className" regardless of what member is hovered.
-            const classMethodMatch = scopeLine.match(/^([\w:]+)\.(?:[\w:]+\.)?([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-            if (classMethodMatch) {
-                className = classMethodMatch[1];
-            }
-        }
-        
+        // #622: the scope walk and class-name extraction that stood here is now shared — this was
+        // the most capable of the six copies, so the helper took its rules (routine-only hop,
+        // 3-part form, colon labels per #247).
+        const className = resolveEnclosingClassName(document, currentLine, structure);
+
         if (!className) {
             logger.info('❌ Could not determine className');
             return null;
@@ -660,25 +628,9 @@ export class ClassMemberResolver {
         tokens: Token[],
         paramCount?: number
     ): Promise<MemberInfo | null> {
-        const structure = this.tokenCache.getStructure(document);
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine);
-        if (!currentScope) return null;
-
-        if (currentScope.subType === TokenType.Routine) {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
-            if (parentScope) currentScope = parentScope;
-            else return null;
-        }
-
-        let className: string | null = null;
-        if (currentScope.value.includes('.')) {
-            className = currentScope.value.split('.')[0];
-        } else {
-            const lines = document.getText().split('\n');
-            const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-            if (m) className = m[1];
-        }
+        // #622: shared walk. This copy carried the 2-part pattern, so a method implemented as
+        // `Class.Interface.Method` resolved to no class here and PARENT.member found nothing.
+        const className = resolveEnclosingClassName(document, currentLine, this.tokenCache.getStructure(document));
         if (!className) return null;
 
         // Ensure the class index is built — it's needed for parent chain resolution
@@ -718,25 +670,9 @@ export class ClassMemberResolver {
         currentLine: number,
         tokens: Token[]
     ): Promise<{ parentClassName: string; moduleFile?: string } | null> {
-        const structure = this.tokenCache.getStructure(document);
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine);
-        if (!currentScope) return null;
-
-        if (currentScope.subType === TokenType.Routine) {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
-            if (parentScope) currentScope = parentScope;
-            else return null;
-        }
-
-        let className: string | null = null;
-        if (currentScope.value.includes('.')) {
-            className = currentScope.value.split('.')[0];
-        } else {
-            const lines = document.getText().split('\n');
-            const scopeLine = lines[currentScope.line];
-            const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-            if (m) className = m[1];
-        }
+        // #622: shared walk — third of the three copies that lived in this file. Same 2-part
+        // limitation as the one above.
+        const className = resolveEnclosingClassName(document, currentLine, this.tokenCache.getStructure(document));
         if (!className) return null;
 
         await this.ensureIndexBuilt(document);

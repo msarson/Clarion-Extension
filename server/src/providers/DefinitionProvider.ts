@@ -12,6 +12,7 @@ import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { SelfParentClassResolver } from '../utils/SelfParentClassResolver';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import { findSectionLocation } from '../utils/SectionLocator';
@@ -1293,47 +1294,9 @@ export class DefinitionProvider {
     private async findClassMember(tokens: Token[], memberName: string, document: TextDocument, currentLine: number): Promise<Location | null> {
         logger.info(`Looking for class member ${memberName} in current context`);
 
-        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
-        
-        // Find the current class or method context
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
-        if (!currentScope) {
-            logger.info('No scope found - cannot determine class context');
-            return null;
-        }
-
-        // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
-        if (currentScope.subType === TokenType.Routine) {
-            logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
-            if (parentScope) {
-                currentScope = parentScope;
-                logger.info(`Using parent scope: ${currentScope.value}`);
-            } else {
-                logger.info('No parent scope found for routine');
-                return null;
-            }
-        }
-
-        // For method implementations, extract the class name (e.g., "StringTheory._Malloc" -> "StringTheory")
-        let className: string | null = null;
-        if (currentScope.value.includes('.')) {
-            className = currentScope.value.split('.')[0];
-            logger.info(`Extracted class name from method: ${className}`);
-        } else {
-            // Scope value doesn't have class name, try to parse from the actual line
-            const content = document.getText();
-            const lines = content.split('\n');
-            const scopeLine = lines[currentScope.line];
-            logger.info(`Scope line text: "${scopeLine}"`);
-            
-            // Match ClassName.MethodName PROCEDURE pattern
-            const classMethodMatch = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-            if (classMethodMatch) {
-                className = classMethodMatch[1];
-                logger.info(`Extracted class name from line: ${className}`);
-            }
-        }
+        // #622: shared walk — this was a verbatim copy plus logging, carrying the 2-part pattern.
+        const className = resolveEnclosingClassName(document, currentLine, this.tokenCache.getStructure(document));
+        logger.info(`Class context for line ${currentLine}: ${className ?? '(none)'}`);
 
         if (!className) {
             logger.info('Could not determine class name from context');

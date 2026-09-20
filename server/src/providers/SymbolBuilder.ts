@@ -1,4 +1,5 @@
 import { DocumentSymbol, SymbolKind, Range, Position } from 'vscode-languageserver';
+import { isMethodImplementationLabel } from '../utils/EnclosingClassResolver';
 
 /**
  * Helper class for building DocumentSymbol instances with consistent patterns
@@ -86,7 +87,7 @@ export class SymbolBuilder {
      * Example: "StringTheory.Append" -> true
      */
     static isClassMethod(label: string): boolean {
-        return label.includes('.');
+        return isMethodImplementationLabel(label);   // #622
     }
 
     /**

@@ -4,6 +4,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { ClassMemberResolver } from './ClassMemberResolver';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
+import { resolveEnclosingClassName } from './EnclosingClassResolver';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import LoggerManager from '../logger';
 
@@ -248,23 +249,11 @@ export class ChainedPropertyResolver {
 
     /** Extracts the class name the current scope belongs to (for SELF resolution). Public for CompletionProvider. */
     public resolveCurrentClassName(document: TextDocument, position: Position, tokens: Token[]): string | null {
-        const structure = this.tokenCache.getStructure(document);
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line);
-        if (!currentScope) return null;
-
-        if (currentScope.subType !== undefined) {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
-            if (parentScope) currentScope = parentScope;
-        }
-
-        if (currentScope.value.includes('.')) {
-            return currentScope.value.split('.')[0];
-        }
-
-        const lines = document.getText().split('\n');
-        const scopeLine = lines[currentScope.line];
-        const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-        return m ? m[1] : null;
+        // #622: was one of six copies of this walk. Two of its own quirks went with it — it hopped
+        // out of the scope on ANY subType rather than only a ROUTINE, and its line pattern was
+        // 2-part, so a `Class.Interface.Method` implementation resolved to nothing here while the
+        // copy in ClassMemberResolver handled it.
+        return resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
     }
 
     /** Resolves the parent class name for PARENT resolution. */

@@ -1,4 +1,5 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
+import { findEnclosingClassToken } from '../../utils/EnclosingClassResolver';
 import { clarionSourceCandidates } from '../../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -529,28 +530,7 @@ export class MethodHoverResolver {
      * Find the CLASS token for a method declaration
      */
     private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {
-        // Search backwards from the method line to find the CLASS token
-        for (let i = tokens.length - 1; i >= 0; i--) {
-            const token = tokens[i];
-
-            // Stop if we've gone past the method line
-            if (token.line > methodLine) {
-                continue;
-            }
-
-            // Look for CLASS structure
-            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Use the tokenizer's own nesting-aware finishesAt (stack-based, END-marker
-                // driven — not indentation) instead of hand-scanning for a column-0 END.
-                // A local/anonymous CLASS declared inside a procedure's DATA section is
-                // closed by an indented END, which a column-0 scan would skip right past.
-                if (token.finishesAt === undefined || methodLine <= token.finishesAt) {
-                    return token;
-                }
-            }
-        }
-
-        return null;
+        return findEnclosingClassToken(tokens, methodLine);   // #622
     }
 
     /**

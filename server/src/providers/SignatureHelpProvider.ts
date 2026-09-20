@@ -10,6 +10,7 @@ import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSite
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { DocumentStructure } from '../DocumentStructure';
@@ -295,35 +296,11 @@ export class SignatureHelpProvider {
         let className: string | null = null;
 
         if (prefix.toLowerCase() === 'self') {
-            // Find current class context
-            let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
-            
-            // If we're in a routine, get the parent scope
-            if (currentScope && currentScope.subType === TokenType.Routine) {
-                logger.info(`Current scope is a routine, looking for parent scope`);
-                const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
-                if (parentScope) {
-                    currentScope = parentScope;
-                    logger.info(`Using parent scope: ${currentScope.value}`);
-                }
-            }
-            
-            if (currentScope) {
-                // Extract class name from method
-                if (currentScope.value.includes('.')) {
-                    className = currentScope.value.split('.')[0];
-                } else {
-                    // Parse from the actual line text
-                    const content = document.getText();
-                    const lines = content.split('\n');
-                    const scopeLine = lines[currentScope.line];
-                    const classMethodMatch = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-                    if (classMethodMatch) {
-                        className = classMethodMatch[1];
-                        logger.info(`Extracted class name from line: ${className}`);
-                    }
-                }
-            }
+            // #622: shared walk. Note this copy did NOT bail when a routine had no parent scope —
+            // it carried on with the routine as the scope, whose label has no dot, so the result
+            // was the same null by a longer road.
+            className = resolveEnclosingClassName(document, currentLine, structure);
+            logger.info(`SELF class context for line ${currentLine}: ${className ?? '(none)'}`);
         } else {
             // Try to find the variable type — check cross-file first, then current file
             const typeInfo = await this.memberLocator.resolveVariableType(prefix, tokens, document);
