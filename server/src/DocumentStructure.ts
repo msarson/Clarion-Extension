@@ -2031,30 +2031,21 @@ export class DocumentStructure {
             return;
         }
         
-        // ✅ Check if this period is part of a continued statement (line with | before this line)
-        // If the previous line has a line continuation, this period is a statement terminator, not a structure terminator
-        if (token.value === '.') {
-            const prevLine = this.tokensByLine.get(token.line - 1) || [];
-            let lastTokenOnPrevLine: Token | undefined;
-            for (let i = prevLine.length - 1; i >= 0; i--) {
-                const t = prevLine[i];
-                if (t.type !== TokenType.Comment) {
-                    lastTokenOnPrevLine = t;
-                    break;
-                }
-            }
-            
-            if (lastTokenOnPrevLine) {
-                const hasContinuation = lastTokenOnPrevLine.type === TokenType.LineContinuation || 
-                                       lastTokenOnPrevLine.value === '|';
-                if (hasContinuation) {
-                    // This period ends a continued statement, not a structure
-                    if (DOCSTRUCT_TRACE) logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
-                    return;
-                }
-            }
-        }
-        
+        // A period reached on the tail of a `|`-continued statement used to return here without
+        // popping, on the premise that it "ends a continued statement, not a structure". Clarion
+        // has no statement-terminating period: a standalone `.` is the END equivalent and nothing
+        // else, whether or not the statement it follows was split across lines. Bailing left the
+        // structure open, so the next END popped IT and its parent was reported unterminated —
+        //
+        //     IF hr = 0
+        //       RETURN SELF.Run(a, b, |
+        //         c, d).
+        //     END
+        //
+        // where the `.` closes the inner IF and the END closes the outer one. Line continuation is
+        // the tokenizer's concern; by the time a `.` arrives here typed as an EndStatement, the
+        // decision that it IS a terminator has already been made.
+
         // Look ahead to find the next non-comment token. #188 — use the caller's
         // loop index instead of this.tokens.indexOf(token) (O(T) per END → O(1)).
         const currentIndex = index;
