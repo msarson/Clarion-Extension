@@ -654,7 +654,7 @@ export class MemberLocatorService {
     /**
      * #358: ensure the MEMBER('...') parent of `document` is tokenized and in the TokenCache,
      * OFF the felt path. Resolving a MEMBER module's globals (e.g. GlobalErrors, thisStartup)
-     * walks to their declarations in the parent — on IBSWorking that parent (IBSCommon.clw) is
+     * walks to their declarations in the parent — on WorkingLib that parent (CommonLib.clw) is
      * 873 KB / 68k tokens declaring globals ~9,500 lines deep, so the FIRST cold receiver-type
      * resolution pays ~1.1s just to tokenize it. Warming it on the startup idle lane pays that
      * once, in the background, so no interactive validation lands it. Best-effort: returns true
@@ -760,7 +760,7 @@ export class MemberLocatorService {
         // diagnostics pipeline (ReturnValueDiagnostics -> resolveVariableType) while
         // a hover is in flight, and adding yields here let that background work
         // interleave with the hover (NetDebugTrace cold hover 1.06s -> 2.5s on the
-        // ap1.sln rig). With the label pre-filter a miss no longer tokenizes, so the
+        // app1.sln rig). With the label pre-filter a miss no longer tokenizes, so the
         // walk is short enough to run without yielding, exactly as it did before.
         const timeSlice = async (): Promise<void> => { /* no yield — see above */ };
 
@@ -790,7 +790,7 @@ export class MemberLocatorService {
     // declare it, and there is no reason to tokenize it. The tokenize is the
     // expensive part: cold-loading the include universe of an 11K-line generated
     // PROGRAM module cost ~10.5s per NEW undeclared word (`DLL(dll_mode)` in
-    // IBSCommon.clw), all of it in this walk, to return null.
+    // CommonLib.clw), all of it in this walk, to return null.
     //
     // Each reachable file is scanned ONCE per cross-file epoch for its column-0
     // labels and its INCLUDE targets (one regex pass over the text; the text is

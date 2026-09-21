@@ -1,10 +1,10 @@
 /**
  * F12 on a member of a colon-named receiver (#612).
  *
- * Found by the #609 agreement sweep (8 of 456 ap1 positions): hover resolved `Relate:IBSDUC.Open()`,
+ * Found by the #609 agreement sweep (8 of 456 app1 positions): hover resolved `Relate:ACMDUC.Open()`,
  * `ACCESS:X.TryFetch(...)` and `ThisListManager:Browse:1.Init(...)`, F12 returned nothing. Every
  * generated procedure opens and closes its files this way. F12 took the receiver as the word
- * before the dot with `\w+`, which stops at the colon - `IBSDUC`, not `Relate:IBSDUC`.
+ * before the dot with `\w+`, which stops at the colon - `ACMDUC`, not `Relate:ACMDUC`.
  */
 import * as assert from 'assert';
 import { HoverProvider } from '../providers/HoverProvider';

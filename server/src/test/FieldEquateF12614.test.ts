@@ -1,7 +1,7 @@
 /**
  * F12 on a `?Name` field equate goes to the control, as hover does (#614).
  *
- * Found by the #609 agreement sweep on ap1: `SELF.FirstField = ?LOC:REPORT_DATE:Prompt` - hover
+ * Found by the #609 agreement sweep on app1: `SELF.FirstField = ?LOC:REPORT_DATE:Prompt` - hover
  * showed the PROMPT, F12 went to `Prompt EQUATE(2)` in claedgeequ.inc (the name stripped to its
  * last colon segment); `?LOC:YEAR_1099:Prompt` gave F12 nothing. Only hover read the `?Name`
  * token; F12 treated it as an ordinary colon name.

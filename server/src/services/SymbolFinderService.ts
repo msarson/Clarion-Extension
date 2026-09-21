@@ -53,7 +53,7 @@ const includeChainIndexCache = new Map<string, ChainIndexEntry>();
 interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
 const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
 // #345: the cold build tokenizes the ABC/libsrc universe (17-32s measured on
-// IBSWorking) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
+// WorkingLib) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
 // run. The #340 watcher eviction is the primary invalidation (workspace file
 // changes); the TTL only backstops edits the watcher can't see (libsrc edited
 // outside the workspace), so it can be generous.
@@ -1109,9 +1109,9 @@ export class SymbolFinderService {
 
     /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
-     * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
-     * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
-     * so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+     * e.g. "ACMDataSets:Record" → prefix="ACMDataSets", fieldName="Record"
+     * Finds the structure with structurePrefix="ACMDataSets" and returns scope='field'
+     * so FAR only matches ACMDataSets:Record tokens (not bare "Record").
      */
     private async findPrefixedField(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
         const colonIndex = word.indexOf(':');
@@ -1199,7 +1199,7 @@ export class SymbolFinderService {
     private findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
         const fieldNameUpper = fieldName.toUpperCase();
 
-        // Find structure with matching structurePrefix (e.g. FILE,PRE(IBSDataSets))
+        // Find structure with matching structurePrefix (e.g. FILE,PRE(ACMDataSets))
         const structureToken = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.structurePrefix?.toUpperCase() === prefixUpper
@@ -2024,8 +2024,8 @@ export class SymbolFinderService {
         }
         
         // If not found and word has colon, first try to resolve as PRE:Field notation.
-        // e.g. "IBSDataSets:Record" → find structure with structurePrefix="IBSDataSets",
-        // return scope='field' so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+        // e.g. "ACMDataSets:Record" → find structure with structurePrefix="ACMDataSets",
+        // return scope='field' so FAR only matches ACMDataSets:Record tokens (not bare "Record").
         const colonIdx = word.indexOf(':');
         if (colonIdx > 0) {
             const prefixedResult = await this.findPrefixedField(word, tokens, document);

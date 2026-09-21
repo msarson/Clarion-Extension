@@ -1,7 +1,7 @@
 /**
  * Hover on `obj.Method(...)` shows the member F12 goes to (#611).
  *
- * Found by the #609 agreement sweep on ap1 (13 of 456 positions), F12 right and hover wrong:
+ * Found by the #609 agreement sweep on app1 (13 of 456 positions), F12 right and hover wrong:
  * - `ThisWindow.Run()`: the local ThisWindow overrides only Run(USHORT Number,BYTE Request); hover
  *   showed that two-argument override for a zero-argument call instead of the inherited Run().
  * - `EnhancedFocusManager.Init(...)`, a variable of EnhancedFocusClassType: hover showed the Init of

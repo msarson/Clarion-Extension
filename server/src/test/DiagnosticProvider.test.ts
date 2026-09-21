@@ -2336,7 +2336,7 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
 // already skips the trailing Variable via isGluedNumberSuffix (prevChar '.'),
 // so it fires no diagnostic — but the AUGMENT pass only skipped colon-adjacent
 // fragments, so it spent a full cross-file findSymbol walk on each leaf. On the
-// real IBSCommon.clw, 51 such leaves cost ~9s (warm) / triggered the ~18.5s
+// real CommonLib.clw, 51 such leaves cost ~9s (warm) / triggered the ~18.5s
 // chain-index cold build. The augment pass must use the SAME discriminator.
 // ─────────────────────────────────────────────────────────────────────────────
 suite('DiagnosticProvider - undeclaredVar dotted-member leaves (#358)', () => {
@@ -2467,7 +2467,7 @@ MyView VIEW(Customer)
     });
 
     test('BUG PIN #349 — fields nested in overlay GROUPs are valid PROJECT targets (JCA:StartedDate shape)', () => {
-        // Mark's IBSWorking: the dictionary generates MS-SQL date/time splits
+        // Mark's WorkingLib: the dictionary generates MS-SQL date/time splits
         // as GROUP,OVER overlays inside the RECORD. collectFieldNames only
         // walked the RECORD's DIRECT Label children, so overlay-nested fields
         // (and the overlay's own label) were flagged 'not a field on FILE'.

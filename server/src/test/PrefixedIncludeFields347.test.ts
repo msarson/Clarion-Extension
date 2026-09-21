@@ -14,8 +14,8 @@ import {
 
 /**
  * Issue #347 — undeclaredVar false positives on PRE-prefixed FILE fields
- * (Mark's IBSWorking: JCA:StartedDate / JCA:EndedDate, the persistent
- * diag_count=2 on SelectJobNumber_IBSCommon.clw).
+ * (Mark's WorkingLib: JCA:StartedDate / JCA:EndedDate, the persistent
+ * diag_count=2 on SelectRecord_CommonLib.clw).
  *
  * The dictionary-generated `JCMaster FILE,...,PRE(JCA)` declaration is
  * carried into the program via INCLUDE. Prefixed-field resolution had a
@@ -102,7 +102,7 @@ suite('Issue #347 — PRE-prefixed fields from include-carried declarations', ()
     });
 
     test('BUG PIN #348 — prefixed field resolves when member and program live in DIFFERENT directories (redirection fallback)', async () => {
-        // Mark's IBSWorking layout: member modules in genfiles\src, app main
+        // Mark's WorkingLib layout: member modules in genfiles\src, app main
         // (with the inline FILE,PRE(JCA) declarations) at the project root per
         // the RED. findPrefixedField's parent walk dead-ended on the same-dir
         // fs.existsSync — the #300 redirection fallback was missing.

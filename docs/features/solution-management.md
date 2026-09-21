@@ -137,7 +137,7 @@ When opening a solution for the first time, you'll configure:
 
 **What:** which installed Clarion the solution is edited and built with.
 
-The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "DirectSystems", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
+The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "Clarion 10 Dev", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
 
 **Set or change it:**
 - `Ctrl+Shift+P` → **Clarion: Set Active Version**

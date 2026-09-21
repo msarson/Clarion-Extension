@@ -2,8 +2,8 @@
  * #600 — find-all-references misses the call sites of a colon-qualified name whose PREFIX is
  * longer than eight characters.
  *
- * Found by the #599 corpus sweep on ap1.sln, then reduced to one file: `IBSCommon:Init` is declared
- * inside `MODULE('IBSCOMMON.DLL')` at CRS.clw:418 and called at CRS.clw:2626, and
+ * Found by the #599 corpus sweep on app1.sln, then reduced to one file: `CommonLib:Init` is declared
+ * inside `MODULE('COMMONLIB.DLL')` at CRS.clw:418 and called at CRS.clw:2626, and
  * textDocument/references returned ONLY the declaration from either cursor — in the very file the
  * request was made in, so not a search-set-width problem.
  *
@@ -15,7 +15,7 @@
  * DECLARATION always matches. A call site is indented, and there the cap decides:
  *
  *     GLO:Init          prefix 3   -> StructurePrefix("GLO:Init")              one token
- *     IBSCommon:Init    prefix 9   -> Variable("IBSCommon") ':' Function("Init")  three tokens
+ *     CommonLib:Init    prefix 9   -> Variable("CommonLib") ':' Function("Init")  three tokens
  *
  * `findReferencesInFile` compares `token.value` against the search word, so the three-token form can
  * never match and the call site is invisible. Same root cause as #597 — one name arriving as several
@@ -50,19 +50,19 @@ suite('FAR on a long-prefix colon name (#600)', () => {
     const docs = new Map<string, TextDocument>();
 
     // Mirrors the reported shape: a DLL import declared at column 0 inside a MODULE block, called
-    // from the program's main code. `IBSCommon` is nine characters, `Short` is five.
+    // from the program's main code. `CommonLib` is nine characters, `Short` is five.
     const files: { [rel: string]: string } = {
-        'ap1.clw': [
+        'app1.clw': [
             '  PROGRAM',                                  // 0
             '  MAP',                                      // 1
             "    MODULE('common.dll')",                   // 2
-            'IBSCommon:Init        PROCEDURE(),DLL',      // 3  long prefix — the bug
+            'CommonLib:Init        PROCEDURE(),DLL',      // 3  long prefix — the bug
             'Short:Init            PROCEDURE(),DLL',      // 4  short prefix — the control
             'reg:WIN:ShowExits     PROCEDURE(),DLL',      // 5  two colons — #596 cause 2
             '    END',                                    // 6
             '  END',                                      // 7
             '  CODE',                                     // 8
-            '  IBSCommon:Init()',                         // 9  call site that was never found
+            '  CommonLib:Init()',                         // 9  call site that was never found
             '  Short:Init()',                             // 10 call site that always worked
             '  reg:WIN:ShowExits()',                      // 11 two colons — #596 cause 2
             '  RETURN',                                   // 12
@@ -87,7 +87,7 @@ suite('FAR on a long-prefix colon name (#600)', () => {
             tc.getTokens(doc);
             docs.set(rel, doc);
         }
-        const project = new ClarionProjectServer('ap1', 'app', dir, '{PFX-600}');
+        const project = new ClarionProjectServer('app1', 'app', dir, '{PFX-600}');
         for (const rel of Object.keys(files)) project.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, project));
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = {
             solution: { projects: [project] },
@@ -122,20 +122,20 @@ suite('FAR on a long-prefix colon name (#600)', () => {
         (refs ?? []).map(r => r.range.start.line).sort((a, b) => a - b);
 
     async function far(line: number, character: number) {
-        const doc = docs.get('ap1.clw')!;
+        const doc = docs.get('app1.clw')!;
         return new ReferencesProvider().provideReferences(doc, { line, character }, { includeDeclaration: true });
     }
 
     test('the eight-character cap is what splits the call site — the tokens say so', () => {
-        const tokens = new ClarionTokenizer(files['ap1.clw']).tokenize();
+        const tokens = new ClarionTokenizer(files['app1.clw']).tokenize();
         const at = (line: number) => tokens.filter(t => t.line === line).map(t => `${TokenType[t.type]}(${t.value})`);
 
         // Short prefix: one token, so `token.value` alone matches the search word.
         assert.deepStrictEqual(at(10).slice(0, 1), ['StructurePrefix(Short:Init)']);
 
-        // Long prefix: three tokens, none of which equals "IBSCommon:Init".
+        // Long prefix: three tokens, none of which equals "CommonLib:Init".
         assert.deepStrictEqual(at(9).slice(0, 3),
-            ['Variable(IBSCommon)', 'Delimiter(:)', 'Function(Init)']);
+            ['Variable(CommonLib)', 'Delimiter(:)', 'Function(Init)']);
     });
 
     test('the short-prefix control finds its call site (before and after — this is the control)', async () => {
@@ -167,7 +167,7 @@ suite('FAR on a long-prefix colon name (#600)', () => {
     // word is the whole name. resolvePrefixedName walks a chain of any length, so the fix here
     // should already cover it — asserted rather than assumed, because "should" is not evidence.
     test('a two-colon call site is found — #596 cause 2, same helper', async () => {
-        const tokens = new ClarionTokenizer(files['ap1.clw']).tokenize();
+        const tokens = new ClarionTokenizer(files['app1.clw']).tokenize();
         const at11 = tokens.filter(t => t.line === 11).map(t => `${TokenType[t.type]}(${t.value})`);
         assert.deepStrictEqual(at11.slice(0, 3),
             ['StructurePrefix(reg:WIN)', 'Delimiter(:)', 'Function(ShowExits)'],

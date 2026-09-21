@@ -81,19 +81,19 @@ suite('#517 unresolved procedure calls', () => {
         assert.deepStrictEqual(flagged(d), []);
     });
 
-    // A colon-prefixed procedure (`IBSCommon:Kill PROCEDURE,DLL` — every generated
+    // A colon-prefixed procedure (`CommonLib:Kill PROCEDURE,DLL` — every generated
     // DLL-init/kill pair) tokenizes in two shapes: one token when the prefix is 8
     // characters or fewer (`ABC:Init`), Variable ':' Function above that
-    // (`IBSCommon` ':' `Kill`). The real-solution trial flagged `Kill` on the
+    // (`CommonLib` ':' `Kill`). The real-solution trial flagged `Kill` on the
     // second shape because only the part after the colon was looked up.
     const PREFIXED = [
         '  PROGRAM',
         '  MAP',
-        'IBSCommon:Kill  PROCEDURE,DLL',
+        'CommonLib:Kill  PROCEDURE,DLL',
         'ABC:Init        PROCEDURE,DLL',
         '  END',
         '  CODE',
-        '  IBSCommon:Kill()',
+        '  CommonLib:Kill()',
         '  ABC:Init()',
         '  RETURN',
     ];
@@ -103,9 +103,9 @@ suite('#517 unresolved procedure calls', () => {
     });
 
     test('a colon-prefixed call declared nowhere is flagged under its FULL name', async () => {
-        const d = await run([...PREFIXED.slice(0, 8), '  IBSCommon:Missing()', '  ABC:Gone()', '  RETURN'].join('\n'));
-        assert.deepStrictEqual(flagged(d), ['ABC:Gone', 'IBSCommon:Missing']);
-        const long = d.find(x => String(x.message).includes('IBSCommon:Missing'))!;
+        const d = await run([...PREFIXED.slice(0, 8), '  CommonLib:Missing()', '  ABC:Gone()', '  RETURN'].join('\n'));
+        assert.deepStrictEqual(flagged(d), ['ABC:Gone', 'CommonLib:Missing']);
+        const long = d.find(x => String(x.message).includes('CommonLib:Missing'))!;
         assert.strictEqual(long.range.start.character, 2, 'the squiggle starts at the prefix, not at the colon');
     });
 

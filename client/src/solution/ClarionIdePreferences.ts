@@ -16,7 +16,7 @@ export interface IdePreferences {
  * Uses the WIN32 variant: hash1 = hash2 = (5381<<16)+5381, processes char-pairs as int32.
  * All arithmetic wraps at 32-bit signed integer boundaries (matching .NET behaviour).
  *
- * Test vector: "c:\development\ibsworking\ap1.sln" → "ecfee7f0"
+ * Test vector: "c:\dev\sample\MySln.sln" → "ef421397"
  */
 export function computeSlnHash(slnPath: string): string {
     const s = slnPath.toLowerCase();
@@ -47,7 +47,7 @@ export function computeSlnHash(slnPath: string): string {
  * Returns the full path to the Clarion IDE preferences XML for the given solution.
  * The folder is derived from the propertiesFile path:
  *   e.g. C:\...\SoftVelocity\Clarion\10.0\ClarionProperties.xml
- *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.sln.ecfee7f0.xml
+ *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.sln.ef421397.xml
  */
 export function getPreferencesFilePath(slnPath: string, propertiesFile: string): string {
     const preferencesDir = path.join(path.dirname(propertiesFile), 'preferences');

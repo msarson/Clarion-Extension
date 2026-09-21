@@ -1619,7 +1619,7 @@ export class ReferencesProvider {
         if (!target) return null;
 
         // The INCLUDE lines naming `target` in one file, found by a TEXT scan — a
-        // tokenize per includer was 240s over ABBROWSE.INC's includers on ap1.sln.
+        // tokenize per includer was 240s over ABBROWSE.INC's includers on app1.sln.
         const base = path.basename(target).toLowerCase();
         const includeLinesFor = (uri: string): Location[] => {
             const text = uri.toLowerCase() === document.uri.toLowerCase()
@@ -2086,7 +2086,7 @@ export class ReferencesProvider {
                 scannedThisRound = true;
                 // #550 — a text scan, not a tokenize: the family only needs `Label CLASS(Parent)`
                 // lines, and a Clarion label always starts in column 1. Tokenizing every
-                // candidate (108 generated modules mentioning the class on ap1.sln) cost 12.7s
+                // candidate (108 generated modules mentioning the class on app1.sln) cost 12.7s
                 // of a 13.7s search; reading them and matching one anchored regex does not.
                 const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
                 if (text === null) continue;
@@ -2755,7 +2755,7 @@ export class ReferencesProvider {
         if (!declProject) return null;
         // Until the reference index is built (seconds after start) nothing can be pruned,
         // and a family of 34 projects would mean scanning the whole solution (73s cold on
-        // ap1.sln). Stay project-scoped until then, as before #526.
+        // app1.sln). Stay project-scoped until then, as before #526.
         if (!ReferenceCountIndex.getInstance().isBuilt) {
             logger.test(`[FAR] #526: reference index not built yet → project-scoped search for "${name}"`);
             return null;
@@ -3012,7 +3012,7 @@ export class ReferencesProvider {
                 // a PROGRAM's MAP is the FIRST, and every module of that program may reference it.
                 //
                 // Both resolve to `module` scope here, so the narrow rule was applied to both. On
-                // ap1.sln that made PrintForm, declared in DMCommon.clw's MAP, answer 7 references
+                // app1.sln that made RenderDoc, declared in DataUtil.clw's MAP, answer 7 references
                 // from its declaration and 8 from one of its own call sites — the same symbol giving
                 // two answers depending on where it was right-clicked.
                 //
@@ -3158,7 +3158,7 @@ export class ReferencesProvider {
      * #330 tier 2 — resolve the DEFINING project for a MAP declaration.
      * A declaration inside MODULE('x.dll'|'x.lib') maps the library basename
      * to the project whose main source is `<base>.clw` (the #299 pattern —
-     * verified 1:1 against projectReferences on the Direct10 substrate);
+     * verified 1:1 against projectReferences on the real-solution substrate);
      * any other declaration belongs to the project owning the declaring file.
      * Third-party DLLs (no in-solution project) resolve to null.
      */
@@ -3569,8 +3569,8 @@ export class ReferencesProvider {
                     // #600: a colon-qualified name arrives as ONE token or SEVERAL depending on how
                     // long its prefix is. StructurePrefix caps the prefix at eight characters
                     // (`[A-Z][A-Z0-9_]{0,7}`), so an indented `GLO:Init` is a single token whose
-                    // value matches above, while `IBSCommon:Init` — nine — splits into
-                    // Variable(IBSCommon) ':' Function(Init) and matches nothing. The declaration is
+                    // value matches above, while `CommonLib:Init` — nine — splits into
+                    // Variable(CommonLib) ':' Function(Init) and matches nothing. The declaration is
                     // unaffected because a name at column 0 is one Label whatever its length, which
                     // is why the symbol resolved correctly and only its CALL SITES went missing.
                     //

@@ -3,7 +3,7 @@
  * call site in project A, hover and Find All References resolved to project B's
  * procedure while F12 / Ctrl+F12 correctly stayed in A.
  *
- * The shape that triggers it, reproduced from ap1.sln (ap1 vs cm1):
+ * The shape that triggers it, reproduced from app1.sln (app1 vs lib1):
  *   - A prototypes the procedure in its PROGRAM's own MAP, inside a
  *     MODULE('forms_a.clw') block. The structure-declaration index only scans
  *     .inc/.equ files, so A's prototype is NEVER indexed.
@@ -43,7 +43,7 @@ suite('Cross-project same-named procedure (#483)', () => {
     let savedLibsrc: string[] = [];
     const docs = new Map<string, TextDocument>();
 
-    // Project A (ap1-like): prototype lives in the PROGRAM's own MAP — not indexed.
+    // Project A (app1-like): prototype lives in the PROGRAM's own MAP — not indexed.
     const aFiles: { [rel: string]: string } = {
         'a.clw': [
             '  PROGRAM',                                      // 0
@@ -77,7 +77,7 @@ suite('Cross-project same-named procedure (#483)', () => {
         ].join('\r\n'),
     };
 
-    // Project B (cm1-like): module-callout INC — indexed, and visible to A's index too.
+    // Project B (lib1-like): module-callout INC — indexed, and visible to A's index too.
     const bFiles: { [rel: string]: string } = {
         'b.clw': [
             '  PROGRAM',                                      // 0
@@ -142,7 +142,7 @@ suite('Cross-project same-named procedure (#483)', () => {
         write(bDir, bFiles);
         write(aDir, aFiles);
 
-        // B FIRST, as cm1 sorts before ap1 — any first-hit hunt lands on B.
+        // B FIRST, as lib1 sorts before app1 — any first-hit hunt lands on B.
         const pB = new ClarionProjectServer('B', 'app', bDir, '{B-483}');
         for (const rel of Object.keys(bFiles)) pB.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pB));
         const pA = new ClarionProjectServer('A', 'app', aDir, '{A-483}');

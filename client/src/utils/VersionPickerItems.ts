@@ -9,7 +9,7 @@ import { ClarionInstallation } from './ClarionInstallationDetector';
  *     ClarionProperties.xml per Installation. Discovered by
  *     ClarionInstallationDetector.
  *   - Compile Target — an entry inside an Installation's Clarion.Versions XML
- *     block (e.g. "Clarion 11.1.13855", "Clarion6IBS").
+ *     block (e.g. "Clarion 11.1.13855", "Clarion6ACM").
  *
  * Stage 1 lists Compile Targets within one Installation + appends a "switch
  * Installation" sentinel item. Stage 2 lists Installations.

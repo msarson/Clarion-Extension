@@ -422,7 +422,7 @@ export class StructureFieldResolver {
     async resolveTypeNameHover(typeName: string, document: TextDocument): Promise<Hover | null> {
         // #361 — GATE the include walk on the SDI. findTypeDeclarationInIncludes
         // does a recursive fs.readFileSync + tokenize of EVERY reachable INCLUDE;
-        // on IBSCommon.clw a hover over a word that isn't a type (NetDebugTrace,
+        // on CommonLib.clw a hover over a word that isn't a type (NetDebugTrace,
         // dll_mode, a word inside a string) walked the whole ABC/NetTalk/libsrc
         // universe synchronously — a 38s frozen editor. The SDI already indexes
         // every declared type across the redirection search paths, which is a

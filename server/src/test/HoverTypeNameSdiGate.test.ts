@@ -10,7 +10,7 @@ import { serverSettings } from '../serverSettings';
 /**
  * #361 — resolveTypeNameHover's include walk (findTypeDeclarationInIncludes) does
  * a recursive fs.readFileSync + tokenize of every reachable INCLUDE. On the real
- * IBSCommon.clw a hover over a word that is NOT a type walked the whole
+ * CommonLib.clw a hover over a word that is NOT a type walked the whole
  * ABC/NetTalk/libsrc universe synchronously — a 38s frozen editor. The SDI is a
  * superset of the document's reachable includes, so the walk is gated on it: an
  * SDI miss returns null WITHOUT the walk; an SDI hit still walks (and finds the

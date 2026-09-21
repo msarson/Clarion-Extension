@@ -206,7 +206,7 @@ export class VariableHoverResolver {
 
         // #420: a predefined compiler flag (DLL_MODE, _DEBUG_, _C80_ …) is set by the
         // compiler/project system and declared in NO source file — the cross-file walk
-        // below would cold-load the whole include universe (10.5s on IBSCommon.clw) to
+        // below would cold-load the whole include universe (10.5s on CommonLib.clw) to
         // return null. Checked AFTER the current-file tiers so a user declaration of
         // the same name still wins.
         const flagHover = this.compilerFlagHover(searchWord);

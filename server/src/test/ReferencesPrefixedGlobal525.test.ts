@@ -1,7 +1,7 @@
 /**
- * #525 — find-all-references on a prefixed label (GLO:Name, GVF:Owner).
+ * #525 — find-all-references on a prefixed label (GLO:Name, GBL:Owner).
  *
- * Reported on the live ap1.clw: `GVF:Owner STRING(256),EXTERNAL,DLL(_ABCDllMode_)`,
+ * Reported on the live app1.clw: `GBL:Owner STRING(256),EXTERNAL,DLL(_ABCDllMode_)`,
  * used in 50 modules, "no references". EXTERNAL is not the factor, the colon is. The
  * references provider prunes its search set with `ReferenceCountIndex.mayContain`
  * (since #315), and that index scanned identifiers with a pattern that stops at a
@@ -32,27 +32,27 @@ suite('FAR on prefixed labels (#525)', () => {
     let savedRed: string;
     const docs = new Map<string, TextDocument>();
     const files: { [rel: string]: string } = {
-        'ap1.clw': [
+        'app1.clw': [
             '  PROGRAM',                                                   // 0
             '  MAP',                                                       // 1
             "    MODULE('member1.clw')",                                   // 2
             '      DoThing PROCEDURE()',                                   // 3
             '    END',                                                     // 4
             '  END',                                                       // 5
-            'GVF:Owner            STRING(256),EXTERNAL,DLL(_ABCDllMode_)', // 6 — the reported shape
+            'GBL:Owner            STRING(256),EXTERNAL,DLL(_ABCDllMode_)', // 6 — the reported shape
             'GLO:Plain            STRING(20)',                              // 7 — the generated-app convention
             '  CODE',                                                      // 8
-            "  GVF:Owner = 'x'",                                           // 9
+            "  GBL:Owner = 'x'",                                           // 9
             "  GLO:Plain = 'y'",                                           // 10
         ].join('\r\n'),
         'member1.clw': [
-            "  MEMBER('ap1.clw')",                                         // 0
+            "  MEMBER('app1.clw')",                                         // 0
             '  MAP',                                                       // 1
             '  END',                                                       // 2
             'DoThing PROCEDURE()',                                         // 3
             '  CODE',                                                      // 4
-            "  IF GVF:Owner = '' THEN RETURN.",                            // 5
-            '  GLO:Plain = GVF:Owner',                                     // 6
+            "  IF GBL:Owner = '' THEN RETURN.",                            // 5
+            '  GLO:Plain = GBL:Owner',                                     // 6
         ].join('\r\n'),
     };
 
@@ -74,7 +74,7 @@ suite('FAR on prefixed labels (#525)', () => {
             tc.getTokens(doc);
             docs.set(rel, doc);
         }
-        const project = new ClarionProjectServer('ap1', 'app', dir, '{PFX-525}');
+        const project = new ClarionProjectServer('app1', 'app', dir, '{PFX-525}');
         for (const rel of Object.keys(files)) project.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, project));
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = {
             solution: { projects: [project] },
@@ -125,23 +125,23 @@ suite('FAR on prefixed labels (#525)', () => {
 
     test('mayContain answers true for files that mention the prefixed name', () => {
         const idx = ReferenceCountIndex.getInstance();
-        assert.strictEqual(idx.mayContain(path.join(dir, 'ap1.clw'), 'GLO:Plain'), true);
-        assert.strictEqual(idx.mayContain(path.join(dir, 'member1.clw'), 'GVF:Owner'), true);
+        assert.strictEqual(idx.mayContain(path.join(dir, 'app1.clw'), 'GLO:Plain'), true);
+        assert.strictEqual(idx.mayContain(path.join(dir, 'member1.clw'), 'GBL:Owner'), true);
     });
 
     test('FAR on a plain prefixed global from its declaration finds the program and the member', async () => {
         const refs = await new ReferencesProvider().provideReferences(
-            docs.get('ap1.clw')!, { line: 7, character: 4 }, { includeDeclaration: true });
+            docs.get('app1.clw')!, { line: 7, character: 4 }, { includeDeclaration: true });
         const got = keyed(refs);
-        assert.ok(got.includes('ap1.clw:10'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
+        assert.ok(got.includes('app1.clw:10'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
         assert.ok(got.includes('member1.clw:6'), `use in the member; got [${got.join(', ')}]`);
     });
 
     test('FAR on an EXTERNAL,DLL() prefixed global from its declaration finds the program and the member', async () => {
         const refs = await new ReferencesProvider().provideReferences(
-            docs.get('ap1.clw')!, { line: 6, character: 4 }, { includeDeclaration: true });
+            docs.get('app1.clw')!, { line: 6, character: 4 }, { includeDeclaration: true });
         const got = keyed(refs);
-        assert.ok(got.includes('ap1.clw:9'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
+        assert.ok(got.includes('app1.clw:9'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
         assert.ok(got.includes('member1.clw:5') && got.includes('member1.clw:6'), `uses in the member; got [${got.join(', ')}]`);
     });
 
@@ -149,7 +149,7 @@ suite('FAR on prefixed labels (#525)', () => {
         const refs = await new ReferencesProvider().provideReferences(
             docs.get('member1.clw')!, { line: 5, character: 8 }, { includeDeclaration: true });
         const got = keyed(refs);
-        assert.ok(got.includes('ap1.clw:6'), `declaration; got [${got.join(', ')}]`);
-        assert.ok(got.includes('ap1.clw:9'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
+        assert.ok(got.includes('app1.clw:6'), `declaration; got [${got.join(', ')}]`);
+        assert.ok(got.includes('app1.clw:9'), `use in the PROGRAM CODE; got [${got.join(', ')}]`);
     });
 });

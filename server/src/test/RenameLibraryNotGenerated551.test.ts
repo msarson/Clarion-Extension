@@ -44,7 +44,7 @@ suite('A library file flagged Generated in the .cwproj is not generated code (#5
         tc.clearAllTokens();
         docs.clear();
 
-        const project = new ClarionProjectServer('ap1', 'app', dir, '{AP1-551}');
+        const project = new ClarionProjectServer('app1', 'app', dir, '{APP1-551}');
         const add = (file: string, relativePath: string, content: string) => {
             fs.writeFileSync(file, content);
             const sf = new ClarionSourcerFileServer(path.basename(file), relativePath, project);

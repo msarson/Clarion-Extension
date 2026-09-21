@@ -94,7 +94,7 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 Eight changes, most of them names the extension could not resolve in a real generated application. Each came from someone running it over their own code rather than from a test case.
 
 - Find All References answers the same way wherever it is asked: at a procedure declared in a program’s MAP it now lists the uses in every module of that program, not only the modules the MAP itself names.
-- Names written the way generated applications write them resolve: a prefix that runs past eight characters, such as the `IBSCommon:Init` call every linked DLL gets, and a prefixed prototype indented inside a MAP rather than at column 0.
+- Names written the way generated applications write them resolve: a prefix that runs past eight characters, such as the `CommonLib:Init` call every linked DLL gets, and a prefixed prototype indented inside a MAP rather than at column 0.
 - Procedures prototyped in an include file are found again — a MAP that pulls its prototypes in with `INCLUDE('file.inc','PROTOTYPES')` records them as declarations, using only the section the INCLUDE names, as the compiler does.
 - Whitespace around the member-access dot is read the way the compiler reads it: `Receiver   .Method(42)` is a method call, while a space *after* the dot ends the statement and hover no longer describes it as a member access.
 - Completion offers ROUTINE labels, and after `DO` offers only those; hovering a routine names the procedure it belongs to.

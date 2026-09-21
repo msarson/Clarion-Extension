@@ -6,7 +6,7 @@
  * its own MEMBER implementation, and its own callers that `INCLUDE` the INC.
  *
  * Two real-world traits the passing #322 fixture lacks and that are reproduced
- * here verbatim from F:\TestApps\Direct10Source:
+ * here from a real generated solution:
  *   1. Two independent projects carrying the same procedure name.
  *   2. The MODULE('…CLW') reference is UPPER-case while the implementation file
  *      is mixed-case (`AppendText_SQL.clw`) — a case mismatch.

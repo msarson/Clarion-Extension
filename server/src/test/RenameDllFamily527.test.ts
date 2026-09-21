@@ -14,7 +14,7 @@
  * there are skipped and reported (file + occurrence count, and where the durable change
  * belongs), and a rename started IN a generated file is refused with that reason.
  *
- * Same fixture as #526, with ap2 marked generated.
+ * Same fixture as #526, with app2 marked generated.
  */
 import * as assert from 'assert';
 import * as fs from 'fs';
@@ -33,7 +33,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { serverSettings } from '../serverSettings';
 
-const EXTERNAL_DECL = 'GVF:Owner            STRING(256),EXTERNAL,DLL(_ABCDllMode_)';
+const EXTERNAL_DECL = 'GBL:Owner            STRING(256),EXTERNAL,DLL(_ABCDllMode_)';
 
 suite('Rename spans the DLL family for hand-coded files (#527)', () => {
     let root: string;
@@ -44,34 +44,34 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
     const built: ClarionProjectServer[] = [];
 
     const projects: { [dir: string]: { [rel: string]: string } } = {
-        IBSCommon: {
-            'ibscommon.clw': ['  PROGRAM', '  MAP', '  END', '  CODE', '  RETURN'].join('\r\n'),
-            'IBSCOGLO.CLW': [
+        CommonLib: {
+            'acmcommon.clw': ['  PROGRAM', '  MAP', '  END', '  CODE', '  RETURN'].join('\r\n'),
+            'ACMCOGLO.CLW': [
                 '    MEMBER',
                 '! Global Data to be included before file declaration',
-                'GVF:Owner            STRING(256)',           // 2 — the definition
-                'GVF:DriverString     STRING(512)',
+                'GBL:Owner            STRING(256)',           // 2 — the definition
+                'GBL:DriverString     STRING(512)',
             ].join('\r\n'),
-            'IBSCommon.exp': ['LIBRARY', 'EXPORTS', '  $GVF:DRIVERSTRING   @?', '  $GVF:OWNER   @?'].join('\n'),
+            'CommonLib.exp': ['LIBRARY', 'EXPORTS', '  $GBL:DRIVERSTRING   @?', '  $GBL:OWNER   @?'].join('\n'),
         },
-        ap1: {
-            'ap1.clw': [
+        app1: {
+            'app1.clw': [
                 '  PROGRAM', '  MAP', "    MODULE('worker.clw')", '      Work PROCEDURE()', '    END', '  END',
                 EXTERNAL_DECL,                                // 6
                 '  CODE',
-                "  GVF:Owner = 'ap1'",                        // 8
+                "  GBL:Owner = 'app1'",                        // 8
             ].join('\r\n'),
             'worker.clw': [
-                "  MEMBER('ap1.clw')", '  MAP', '  END', 'Work PROCEDURE()', '  CODE',
-                "  IF GVF:Owner = '' THEN RETURN.",           // 5
+                "  MEMBER('app1.clw')", '  MAP', '  END', 'Work PROCEDURE()', '  CODE',
+                "  IF GBL:Owner = '' THEN RETURN.",           // 5
             ].join('\r\n'),
         },
-        ap2: {
-            'ap2.clw': [
+        app2: {
+            'app2.clw': [
                 '  PROGRAM', '  MAP', '  END',
                 EXTERNAL_DECL,                                // 3
                 '  CODE',
-                "  GVF:Owner = 'ap2'",                        // 5
+                "  GBL:Owner = 'app2'",                        // 5
             ].join('\r\n'),
         },
     };
@@ -99,14 +99,14 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
                 fs.writeFileSync(p, content);
                 if (rel.toLowerCase().endsWith('.exp')) continue;
                 const sf = new ClarionSourcerFileServer(rel, rel, project);
-                if (name === 'ap2') sf.generated = true;       // the generated consumer
+                if (name === 'app2') sf.generated = true;       // the generated consumer
                 project.sourceFiles.push(sf);
                 seedPaths.push(p);
                 const doc = TextDocument.create(`file:///${p.replace(/\\/g, '/')}`, 'clarion', 1, content);
                 tc.getTokens(doc);
                 docs.set(rel, doc);
             }
-            if (name === 'ap1' || name === 'ap2') project.projectReferences.push({ name: 'IBSCommon', project: 'IBSCommon.cwproj' });
+            if (name === 'app1' || name === 'app2') project.projectReferences.push({ name: 'CommonLib', project: 'CommonLib.cwproj' });
             built.push(project);
         }
         const findProjectForFile = (fp: string) => {
@@ -155,39 +155,39 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
 
     test('rename from a hand-coded consumer rewrites its own files, the hand-coded definer, and skips the generated consumer', async () => {
         const provider = new RenameProvider();
-        const edit = await provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor');
+        const edit = await provider.provideRename(docs.get('app1.clw')!, { line: 6, character: 4 }, 'GBL:Proprietor');
         const got = editsByFile(edit);
-        assert.deepStrictEqual([...got.entries()].sort(), [['ap1.clw', 2], ['ibscoglo.clw', 1], ['worker.clw', 1]], `edits: ${JSON.stringify([...got])}`);
+        assert.deepStrictEqual([...got.entries()].sort(), [['acmcoglo.clw', 1], ['app1.clw', 2], ['worker.clw', 1]], `edits: ${JSON.stringify([...got])}`);
         const report = provider.getLastRenameReport();
         assert.ok(report, 'a report is produced when generated files were left alone');
-        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`), ['ap2.clw:2']);
+        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`), ['app2.clw:2']);
         assert.ok(/\.app/i.test(report!.message) && /generated/i.test(report!.message), `message explains why: ${report!.message}`);
     });
 
     test('a generated file in the cursor\'s own project is skipped and reported too', async () => {
         // The Generated flag is about who owns the file, not which project it is in.
-        const ap1 = built.find(p => p.name === 'ap1')!;
-        ap1.sourceFiles.find(sf => sf.name === 'worker.clw')!.generated = true;
+        const app1 = built.find(p => p.name === 'app1')!;
+        app1.sourceFiles.find(sf => sf.name === 'worker.clw')!.generated = true;
         const provider = new RenameProvider();
-        const edit = await provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor');
+        const edit = await provider.provideRename(docs.get('app1.clw')!, { line: 6, character: 4 }, 'GBL:Proprietor');
         const got = editsByFile(edit);
-        assert.deepStrictEqual([...got.entries()].sort(), [['ap1.clw', 2], ['ibscoglo.clw', 1]], `edits: ${JSON.stringify([...got])}`);
+        assert.deepStrictEqual([...got.entries()].sort(), [['acmcoglo.clw', 1], ['app1.clw', 2]], `edits: ${JSON.stringify([...got])}`);
         const report = provider.getLastRenameReport();
         assert.ok(report);
-        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`).sort(), ['ap2.clw:2', 'worker.clw:1']);
+        assert.deepStrictEqual(report!.skipped.map(s => `${path.basename(s.file).toLowerCase()}:${s.count}`).sort(), ['app2.clw:2', 'worker.clw:1']);
     });
 
     test('rename is refused, with the reason, when the file under the cursor is generated', async () => {
         for (const p of built) for (const sf of p.sourceFiles) sf.generated = true;
         const provider = new RenameProvider();
         await assert.rejects(
-            () => provider.prepareRename(docs.get('ap1.clw')!, { line: 6, character: 4 }),
+            () => provider.prepareRename(docs.get('app1.clw')!, { line: 6, character: 4 }),
             (err: Error) => {
                 assert.ok(/generated/i.test(err.message) && /\.app/i.test(err.message), `prepareRename rejected with: ${err.message}`);
                 return true;
             });
         await assert.rejects(
-            () => provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor'),
+            () => provider.provideRename(docs.get('app1.clw')!, { line: 6, character: 4 }, 'GBL:Proprietor'),
             (err: Error) => /generated/i.test(err.message),
             'provideRename must reject too, in case the client skipped prepareRename');
     });
@@ -195,7 +195,7 @@ suite('Rename spans the DLL family for hand-coded files (#527)', () => {
     test('no report when nothing was left alone', async () => {
         for (const p of built) for (const sf of p.sourceFiles) sf.generated = false;
         const provider = new RenameProvider();
-        const edit = await provider.provideRename(docs.get('ap1.clw')!, { line: 6, character: 4 }, 'GVF:Proprietor');
+        const edit = await provider.provideRename(docs.get('app1.clw')!, { line: 6, character: 4 }, 'GBL:Proprietor');
         assert.strictEqual(editsByFile(edit).size, 4, 'all four files rewritten');
         assert.strictEqual(provider.getLastRenameReport(), null);
     });

@@ -188,7 +188,7 @@ export class FileRelationshipGraph {
             // seeds: a class implementation compiled through LINK() is never a Compile
             // item, so without this it had no node (no document links, invisible to
             // every graph consumer). Earlier builds refused to enqueue targets for fear
-            // of pulling thousands of libsrc files in; measured on ap1.sln (40 projects,
+            // of pulling thousands of libsrc files in; measured on app1.sln (40 projects,
             // 2,987 seeds) the closure is +3,425 distinct files, 84% of them generated
             // .inc files inside the solution's own folders and only 534 from libsrc +
             // Accessory, converging in 7 hops — ~1.4s cold, ~100ms warm via the disk
@@ -258,7 +258,7 @@ export class FileRelationshipGraph {
         logger.debug(`✅ [FRG] FileRelationshipGraph built: ${this.forwardEdges.size} files, ${edgeCount} edges in ${this._buildDurationMs}ms`);
     }
 
-    /** #522 — safety limit on closure depth; ap1.sln converges in 7. */
+    /** #522 — safety limit on closure depth; app1.sln converges in 7. */
     private static readonly MAX_CLOSURE_HOPS = 16;
 
     /**
@@ -806,7 +806,7 @@ export class FileRelationshipGraph {
         // number of comment/blank lines before it — template-generated modules
         // put a banner there. A fixed "line 0 or 1" window silently dropped the
         // MEMBER edge of every banner-prefixed generated module (Mark's VM: zero
-        // MEMBER edges for ap1.clw across 162 generated members). The window now
+        // MEMBER edges for app1.clw across 162 generated members). The window now
         // stays open until the first non-blank, non-comment line.
         let memberWindowOpen = true;
 
@@ -981,7 +981,7 @@ export class FileRelationshipGraph {
     /**
      * #315 — MEMBER edges whose PROGRAM target matches by BASENAME. resolveFile
      * asks every project's redirection parser in solution order, so
-     * MEMBER('ap1.clw') edges can resolve to a different copy of the program
+     * MEMBER('app1.clw') edges can resolve to a different copy of the program
      * file than the one the editor opens (Mark's trace: frg_built=true,
      * frg_member_edges_of_doc=0 → whole-solution fallback). Same basename =
      * same logical app; callers use this when the exact-path lookup is empty.

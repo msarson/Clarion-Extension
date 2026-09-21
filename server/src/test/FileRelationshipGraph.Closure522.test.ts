@@ -4,7 +4,7 @@
  * The build used to scan only the files each .cwproj lists and deliberately never
  * enqueued the targets, so a class implementation compiled through LINK() (never a
  * Compile item) had no node: no document links, and invisible to every consumer that
- * starts from the graph. Measured on ap1.sln (40 projects, 2,987 seeds) the closure is
+ * starts from the graph. Measured on app1.sln (40 projects, 2,987 seeds) the closure is
  * +3,425 distinct files, 84% of them generated .inc files in the solution's own
  * folders and only 534 from libsrc + Accessory: affordable, and the mtime disk cache
  * makes warm starts near free. Issue #522 has the numbers.

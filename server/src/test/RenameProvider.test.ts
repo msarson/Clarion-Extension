@@ -118,7 +118,7 @@ suite('RenameProvider', () => {
                 'CODE',
                 '  MyVar = 1',
             ].join('\n');
-            const doc = createDocument(code, 'file:///f%3A/MyProject/IBS.CLW');
+            const doc = createDocument(code, 'file:///f%3A/MyProject/ACM.CLW');
             seedCache(doc);
 
             // Should NOT throw — user's own file

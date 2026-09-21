@@ -1,10 +1,10 @@
 /**
  * Hover on a field of a typed QUEUE whose TYPE the MEMBER parent declares (#613).
  *
- * Found by the #609 agreement sweep on ap1: `UvFieldQ.AltIDToolTip` (UvFieldQ QUEUE(tqRwField))
+ * Found by the #609 agreement sweep on app1: `UvFieldQ.AltIDToolTip` (UvFieldQ QUEUE(tqRwField))
  * and `ssFieldQ.Desc` - hover empty after 3-6s, F12 right. tqRwField is declared in the PROGRAM
- * file ibsquery.clw; since #483 the structure index leaves a PROGRAM's data out, and hover's
- * type-field lookup never read the MEMBER parent itself. All the ap1 cases sat in ROUTINEs, so
+ * file acmquery.clw; since #483 the structure index leaves a PROGRAM's data out, and hover's
+ * type-field lookup never read the MEMBER parent itself. All the app1 cases sat in ROUTINEs, so
  * the routine shapes stay pinned here too - they were never the cause. (The sweep's third case,
  * `sqlStmt.SetValue`, was inside an OMIT block, where hover shows nothing by design.)
  */
@@ -43,7 +43,7 @@ const CLW = [
     "  FieldQ.Desc = 'x'",                              // 15
 ];
 
-// The ap1 shape: the QUEUE,TYPE lives in the PROGRAM file, the procedure in a MEMBER module of it.
+// The app1 shape: the QUEUE,TYPE lives in the PROGRAM file, the procedure in a MEMBER module of it.
 const PROG = [
     '  PROGRAM',
     '  MAP',

@@ -3,7 +3,7 @@
  * being implemented, PARENT is that class's parent - both resolve to the CLASS
  * declaration instead of the generic keyword card.
  *
- * On ap1's generated APAccountFile_IBSCommon.clw, hovering SELF in ThisWindow.Init
+ * On app1's generated AccountFile_CommonLib.clw, hovering SELF in ThisWindow.Init
  * gave only the keyword description, F12 did nothing, and F12 on PARENT fell back to
  * a word search that landed on an unrelated `parent` property of another class.
  */

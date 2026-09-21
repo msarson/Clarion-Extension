@@ -4,7 +4,7 @@
  * Language Reference > 2 > Field Qualification: "You may use a colon (:) instead of a period
  * (StructureName:FieldLabel) to reference member variables of any structure except CLASS", and
  * the RECORD label of a FILE may be omitted. Generated code writes `DEBUGHOOK(Customer:Record)`
- * for every file. On ap1, F12 on `DAVanLineAgent:Record` went to the RECORD of a different FILE
+ * for every file. On app1, F12 on `DAVanLineAgent:Record` went to the RECORD of a different FILE
  * (the first one in the program) and hover showed nothing - 27 of 456 sampled positions.
  */
 import * as assert from 'assert';

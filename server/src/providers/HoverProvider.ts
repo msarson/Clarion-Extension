@@ -423,7 +423,7 @@ export class HoverProvider {
                     }
 
                     // Not a procedure — check for global variable in parent's own scope only.
-                    // Use full word (e.g., Access:IBSDataSets) — colon is part of the label name.
+                    // Use full word (e.g., Access:ACMDataSets) — colon is part of the label name.
                     // shallowOnly=true: skips recursive include chain, handled by findInIncludesAndEquates below.
                     const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
                     mark('parentGlobalVar');

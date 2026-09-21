@@ -1,5 +1,5 @@
-AppFrame             APPLICATION('IBS Main Menu'),AT(,,600,400),FONT('Segoe UI',8,COLOR:Black,FONT:regular,CHARSET:ANSI), |
-  RESIZE,CENTERED,HVSCROLL,CENTER,ICON('IBSMenu.ico'),IMM,MAX,STATUS(-1,220,120,45,80),SYSTEM, |
+AppFrame             APPLICATION('ACM Main Menu'),AT(,,600,400),FONT('Segoe UI',8,COLOR:Black,FONT:regular,CHARSET:ANSI), |
+  RESIZE,CENTERED,HVSCROLL,CENTER,ICON('ACMMenu.ico'),IMM,MAX,STATUS(-1,220,120,45,80),SYSTEM, |
   TIMER(6000)
                        MENUBAR,USE(?MENUBAR1)
                          MENU('&File'),USE(?FileMenu)
@@ -60,7 +60,7 @@ AppFrame             APPLICATION('IBS Main Menu'),AT(,,600,400),FONT('Segoe UI',
                          MENU('&Help'),USE(?MENU2),MSG('Windows Help')
                            ITEM('&Help'),USE(?HelpHelp)
                            ITEM('&About'),USE(?HelpAbout),MSG('About This Program')
-                           ITEM('IBS Support Portal'),USE(?itmIBSSupportPortal)
+                           ITEM('ACM Support Portal'),USE(?itmACMSupportPortal)
                            ITEM('&License Agreement'),USE(?HelpLicenseAgreement)
                            ITEM('SQL Details'),USE(?mnuSQLDetails)
                          END

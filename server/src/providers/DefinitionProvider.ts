@@ -1152,7 +1152,7 @@ export class DefinitionProvider {
 
     // #360/#361 — F12 (findSymbolDefinition) on a symbol in a big PROGRAM file walks
     // findSymbol's tier cascade + the parent/include chains: ~15s cold for a NetTalk
-    // proc (NetDebugTrace) on IBSCommon.clw. Cache the RESULT per (uri, word, line),
+    // proc (NetDebugTrace) on CommonLib.clw. Cache the RESULT per (uri, word, line),
     // invalidated by the cross-file epoch (the #340 watcher / #355 drift path), so a
     // repeat F12 on the same call site is instant. Keyed by line (not scope) so the
     // #330 self-exclusion — which is position-specific — stays correct per call site.

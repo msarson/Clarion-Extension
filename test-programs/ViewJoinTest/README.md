@@ -5,7 +5,7 @@ hand-written, and exists to record what the **Clarion compiler actually accepts*
 VIEW structure, so diagnostics that validate VIEW/PROJECT/JOIN can be checked against
 the language rather than against assumption.
 
-Verified against **Clarion 10.0.12567** (`F:\DirectSystems\Clarion10`), TopSpeed driver,
+Verified against **Clarion 10.0.12567**, TopSpeed driver,
 built with MSBuild. It compiles and links cleanly — the `PRAGMA('link(ClaTPS.lib)')` is
 what pulls the driver in; without it the compile still succeeds and only the link fails
 with `Unresolved External TOPSPEED`.

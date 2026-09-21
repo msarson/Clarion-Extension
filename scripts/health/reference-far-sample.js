@@ -198,7 +198,7 @@ function sample(rows, perSlice) {
      * Occurrences of `name` inside one program's family, minus that family's own declarations.
      *
      * The third correction (#599). A corpus-wide count compares 79 programs' call sites against ONE
-     * program's references: vwLstMove is declared in 79 programs and called from none of jm1's
+     * program's references: vwCommonOp is declared in 79 programs and called from none of jm1's
      * members, so the corpus sees 132 "uses" while FAR correctly answers 1. Scoping to the family
      * asks the question FAR is actually answering.
      */
@@ -283,7 +283,7 @@ function sample(rows, perSlice) {
         } catch (e) { err = e.message; }
         ms = Date.now() - rt;
         // Naive occurrences MINUS the declarations of that name. A third-party prototype the app
-        // generator emits into every program — vuAnimateCloseBlend is declared in 39 of ap1's
+        // generator emits into every program — vuAnimateCloseBlend is declared in 39 of app1's
         // generated .clw files and called in none — otherwise reads as 39 occurrences against 1
         // resolved reference and looks like a catastrophic miss. It is not: FAR deliberately scopes
         // a module-level MAP procedure to its own module, and there is nothing else to find.

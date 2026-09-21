@@ -32,7 +32,7 @@ logger.setLevel("error");
 /**
  * #361 — walk-RESULT cache for findDeclarationInMapIncludes, keyed by
  * host+procName. The walk recursively reads + tokenizes the reachable MAP
- * include chain; on IBSCommon.clw a hover over a NetTalk procedure (NetDebugTrace)
+ * include chain; on CommonLib.clw a hover over a NetTalk procedure (NetDebugTrace)
  * cost ~89s, and hovering repeatedly around a block re-paid it every time. The
  * walk result (including a NEGATIVE "no declaration reachable") is memoized here
  * and reused until the cross-file epoch bumps (the #340 watcher / #355 drift path
@@ -563,7 +563,7 @@ export class MapProcedureResolver {
 
         // #484 — two passes. The document's OWN MAP tokens first: a generated app
         // declares every procedure in its PROGRAM's MAP, and expanding that MAP's
-        // INCLUDEs meant tokenising every header it pulls in (ap1's MAP INCLUDEs a
+        // INCLUDEs meant tokenising every header it pulls in (app1's MAP INCLUDEs a
         // 5,992-line library source) on the first hover / F12 — ~1.7s — for a
         // prototype sitting right there in the document. The expansion now runs
         // only when the document itself does not declare the name.
@@ -845,7 +845,7 @@ export class MapProcedureResolver {
         
         // #484 — the document's own tokens first. In a generated app the prototype
         // AND its MODULE('x.clw') block are both in the PROGRAM's MAP, so expanding
-        // the MAP's INCLUDEs (tokenising every header — ap1's MAP pulls in a
+        // the MAP's INCLUDEs (tokenising every header — app1's MAP pulls in a
         // 5,992-line library source, ~1s) proved nothing the document did not
         // already say. Keyed by NAME, as the expanded walk below is, because
         // `position` may carry an INCLUDE file's line number when the declaration
@@ -1038,8 +1038,8 @@ export class MapProcedureResolver {
             // The old flow required redirection to resolve the PHYSICAL binary before trying the
             // source-project fallback — a DLL that isn't built (or whose output dir isn't in the
             // RED paths) dead-ended F12 even though every needed source file is in the solution.
-            // Go straight from the library basename to its main source (IBSUTILS.DLL →
-            // ibsutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
+            // Go straight from the library basename to its main source (ACMUTILS.DLL →
+            // acmutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
             // #313 (docs: MODULE — "specify MEMBER source file"): the sourcefile string
             // routinely OMITS the extension — the Language Reference's own example is
             // MODULE('Loadit') for loadit.clw, and shipped headers do the same
@@ -1100,7 +1100,7 @@ export class MapProcedureResolver {
                             logger.info(`⚠️ Resolved to compiled binary (${ext}), searching for source file instead`);
                             
                             // Try to find the source file in other projects
-                            // Strategy: Find the main CLW file for this DLL (e.g., IBSCommon.clw for IBSCOMMON.DLL)
+                            // Strategy: Find the main CLW file for this DLL (e.g., CommonLib.clw for COMMONLIB.DLL)
                             // That file will have a MAP which declares where the procedure is implemented
                             const actualExt = path.extname(resolvedPath);
                             const baseName = path.basename(resolvedPath, actualExt);
@@ -1112,7 +1112,7 @@ export class MapProcedureResolver {
                                 logger.info(`   🏗️ Checking project: ${proj.name} at ${proj.path}`);
                                 const sourceFiles = proj.sourceFiles || [];
                                 
-                                // Look for exact match first: IBSCommon.clw for IBSCOMMON.DLL
+                                // Look for exact match first: CommonLib.clw for COMMONLIB.DLL
                                 const mainFile = sourceFiles.find(sf => {
                                     if (!sf || !sf.name) return false;
                                     if (!sf.name.toLowerCase().endsWith('.clw')) return false;

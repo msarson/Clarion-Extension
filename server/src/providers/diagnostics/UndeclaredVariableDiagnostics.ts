@@ -259,7 +259,7 @@ async function augmentDeclaredViaSymbolFinder(
         // segment of `TemplateHelper.Debug.DriverOptions` tokenizes as a bare
         // Variable preceded by '.', so it looks like a standalone name but is
         // member access that can never resolve. 51 such leaves on the real
-        // IBSCommon.clw cost ~9s warm / triggered the ~18.5s chain cold build,
+        // CommonLib.clw cost ~9s warm / triggered the ~18.5s chain cold build,
         // while COLLECT already ignored them (asymmetry = pure wasted lookups).
         // Using the shared discriminator realigns AUGMENT with COLLECT (#300).
         if (isGluedNumberSuffix(t, document)) continue;

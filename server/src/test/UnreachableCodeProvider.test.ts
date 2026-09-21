@@ -115,7 +115,7 @@ StateCalc:Kill_Called    BYTE,STATIC
   ELSE
      StateCalc:Kill_Called = True
   END
-  IBSCOMMON:Kill()
+  ACMCOMMON:Kill()
 `;
         console.log('\n=== DEBUG: Tokenizer Output ===');
         console.log('Code with line numbers:');

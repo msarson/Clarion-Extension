@@ -9,7 +9,7 @@
  * product answer - the agreement sweep does that. Established on #607: 7,537 results changed,
  * every one of the 7,518 dropped hits confirmed wrong.
  *
- * Usage (run `npm run compile` first; about 5 minutes on ap1):
+ * Usage (run `npm run compile` first; about 5 minutes on app1):
  *   node scripts/health/self-members.js --out=before.tsv
  *   node scripts/health/self-members.js --out=after.tsv --against=before.tsv
  * Options: --sln=...  --show=5

@@ -3,7 +3,7 @@
  * two procedures (#608): the method belongs to the declaration nearest above it, not to
  * the first one in the file.
  *
- * ap1's UpdateUserEmails_IBSMenu.clw declares `ThisWindow` twice. The lookups took the
+ * app1's UpdateUserEmails_ACMMenu.clw declares `ThisWindow` twice. The lookups took the
  * first, so the second procedure's methods resolved SELF members, and PARENT's class,
  * against the first procedure's ThisWindow.
  */

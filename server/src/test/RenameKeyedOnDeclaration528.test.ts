@@ -5,8 +5,8 @@
  * .clw and every other hand-coded file, skipping and listing the generated ones), and
  * renaming a method whose declaration is itself generated stays refused.
  *
- * Fixture (one project, ap1):
- *   ap1.clw      hand-coded PROGRAM: INCLUDE ctThing.inc, `Obj ctThing`, calls Obj.Method()
+ * Fixture (one project, app1):
+ *   app1.clw      hand-coded PROGRAM: INCLUDE ctThing.inc, `Obj ctThing`, calls Obj.Method()
  *   ctThing.inc  hand-coded: ctThing CLASS ... Method PROCEDURE()
  *   ctThing.clw  hand-coded: ctThing.Method PROCEDURE() implementation
  *   browse.clw   GENERATED module: calls Obj.Method()
@@ -37,7 +37,7 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
     let project: ClarionProjectServer;
 
     const files: { [rel: string]: string } = {
-        'ap1.clw': [
+        'app1.clw': [
             '  PROGRAM',                                  // 0
             "  INCLUDE('ctThing.inc'),ONCE",              // 1
             '  MAP',                                      // 2
@@ -55,7 +55,7 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
             '         END',                                                 // 2
         ].join('\r\n'),
         'ctThing.clw': [
-            "  MEMBER('ap1.clw')",                        // 0
+            "  MEMBER('app1.clw')",                        // 0
             "  INCLUDE('ctThing.inc'),ONCE",              // 1
             '  MAP',                                      // 2
             '  END',                                      // 3
@@ -64,7 +64,7 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
             '  RETURN',                                   // 6
         ].join('\r\n'),
         'browse.clw': [
-            "  MEMBER('ap1.clw')",                        // 0
+            "  MEMBER('app1.clw')",                        // 0
             '  MAP',                                      // 1
             '  END',                                      // 2
             'Browse PROCEDURE()',                         // 3
@@ -86,7 +86,7 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
         tc.clearAllTokens();
         ExpExportIndex.getInstance().reset();
         docs.clear();
-        project = new ClarionProjectServer('ap1', 'app', dir, '{AP1-528}');
+        project = new ClarionProjectServer('app1', 'app', dir, '{APP1-528}');
         const seedPaths: string[] = [];
         for (const [rel, content] of Object.entries(files)) {
             const p = path.join(dir, rel);
@@ -155,7 +155,7 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
         const provider = new RenameProvider();
         const AT_IMPL = { line: 4, character: 9 };   // ctThing.clw "ctThing.Method PROCEDURE()" — on Method
         const edit = await provider.provideRename(docs.get('ctThing.clw')!, AT_IMPL, 'Renamed');
-        assert.deepStrictEqual(editsByFile(edit), [['ap1.clw', 1], ['ctthing.clw', 1], ['ctthing.inc', 1]]);
+        assert.deepStrictEqual(editsByFile(edit), [['app1.clw', 1], ['ctthing.clw', 1], ['ctthing.inc', 1]]);
         // #550 — the generated browse.clw call site is found from the implementation now
         // (the class-method search reaches every MEMBER module of the program), so it is
         // skipped and reported rather than silently absent.
@@ -174,17 +174,17 @@ suite('Rename keys the generated refusal on the declaration (#528)', () => {
         const provider = new RenameProvider();
         await assert.rejects(() => provider.prepareRename(docs.get('browse.clw')!, AT_BROWSE_CALL),
             (err: Error) => { assert.ok(/generated/i.test(err.message) && /\.app/i.test(err.message), err.message); return true; });
-        await assert.rejects(() => provider.prepareRename(docs.get('ap1.clw')!, { line: 9, character: 8 }),
+        await assert.rejects(() => provider.prepareRename(docs.get('app1.clw')!, { line: 9, character: 8 }),
             (err: Error) => { assert.ok(/generated/i.test(err.message), err.message); return true; });
-        await assert.rejects(() => provider.provideRename(docs.get('ap1.clw')!, { line: 9, character: 8 }, 'Renamed'),
+        await assert.rejects(() => provider.provideRename(docs.get('app1.clw')!, { line: 9, character: 8 }, 'Renamed'),
             (err: Error) => { assert.ok(/generated/i.test(err.message), err.message); return true; });
     });
 
     test('a rename started in a generated file of a symbol declared in that same generated file is refused', async () => {
-        // browse.clw is generated and Browse's declaration lives in the generated ap1 MAP? No —
+        // browse.clw is generated and Browse's declaration lives in the generated app1 MAP? No —
         // declare a module-local procedure so the declaration is IN the generated file.
         const p = path.join(dir, 'gen2.clw');
-        const content = ["  MEMBER('ap1.clw')", '  MAP', '    Helper PROCEDURE()', '  END', 'Helper PROCEDURE()', '  CODE', '  RETURN'].join('\r\n');
+        const content = ["  MEMBER('app1.clw')", '  MAP', '    Helper PROCEDURE()', '  END', 'Helper PROCEDURE()', '  CODE', '  RETURN'].join('\r\n');
         fs.writeFileSync(p, content);
         const sf = new ClarionSourcerFileServer('gen2.clw', 'gen2.clw', project);
         sf.generated = true;

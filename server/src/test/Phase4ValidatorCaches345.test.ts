@@ -15,7 +15,7 @@ import { setServerInitialized } from '../serverState';
 /**
  * Issue #345 phase 4 — cross-pass validator caches.
  *
- * Mark's IBSWorking startup ran the SAME document through 4 validation passes
+ * Mark's WorkingLib startup ran the SAME document through 4 validation passes
  * (open / change / sdiReady / crossFileUpdate); viewProjectFields re-resolved
  * and re-tokenized the MEMBER parent on each (4.3s × 4), RVD re-resolved
  * receiver types (GlobalErrors 2.5s × pass), and a restart re-read the include

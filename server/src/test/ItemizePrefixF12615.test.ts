@@ -1,7 +1,7 @@
 /**
  * F12 on an ITEMIZE equate reached through an INCLUDE (#615).
  *
- * Found by the #609 agreement sweep on ap1: `FuzzyMatcher.SetOption(MatchOption:NoCase, 1)` in
+ * Found by the #609 agreement sweep on app1: `FuzzyMatcher.SetOption(MatchOption:NoCase, 1)` in
  * glc.clw - hover went to the ITEMIZE entry in ABFUZZY.INC (`ITEMIZE(),PRE(MatchOption)`), F12 to
  * nothing. F12's prefix resolver looked in the current file and its MEMBER parent only; hover's
  * walks the INCLUDE chain too.

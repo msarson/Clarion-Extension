@@ -93,7 +93,7 @@ export function registerBuildCommands(
         // Build project from application context
         commands.registerCommand('clarion.buildProjectFromApp', async (node) => {
             if (node && node.data && node.data.name) {
-                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                // Get the application name without extension (e.g., "ACMQuery" from "ACMQuery.app")
                 const appName = node.data.name.replace(/\.app$/i, '');
                 
                 // Find the project with matching name
@@ -122,7 +122,7 @@ export function registerBuildCommands(
         // Generate and build project from application context
         commands.registerCommand('clarion.generateAndBuildApp', async (node) => {
             if (node && node.data && node.data.absolutePath && node.data.name) {
-                // Get the application name without extension (e.g., "IBSQuery" from "IBSQuery.app")
+                // Get the application name without extension (e.g., "ACMQuery" from "ACMQuery.app")
                 const appName = node.data.name.replace(/\.app$/i, '');
                 
                 // Find the project with matching name

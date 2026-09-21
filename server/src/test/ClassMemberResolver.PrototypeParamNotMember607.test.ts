@@ -2,7 +2,7 @@
  * SELF.member lookup in the current document (#607): only a declaration's label names
  * a class member, and the scan ends at the CLASS's own END.
  *
- * Reported from ap1's generated APAccountFile_IBSCommon.clw: `SELF.Request` hovered as
+ * Reported from app1's generated AccountFile_CommonLib.clw: `SELF.Request` hovered as
  * "Class Property · ThisWindow" and F12 went to
  * `Run PROCEDURE(USHORT Number,BYTE Request)` - the parameter name in a method
  * prototype had been taken for a member. The real property is the inherited

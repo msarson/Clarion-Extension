@@ -9,7 +9,7 @@ import { HoverProvider } from '../providers/HoverProvider';
  * #582 — #575 made hovering END show what it closes. A period terminator closes a structure just as
  * END does (the parser links both to their opener), but hovering it showed nothing: hover starts from
  * the word under the cursor, and `.` is not a word character. 677 periods close a multi-line
- * structure across the DirectSystems solution and the Clarion 10 libsrc.
+ * structure across the test corpus and the Clarion 10 libsrc.
  */
 let tmpRoot: string;
 

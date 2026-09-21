@@ -23,7 +23,7 @@ import { ScopeTypeIndexService } from '../services/ScopeTypeIndexService';
  * at the implementation left a hand-coded caller elsewhere unrenamed, and the #527 report
  * could not list a generated module's calls.
  *
- * Same fixture as the #528 rename suite: a PROGRAM (ap1.clw) with an object of a class
+ * Same fixture as the #528 rename suite: a PROGRAM (app1.clw) with an object of a class
  * declared in ctThing.inc / implemented in ctThing.clw, and a second MEMBER module
  * (browse.clw) calling the method.
  */
@@ -35,7 +35,7 @@ suite('Class-method references reach every MEMBER module of the program (#550)',
     const docs = new Map<string, TextDocument>();
 
     const files: { [rel: string]: string } = {
-        'ap1.clw': [
+        'app1.clw': [
             '  PROGRAM',                                  // 0
             "  INCLUDE('ctThing.inc'),ONCE",              // 1
             '  MAP',                                      // 2
@@ -65,7 +65,7 @@ suite('Class-method references reach every MEMBER module of the program (#550)',
             '  RETURN',                                   // 6
         ].join('\r\n'),
         'browse.clw': [
-            "  MEMBER('ap1.clw')",                        // 0
+            "  MEMBER('app1.clw')",                        // 0
             '  MAP',                                      // 1
             '  END',                                      // 2
             'Browse PROCEDURE()',                         // 3
@@ -87,7 +87,7 @@ suite('Class-method references reach every MEMBER module of the program (#550)',
         tc.clearAllTokens();
         ExpExportIndex.getInstance().reset();
         docs.clear();
-        const project = new ClarionProjectServer('ap1', 'app', dir, '{AP1-550}');
+        const project = new ClarionProjectServer('app1', 'app', dir, '{APP1-550}');
         const seedPaths: string[] = [];
         for (const [rel, content] of Object.entries(files)) {
             const p = path.join(dir, rel);
@@ -130,7 +130,7 @@ suite('Class-method references reach every MEMBER module of the program (#550)',
         const locs = await new ReferencesProvider().provideReferences(docs.get(file)!, { line, character }, { includeDeclaration: true });
         return (locs ?? []).map(l => `${path.basename(decodeURIComponent(l.uri)).toLowerCase()}:${l.range.start.line}`).sort();
     };
-    const EXPECTED = ['ap1.clw:9', 'browse.clw:5', 'ctthing.clw:4', 'ctthing.inc:1'];
+    const EXPECTED = ['app1.clw:9', 'browse.clw:5', 'ctthing.clw:4', 'ctthing.inc:1'];
 
     test('control: from the call site in the other MEMBER module, every site is found', async () => {
         assert.deepStrictEqual(await hits('browse.clw', 5, 8), EXPECTED);
@@ -141,13 +141,13 @@ suite('Class-method references reach every MEMBER module of the program (#550)',
     });
 
     test('bug-pin: from the PROGRAM file call site, the call in the other MEMBER module is found', async () => {
-        assert.deepStrictEqual(await hits('ap1.clw', 9, 8), EXPECTED);
+        assert.deepStrictEqual(await hits('app1.clw', 9, 8), EXPECTED);
     });
 
     test('a program\'s global scope is built once per token array, not once per scanned module', () => {
         const svc = new ScopeTypeIndexService(TokenCache.getInstance());
-        const first = svc.loadGlobalScopeFromProgramFile(docs.get('ap1.clw')!.uri);
-        const second = svc.loadGlobalScopeFromProgramFile(docs.get('ap1.clw')!.uri);
+        const first = svc.loadGlobalScopeFromProgramFile(docs.get('app1.clw')!.uri);
+        const second = svc.loadGlobalScopeFromProgramFile(docs.get('app1.clw')!.uri);
         assert.strictEqual(second, first, 'the same Map instance comes back while the tokens are unchanged');
         assert.ok(first.has('obj'), 'and it is the real scope: Obj is a PROGRAM global');
     });

@@ -2490,7 +2490,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 const warmFinder = new SymbolFinderService(tokenCache, new ScopeAnalyzer(tokenCache, undefined as never));
                 // #358: also tokenize each open MEMBER module's parent file here. A MEMBER's
                 // globals (GlobalErrors/thisStartup) are declared deep in that parent, and on
-                // IBSWorking the parent (IBSCommon.clw, 873 KB / 68k tokens) costs ~1.1s to
+                // WorkingLib the parent (CommonLib.clw, 873 KB / 68k tokens) costs ~1.1s to
                 // tokenize — paid by the first cold receiver-type resolution unless warmed off
                 // the felt path here. Shared parents are tokenized once (getTokensByUri guard).
                 const warmLocator = new MemberLocatorService();

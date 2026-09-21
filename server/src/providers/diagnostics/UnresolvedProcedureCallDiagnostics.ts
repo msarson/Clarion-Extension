@@ -122,8 +122,8 @@ export async function validateUnresolvedProcedureCalls(
         const prev = tokens[i - 1];
         if (prev && prev.line === t.line && (prev.type === TokenType.StructureField || prev.value === '.')) continue;
 
-        // A colon-prefixed procedure — `IBSCommon:Kill()`, the generated DLL init/kill
-        // pair — is declared under its FULL name (`IBSCommon:Kill PROCEDURE,DLL`). Above
+        // A colon-prefixed procedure — `CommonLib:Kill()`, the generated DLL init/kill
+        // pair — is declared under its FULL name (`CommonLib:Kill PROCEDURE,DLL`). Above
         // the tokenizer's 8-character prefix cap it arrives as Variable ':' Function, so
         // the token holds only `Kill`; read the whole identifier from the source line.
         const name = qualifiedNameAt(lineText, t.start, rawName);
@@ -267,7 +267,7 @@ export function isCall(tokens: Token[], i: number): boolean {
 
 /**
  * The full identifier ending where `value` ends at `start` on `lineText`: extends left
- * over `PREFIX:` segments (`IBSCommon:Kill` for a token holding `Kill`). Stops at
+ * over `PREFIX:` segments (`CommonLib:Kill` for a token holding `Kill`). Stops at
  * anything that is not an identifier character or a single colon, so `x = Kill()` and
  * `Label::Routine` are left alone.
  */

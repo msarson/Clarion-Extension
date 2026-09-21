@@ -10,7 +10,7 @@ StateCalc:Kill_Called    BYTE,STATIC
   ELSE
      StateCalc:Kill_Called = True
   END
-  IBSCOMMON:Kill()                                         ! Should NOT be dimmed - it's reachable via ELSE branch
+  ACMCOMMON:Kill()                                         ! Should NOT be dimmed - it's reachable via ELSE branch
 
 ! Test 2: RETURN in both branches should dim code after END
 TestBothBranches PROCEDURE
