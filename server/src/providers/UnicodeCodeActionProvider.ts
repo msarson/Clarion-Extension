@@ -1,6 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { CodeAction, CodeActionKind, CodeActionContext, Range, TextEdit, WorkspaceEdit } from 'vscode-languageserver/node';
-import { isUnrepresentableInAnsi } from './diagnostics/UnicodeDiagnostics';
+import { isUnrepresentableInAnsi, isDecodeArtifact } from './diagnostics/UnicodeDiagnostics';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("UnicodeCodeActionProvider");
@@ -32,6 +32,11 @@ export class UnicodeCodeActionProvider {
 
         for (const diag of invalidEncodingDiags) {
             const char = document.getText(diag.range);
+            // #629 — never offer to edit a decode artefact. U+FFFD stands for a byte the
+            // decoder could not read, so deleting or replacing it destroys the real byte:
+            // on a generated file it strips the delimiters out of the descriptor strings.
+            // The diagnostic no longer reports these, so this only guards a stale one.
+            if ([...char].some(c => isDecodeArtifact(c.codePointAt(0)!))) continue;
             const replacement = REPLACEMENTS.get(char);
 
             if (replacement) {
@@ -67,7 +72,7 @@ export class UnicodeCodeActionProvider {
         for (let i = 0; i < text.length;) {
             const code = text.codePointAt(i)!;
             const charLen = code > 0xFFFF ? 2 : 1;
-            if (isUnrepresentableInAnsi(code)) {
+            if (isUnrepresentableInAnsi(code) && !isDecodeArtifact(code)) {   // #629
                 const range: Range = { start: document.positionAt(i), end: document.positionAt(i + charLen) };
                 const replacement = REPLACEMENTS.get(String.fromCodePoint(code));
                 allEdits.push(replacement ? TextEdit.replace(range, replacement) : TextEdit.del(range));

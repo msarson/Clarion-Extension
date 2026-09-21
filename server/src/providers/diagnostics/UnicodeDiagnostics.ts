@@ -55,6 +55,27 @@ export function isUnrepresentableInAnsi(codePoint: number): boolean {
     return !getRepresentableCodePoints().has(codePoint);
 }
 
+/** U+FFFD REPLACEMENT CHARACTER. */
+const REPLACEMENT_CHAR = 0xFFFD;
+
+/**
+ * #629 — true for the one code point that is never file content.
+ *
+ * A decoder emits U+FFFD when it meets a byte it cannot read. Seeing it in the document text
+ * tells us the file was decoded with the wrong encoding; it says nothing about the character
+ * actually stored on disk, which we cannot see from here. Generated Clarion is full of the
+ * shape that triggers it: template field-descriptor strings separate their fields with the
+ * high-bit bytes 0xA6 and 0xAB, `¦` and `«` in Windows-1252 and perfectly representable in
+ * ANSI, so an ANSI file read as UTF-8 turns every delimiter into U+FFFD.
+ *
+ * Treating that as contamination is wrong twice over: the finding is about a character that
+ * is not there, and the quick fix offers to delete it — which would strip the delimiters out
+ * of the strings and break the application at runtime with nothing to point at.
+ */
+export function isDecodeArtifact(codePoint: number): boolean {
+    return codePoint === REPLACEMENT_CHAR;
+}
+
 /**
  * True when the file opens with the Clarion 12 `!UTF8` directive.
  *
@@ -112,7 +133,9 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
         for (let i = 0; i < codeEnd;) {
             const code = line.codePointAt(i)!;
             const charLen = code > 0xFFFF ? 2 : 1; // astral characters (emoji) span two UTF-16 units
-            if (isUnrepresentableInAnsi(code)) {
+            // #629 — U+FFFD is unrepresentable in ANSI, but it is the decoder's marker for a
+            // byte it could not read, not something the author wrote. Reported separately below.
+            if (isUnrepresentableInAnsi(code) && !isDecodeArtifact(code)) {
                 if (first < 0) { first = i; firstCode = code; }
                 lastEnd = i + charLen;
                 count++;
@@ -132,6 +155,30 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
             message: `Character '${String.fromCodePoint(firstCode)}' (U+${hex})${which} has no encoding in any Windows ANSI code page. The Clarion compiler takes the raw UTF-8 bytes, so a string will not display as written, and a UTF-8 BOM added on save breaks the compile.`,
             source: 'clarion',
             code: 'invalid-encoding'
+        });
+    }
+
+    // #629 — one report per file, not one per line. Every U+FFFD in the text came from the
+    // same cause (the whole file was decoded with the wrong encoding), so a finding per line
+    // is 21 copies of one fact. Anchored on the first occurrence so the entry still navigates
+    // somewhere useful. Comments are NOT exempt here, unlike the scan above: a byte the
+    // decoder could not read is a fact about the file, wherever it sits.
+    const text = document.getText();
+    const firstArtifact = text.indexOf(String.fromCodePoint(REPLACEMENT_CHAR));
+    if (firstArtifact >= 0) {
+        const total = text.split(String.fromCodePoint(REPLACEMENT_CHAR)).length - 1;
+        diagnostics.push({
+            severity: DiagnosticSeverity.Warning,
+            range: {
+                start: document.positionAt(firstArtifact),
+                end: document.positionAt(firstArtifact + 1)
+            },
+            message: `This file is not valid UTF-8: ${total} byte${total === 1 ? '' : 's'} could not be decoded and ${total === 1 ? 'was' : 'were'} replaced with U+FFFD. `
+                + `It is most likely ANSI — generated Clarion separates the fields of a descriptor string with the high-bit bytes 0xA6 and 0xAB. `
+                + `Reopen it with the correct encoding (Reopen with Encoding → Windows 1252). `
+                + `Saving while it reads like this writes the replacement character over those bytes permanently.`,
+            source: 'clarion',
+            code: 'utf8-decode-artifact'
         });
     }
 
