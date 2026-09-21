@@ -122,4 +122,4 @@ async function startSession(opts) {
     return { request, notify, open, close, toUri, sln };
 }
 
-module.exports = { startSession, toUri, REPO, APPDEV, CLARION_ROOT };
+module.exports = { startSession, toUri, REPO, CLARION_ROOT };
