@@ -125,6 +125,7 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
     // warning per line spanning the first to the last offending character, rather than
     // one per character (a pasted banner in a string is one squiggle, not fifty).
     const diagnostics: Diagnostic[] = [];
+    const artifacts: { line: number; character: number }[] = [];
     const lines = document.getText().split(/\r?\n/);
     for (let lineNo = 0; lineNo < lines.length; lineNo++) {
         const line = lines[lineNo];
@@ -134,8 +135,11 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
             const code = line.codePointAt(i)!;
             const charLen = code > 0xFFFF ? 2 : 1; // astral characters (emoji) span two UTF-16 units
             // #629 — U+FFFD is unrepresentable in ANSI, but it is the decoder's marker for a
-            // byte it could not read, not something the author wrote. Reported separately below.
-            if (isUnrepresentableInAnsi(code) && !isDecodeArtifact(code)) {
+            // byte it could not read, not something the author wrote. Reported separately below,
+            // and collected here so it inherits this loop's comment exemption.
+            if (isDecodeArtifact(code)) {
+                artifacts.push({ line: lineNo, character: i });
+            } else if (isUnrepresentableInAnsi(code)) {
                 if (first < 0) { first = i; firstCode = code; }
                 lastEnd = i + charLen;
                 count++;
@@ -158,25 +162,35 @@ export function validateUnicodeCharacters(document: TextDocument): Diagnostic[] 
         });
     }
 
-    // #629 — one report per file, not one per line. Every U+FFFD in the text came from the
-    // same cause (the whole file was decoded with the wrong encoding), so a finding per line
-    // is 21 copies of one fact. Anchored on the first occurrence so the entry still navigates
-    // somewhere useful. Comments are NOT exempt here, unlike the scan above: a byte the
-    // decoder could not read is a fact about the file, wherever it sits.
-    const text = document.getText();
-    const firstArtifact = text.indexOf(String.fromCodePoint(REPLACEMENT_CHAR));
-    if (firstArtifact >= 0) {
-        const total = text.split(String.fromCodePoint(REPLACEMENT_CHAR)).length - 1;
+    // #629 — one report per file, not one per line. Every U+FFFD came from the same cause (the
+    // whole file was decoded with the wrong encoding), so a finding per line is one fact
+    // repeated. Anchored on the first so the entry still navigates somewhere useful.
+    //
+    // Comments are exempt, the same rule the scan above follows for #556. The first cut of
+    // this check scanned them too, arguing that a byte the decoder could not read is a fact
+    // about the file wherever it sits. True, but the consequence it warns about — a save
+    // overwriting the original byte — only matters where the byte carries meaning. Measured on
+    // a Clarion 12 install: 49 replacement characters across 8 shipped library files, 45 of
+    // them typographic quotes, en-dashes and copyright symbols in comments, in files nobody
+    // edits (builtins.clw among them). Warning there is noise; the four that sat in string
+    // data are the ones worth a word.
+    //
+    // The message does not name a cause. The byte is unrecoverable from here, so which
+    // character it was — a delimiter, a dash, a copyright sign — is exactly what we cannot say.
+    if (artifacts.length > 0) {
+        const total = artifacts.length;
+        const at = artifacts[0];
         diagnostics.push({
             severity: DiagnosticSeverity.Warning,
             range: {
-                start: document.positionAt(firstArtifact),
-                end: document.positionAt(firstArtifact + 1)
+                start: { line: at.line, character: at.character },
+                end: { line: at.line, character: at.character + 1 }
             },
             message: `This file is not valid UTF-8: ${total} byte${total === 1 ? '' : 's'} could not be decoded and ${total === 1 ? 'was' : 'were'} replaced with U+FFFD. `
-                + `It is most likely ANSI — generated Clarion separates the fields of a descriptor string with the high-bit bytes 0xA6 and 0xAB. `
-                + `Reopen it with the correct encoding (Reopen with Encoding → Windows 1252). `
-                + `Saving while it reads like this writes the replacement character over those bytes permanently.`,
+                + `It is most likely ANSI. Reopen it with the encoding it was written in `
+                + `(Reopen with Encoding — Windows 1252 for most Clarion source), or set it for good with `
+                + `"[clarion]": { "files.encoding": "windows1252" } in settings. `
+                + `Do not use Save with Encoding while it reads like this: that writes the replacement character over the original bytes permanently.`,
             source: 'clarion',
             code: 'utf8-decode-artifact'
         });

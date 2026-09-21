@@ -75,3 +75,55 @@ suite('U+FFFD is a decode artefact, not invalid encoding (#629)', () => {
         assert.deepStrictEqual(diags("S = '¦«éüñ'"), [], 'these are exactly the characters the file really holds');
     });
 });
+
+/**
+ * Follow-up to the above, from a real report: the first cut of this check scanned the whole
+ * line, comments included, on the reasoning that a byte the decoder could not read is a fact
+ * about the file wherever it sits. In practice the consequence it warns about — a save
+ * writing the replacement character over the original byte — only matters where the byte
+ * carries meaning.
+ *
+ * Measured on a Clarion 12 install: 49 U+FFFD across 8 shipped library files, 45 of them in
+ * comments (copyright symbols, typographic quotes, en-dashes) in files nobody edits —
+ * including `builtins.clw` and CapeSoft's StringTheory. Only 4 sat in real string data.
+ * So this follows the same rule as its sibling (#556): comments are exempt.
+ */
+suite('the decode-artefact report exempts comments (#629 follow-up)', () => {
+    test('a replacement character only in a comment raises nothing', () => {
+        const d = diags([
+            '  MEMBER()',
+            `!   Some library is copyright ${R} 2026 by Somebody`,
+            'SomeProc PROCEDURE',
+        ].join('\r\n'));
+        assert.deepStrictEqual(
+            d.map(x => x.code), [],
+            'a mangled copyright symbol in a comment is cosmetic — the file is not edited and the data is not at risk'
+        );
+    });
+
+    test('a replacement character in a string is still reported', () => {
+        const d = diags([
+            '  MEMBER()',
+            'SomeProc PROCEDURE',
+            '  CODE',
+            `  S = 'a${R}b'`,
+        ].join('\r\n'));
+        assert.strictEqual(d.length, 1, `expected the report, got ${JSON.stringify(d.map(x => x.code))}`);
+        assert.strictEqual(d[0].code, 'utf8-decode-artifact');
+    });
+
+    test('the count reflects only the ones that matter', () => {
+        const d = diags([
+            `! comment ${R} ${R} ${R}`,
+            `  S = 'x${R}y'`,
+        ].join('\r\n')).filter(x => x.code === 'utf8-decode-artifact');
+        assert.strictEqual(d.length, 1);
+        assert.ok(/\b1 byte\b/.test(String(d[0].message)), `should count 1, not 4: ${String(d[0].message)}`);
+    });
+
+    test('the message does not assert a cause it cannot know', () => {
+        const d = diags(`  S = 'a${R}b'`).filter(x => x.code === 'utf8-decode-artifact');
+        const m = String(d[0].message);
+        assert.ok(!/descriptor string|0xA6|0xAB/i.test(m), `the byte could be anything — a copyright sign, a dash: ${m}`);
+    });
+});
