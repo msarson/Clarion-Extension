@@ -94,24 +94,6 @@ export class MemberLocatorService {
     }
 
     /**
-     * Finds the declaration location of a variable.
-     * Search order: current file → MEMBER parent (+ its INCLUDE chain) → current INCLUDE chain.
-     * Returns a Location or null.
-     */
-    async findVariableLocation(
-        varName: string,
-        document: TextDocument
-    ): Promise<Location | null> {
-        const tokens = this.tokenCache.getTokens(document);
-        const result = await this.findVariableTokenCrossFile(varName, tokens, document);
-        if (!result) return null;
-        return Location.create(result.doc.uri, {
-            start: { line: result.token.line, character: result.token.start },
-            end: { line: result.token.line, character: result.token.start + result.token.value.length }
-        });
-    }
-
-    /**
      * Searches the MEMBER parent file (+ its INCLUDE chain) and current INCLUDE chain for a variable.
      * Does NOT search the current file — use after local scope checks have already run.
      * Returns the raw token result for callers that need to build their own output (e.g. hover).
@@ -2365,7 +2347,21 @@ export class MemberLocatorService {
      * `PARENT.` offered nothing whenever the class lived in an .inc. One implementation, so the
      * two cannot drift again.
      */
-    public async resolveParentName(className: string, document: TextDocument): Promise<string | null> {
+    public async resolveParentName(className: string, document: TextDocument, atLine?: number): Promise<string | null> {
+        // #628 — a module may declare the same local class label in several procedures (every
+        // generated procedure has its own ThisWindow), so "the parent of ThisWindow" depends on
+        // where the cursor is. Without a line this reads the FIRST matching declaration in the
+        // document, which is the first procedure's. #608 settled that for hover and Go to
+        // Definition; a caller that knows the line gets the same answer here.
+        if (atLine !== undefined) {
+            const label = nearestClassLabel(this.tokenCache.getTokens(document), className, atLine);
+            if (label) {
+                const declLine = document.getText().split(/\r?\n/)[label.line];
+                const parent = declLine ? extractParentName(declLine) : null;
+                if (parent) return parent;
+            }
+        }
+
         const inOpenDocument = await this.findClassInfoInDoc(className, document);
         if (inOpenDocument?.parentClass) return inOpenDocument.parentClass;
 

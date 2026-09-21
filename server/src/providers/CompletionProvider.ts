@@ -471,7 +471,7 @@ export class CompletionProvider {
         if (chainUpper === 'PARENT') {
             // resolveCurrentClassName gives us the class; we need its parent
             if (!callerClass) return null;
-            const parentClass = await this.resolveParentOf(callerClass, document);
+            const parentClass = await this.resolveParentOf(callerClass, document, position.line);
             if (!parentClass) return null;
             return { className: parentClass, callerClass };
         }
@@ -529,7 +529,7 @@ export class CompletionProvider {
             currentClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
         } else if (root === 'PARENT') {
             currentClass = callerClass
-                ? await this.resolveParentOf(callerClass, document)
+                ? await this.resolveParentOf(callerClass, document, position.line)
                 : null;
         } else {
             // Same reason as the plain-word branch: a chain rooted on a PARAMETER
@@ -556,13 +556,13 @@ export class CompletionProvider {
     }
 
     /** Finds the parent class of a given class (via ClassDefinitionIndexer). */
-    private async resolveParentOf(className: string, document: TextDocument): Promise<string | null> {
+    private async resolveParentOf(className: string, document: TextDocument, atLine?: number): Promise<string | null> {
         // #623: this used to scan the open document's text and stop there. A class declared in an
         // .inc — where generated and hand-written Clarion classes normally live — has no CLASS
         // line in the .clw being edited, so PARENT. offered nothing at all. The same shape already
         // worked through ClassMemberResolver.getParentClassInfo, which consults the include chain
         // and the declaration index; both now take the same two tiers.
-        return this.memberLocator.resolveParentName(className, document);
+        return this.memberLocator.resolveParentName(className, document, atLine);
     }
 
     // -------------------------------------------------------------------------

@@ -694,7 +694,7 @@ export class ClassMemberResolver {
      * and returns the Location of the best match.
      * If declarationSig is provided, uses type-based overload matching.
      */
-    public findImplementationInFile(
+    private findImplementationInFile(
         filePath: string,
         className: string,
         methodName: string,
