@@ -57,6 +57,41 @@ export function* ancestorNames<T extends HasParentName>(
 }
 
 /**
+ * The class itself, then each ancestor, nearest first — resolved by the caller, cycle-safe.
+ *
+ * Lazy on purpose. Resolving a class can read a file, and the consumers stop at different
+ * points: the member lookups stop at the first hit, and a structure that does not inherit
+ * its parent's members stops the ascent entirely. A consumer just `break`s and the next
+ * class is never resolved.
+ *
+ * `info` is null when the name resolves to nothing. That is yielded rather than skipped,
+ * because it means different things to different callers — "not indexed, try the document"
+ * to one, "cannot answer, abort" to another — and the walk cannot ascend past it either
+ * way, so it stops after yielding.
+ */
+export async function* ancestorChain<T extends HasParentName>(
+    startName: string,
+    resolve: (name: string) => Promise<T | null>
+): AsyncGenerator<{ name: string; info: T | null; depth: number }> {
+    const seen = new Set<string>();
+    let current: string | undefined = startName;
+    let depth = 0;
+
+    while (current) {
+        const key = current.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        const info = await resolve(current);
+        yield { name: current, info, depth };
+        if (!info) return;
+
+        current = info.parentName;
+        depth++;
+    }
+}
+
+/**
  * True when `ancestorName` appears in `descendantName`'s parent chain.
  *
  * Strict: a class is not its own ancestor, so the caller decides separately what

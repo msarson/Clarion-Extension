@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
 import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
-import { isAncestorOf } from '../utils/ClassAncestry';
+import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAncestry';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -438,7 +438,7 @@ export class MemberLocatorService {
                 this.trace(`findMemberInClass hit SDI-located body file="${fromSdi.file}" line=${fromSdi.line}`);
                 return fromSdi;
             }
-            const fromAscent = await this.walkParentChain(className, memberName, paramCount, new Set(), document);
+            const fromAscent = await this.walkParentChain(className, memberName, paramCount, document);
             if (fromAscent) {
                 this.trace(`findMemberInClass hit parent chain (SDI-first) file="${fromAscent.file}" line=${fromAscent.line}`);
                 return fromAscent;
@@ -494,7 +494,6 @@ export class MemberLocatorService {
             className,
             memberName,
             paramCount,
-            new Set(),
             document
         );
         if (fromHierarchy) {
@@ -1354,8 +1353,7 @@ export class MemberLocatorService {
         document: TextDocument,
         inlineAllowed: boolean
     ): Promise<Set<string> | null> {
-        const visited = new Set<string>();
-        return this.collectImplementedInterfaceMethodsRecursive(className, document, inlineAllowed, visited);
+        return this.collectImplementedInterfaceMethodsUpChain(className, document, inlineAllowed);
     }
 
     /**
@@ -1402,34 +1400,22 @@ export class MemberLocatorService {
         return impls;
     }
 
-    private async collectImplementedInterfaceMethodsRecursive(
+    private async collectImplementedInterfaceMethodsUpChain(
         className: string,
         document: TextDocument,
-        inlineAllowed: boolean,
-        visited: Set<string>
+        inlineAllowed: boolean
     ): Promise<Set<string> | null> {
-        const key = className.toLowerCase();
-        if (visited.has(key)) return new Set();
-        visited.add(key);
-
-        const info = await this.resolveClassDeclarationInfo(className, document);
-        if (!info) return null;
-
-        const ownImpls = await this.collectImplementedInterfaceMethodsForDeclaration(info, document, inlineAllowed);
-        if (ownImpls === null) return null;
-
-        const merged = new Set(ownImpls);
-        if (info.parentName) {
-            const parentImpls = await this.collectImplementedInterfaceMethodsRecursive(
-                info.parentName,
-                document,
-                inlineAllowed,
-                visited
-            );
-            if (parentImpls === null) return null;
-            for (const entry of parentImpls) {
-                merged.add(entry);
-            }
+        // #624 — same ascent as every other. The reduction here is a union, and the
+        // contract is strict: ANY link that cannot be resolved makes the whole answer
+        // null, so callers skip rather than report a false positive. A cycle is not an
+        // unresolved link — ancestorChain simply stops, contributing nothing, as the
+        // recursive form's visited-check did.
+        const merged = new Set<string>();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info) return null;
+            const ownImpls = await this.collectImplementedInterfaceMethodsForDeclaration(info, document, inlineAllowed);
+            if (ownImpls === null) return null;
+            for (const entry of ownImpls) merged.add(entry);
         }
 
         return merged;
@@ -1722,35 +1708,36 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        visited: Set<string>,
         document?: TextDocument
     ): Promise<MemberInfo | null> {
-        if (visited.has(className.toLowerCase())) {
-            this.trace(`walkParentChain cycle stop at "${className}"`);
-            return null;
-        }
-        visited.add(className.toLowerCase());
-        this.trace(`walkParentChain class="${className}" member="${memberName}"`);
-
-        let classInfo: StructureDeclarationInfo | null = null;
-        if (document) {
-            classInfo = await this.resolveClassDeclarationInfo(className, document);
-        }
-        if (!classInfo) {
-            await this.ensureIndexBuilt();
-            const classInfos = this.sdi.findFor(className, document?.uri); // #571
-            if (classInfos.length === 0) return null;
-            classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        }
-        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-        if (result) {
-            this.trace(`walkParentChain found "${memberName}" in "${classInfo.filePath}" line=${result.line}`);
-            return result;
-        }
-
-        if (inheritsMembersFromParent(classInfo.structureType) && classInfo.parentName) {
-            this.trace(`walkParentChain ascend "${className}" -> "${classInfo.parentName}"`);
-            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited, document);
+        // #624 — the ascent, its cycle guard and the TYPE-vs-instance pick come from
+        // ClassAncestry; what stays here is this walk's own reduction (first hit wins)
+        // and its own resolution order (open document before the index).
+        for await (const { name, info } of ancestorChain(className, async n => {
+            let classInfo: StructureDeclarationInfo | null = document
+                ? await this.resolveClassDeclarationInfo(n, document)
+                : null;
+            if (!classInfo) {
+                await this.ensureIndexBuilt();
+                classInfo = pickDeclaration(this.sdi.findFor(n, document?.uri)); // #571
+            }
+            return classInfo;
+        })) {
+            if (!info) {
+                this.trace(`walkParentChain stop at "${name}" (unresolved)`);
+                return null;
+            }
+            this.trace(`walkParentChain class="${name}" member="${memberName}"`);
+            const result = await this.scanBodyForMember(info.filePath, name, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            if (result) {
+                this.trace(`walkParentChain found "${memberName}" in "${info.filePath}" line=${result.line}`);
+                return result;
+            }
+            // A structure that does not inherit its parent's members ends the ascent.
+            if (!inheritsMembersFromParent(info.structureType)) {
+                this.trace(`walkParentChain stop at "${name}" (does not inherit)`);
+                return null;
+            }
         }
         this.trace(`walkParentChain stop at "${className}" (no parent/no hit)`);
         return null;
