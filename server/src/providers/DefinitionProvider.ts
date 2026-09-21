@@ -223,9 +223,19 @@ export class DefinitionProvider {
                         // Count parameters for overload resolution
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
                         logger.info(`Method call has ${paramCount} parameters`);
-                        
-                        const memberInfo = this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
-                        
+
+                        // #626 — once SELF's class is known this is the same question the
+                        // explicit-receiver branch below asks, so it goes to the same engine.
+                        // It was answered by ClassMemberResolver, which has no equivalent of
+                        // MemberLocatorService.preferFittingInheritedOverload, so `SELF.Run()`
+                        // on a class overriding only Run(USHORT,BYTE) resolved to that override
+                        // while `ThisWindow.Run()` correctly resolved to the inherited Run().
+                        // ClassMemberResolver still answers when SELF's class cannot be named —
+                        // it infers the class from scope itself.
+                        const memberInfo = selfClass
+                            ? await this.memberLocator.findMemberInClass(selfClass, methodName, document, paramCount)
+                            : this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+
                         if (memberInfo) {
                             logger.info(`✅ Found method declaration at ${memberInfo.file}:${memberInfo.line}`);
                             return Location.create(

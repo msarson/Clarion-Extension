@@ -1,5 +1,6 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
-import { findEnclosingClassToken } from '../../utils/EnclosingClassResolver';
+import { findEnclosingClassToken, resolveEnclosingClassName } from '../../utils/EnclosingClassResolver';
+import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { clarionSourceCandidates } from '../../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -41,6 +42,8 @@ export class MethodHoverResolver {
     private overloadResolver: MethodOverloadResolver;
     private memberResolver: ClassMemberResolver;
     private formatter: HoverFormatter;
+    /** #626 — the engine the explicit-receiver hover path already uses. */
+    private memberLocator = new MemberLocatorService();
 
     constructor(
         overloadResolver: MethodOverloadResolver,
@@ -295,10 +298,19 @@ export class MethodHoverResolver {
         paramCount?: number
     ): Promise<Hover | null> {
         const tokens = this.tokenCache.getTokens(document);
-        let memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+        // #626 — SELF's member lookup goes to the same engine as an explicit receiver, so
+        // the #611 rule (a local override that the call does not fit does not hide an
+        // inherited overload that does) applies to `SELF.Run()` as it already did to
+        // `ThisWindow.Run()`. Hover and F12 name SELF's class with the same #622 helper, so
+        // they cannot disagree about which class is being asked. ClassMemberResolver still
+        // answers when the class cannot be named — it infers it from scope itself.
+        const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
+        let memberInfo = selfClass
+            ? await this.memberLocator.findMemberInClass(selfClass, fieldName, document, paramCount)
+            : this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
 
         if (!memberInfo) {
-            logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
+            logger.info(`❌ member lookup returned null for ${fieldName} in SELF context`);
             return null;
         }
 
