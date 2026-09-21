@@ -24,7 +24,7 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { TokenHelper } from '../utils/TokenHelper';
-import { findEnclosingClassToken } from '../utils/EnclosingClassResolver';
+import { findEnclosingClassToken, resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
@@ -534,9 +534,19 @@ export class ImplementationProvider {
                 // SELF.Method() — resolve via class member lookup then cross-file search
                 if (callInfo.objectName.toUpperCase() === 'SELF') {
                     const selfTokens = this.tokenCache.getTokens(document);
-                    const memberInfo = this.memberResolver.findClassMemberInfo(
-                        callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
-                    );
+                    // #627 — the same engine as the typed-variable branch below, so #611's rule
+                    // applies to SELF here too: a local override the call does not fit does not
+                    // hide an inherited overload that does. It matters more here than for F12,
+                    // because the member picked supplies the class name for the cross-file
+                    // implementation hunt — the wrong overload sends it after the wrong class's
+                    // body. ClassMemberResolver still answers when SELF's class cannot be named;
+                    // it infers the class from scope itself.
+                    const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
+                    const memberInfo = selfClass
+                        ? await this.memberLocator.findMemberInClass(selfClass, callInfo.methodName, document, callInfo.paramCount)
+                        : this.memberResolver.findClassMemberInfo(
+                            callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
+                        );
                     if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                         // #182 — arg-classification overlay (symmetric with PARENT/Definition).
                         const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
