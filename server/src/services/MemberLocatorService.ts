@@ -30,6 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
 import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
+import { isAncestorOf } from '../utils/ClassAncestry';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -2172,7 +2173,7 @@ export class MemberLocatorService {
         const ownMembers = await this.findAllMembersInClass(className, document);
 
         // 2. Determine access filter relative to the caller
-        const accessAllowed = this.accessFilter(className, callerClass);
+        const accessAllowed = this.accessFilter(className, callerClass, document);
         const filtered = ownMembers.filter(m => accessAllowed.has(m.access));
 
         // 3. Determine the parent class (if any)
@@ -2416,27 +2417,22 @@ export class MemberLocatorService {
      * - subclass      → public + protected
      * - external      → public only
      */
-    private accessFilter(className: string, callerClass: string | undefined): Set<'public' | 'protected' | 'private'> {
+    private accessFilter(
+        className: string,
+        callerClass: string | undefined,
+        document?: TextDocument
+    ): Set<'public' | 'protected' | 'private'> {
         if (!callerClass) return new Set(['public']);
         if (callerClass.toLowerCase() === className.toLowerCase()) {
             return new Set(['public', 'protected', 'private']);
         }
-        // Check if callerClass is a subclass of className via the indexer
-        const callerInfos = this.sdi.find(callerClass);
-        if (callerInfos.length > 0) {
-            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentName;
-            const seen = new Set<string>();
-            while (current && !seen.has(current.toLowerCase())) {
-                seen.add(current.toLowerCase());
-                if (current.toLowerCase() === className.toLowerCase()) {
-                    return new Set(['public', 'protected']);
-                }
-                const parentInfos = this.sdi.find(current);
-                current = parentInfos.length > 0
-                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentName
-                    : undefined;
-            }
-        }
-        return new Set(['public']);
+        // #624 — scope every hop to the asking file's project (#571), as the other five
+        // ascents do. An unscoped find() answers with whichever project index was built
+        // first, so in a solution where two projects declare the same class name the
+        // subclass test was decided against the other project's class and inherited
+        // PROTECTED members were dropped.
+        return isAncestorOf(className, callerClass, name => this.sdi.findFor(name, document?.uri))
+            ? new Set(['public', 'protected'])
+            : new Set(['public']);
     }
 }
