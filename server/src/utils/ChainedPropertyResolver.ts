@@ -2,6 +2,7 @@ import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ClassMemberResolver } from './ClassMemberResolver';
+import { extractClassName } from './ClassNameUtils';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
 import { resolveEnclosingClassName } from './EnclosingClassResolver';
@@ -234,7 +235,7 @@ export class ChainedPropertyResolver {
                 continue;
             }
 
-            const nextClass = ClassMemberResolver.extractClassName(memberInfo.type);
+            const nextClass = extractClassName(memberInfo.type);
             if (!nextClass) {
                 logger.info(`ChainedPropertyResolver: type "${memberInfo.type}" of "${segmentName}" is not navigable`);
                 return null;

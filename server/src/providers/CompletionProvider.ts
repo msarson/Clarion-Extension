@@ -5,9 +5,9 @@ import { SolutionManager } from '../solution/solutionManager';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { WordCompletionProvider } from './WordCompletionProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
-import { MemberEnumItem } from '../utils/ClassMemberResolver';
+import { MemberEnumItem } from '../utils/ClassMemberScan';
+import { extractClassName } from '../utils/ClassNameUtils';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { PropertyService } from '../utils/PropertyService';
 import { EventService } from '../utils/EventService';
 import { Token } from '../ClarionTokenizer';
@@ -547,7 +547,7 @@ export class CompletionProvider {
             const member = members.find(m => m.name.toUpperCase() === seg.toUpperCase());
             if (!member) return null;
 
-            const nextClass = ClassMemberResolver.extractClassName(member.type);
+            const nextClass = extractClassName(member.type);
             if (!nextClass) return null;
             currentClass = nextClass;
         }

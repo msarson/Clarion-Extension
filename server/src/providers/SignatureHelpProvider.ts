@@ -7,7 +7,6 @@ import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier, ClassifierContext } from '../utils/CallSiteArgumentClassifier';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ArgumentTypeResolver } from '../utils/ArgumentTypeResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
@@ -32,7 +31,6 @@ export class SignatureHelpProvider {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver = new MethodOverloadResolver();
     private argClassifier = new CallSiteArgumentClassifier();
-    private memberResolver = new ClassMemberResolver();
     private argTypeResolver = new ArgumentTypeResolver();
     private memberLocator = new MemberLocatorService();
     private builtinService = BuiltinFunctionService.getInstance();

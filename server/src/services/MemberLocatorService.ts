@@ -19,7 +19,8 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration } from '../utils/ClassMemberScan';
+import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
@@ -207,12 +208,12 @@ export class MemberLocatorService {
         document: TextDocument,
         atLine: number
     ): Promise<{ className: string; isReference: boolean } | null> {
-        const ownLabel = ClassMemberResolver.nearestClassLabel(tokens, receiver, atLine);
+        const ownLabel = nearestClassLabel(tokens, receiver, atLine);
         if (ownLabel) return { className: ownLabel.value, isReference: false };
 
         const typeInfo = await this.resolveVariableType(receiver, tokens, document, atLine);
         if (!typeInfo?.isClass) return null;
-        const isClass = ClassMemberResolver.nearestClassLabel(tokens, typeInfo.typeName, atLine) !== null
+        const isClass = nearestClassLabel(tokens, typeInfo.typeName, atLine) !== null
             || (await this.resolveClassDeclarationInfo(typeInfo.typeName, document))?.structureType === 'CLASS';
         return isClass ? { className: typeInfo.typeName, isReference: typeInfo.isReference } : null;
     }
@@ -1190,7 +1191,7 @@ export class MemberLocatorService {
             if (token.label?.toLowerCase() !== methodName.toLowerCase()) continue;
 
             const memberLine = docLines[token.line] ?? '';
-            const declParamCount = this.countParamsInDecl(memberLine);
+            const declParamCount = countParametersInDeclaration(memberLine);
             candidates.push({ type: 'PROCEDURE', line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
 
@@ -1394,7 +1395,7 @@ export class MemberLocatorService {
             if (parts[0].toLowerCase() !== clsLower) continue;
             const methodName = parts[2].toLowerCase();
             const lineText = docLines[t.line] ?? '';
-            const paramCount = this.countParamsInDecl(lineText);
+            const paramCount = countParametersInDeclaration(lineText);
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;
@@ -1640,7 +1641,7 @@ export class MemberLocatorService {
             if (!token.label) continue;
             methods.push({
                 name: token.label,
-                paramCount: this.countParamsInDecl(docLines[token.line] ?? '')
+                paramCount: countParametersInDeclaration(docLines[token.line] ?? '')
             });
         }
         return methods;
@@ -1676,19 +1677,19 @@ export class MemberLocatorService {
                 const diskResult =
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'CLASS',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     ) ??
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'GROUP',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     ) ??
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'QUEUE',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     );
@@ -1766,25 +1767,12 @@ export class MemberLocatorService {
         const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         return scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
-            (line) => this.countParamsInDecl(line),
+            (line) => countParametersInDeclaration(line),
             (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
             liveContent
         );
     }
 
-    private countParamsInDecl(line: string): number {
-        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
-        if (!match) return 0;
-        const paramList = match[1].trim();
-        if (!paramList) return 0;
-        let depth = 0, count = 0;
-        for (const char of paramList) {
-            if (char === '(') depth++;
-            else if (char === ')') depth--;
-            else if (char === ',' && depth === 0) count++;
-        }
-        return count + 1;
-    }
 
     /**
      * Token-based replacement for scanClassBodyForAllMembers.
@@ -1907,7 +1895,7 @@ export class MemberLocatorService {
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
             if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                declParamCount = this.countParamsInDecl(memberLine);
+                declParamCount = countParametersInDeclaration(memberLine);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
@@ -1967,7 +1955,7 @@ export class MemberLocatorService {
 
         // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName) — the type name
         // may be colon-qualified (GROUP(CFG:SomeType)), exactly as the LIKE(...) case below
-        // already allows, and as ClassMemberResolver.extractClassName allows on the chained
+        // already allows, and as extractClassName allows on the chained
         // path. Without ':' here the whole match fails and the declaration falls through to
         // the bare-keyword branch, which resolves a variable to ITS OWN name as its type.
         const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\(([\w:]+)\)$/i);

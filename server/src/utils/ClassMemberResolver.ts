@@ -21,252 +21,8 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ClassMemberResolver");
 logger.setLevel("error");
 
-/**
- * The kind of structure a member was found in. Carried on MemberInfo so a
- * consumer can describe the member accurately: a QUEUE/GROUP member is a field,
- * not a "Class Property". Optional because not every producer of a MemberInfo
- * knows the kind, and consumers keep their previous CLASS/INTERFACE assumption
- * when it is absent.
- */
-export type MemberOwnerKind = 'CLASS' | 'GROUP' | 'QUEUE' | 'INTERFACE';
-
-export type MemberInfo = { type: string; className: string; line: number; file: string; signature?: string; isInterface?: boolean; structureType?: MemberOwnerKind;
-    /** #611: no overload here takes the call's argument count - the pick was only the closest. */
-    arityMismatch?: boolean };
-
-/** Access level for a class member. */
-export type MemberAccess = 'public' | 'protected' | 'private';
-
-/** A single class member returned by the enumeration API. */
-export interface MemberEnumItem {
-    name: string;
-    kind: 'method' | 'property';
-    signature: string;       // full declaration line (trimmed)
-    type: string;            // return type (methods) or data type (properties)
-    access: MemberAccess;
-    fromClass: string;       // class that declared this member (for inherited items)
-    line: number;            // 0-based line in the file
-    file: string;            // absolute file path
-}
-
-/**
- * Detects the access modifier in a Clarion member declaration line.
- * Looks for PRIVATE or PROTECTED in the comma-separated attribute list.
- */
-export function detectMemberAccess(line: string): MemberAccess {
-    const stripped = line.replace(/!.*$/, '');
-    if (/\bPRIVATE\b/i.test(stripped)) return 'private';
-    if (/\bPROTECTED\b/i.test(stripped)) return 'protected';
-    return 'public';
-}
-
-/**
- * Scans the body of a named CLASS/QUEUE/GROUP in a file and returns ALL members.
- * Handles nested GROUP/QUEUE/RECORD blocks so their END keywords do not
- * prematurely terminate the scan.
- *
- * @param filePath      Absolute path to the file to scan
- * @param className     Name of the structure to find (e.g. "ThisWindow")
- * @param structureType Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
- * @returns Array of MemberEnumItem, or empty array if class not found
- */
-export function scanClassBodyForAllMembers(
-    filePath: string,
-    className: string,
-    structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'INTERFACE' = 'CLASS',
-    contentOverride?: string
-): MemberEnumItem[] {
-    const results: MemberEnumItem[] = [];
-    try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
-        const lines = content.split(/\r?\n/);
-        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
-
-        for (let j = 0; j < lines.length; j++) {
-            if (!headerPattern.test(lines[j])) continue;
-
-            let nestDepth = 0;
-
-            for (let k = j + 1; k < lines.length; k++) {
-                const raw = lines[k];
-                const stripped = raw.replace(/!.*$/, '').trim();
-
-                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
-                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    // Self-closing single-line form (e.g. "Foo GROUP(Type),DIM(2) END" or the
-                    // period form "...,DIM(2).") is a net no-op. Checking end-of-line independently
-                    // of the opening match — rather than one regex trying to capture attributes and
-                    // terminator together — avoids the attrs-swallow-terminator failure mode; "."
-                    // is fully interchangeable with END for closing any Clarion structure.
-                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
-                        nestDepth++;
-                    }
-                    continue;
-                }
-                if (/^(END|\.)\s*$/i.test(stripped)) {
-                    if (nestDepth > 0) { nestDepth--; continue; }
-                    break;
-                }
-                if (nestDepth > 0) continue;
-                if (!stripped || /^(INCLUDE|MODULE|SECTION)\b/i.test(stripped)) continue;
-
-                // A member line: Label <whitespace> Type...
-                const memberMatch = raw.match(/^(\w+)\s+(.+?)(\s*!.*)?$/);
-                if (!memberMatch) continue;
-
-                const name = memberMatch[1];
-                const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
-                const access = detectMemberAccess(raw);
-                // #247: PROCEDURE ≡ FUNCTION — both declare methods.
-                const kind: 'method' | 'property' = ProcedureUtils.startsWithProcedureKeyword(typeStr) ? 'method' : 'property';
-
-                results.push({
-                    name,
-                    kind,
-                    signature: raw.trim(),
-                    type: typeStr,
-                    access,
-                    fromClass: className,
-                    line: k,
-                    file: filePath
-                });
-            }
-            // Only scan the first matching class definition
-            break;
-        }
-    } catch {
-        // Caller handles logging
-    }
-    return results;
-}
-
-/**
- * Scans the body of a named CLASS/QUEUE/GROUP in a file for a specific member.
- * Handles nested GROUP/QUEUE/RECORD blocks (nestDepth tracking) so their END
- * keywords do not prematurely terminate the scan of the parent structure.
- *
- * This is the canonical implementation shared by ClassMemberResolver and
- * MemberLocatorService — keep both in sync if the algorithm changes.
- *
- * @param filePath   Absolute path to the file to scan
- * @param className  Name of the structure to find (e.g. "UltimateDebug")
- * @param memberName Name of the member to find inside the structure
- * @param paramCount Optional call-site parameter count for overload selection
- * @param structureType  Structure keyword to match — CLASS | QUEUE | GROUP (default CLASS)
- * @param countParamsInDecl  Callback that counts parameters in a declaration line
- * @param selectBestOverload Callback that picks the best candidate by paramCount
- * @returns MemberInfo with the file URI, or null if not found
- */
-export function scanClassBodyForMember(
-    filePath: string,
-    className: string,
-    memberName: string,
-    paramCount: number | undefined,
-    structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'INTERFACE' = 'CLASS',
-    countParamsInDecl: (line: string) => number,
-    selectBestOverload: (candidates: { type: string; line: number; paramCount: number; signature?: string }[], paramCount: number | undefined) => { type: string; line: number; paramCount: number; signature?: string } | null,
-    contentOverride?: string
-): MemberInfo | null {
-    try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
-        const lines = content.split(/\r?\n/);
-        const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
-
-        for (let j = 0; j < lines.length; j++) {
-            const headerMatch = lines[j].match(headerPattern);
-            if (!headerMatch) continue;
-            // The keyword on the declaration itself, not the caller's hint: the
-            // header pattern accepts all four kinds, so a caller passing the
-            // default 'CLASS' can still land on a QUEUE/GROUP body.
-            const ownerKind = headerMatch[1].toUpperCase() as MemberOwnerKind;
-
-            const candidates: { type: string; line: number; paramCount: number; signature?: string }[] = [];
-            let nestDepth = 0;
-
-            for (let k = j + 1; k < lines.length; k++) {
-                const memberLine = lines[k];
-                const stripped = memberLine.replace(/!.*$/, '').trim();
-
-                if (/^(GROUP|QUEUE|RECORD)\b/i.test(stripped) ||
-                    /^\w+\s+(GROUP|QUEUE|RECORD)\b/i.test(stripped)) {
-                    // Self-closing single-line form is a net no-op (see scanClassBodyForAllMembers
-                    // for the full rationale — same attrs-swallow-terminator hazard, same fix).
-                    if (!/(\bEND|\.)\s*$/i.test(stripped)) {
-                        nestDepth++;
-                    }
-                } else if (/^(END|\.)\s*$/i.test(stripped)) {
-                    if (nestDepth > 0) { nestDepth--; continue; }
-                    break;
-                }
-
-                if (nestDepth > 0) continue;
-
-                const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
-                if (memberMatch) {
-                    const afterMember = memberLine.substring(memberMatch[0].length).trim();
-                    const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
-                    let declParamCount = 0;
-                    if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                        declParamCount = countParamsInDecl(memberLine);
-                    }
-                    candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
-                }
-            }
-
-            const bestMatch = selectBestOverload(candidates, paramCount);
-            if (bestMatch) {
-                const fileUri = pathToCanonicalUri(filePath); // #251
-                return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType: ownerKind,
-                    arityMismatch: !overloadAcceptsArgs(bestMatch, paramCount) };
-            }
-        }
-    } catch (error) {
-        // Caller handles logging
-    }
-    return null;
-}
-
-export type OverloadCandidate = { type: string; line: number; paramCount: number; signature?: string };
-
-/**
- * Picks the best overload candidate given the call-site parameter count.
- * Exported so MemberLocatorService can share the same selection logic.
- */
-/**
- * #611: whether a call with `paramCount` arguments can bind to this overload - an exact count,
- * or one that leaves only defaulted/omittable parameters out. Undefined (no call) always fits.
- */
-export function overloadAcceptsArgs(c: OverloadCandidate, paramCount: number | undefined): boolean {
-    if (paramCount === undefined || c.paramCount === paramCount) return true;
-    const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
-    return paramCount >= c.paramCount - defaults && paramCount <= c.paramCount;
-}
-
-export function selectBestMemberOverload(
-    candidates: OverloadCandidate[],
-    paramCount: number | undefined
-): OverloadCandidate | null {
-    if (candidates.length === 0) return null;
-    if (paramCount === undefined) return candidates[0];
-
-    const exact = candidates.find(c => c.paramCount === paramCount);
-    if (exact) return exact;
-
-    const compatible = candidates
-        .filter(c => {
-            const defaults = ClarionPatterns.countDefaultParams(c.signature ?? '');
-            return paramCount >= (c.paramCount - defaults) && paramCount <= c.paramCount;
-        })
-        .sort((a, b) => (a.paramCount - paramCount) - (b.paramCount - paramCount));
-    if (compatible.length > 0) return compatible[0];
-
-    return candidates.reduce((best, curr) => {
-        const bd = Math.abs(best.paramCount - paramCount);
-        const cd = Math.abs(curr.paramCount - paramCount);
-        if (cd === bd) return curr.paramCount > best.paramCount ? curr : best;
-        return cd < bd ? curr : best;
-    });
-}
+import { MemberOwnerKind, MemberInfo, MemberAccess, MemberEnumItem, detectMemberAccess, scanClassBodyForAllMembers, scanClassBodyForMember, OverloadCandidate, overloadAcceptsArgs, selectBestMemberOverload, countParametersInDeclaration } from './ClassMemberScan';
+import { nearestClassLabel } from './ClassNameUtils';
 
 /**
  * Shared utility for resolving class members (methods, properties)
@@ -291,17 +47,6 @@ export class ClassMemberResolver {
      * belongs to - the nearest such declaration above it, since a generated module can
      * declare the same local class label in several procedures; failing that, the first.
      */
-    public static nearestClassLabel(tokens: Token[], className: string, atLine: number): Token | null {
-        const wanted = className.toLowerCase();
-        let best: Token | null = null;
-        for (const classToken of TokenHelper.findClassStructures(tokens)) {
-            const label = tokens.find(t =>
-                t.type === TokenType.Label && t.line === classToken.line && t.value.toLowerCase() === wanted);
-            if (!label) continue;
-            if (!best || (label.line <= atLine && (best.line > atLine || label.line > best.line))) best = label;
-        }
-        return best;
-    }
 
     public findClassMemberInfo(
         memberName: string,
@@ -331,7 +76,7 @@ export class ClassMemberResolver {
         
         // #607: the CLASS's own label - not the parent named in `Child CLASS(Base)`.
         // #608: of several same-named local classes, the one this method belongs to.
-        const ownLabel = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
+        const ownLabel = nearestClassLabel(tokens, className, currentLine);
         for (const classToken of classTokens) {
             const labelToken = ownLabel && ownLabel.line === classToken.line ? ownLabel : undefined;
 
@@ -408,7 +153,7 @@ export class ClassMemberResolver {
                 }
                 
                 // Select best match based on parameter count
-                const bestMatch = this.selectBestOverload(candidates, paramCount);
+                const bestMatch = selectBestMemberOverload(candidates, paramCount);
                 if (bestMatch) {
                     // findClassStructures filters to CLASS tokens, so this branch
                     // can only ever have matched a CLASS body.
@@ -534,7 +279,7 @@ export class ClassMemberResolver {
                         }
                         
                         // Select best match based on parameter count
-                        const bestMatch = this.selectBestOverload(candidates, paramCount);
+                        const bestMatch = selectBestMemberOverload(candidates, paramCount);
                         if (bestMatch) {
                             // Convert file path to URI format
                             const fileUri = pathToCanonicalUri(resolvedPath); // #251
@@ -560,12 +305,6 @@ export class ClassMemberResolver {
         return null;
     }
 
-    private selectBestOverload(
-        candidates: OverloadCandidate[],
-        paramCount?: number
-    ): OverloadCandidate | null {
-        return selectBestMemberOverload(candidates, paramCount);
-    }
 
     /**
      * Counts parameters in a method call
@@ -641,7 +380,7 @@ export class ClassMemberResolver {
         const content = document.getText();
         const lines = content.split('\n');
         // #608: of several same-named local classes, the one this method belongs to
-        const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
+        const labelToken = nearestClassLabel(tokens, className, currentLine);
         if (labelToken) {
             const classDecLine = lines[labelToken.line];
             const parentName = extractParentName(classDecLine);   // #623: colon-aware, shared
@@ -684,7 +423,7 @@ export class ClassMemberResolver {
         let parentClassName: string | null = null;
 
         // #608: of several same-named local classes, the one this method belongs to
-        const labelToken = ClassMemberResolver.nearestClassLabel(tokens, className, currentLine);
+        const labelToken = nearestClassLabel(tokens, className, currentLine);
         if (labelToken) {
             const classDecLine = docLines[labelToken.line];
             const parentName = extractParentName(classDecLine);   // #623: colon-aware, shared
@@ -828,7 +567,7 @@ export class ClassMemberResolver {
         const found = scanClassBodyForMember(
             filePath, className, memberName, paramCount, 'CLASS',
             (line) => this.countParametersInDeclaration(line),
-            (candidates, pc) => this.selectBestOverload(candidates, pc),
+            (candidates, pc) => selectBestMemberOverload(candidates, pc),
             text
         );
         if (found) return { ...found, file: uri };
@@ -851,7 +590,7 @@ export class ClassMemberResolver {
         const result = scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
             (line) => this.countParametersInDeclaration(line),
-            (candidates, pc) => this.selectBestOverload(candidates, pc),
+            (candidates, pc) => selectBestMemberOverload(candidates, pc),
             liveContent
         );
         if (!result) {
@@ -871,45 +610,6 @@ export class ClassMemberResolver {
      *   "STRING(20)"           → null
      *   "LONG"                 → null
      */
-    public static extractClassName(typeStr: string): string | null {
-        const CLARION_PRIMITIVES = new Set([
-            'PROCEDURE', 'ROUTINE',
-            'STRING', 'CSTRING', 'PSTRING', 'USTRING',
-            'LONG', 'ULONG', 'SHORT', 'USHORT', 'BYTE', 'SBYTE',
-            'REAL', 'SREAL', 'BFLOAT4', 'BFLOAT8',
-            'DECIMAL', 'PDECIMAL',
-            'DATE', 'TIME', 'CLOCK',
-            'BOOL', 'ANY', 'ASTRING', 'MEMO', 'BLOB', 'BFILE',
-            'SIGNED', 'UNSIGNED', 'VARIANT', 'LIKE',
-            'FILE', 'VIEW', 'REPORT', 'WINDOW', 'APPLICATION',
-            'QUEUE', 'GROUP', 'RECORD', 'KEY', 'INDEX',
-            'THREAD', 'MODULE', 'EQUATE',
-        ]);
-
-        // Strip leading & (reference prefix)
-        let name = typeStr.trim().replace(/^&/, '').trim();
-
-        // LIKE(TypeName) or LIKE(PREFIX:TypeName) — inherited type: resolve to the referenced name
-        const likeMatch = name.match(/^LIKE\s*\(\s*([\w:]+)\s*\)/i);
-        if (likeMatch) return likeMatch[1];
-
-        // GROUP(TypeName) / QUEUE(TypeName) / RECORD(TypeName) — structured-type property
-        // (e.g. "Settings GROUP(ConnectionSettingsType) END"): resolve to the referenced
-        // type name, same treatment as LIKE(TypeName) above. Without this, the comma/paren
-        // split below strips down to the bare keyword ("GROUP"), which then matches
-        // CLARION_PRIMITIVES and gets rejected as "not navigable" — breaking chained
-        // hover/member resolution (e.g. SELF.Settings.Address) one level too early.
-        const structRefMatch = name.match(/^(?:GROUP|QUEUE|RECORD)\s*\(\s*([\w:]+)\s*\)/i);
-        if (structRefMatch) return structRefMatch[1];
-
-        // Take only the part before comma or parenthesis (attributes/dimensions)
-        name = name.split(/[,(]/)[0].trim();
-
-        if (!name || CLARION_PRIMITIVES.has(name.toUpperCase())) {
-            return null;
-        }
-        return name;
-    }
 
     /**
      * Finds a member inside a specific named structure (CLASS, QUEUE, or GROUP)

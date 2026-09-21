@@ -23,6 +23,7 @@ interface DllProjectLike {
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { extractClassName } from '../utils/ClassNameUtils';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -1345,7 +1346,7 @@ export class ReferencesProvider {
             fileVarIndex, globalScope, position.line, variableName.toLowerCase());
         if (!rawType) return null;
 
-        const typeName = ClassMemberResolver.extractClassName(rawType);
+        const typeName = extractClassName(rawType);
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);

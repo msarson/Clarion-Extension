@@ -29,12 +29,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import {
-    ClassMemberResolver,
     scanClassBodyForMember,
     scanClassBodyForAllMembers,
     selectBestMemberOverload,
-} from '../utils/ClassMemberResolver';
+} from '../utils/ClassMemberScan';
 
 let tmpDir: string;
 

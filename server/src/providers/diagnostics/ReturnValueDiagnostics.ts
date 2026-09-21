@@ -4,7 +4,8 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
-import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate, ClassMemberResolver } from '../../utils/ClassMemberResolver';
+import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate } from '../../utils/ClassMemberScan';
+import { extractClassName } from '../../utils/ClassNameUtils';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -1205,7 +1206,7 @@ export async function validateDiscardedReturnValues(
                 chainBroken = true;
                 break;
             }
-            const nextClass = ClassMemberResolver.extractClassName(segMemberInfo.type);
+            const nextClass = extractClassName(segMemberInfo.type);
             if (!nextClass) {
                 logger.debug(`🔍 Line ${lineIdx + 1}: chain segment "${segmentName}" type "${segMemberInfo.type}" is not navigable`);
                 chainBroken = true;

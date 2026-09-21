@@ -2,7 +2,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver-protocol';
 import { Token } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
-import { ClassMemberResolver } from './ClassMemberResolver';
+import { nearestClassLabel } from './ClassNameUtils';
 import { ChainedPropertyResolver } from './ChainedPropertyResolver';
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
@@ -62,7 +62,7 @@ export class SelfParentClassResolver {
      * several procedures), otherwise the structure index.
      */
     private async locate(className: string, document: TextDocument, tokens: Token[], atLine: number): Promise<ClassDeclarationSite | null> {
-        const best = ClassMemberResolver.nearestClassLabel(tokens, className, atLine);
+        const best = nearestClassLabel(tokens, className, atLine);
         if (best) {
             const text = document.getText().split(/\r?\n/)[best.line] ?? '';
             const parent = text.match(/\bCLASS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i);

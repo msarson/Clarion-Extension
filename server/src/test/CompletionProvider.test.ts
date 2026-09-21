@@ -18,7 +18,7 @@ import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
-import { scanClassBodyForAllMembers, detectMemberAccess } from '../utils/ClassMemberResolver';
+import { scanClassBodyForAllMembers, detectMemberAccess } from '../utils/ClassMemberScan';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { CompletionProvider } from '../providers/CompletionProvider';
 
