@@ -83,7 +83,15 @@ export class ProcedureHoverResolver {
         // scans the current document, so hover at call sites of such procedures was
         // dead. Locate the declaration via the shared walk and resolve the
         // implementation from ITS document — the proven declaration-side path.
-        if (!mapDecl) {
+        //
+        // Skipped for a bare ARGUMENT reference (`SORT(Queue, CompareProc)`): that
+        // shape matches every identifier passed as an argument, so most words
+        // arriving here are ordinary variables with no declaration to find — and
+        // this walk is the expensive one (~89s cold on a large PROGRAM file before
+        // its result is memoized). A callback's prototype is visible to the compiler
+        // from the calling module, which the cheap in-document MAP scan above
+        // already covers.
+        if (!mapDecl && !detection.isArgumentReference) {
             const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens);
             mk('walkIncludes');
             if (hit) {

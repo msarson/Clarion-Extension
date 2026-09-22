@@ -10,16 +10,17 @@ export class ProcedureCallDetector {
      * Handles multiple patterns:
      * - Direct call: MyProcedure()
      * - START() call: START(MyProcedure, ...)
-     * 
+     * - Bare argument reference: SORT(Queue, CompareProc)
+     *
      * @returns true if this is a procedure call/reference
      */
     public static isProcedureCallOrReference(
         document: TextDocument,
         position: Position,
         wordRange: Range | undefined
-    ): { isProcedure: boolean; isStartCall: boolean } {
+    ): { isProcedure: boolean; isStartCall: boolean; isArgumentReference: boolean } {
         if (!wordRange) {
-            return { isProcedure: false, isStartCall: false };
+            return { isProcedure: false, isStartCall: false, isArgumentReference: false };
         }
 
         const line = document.getText({
@@ -42,9 +43,25 @@ export class ProcedureCallDetector {
         // e.g. "  Main" or "  Main  !" — Clarion allows calling no-param procedures without ()
         const isStandaloneCall = /^\s*$/.test(beforeWord) && /^\s*(!.*)?$/.test(afterWord);
 
+        // A procedure passed BY NAME as an argument — `SORT(Queue, CompareProc)`, a
+        // procedure-typed parameter, any callback. Such a reference carries no '(' of
+        // its own (it is referenced, not called) and is not first inside a START(), so
+        // all three checks above miss it: hover and F12 then skipped the procedure
+        // pipeline entirely, and the reference resolved to nothing at all.
+        //
+        // START( is one instance of this shape; it stays a separate flag above only
+        // because callers label their log message with it.
+        //
+        // This is a WEAK signal — every bare identifier argument matches it, procedure
+        // or not (`Foo(x, y)`, `USE(SomeVar)`, `AT(1,2)`). Callers must therefore keep
+        // it to CHEAP resolution tiers and must not let it trigger exhaustive
+        // cross-file searches; see ProcedureHoverResolver's #313 walk.
+        const isArgumentReference = /[(,]\s*$/.test(beforeWord) && /^\s*[,)]/.test(afterWord);
+
         return {
-            isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall,
-            isStartCall: !!isInStartCall
+            isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall || isArgumentReference,
+            isStartCall: !!isInStartCall,
+            isArgumentReference
         };
     }
 
