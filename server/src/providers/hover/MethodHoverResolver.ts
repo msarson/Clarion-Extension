@@ -17,6 +17,7 @@ import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import LoggerManager from '../../logger';
 import { StructureDeclarationIndexer, scanSourceForDeclarations } from '../../utils/StructureDeclarationIndexer';
 import { pickDeclaration } from '../../utils/ClassAncestry';
+import { ClassDeclarationSite } from '../../utils/SelfParentClassResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -523,10 +524,10 @@ export class MethodHoverResolver {
      * prefix was hovered — that is what hovering the method name is for.
      *
      * Three places can declare it, and the order matters:
-     *   1. A procedure-local CLASS (#233 Rule 4). It is declared INDENTED in a procedure's
-     *      local data, and one module may declare the same name in several procedures, so
-     *      only the `declaringProcedureLine` binding picks the right one — a search by name
-     *      would be ambiguous and a column-0 search would not see it at all.
+     *   1. A procedure-local CLASS (#233 Rule 4). Its label sits at column 0 like any Clarion
+     *      label — only its END is indented — so what distinguishes it is the procedure it
+     *      belongs to, and one module may declare the same name in several procedures. Only
+     *      the `declaringProcedureLine` binding picks the right one; a search by name cannot.
      *   2. Module level in THIS document — a generated app declares `ThisWindow CLASS(...)`
      *      in the same .clw that implements it. Scanned with the indexer's own scanner, so
      *      "is this really a CLASS declaration" is decided identically, and over the live
@@ -544,9 +545,12 @@ export class MethodHoverResolver {
      */
     private resolveClassDeclarationHover(className: string, document: TextDocument, implLine: number): Hover | null {
         const target = className.toLowerCase();
-        const header = [`**${className}**`, ``, `🔷 Class declaration`, ``];
-        const hover = (location: string): Hover =>
-            ({ contents: { kind: 'markdown', value: [...header, location].join('\n') } });
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        // One scan serves tiers 1 and 2: tier 2 looks up by NAME, tier 1 by the LINE it has
+        // already picked, which is how it reads the parent off the right one of two same-named
+        // local classes.
+        const declared = scanSourceForDeclarations(document.getText(), docPath)
+            .filter(d => d.structureType === 'CLASS');
 
         // 1. Procedure-local class.
         const tokens = this.tokenCache.getTokens(document);
@@ -558,18 +562,22 @@ export class MethodHoverResolver {
             const localClass = owner?.localClassTokens?.find(c => c.label?.toLowerCase() === target);
             if (localClass) {
                 logger.info(`✅ ${className} is procedure-local, declared at line ${localClass.line}`);
-                return hover(this.formatter.locationLink(document.uri, localClass.line));
+                const onLine = declared.find(d => d.line === localClass.line);
+                return this.buildClassDeclarationHover({
+                    className, uri: document.uri, line: localClass.line,
+                    parentName: onLine?.parentName, isType: onLine?.isType ?? false
+                });
             }
         }
 
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-
         // 2. Module level in this document.
-        const here = scanSourceForDeclarations(document.getText(), docPath)
-            .find(d => d.structureType === 'CLASS' && d.name.toLowerCase() === target);
+        const here = declared.find(d => d.name.toLowerCase() === target);
         if (here) {
             logger.info(`✅ ${className} is declared in this file at line ${here.line}`);
-            return hover(this.formatter.locationLink(document.uri, here.line));
+            return this.buildClassDeclarationHover({
+                className: here.name, uri: document.uri, line: here.line,
+                parentName: here.parentName, isType: here.isType
+            });
         }
 
         // 3. Another file.
@@ -579,11 +587,48 @@ export class MethodHoverResolver {
                 .filter(d => d.structureType === 'CLASS'));
         if (indexed) {
             logger.info(`✅ ${className} is declared in ${indexed.filePath}:${indexed.line}`);
-            return hover(this.formatter.locationLink(indexed.filePath, indexed.line));
+            return this.buildClassDeclarationHover({
+                className: indexed.name, uri: indexed.filePath, line: indexed.line,
+                parentName: indexed.parentName, isType: indexed.isType
+            });
         }
 
         logger.info(`❌ No CLASS declaration found for ${className}`);
-        return hover(`⚠️ *Declaration not found*`);
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [`**${className}**`, ``, `🔷 Class declaration`, ``, `⚠️ *Declaration not found*`].join('\n')
+            }
+        };
+    }
+
+    /**
+     * The card for a resolved CLASS declaration: what it is, where it is, and what it
+     * extends (#634).
+     *
+     * What a class derives from is the fact this hover is usually opened to find — in a
+     * generated app, `CLASS(WindowManager)` against `CLASS(ReportManager)` is what says
+     * which framework behaviour you are looking at. It is rendered in the shape #606
+     * already established for the bare SELF/PARENT card (`HoverProvider.buildSelfParentHover`),
+     * so the two ways of asking "which class is this?" answer in one voice rather than two.
+     *
+     * A parentless class renders no `Extends` line at all, rather than an empty one.
+     */
+    private buildClassDeclarationHover(site: ClassDeclarationSite): Hover {
+        const typeLabel = site.isType ? 'CLASS, TYPE' : 'CLASS';
+        const parentLine = site.parentName ? `\n⬆️ Extends: \`${site.parentName}\`` : '';
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**${site.className}** — ${typeLabel}`,
+                    ``,
+                    `🔷 Class declaration`,
+                    ``,
+                    `${this.formatter.locationLink(site.uri, site.line)}${parentLine}`
+                ].join('\n')
+            }
+        };
     }
 
     /**

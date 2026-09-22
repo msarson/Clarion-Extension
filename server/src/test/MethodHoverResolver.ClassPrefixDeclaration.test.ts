@@ -38,14 +38,14 @@ import { SolutionManager } from '../solution/solutionManager';
 //
 // The declaration is padded down to line 6 so the assertion cannot pass on a stray ':1'.
 //
-// 6 MyLib CLASS,TYPE,MODULE('lib.clw')   <- the only real declaration, in the OTHER file
+// 6 MyLib CLASS(BaseLib),TYPE,MODULE('lib.clw')   <- the only real declaration, in the OTHER file
 const LIB_INC = [
     '! library class fixture',
     '! padding, so the declaration lands on a distinctive line number',
     '! padding',
     '! padding',
     '! padding',
-    "MyLib CLASS,TYPE,MODULE('lib.clw')",
+    "MyLib CLASS(BaseLib),TYPE,MODULE('lib.clw')",
     'First    PROCEDURE()',
     'Second   PROCEDURE()',
     '    END',
@@ -99,10 +99,14 @@ const APP_CLW = [
 
 // ── Procedure-local shape: same class name declared in two procedures ────────────────
 //
-//  6 SharedName CLASS      <- ProcA's, indented scope; the OLD wrong answer for BOTH
-// 13 SharedName.Run PROCEDURE
-// 18 SharedName CLASS      <- ProcB's
-// 25 SharedName.Run PROCEDURE   <- hover the prefix here; must resolve to 18, not 6
+// A local class's LABEL sits at column 0 like any Clarion label — only its END is indented —
+// so what distinguishes the two is the procedure they belong to, never their column.
+// ProcA's has no parent and ProcB's does, which also pins that the right one is read.
+//
+//  6 SharedName CLASS             <- ProcA's; the OLD wrong answer for BOTH
+// 13 SharedName.Run PROCEDURE     <- hover here for the parentless case
+// 18 SharedName CLASS(LocalBase)  <- ProcB's
+// 25 SharedName.Run PROCEDURE     <- hover the prefix here; must resolve to 18, not 6
 const LOCAL_CLW = [
     'PROGRAM',
     '  MAP',
@@ -121,7 +125,7 @@ const LOCAL_CLW = [
     '  AVar = 2',
     '',
     'ProcB PROCEDURE',
-    'SharedName CLASS',
+    'SharedName CLASS(LocalBase)',
     'Run PROCEDURE',
     '  END',
     'BVar LONG',
@@ -222,6 +226,9 @@ suite('MethodHoverResolver — hovering the class prefix resolves the CLASS decl
             `must NOT report the first method implementation (lib.clw:4) as the declaration; got: ${content}`);
         assert.ok(!/Second|First/.test(content.replace(/MyLib/g, '')),
             `must say nothing about any method; got: ${content}`);
+        // #634 — tier 3 (cross-file index) carries parentName, so the card names it.
+        assert.ok(/Extends.*BaseLib/.test(content),
+            `should name the parent class BaseLib; got: ${content}`);
     });
 
     test('generated app class: still resolves to the CLASS line declared in the same .clw', async () => {
@@ -236,6 +243,10 @@ suite('MethodHoverResolver — hovering the class prefix resolves the CLASS decl
             `should cite the CLASS line at app.clw:5; got: ${content}`);
         assert.ok(!content.includes('app.clw:12'),
             `must NOT cite the first method implementation at app.clw:12; got: ${content}`);
+        // #634 — the generated-app case, and the reason this matters: which framework class
+        // a window manager derives from is the fact you hover the prefix to find out.
+        assert.ok(/Extends.*WindowManager/.test(content),
+            `should name the parent class WindowManager; got: ${content}`);
     });
 
     test('procedure-local class: resolves to the declaration in the hovered method\'s OWN procedure', async () => {
@@ -250,5 +261,26 @@ suite('MethodHoverResolver — hovering the class prefix resolves the CLASS decl
             `should cite ProcB's own local CLASS at local.clw:18; got: ${content}`);
         assert.ok(!content.includes('local.clw:6'),
             `must NOT cite ProcA's same-named local CLASS at local.clw:6; got: ${content}`);
+        // #634 — tier 1 reads the parent off the declaration it picked, so naming LocalBase
+        // is also a second, independent check that it picked ProcB's and not ProcA's.
+        assert.ok(/Extends.*LocalBase/.test(content),
+            `should name ProcB's parent class LocalBase; got: ${content}`);
+    });
+
+    // #634 — a class with no parent must not render an empty "Extends:" line.
+    test('a class declared without a parent names no parent', async () => {
+        const doc = diskDoc('local.clw', LOCAL_CLW);
+
+        // 0-based line 12 = ProcA's 'SharedName.Run PROCEDURE'; ProcA's class has no parent.
+        const content = hoverText(await provider.provideHover(doc, Position.create(12, 2)));
+
+        assert.ok(content.includes('Class declaration'),
+            `should be a class declaration hover; got: ${content}`);
+        assert.ok(content.includes('local.clw:6'),
+            `should cite ProcA's own local CLASS at local.clw:6; got: ${content}`);
+        assert.ok(!/Extends/.test(content),
+            `a parentless class must not render an Extends line; got: ${content}`);
+        assert.ok(!/LocalBase/.test(content),
+            `must not borrow ProcB's parent; got: ${content}`);
     });
 });
