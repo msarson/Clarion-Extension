@@ -15,8 +15,8 @@ import { resolveFileInNoSolutionMode } from '../../solution/findFileNoSolution';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import LoggerManager from '../../logger';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
-import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, scanSourceForDeclarations } from '../../utils/StructureDeclarationIndexer';
+import { pickDeclaration } from '../../utils/ClassAncestry';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -87,29 +87,9 @@ export class MethodHoverResolver {
         const methodEnd = methodStart + methodName.length;
         
         if (position.character >= classStart && position.character <= classEnd) {
-            // Cursor is on the class prefix — show the class declaration, not the method
-            const tokens = this.tokenCache.getTokens(document);
-            const classToken = tokens.find(t =>
-                t.start === 0 &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            if (classToken) {
-                const typeStr = SymbolFinderService.extractTypeInfo(classToken, tokens);
-                const lineTokens = tokens.filter(t => t.line === classToken.line);
-                const declaration = lineTokens.map(t => t.value).join(' ');
-                const markdown = [
-                    `**${className}** — \`${typeStr}\``,
-                    ``,
-                    `🔷 Class declaration`,
-                    ``,
-                    '```clarion',
-                    declaration,
-                    '```',
-                    this.formatter.locationLink(document.uri, classToken.line)
-                ];
-                return { contents: { kind: 'markdown', value: markdown.join('\n') } };
-            }
-            return null;
+            // Cursor is on the class prefix — the question is where the CLASS is declared.
+            // Deliberately nothing about this method: hovering the method name answers that.
+            return this.resolveClassDeclarationHover(className, document, position.line);
         }
 
         if (position.character >= methodStart && position.character <= methodEnd) {
@@ -536,6 +516,74 @@ export class MethodHoverResolver {
 
         logger.info(`✅ [Rule 4] Found local derived method implementation for ${qualifiedName} bound to declaring procedure at line ${owningProcedure.line}`);
         return `${document.uri}:${implToken.line}`;
+    }
+
+    /**
+     * Where `className` is DECLARED, as a hover. Says nothing about the method whose
+     * prefix was hovered — that is what hovering the method name is for.
+     *
+     * Three places can declare it, and the order matters:
+     *   1. A procedure-local CLASS (#233 Rule 4). It is declared INDENTED in a procedure's
+     *      local data, and one module may declare the same name in several procedures, so
+     *      only the `declaringProcedureLine` binding picks the right one — a search by name
+     *      would be ambiguous and a column-0 search would not see it at all.
+     *   2. Module level in THIS document — a generated app declares `ThisWindow CLASS(...)`
+     *      in the same .clw that implements it. Scanned with the indexer's own scanner, so
+     *      "is this really a CLASS declaration" is decided identically, and over the live
+     *      text so unsaved edits count. A declaration here outranks the index: another file
+     *      may declare the same name.
+     *   3. Another file, via the cross-file index — the library shape (declared in .inc,
+     *      implemented in .clw). The index does not scan implementation .clw modules, which
+     *      is why (2) cannot be folded into it.
+     *
+     * Previously this searched the current document for the first column-0 token matching
+     * the class name. In a generated app that is the real `ThisWindow CLASS(...)` line, so
+     * it looked correct; for a library class, whose declaration is in another file entirely,
+     * it matched the first METHOD IMPLEMENTATION prefix and reported an unrelated method as
+     * the "class declaration".
+     */
+    private resolveClassDeclarationHover(className: string, document: TextDocument, implLine: number): Hover | null {
+        const target = className.toLowerCase();
+        const header = [`**${className}**`, ``, `🔷 Class declaration`, ``];
+        const hover = (location: string): Hover =>
+            ({ contents: { kind: 'markdown', value: [...header, location].join('\n') } });
+
+        // 1. Procedure-local class.
+        const tokens = this.tokenCache.getTokens(document);
+        const implToken = tokens.find(t =>
+            t.line === implLine && t.subType === TokenType.MethodImplementation);
+        if (implToken && implToken.declaringProcedureLine !== undefined) {
+            const owner = tokens.find(t =>
+                t.line === implToken.declaringProcedureLine && t.localClassTokens);
+            const localClass = owner?.localClassTokens?.find(c => c.label?.toLowerCase() === target);
+            if (localClass) {
+                logger.info(`✅ ${className} is procedure-local, declared at line ${localClass.line}`);
+                return hover(this.formatter.locationLink(document.uri, localClass.line));
+            }
+        }
+
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+
+        // 2. Module level in this document.
+        const here = scanSourceForDeclarations(document.getText(), docPath)
+            .find(d => d.structureType === 'CLASS' && d.name.toLowerCase() === target);
+        if (here) {
+            logger.info(`✅ ${className} is declared in this file at line ${here.line}`);
+            return hover(this.formatter.locationLink(document.uri, here.line));
+        }
+
+        // 3. Another file.
+        const indexed = pickDeclaration(
+            StructureDeclarationIndexer.getInstance()
+                .findFor(className, docPath)
+                .filter(d => d.structureType === 'CLASS'));
+        if (indexed) {
+            logger.info(`✅ ${className} is declared in ${indexed.filePath}:${indexed.line}`);
+            return hover(this.formatter.locationLink(indexed.filePath, indexed.line));
+        }
+
+        logger.info(`❌ No CLASS declaration found for ${className}`);
+        return hover(`⚠️ *Declaration not found*`);
     }
 
     /**
