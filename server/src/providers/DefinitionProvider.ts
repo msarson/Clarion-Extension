@@ -460,71 +460,17 @@ export class DefinitionProvider {
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
-            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            
-            logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, line="${line.trim()}"`);
-            
-            if (detection.isProcedure) {
-                logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-                
-                // Count parameters for overload resolution
-                const paramCount = this.memberResolver.countParametersInCall(line, word);
-                logger.info(`Procedure call has ${paramCount} parameters`);
-                
-                // First, try to find MAP declaration in current file
-                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
-                
-                // Check if we're already AT the MAP declaration - if so, jump to implementation instead
-                if (mapDecl && 
-                    mapDecl.uri === document.uri && 
-                    mapDecl.range.start.line === position.line) {
-                    logger.info(`📍 Already at MAP declaration for ${word} - finding implementation instead`);
-                    
-                    // Navigate to implementation (like Ctrl+F12 would do)
-                    const implLocation = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        position,
-                        line, // Pass declaration signature for overload matching
-                        this.tokenCache.getStructure(document) // #258: reuse cached structure
-                    );
-                    
-                    if (implLocation) {
-                        logger.info(`✅ Found implementation at line ${implLocation.range.start.line}`);
-                        return implLocation;
-                    } else {
-                        logger.info(`❌ No implementation found for MAP declaration: ${word}`);
-                        return null;
-                    }
-                }
-                
-                if (mapDecl) {
-                    logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
-                    return mapDecl;
-                }
-                
-                // If not found locally and file has MEMBER, check parent file's MAP
-                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-                
-                if (memberToken?.referencedFile) {
-                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
-                    
-                    const localScope = getLocalMapScope(document.uri);
-                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
-                        word,
-                        memberToken.referencedFile,
-                        document,
-                        line,
-                        localScope?.containingProcedure
-                    );
-                    if (memberResult) {
-                        logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
-                        return memberResult.location;
-                    }
-                }
-                
-                logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
+            //
+            // The weak `SORT(Queue, CompareProc)` argument shape is deliberately NOT admitted
+            // here. It would answer ahead of the parameter, label and symbol tiers below, and a
+            // bare argument naming an in-scope variable IS that variable — the language reads
+            // it as the nearest declaration in scope, and reaches a same-named procedure only
+            // through `Name()`. It is retried after those tiers instead; see the second call to
+            // this method further down.
+            const strongProcedureCall = await this.resolveProcedureCallDefinition(
+                word, document, position, line, tokens, wordRange, false);
+            if (strongProcedureCall) {
+                return strongProcedureCall.location;
             }
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
@@ -766,6 +712,19 @@ export class DefinitionProvider {
                 return symbolDefinition;
             }
 
+            // A procedure named as a bare argument — `SORT(Queue, CompareRows)`. Resolved
+            // HERE rather than with the other procedure forms above, because every tier
+            // between the two call sites answers for a declaration that shadows it: a
+            // parameter, an in-scope label (already sorted innermost-first), a cross-file
+            // symbol. Reaching this line means none of them claimed the word, so a procedure
+            // of that name is what the reference means.
+            trace.route = 'argumentReference';
+            const argumentProcedureCall = await this.resolveProcedureCallDefinition(
+                word, document, position, line, tokens, wordRange, true);
+            if (argumentProcedureCall) {
+                return argumentProcedureCall.location;
+            }
+
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
             // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
@@ -834,6 +793,101 @@ export class DefinitionProvider {
             trace.cancelled = trace.cancelled || (token?.isCancellationRequested ?? false);
             trace.emitIfSlow();
         }
+    }
+
+    /**
+     * F12 for a procedure call or reference: the MAP declaration, or the implementation
+     * when the cursor is already on that declaration.
+     *
+     * Returns `{ location }` when it has taken responsibility for the word — including
+     * `{ location: null }` for "this is a procedure and there is nowhere to go", which
+     * must not fall through to the tiers below — and `null` when it has not, so the
+     * caller continues down its ladder.
+     *
+     * `allowArgumentReference` admits the weak `SORT(Queue, CompareProc)` shape. The
+     * caller passes false above the variable tiers and true below them, which is what
+     * keeps an in-scope declaration ahead of a same-named procedure.
+     */
+    private async resolveProcedureCallDefinition(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        tokens: Token[],
+        wordRange: Range | undefined,
+        allowArgumentReference: boolean
+    ): Promise<{ location: Definition | null } | null> {
+        const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+
+        logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, isArgumentReference=${detection.isArgumentReference}, allowArgumentReference=${allowArgumentReference}, line="${line.trim()}"`);
+
+        if (!detection.isProcedure) {
+            return null;
+        }
+        if (detection.isArgumentReference !== allowArgumentReference) {
+            return null;
+        }
+
+        logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
+
+        // Count parameters for overload resolution
+        const paramCount = this.memberResolver.countParametersInCall(line, word);
+        logger.info(`Procedure call has ${paramCount} parameters`);
+
+        // First, try to find MAP declaration in current file
+        const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+
+        // Check if we're already AT the MAP declaration - if so, jump to implementation instead
+        if (mapDecl &&
+            mapDecl.uri === document.uri &&
+            mapDecl.range.start.line === position.line) {
+            logger.info(`📍 Already at MAP declaration for ${word} - finding implementation instead`);
+
+            // Navigate to implementation (like Ctrl+F12 would do)
+            const implLocation = await this.mapResolver.findProcedureImplementation(
+                word,
+                tokens,
+                document,
+                position,
+                line, // Pass declaration signature for overload matching
+                this.tokenCache.getStructure(document) // #258: reuse cached structure
+            );
+
+            if (implLocation) {
+                logger.info(`✅ Found implementation at line ${implLocation.range.start.line}`);
+                return { location: implLocation };
+            }
+            logger.info(`❌ No implementation found for MAP declaration: ${word}`);
+            return { location: null };
+        }
+
+        if (mapDecl) {
+            logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
+            return { location: mapDecl };
+        }
+
+        // If not found locally and file has MEMBER, check parent file's MAP
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+
+        if (memberToken?.referencedFile) {
+            logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
+
+            const localScope = getLocalMapScope(document.uri);
+            const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                word,
+                memberToken.referencedFile,
+                document,
+                line,
+                localScope?.containingProcedure
+            );
+            if (memberResult) {
+                logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
+                return { location: memberResult.location };
+            }
+        }
+
+        logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
+        return null;
     }
 
     /**

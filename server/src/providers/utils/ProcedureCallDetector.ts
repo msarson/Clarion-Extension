@@ -10,7 +10,8 @@ export class ProcedureCallDetector {
      * Handles multiple patterns:
      * - Direct call: MyProcedure()
      * - START() call: START(MyProcedure, ...)
-     * - Bare argument reference: SORT(Queue, CompareProc)
+     * - Bare argument reference: SORT(Queue, CompareProc) — reported separately as
+     *   `isArgumentReference`, because it is a weak signal a caller must rank last
      *
      * @returns true if this is a procedure call/reference
      */
@@ -45,18 +46,29 @@ export class ProcedureCallDetector {
 
         // A procedure passed BY NAME as an argument — `SORT(Queue, CompareProc)`, a
         // procedure-typed parameter, any callback. Such a reference carries no '(' of
-        // its own (it is referenced, not called) and is not first inside a START(), so
-        // all three checks above miss it: hover and F12 then skipped the procedure
-        // pipeline entirely, and the reference resolved to nothing at all.
+        // its own, because it is referenced rather than called, so the three checks
+        // above miss it and the procedure pipeline never sees it at all.
         //
-        // START( is one instance of this shape; it stays a separate flag above only
-        // because callers label their log message with it.
+        // Unlike those three, this is a WEAK signal: every bare identifier passed as an
+        // argument matches it — `Foo(x, y)`, `AT(1,2)`, `USE(SomeVar)` — procedure or
+        // not. So it is reported as its own flag, and it means "this MIGHT be a
+        // procedure reference", not "this is one". Two obligations come with it:
         //
-        // This is a WEAK signal — every bare identifier argument matches it, procedure
-        // or not (`Foo(x, y)`, `USE(SomeVar)`, `AT(1,2)`). Callers must therefore keep
-        // it to CHEAP resolution tiers and must not let it trigger exhaustive
-        // cross-file searches; see ProcedureHoverResolver's #313 walk.
-        const isArgumentReference = /[(,]\s*$/.test(beforeWord) && /^\s*[,)]/.test(afterWord);
+        //   1. It must not outrank an in-scope declaration. The language resolves a
+        //      bare argument to the nearest declaration in scope, so a local variable
+        //      sharing a name with a MAP procedure IS the local there — the procedure
+        //      is reachable only as `Name()`. Callers consult this shape only once
+        //      variable resolution has declined; see HoverProvider and
+        //      DefinitionProvider, which both run it as a last tier.
+        //   2. It must not trigger exhaustive cross-file searching, since most words
+        //      reaching it are ordinary variables with nothing to find; see
+        //      ProcedureHoverResolver's #313 walk.
+        //
+        // `START(` is deliberately excluded: it is an argument position too, but it was
+        // already recognised as a strong shape above and keeps that priority, so its
+        // established behaviour is untouched by either obligation.
+        const isArgumentReference =
+            !isInStartCall && /[(,]\s*$/.test(beforeWord) && /^\s*[,)]/.test(afterWord);
 
         return {
             isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall || isArgumentReference,

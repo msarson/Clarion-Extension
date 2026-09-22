@@ -339,6 +339,10 @@ export class HoverProvider {
                 mark('structType(noScope)');
                 if (structTypeHover) return structTypeHover;
 
+                const argRefHover = await this.resolveArgumentReferenceHover(word, document, position, wordRange, line);
+                mark('argumentReference(noScope)');
+                if (argRefHover) return argRefHover;
+
                 return null;
             }
 
@@ -455,13 +459,46 @@ export class HoverProvider {
                 logger.info(`✅ HOVER-RETURN: Found structure type hover for ${word}`);
                 return structTypeHover;
             }
-            
+
+            const argRefHover = await this.resolveArgumentReferenceHover(word, document, position, wordRange, line);
+            mark('argumentReference');
+            if (argRefHover) {
+                logger.info(`✅ HOVER-RETURN: Found procedure-reference hover for argument ${word}`);
+                return argRefHover;
+            }
+
             logger.info(`❌ HOVER-RETURN: No hover information found for ${word}`);
             return null;
         } catch (error) {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * A procedure named as a bare argument — `SORT(Queue, CompareRows)` — resolved as
+     * the LAST tier, after every variable tier above has declined.
+     *
+     * The shape it rests on matches any identifier passed to anything, so ranking it
+     * where the router resolves the other procedure forms (step 3, ahead of locals,
+     * module data, globals and includes) would let a procedure answer for a name the
+     * language reads as a variable: a bare argument resolves to the nearest declaration
+     * in scope, and a same-named procedure is reachable there only as `Name()`. Running
+     * it here inverts that by construction — a variable wins because it was asked
+     * first, with no need to enumerate which kinds of declaration can shadow.
+     *
+     * The stronger forms (`Name(`, `START(Name)`, a standalone call) are unaffected:
+     * they identify a procedure on their own evidence and keep their place in the
+     * router.
+     */
+    private async resolveArgumentReferenceHover(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        wordRange: Range,
+        line: string
+    ): Promise<Hover | null> {
+        return this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line, true);
     }
 
     /**

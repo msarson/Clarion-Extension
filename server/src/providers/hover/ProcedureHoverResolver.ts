@@ -37,18 +37,31 @@ export class ProcedureHoverResolver {
 
     /**
      * Resolves hover for a procedure call (e.g., MyProc() or START(MyProc))
+     *
+     * `allowArgumentReference` admits the weak `SORT(Queue, CompareProc)` shape, and is
+     * false for the router's call, which runs ahead of every variable tier. A bare
+     * argument naming an in-scope variable IS that variable — the language resolves it
+     * to the nearest declaration, and a same-named procedure is reachable there only as
+     * `Name()` — so answering with the procedure from that position would shadow the
+     * declaration the compiler picks. HoverProvider passes true from its last tier,
+     * once no variable has claimed the word.
      */
     async resolveProcedureCall(
         word: string,
         document: TextDocument,
         position: Position,
         wordRange: any,
-        line: string
+        line: string,
+        allowArgumentReference = false
     ): Promise<Hover | null> {
         const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
         const isSelfMethodCall = word.toUpperCase().includes('SELF.') && /\w+\.\w+/.test(word);
-        
+
         if (!detection.isProcedure || isSelfMethodCall) {
+            return null;
+        }
+
+        if (detection.isArgumentReference && !allowArgumentReference) {
             return null;
         }
 
