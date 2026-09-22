@@ -10,16 +10,18 @@ export class ProcedureCallDetector {
      * Handles multiple patterns:
      * - Direct call: MyProcedure()
      * - START() call: START(MyProcedure, ...)
-     * 
+     * - Bare argument reference: SORT(Queue, CompareProc) — reported separately as
+     *   `isArgumentReference`, because it is a weak signal a caller must rank last
+     *
      * @returns true if this is a procedure call/reference
      */
     public static isProcedureCallOrReference(
         document: TextDocument,
         position: Position,
         wordRange: Range | undefined
-    ): { isProcedure: boolean; isStartCall: boolean } {
+    ): { isProcedure: boolean; isStartCall: boolean; isArgumentReference: boolean } {
         if (!wordRange) {
-            return { isProcedure: false, isStartCall: false };
+            return { isProcedure: false, isStartCall: false, isArgumentReference: false };
         }
 
         const line = document.getText({
@@ -42,9 +44,36 @@ export class ProcedureCallDetector {
         // e.g. "  Main" or "  Main  !" — Clarion allows calling no-param procedures without ()
         const isStandaloneCall = /^\s*$/.test(beforeWord) && /^\s*(!.*)?$/.test(afterWord);
 
+        // A procedure passed BY NAME as an argument — `SORT(Queue, CompareProc)`, a
+        // procedure-typed parameter, any callback. Such a reference carries no '(' of
+        // its own, because it is referenced rather than called, so the three checks
+        // above miss it and the procedure pipeline never sees it at all.
+        //
+        // Unlike those three, this is a WEAK signal: every bare identifier passed as an
+        // argument matches it — `Foo(x, y)`, `AT(1,2)`, `USE(SomeVar)` — procedure or
+        // not. So it is reported as its own flag, and it means "this MIGHT be a
+        // procedure reference", not "this is one". Two obligations come with it:
+        //
+        //   1. It must not outrank an in-scope declaration. The language resolves a
+        //      bare argument to the nearest declaration in scope, so a local variable
+        //      sharing a name with a MAP procedure IS the local there — the procedure
+        //      is reachable only as `Name()`. Callers consult this shape only once
+        //      variable resolution has declined; see HoverProvider and
+        //      DefinitionProvider, which both run it as a last tier.
+        //   2. It must not trigger exhaustive cross-file searching, since most words
+        //      reaching it are ordinary variables with nothing to find; see
+        //      ProcedureHoverResolver's #313 walk.
+        //
+        // `START(` is deliberately excluded: it is an argument position too, but it was
+        // already recognised as a strong shape above and keeps that priority, so its
+        // established behaviour is untouched by either obligation.
+        const isArgumentReference =
+            !isInStartCall && /[(,]\s*$/.test(beforeWord) && /^\s*[,)]/.test(afterWord);
+
         return {
-            isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall,
-            isStartCall: !!isInStartCall
+            isProcedure: hasParenthesesAfter || !!isInStartCall || isStandaloneCall || isArgumentReference,
+            isStartCall: !!isInStartCall,
+            isArgumentReference
         };
     }
 
