@@ -794,7 +794,9 @@ export class ImplementationProvider {
         line: string,
         position: Position
     ): { objectName: string; methodName: string; paramCount: number } | null {
-        const pair = /(\w+)\.(\w+)/g;
+        // #644: a receiver label may carry colons (`Relate:Cust`, `ThisListManager:Browse:1`);
+        // `\w+` kept only the last segment, as F12's did before #612.
+        const pair = /([\w:]+)\.(\w+)/g;
         let match: RegExpExecArray | null;
 
         while ((match = pair.exec(line)) !== null) {
