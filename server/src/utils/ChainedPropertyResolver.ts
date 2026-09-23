@@ -144,10 +144,9 @@ export class ChainedPropertyResolver {
      * Resolves the chain `beforeDot` to the class that owns the FINAL member —
      * i.e. steps 1-2 of {@link resolve} without the final member lookup.
      *
-     * Exposed so the DefinitionProvider chained branch can apply the #125
-     * argument-classification overload overlay against the resolved final class
-     * (symmetric with the SELF/PARENT/typed-var branches), which the
-     * paramCount-only final lookup in step 3 cannot do (#131).
+     * Exposed for the callers that need the chain's final class rather than a member of it: the
+     * argument-type classifier and Go to Definition's fallback for a chain
+     * DottedAccessResolver does not name (#654; the resolver itself calls resolveFinalOwner).
      *
      * @returns the final class name, or null if the chain is unresolvable.
      */
