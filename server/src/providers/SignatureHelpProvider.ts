@@ -293,13 +293,18 @@ export class SignatureHelpProvider {
         // Determine the class name
         let className: string | null = null;
 
-        if (prefix.toLowerCase() === 'self') {
+        // #654: the receiver as hover and Go to Definition read it (#651) - SELF the method's class,
+        // PARENT its parent, a local `ThisWindow CLASS(Base)` itself rather than Base (#642).
+        const receiver = await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
+        if (receiver) {
+            className = receiver.className;
+        } else if (prefix.toLowerCase() === 'self') {
             // #622: shared walk. Note this copy did NOT bail when a routine had no parent scope —
             // it carried on with the routine as the scope, whose label has no dot, so the result
             // was the same null by a longer road.
             className = resolveEnclosingClassName(document, currentLine, structure);
             logger.info(`SELF class context for line ${currentLine}: ${className ?? '(none)'}`);
-        } else {
+        } else if (prefix.toLowerCase() !== 'parent') {
             // Try to find the variable type — check cross-file first, then current file
             const typeInfo = await this.memberLocator.resolveVariableType(prefix, tokens, document);
             className = typeInfo?.typeName ?? this.findVariableType(tokens, prefix, currentLine);
