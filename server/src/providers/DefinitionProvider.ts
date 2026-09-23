@@ -7,7 +7,7 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { SelfParentClassResolver } from '../utils/SelfParentClassResolver';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
@@ -46,7 +46,6 @@ logger.setLevel("error");
 export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
-    private memberResolver = new ClassMemberResolver();
     private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
     private argTypeResolver = new ArgumentTypeResolver();
@@ -221,7 +220,7 @@ export class DefinitionProvider {
                         }
 
                         // Count parameters for overload resolution
-                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
+                        const paramCount = countParametersInCall(line, methodName);
                         logger.info(`Method call has ${paramCount} parameters`);
 
                         // #626 — once SELF's class is known this is the same question the
@@ -266,7 +265,7 @@ export class DefinitionProvider {
                         // #648 — once PARENT's class is named, the same engine as SELF (#626) and
                         // an explicit receiver (#611), so an inherited overload the call fits is
                         // not hidden by the parent's own one it does not fit.
-                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
+                        const paramCount = countParametersInCall(line, methodName);
                         const memberInfo = parentInfo
                             ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, methodName, document, paramCount)
                             : null;
@@ -296,7 +295,7 @@ export class DefinitionProvider {
                         }
 
                         const paramCount = hasParentheses
-                            ? this.memberResolver.countParametersInCall(line, methodName)
+                            ? countParametersInCall(line, methodName)
                             : undefined;
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount ?? undefined);
                         if (chainedInfo) {
@@ -344,7 +343,7 @@ export class DefinitionProvider {
                             }
 
                             const paramCount = hasParentheses
-                                ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                ? countParametersInCall(line, methodName) ?? undefined
                                 : undefined;
                             const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount);
                             if (chainedInfo) {
@@ -370,7 +369,7 @@ export class DefinitionProvider {
                                     if (argResolved) return argResolved;
                                 }
                                 const paramCount = hasParentheses
-                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    ? countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
                                 const memberInfo = await this.memberLocator.findMemberInClass(receiverClass.className, methodName, document, paramCount, position.line);
                                 if (memberInfo) {
@@ -399,7 +398,7 @@ export class DefinitionProvider {
                                     }
                                 }
                                 const paramCount = hasParentheses
-                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    ? countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
                                 const result = await this.findClassMemberInType(tokens, classType, methodName, document, paramCount);
                                 if (result) {
@@ -842,7 +841,7 @@ export class DefinitionProvider {
         logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
 
         // Count parameters for overload resolution
-        const paramCount = this.memberResolver.countParametersInCall(line, word);
+        const paramCount = countParametersInCall(line, word);
         logger.info(`Procedure call has ${paramCount} parameters`);
 
         // First, try to find MAP declaration in current file

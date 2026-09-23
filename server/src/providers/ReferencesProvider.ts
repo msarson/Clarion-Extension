@@ -22,7 +22,7 @@ interface DllProjectLike {
 }
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall, countParametersInDeclaration, getDeclarationLineText } from '../utils/ClassMemberScan';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { extractClassName } from '../utils/ClassNameUtils';
@@ -131,7 +131,6 @@ export class ReferencesProvider {
     private tokenCache: TokenCache;
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
-    private memberResolver: ClassMemberResolver;
     private overloadResolver: MethodOverloadResolver;
     private scopeTypeIndex: ScopeTypeIndexService;
     /** #637 — the member lookup hover, F12 and Ctrl+F12 use for SELF / PARENT. */
@@ -142,7 +141,6 @@ export class ReferencesProvider {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
-        this.memberResolver = new ClassMemberResolver();
         this.overloadResolver = new MethodOverloadResolver();
         this.scopeTypeIndex = new ScopeTypeIndexService(this.tokenCache);
     }
@@ -922,7 +920,7 @@ export class ReferencesProvider {
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: 10000 }
         });
-        const callArgCount = this.memberResolver.countParametersInCall(cursorLineText, memberName);
+        const callArgCount = countParametersInCall(cursorLineText, memberName);
         logger.info(`📊 Call arg count at cursor: ${callArgCount} for "${memberName}"`);
 
         let declarationFile: string | null = null;
@@ -1151,10 +1149,10 @@ export class ReferencesProvider {
                 }
             }
             if (!declLineText) {
-                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFsPath, filterDeclLine);
+                declLineText = getDeclarationLineText(filterDeclFsPath, filterDeclLine);
             }
             if (declLineText && ProcedureUtils.containsProcedureKeyword(declLineText)) { // #247: PROCEDURE ≡ FUNCTION
-                const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+                const maxArgs = countParametersInDeclaration(declLineText);
                 const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
                 const minArgs = maxArgs - defaultCount;
                 overloadFilter = {
@@ -1208,7 +1206,7 @@ export class ReferencesProvider {
                         if (matched.declarationLine !== overloadFilter.declarationLine) {
                             logger.info(`🎯 [#249] Cursor-call args re-point anchor: decl line ${overloadFilter.declarationLine} → ${matched.declarationLine}`);
                             declarationLine = matched.declarationLine;
-                            const maxArgs = this.memberResolver.countParametersInDeclaration(matched.signature);
+                            const maxArgs = countParametersInDeclaration(matched.signature);
                             const defaultCount = ClarionPatterns.countDefaultParams(matched.signature);
                             overloadFilter = {
                                 minArgs: maxArgs - defaultCount,
@@ -1363,7 +1361,9 @@ export class ReferencesProvider {
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
-        const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document, callArgCount);
+        // #637 — the shared lookup (CLASS, GROUP or QUEUE; per-project copy, #571), which
+        // replaces ClassMemberResolver.findMemberInNamedStructure.
+        const info = await this.memberLocator.findMemberInClass(typeName, memberName, document, callArgCount);
         if (info) return info;
 
         // 0c289e16 Phase B fallback — when StructureDeclarationIndexer can't find the
@@ -1496,7 +1496,7 @@ export class ReferencesProvider {
                 const declLines = cachedText.split(/\r?\n/);
                 getLineText = (line) => declLines[line] ?? '';
             } else {
-                getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFsPath, line) ?? '';
+                getLineText = (line) => getDeclarationLineText(declFsPath, line) ?? '';
             }
         }
         if (!lookupTokens || lookupTokens.length === 0) return result;
@@ -2651,7 +2651,7 @@ export class ReferencesProvider {
                                     continue; // wrong overload (type-aware check)
                                 }
                             } else {
-                                const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
+                                const implParamCount = countParametersInDeclaration(implLineText);
                                 if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
                                     continue; // wrong overload (arity-only check)
                                 }
@@ -2696,11 +2696,11 @@ export class ReferencesProvider {
         }
         if (!declLineText) {
             const declFile = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-            declLineText = ClassMemberResolver.getDeclarationLineText(declFile, symbolInfo.location.line);
+            declLineText = getDeclarationLineText(declFile, symbolInfo.location.line);
         }
         if (!declLineText || !ProcedureUtils.containsProcedureKeyword(declLineText)) return undefined; // #247: PROCEDURE ≡ FUNCTION
 
-        const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+        const maxArgs = countParametersInDeclaration(declLineText);
         const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
         const minArgs = maxArgs - defaultCount;
         const filter: OverloadFilter = {
@@ -2723,7 +2723,7 @@ export class ReferencesProvider {
                 : null;
             const readDeclLine = (line: number): string | null =>
                 sameDocLines ? (sameDocLines[line] ?? null)
-                             : ClassMemberResolver.getDeclarationLineText(declFsPath, line);
+                             : getDeclarationLineText(declFsPath, line);
             const candidates: Array<{ signature: string; declarationLine: number }> = [];
             for (const t of declTokens) {
                 if (!TokenHelper.isProcedureOrFunction(t)) continue;

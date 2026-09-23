@@ -289,3 +289,73 @@ export function countParametersInDeclaration(line: string): number {
     }
     return commaCount + 1;
 }
+
+/**
+ * Counts the arguments of the call to `methodName` on `line`: commas at parenthesis depth 0.
+ * #637: moved verbatim from ClassMemberResolver.countParametersInCall.
+ */
+export function countParametersInCall(line: string, methodName: string): number {
+    // #249: anchor by WORD BOUNDARY — a bare substring indexOf locked onto a longer
+    // identifier containing the name (resolving `SetValue` on a line with
+    // `SetValueEx(1,2)` counted SetValueEx's args). Prefer a direct call shape
+    // `name(`; fall back to a standalone `name` followed later by '(' (covers
+    // declaration lines like `SetValue PROCEDURE(STRING)`, whose param count the
+    // decl-cursor anchor relies on).
+    const escaped = methodName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(line);
+    let paramList: string;
+    if (callMatch) {
+        paramList = line.substring(callMatch.index + callMatch[0].length);
+    } else {
+        const wordMatch = new RegExp(`\\b${escaped}\\b`, 'i').exec(line);
+        if (!wordMatch) return 0;
+        const afterMethod = line.substring(wordMatch.index + methodName.length);
+        const parenIndex = afterMethod.indexOf('(');
+        if (parenIndex === -1) return 0;
+        paramList = afterMethod.substring(parenIndex + 1);
+    }
+
+    let depth = 0;
+    let commaCount = 0;
+    let hasContent = false;
+
+    for (let i = 0; i < paramList.length; i++) {
+        const char = paramList[i];
+
+        if (char === '(') {
+            depth++;
+        } else if (char === ')') {
+            if (depth === 0) {
+                // End of parameter list
+                return hasContent ? commaCount + 1 : 0;
+            }
+            depth--;
+        } else if (char === ',' && depth === 0) {
+            commaCount++;
+        } else if (char.trim() !== '' && depth === 0) {
+            hasContent = true;
+        }
+    }
+
+    return hasContent ? commaCount + 1 : 0;
+}
+
+/**
+ * Returns the raw text of a specific line from a file given its URI and line number.
+ * Used to retrieve the declaration signature for overload resolution.
+ * #637: moved verbatim from ClassMemberResolver.getDeclarationLineText. It reads the file from
+ * disk, so a declaration edited since the last save reads stale here (compare #640).
+ */
+export function getDeclarationLineText(fileUri: string, line: number): string | null {
+    try {
+        let filePath = fileUri;
+        if (filePath.startsWith('file:///')) {
+            filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        }
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        return lines[line] ?? null;
+    } catch {
+        return null;
+    }
+}

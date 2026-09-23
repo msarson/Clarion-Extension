@@ -4,7 +4,6 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { findSectionLocation } from '../utils/SectionLocator';
@@ -62,7 +61,6 @@ interface HoverTrace {
  */
 export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
-    private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
     private crossFileCache: CrossFileCache;
     private mapResolver: MapProcedureResolver;
@@ -97,7 +95,7 @@ export class HoverProvider {
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache, this.crossFileCache);
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
-        this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
+        this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.formatter);
         this.routineResolver = new RoutineHoverResolver(this.formatter);
         this.contextBuilder = new HoverContextBuilder();
         this.structureFieldResolver = new StructureFieldResolver(

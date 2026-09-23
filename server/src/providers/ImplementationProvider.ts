@@ -28,7 +28,7 @@ import { findEnclosingClassToken, resolveEnclosingClassName } from '../utils/Enc
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
@@ -46,7 +46,6 @@ export class ImplementationProvider {
     private crossFileResolver: CrossFileResolver;
     private crossFileCache: CrossFileCache;
     private overloadResolver: MethodOverloadResolver;
-    private memberResolver: ClassMemberResolver;
     private chainedResolver: ChainedPropertyResolver;
     private memberLocator: MemberLocatorService;
     /** Created on first use — only a weak argument reference that names a real procedure needs it. */
@@ -58,7 +57,6 @@ export class ImplementationProvider {
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
         this.overloadResolver = new MethodOverloadResolver();
-        this.memberResolver = new ClassMemberResolver();
         this.chainedResolver = new ChainedPropertyResolver();
         this.memberLocator = new MemberLocatorService(this.crossFileCache);
     }
@@ -531,7 +529,7 @@ export class ImplementationProvider {
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
-                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            ? countParametersInCall(line, memberName)
                             : 0;
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {
@@ -566,7 +564,7 @@ export class ImplementationProvider {
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
-                            ? this.memberResolver.countParametersInCall(line, memberName)
+                            ? countParametersInCall(line, memberName)
                             : 0;
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
                         if (chainedInfo) {

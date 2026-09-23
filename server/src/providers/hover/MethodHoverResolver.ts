@@ -6,7 +6,6 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
-import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
@@ -41,18 +40,15 @@ const IMPL_SWEEP_BUDGET_MS = 500;
 export class MethodHoverResolver {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver: MethodOverloadResolver;
-    private memberResolver: ClassMemberResolver;
     private formatter: HoverFormatter;
     /** #626 — the engine the explicit-receiver hover path already uses. */
     private memberLocator = new MemberLocatorService();
 
     constructor(
         overloadResolver: MethodOverloadResolver,
-        memberResolver: ClassMemberResolver,
         formatter: HoverFormatter
     ) {
         this.overloadResolver = overloadResolver;
-        this.memberResolver = memberResolver;
         this.formatter = formatter;
     }
 
