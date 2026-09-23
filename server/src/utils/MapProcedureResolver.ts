@@ -61,11 +61,17 @@ export class MapProcedureResolver {
      * INCLUDE targets from the given document AND its MEMBER parent. Shared by the
      * goto-implementation and hover call-site routes — both then run the proven
      * declaration-side resolution from the returned document/position.
+     *
+     * `acceptBarePrototype` also accepts a prototype that is not inside a MODULE
+     * block. An included file's text becomes part of the MAP that includes it, so a
+     * bare `Name PROCEDURE` there is a local prototype. Off by default: the existing
+     * callers look for procedures implemented in another module.
      */
     public async findDeclarationInMapIncludes(
         procName: string,
         document: TextDocument,
-        tokens: Token[]
+        tokens: Token[],
+        acceptBarePrototype = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         // #313 follow-up: MAP procedure names never contain dots — a dotted word is
         // member access, and running this walk for it cost 12s per hover on
@@ -83,7 +89,7 @@ export class MapProcedureResolver {
             mapDeclWalkCache.clear();
             mapDeclWalkEpoch = epoch;
         }
-        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}`;
+        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}${acceptBarePrototype ? '|bare' : ''}`;
         if (mapDeclWalkCache.has(cacheKey)) {
             const cached = mapDeclWalkCache.get(cacheKey)!;
             if (!cached) return null;
@@ -143,7 +149,7 @@ export class MapProcedureResolver {
 
         const visited = new Set<string>();
         for (const start of startPaths) {
-            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
+            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true, acceptBarePrototype);
             if (hit) {
                 mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine });
                 return hit;
@@ -168,6 +174,19 @@ export class MapProcedureResolver {
             (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
             (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
             moduleRanges.some(r => t.line > r.start && t.line < r.end)
+        );
+        return decl ? decl.line : null;
+    }
+
+    /**
+     * A prototype in a MAP-included file that is not inside a MODULE block. Tokenized
+     * on its own, such a line is a GlobalProcedure; anything inside a CLASS or
+     * INTERFACE has a method subtype and is excluded.
+     */
+    private findBareProcDeclLine(tokens: Token[], nameLower: string): number | null {
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MapProcedure) &&
+            t.label?.toLowerCase() === nameLower
         );
         return decl ? decl.line : null;
     }
@@ -200,7 +219,8 @@ export class MapProcedureResolver {
         procName: string,
         visited: Set<string>,
         depth = 0,
-        mapScopedRoot = false
+        mapScopedRoot = false,
+        acceptBarePrototype = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         if (depth > 4) return null;
         const key = fromPath.toLowerCase();
@@ -266,13 +286,14 @@ export class MapProcedureResolver {
             if (!inc) continue;
 
             // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower);
+            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
+                ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
             if (declLine !== null) {
                 logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
                 return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
-            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, false, acceptBarePrototype);
             if (nested) return nested;
         }
         return null;
