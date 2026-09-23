@@ -941,7 +941,7 @@ export class ReferencesProvider {
                 ? (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null
                 : resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
             const info = receiverClass
-                ? await this.memberLocator.findMemberInClass(receiverClass, memberName, document, callArgCount)
+                ? await this.memberLocator.findMemberInClass(receiverClass, memberName, document, callArgCount, /^parent$/i.test(beforeDot) ? undefined : position.line)
                 : null;
             if (info) {
                 declarationFile = info.file;
@@ -971,7 +971,7 @@ export class ReferencesProvider {
                 if (implClass && implMethod === memberName.toLowerCase()) {
                     // Treat exactly like SELF.Member resolution but with a known class name
                     // #637 — the class the implementation line names, through the shared lookup.
-                    const info = await this.memberLocator.findMemberInClass(implClass, memberName, document, callArgCount);
+                    const info = await this.memberLocator.findMemberInClass(implClass, memberName, document, callArgCount, position.line);
                     if (info) {
                         declarationFile = info.file;
                         declarationLine = info.line;

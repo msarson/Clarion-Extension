@@ -352,10 +352,41 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         document: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        atLine?: number
     ): Promise<MemberInfo | null> {
-        const hit = await this.findMemberInClassTiers(className, memberName, document, paramCount);
-        return this.preferFittingInheritedOverload(hit, memberName, document, paramCount, new Set([className.toLowerCase()]));
+        const hit = await this.findMemberInClassTiers(className, memberName, document, paramCount, atLine);
+        return this.preferFittingInheritedOverload(hit, memberName, document, paramCount, new Set([className.toLowerCase()]), atLine);
+    }
+
+    /**
+     * #650 — `className` declared as a local CLASS more than once in the document (every
+     * generated procedure has its own `ThisWindow`): the declaration a member access at
+     * `atLine` belongs to is the nearest above it (#608). Its own body answers, else its own
+     * parent does. Null when the class is not declared twice here, so a module with one
+     * declaration, and every caller without a line, keeps the tiers below unchanged.
+     */
+    private async findMemberInNearestLocalClass(
+        tokens: Token[],
+        className: string,
+        memberName: string,
+        document: TextDocument,
+        docPath: string,
+        paramCount: number | undefined,
+        atLine: number
+    ): Promise<MemberInfo | null | undefined> {
+        const wanted = className.toLowerCase();
+        const declarations = tokens.filter(t =>
+            t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS' &&
+            t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
+        if (declarations.length < 2) return undefined;
+        const own = [...declarations].reverse().find(t => t.line <= atLine) ?? declarations[0];
+
+        const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
+        if (inBody) return inBody;
+        const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
+        const parent = extractParentName(declLine);
+        return parent ? this.findMemberInClass(parent, memberName, document, paramCount) : null;
     }
 
     /**
@@ -369,11 +400,14 @@ export class MemberLocatorService {
         memberName: string,
         document: TextDocument,
         paramCount: number | undefined,
-        visited: Set<string>
+        visited: Set<string>,
+        atLine?: number
     ): Promise<MemberInfo | null> {
         if (!hit?.arityMismatch) return hit;
-        const decl = await this.resolveClassDeclarationInfo(hit.className, document);
-        const parent = decl?.parentName;
+        // #650: with a line, the parent of the local declaration the access belongs to (#628).
+        const parent = atLine !== undefined
+            ? await this.resolveParentName(hit.className, document, atLine)
+            : (await this.resolveClassDeclarationInfo(hit.className, document))?.parentName;
         if (!parent || visited.has(parent.toLowerCase())) return hit;
         visited.add(parent.toLowerCase());
         const up = await this.findMemberInClassTiers(parent, memberName, document, paramCount);
@@ -386,11 +420,17 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         document: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        atLine?: number
     ): Promise<MemberInfo | null> {
         this.trace(`findMemberInClass start class="${className}" member="${memberName}" paramCount=${paramCount ?? 'n/a'}`);
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        if (atLine !== undefined) {
+            const local = await this.findMemberInNearestLocalClass(tokens, className, memberName, document, docPath, paramCount, atLine);
+            if (local !== undefined) return local;
+        }
 
         // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
         // #314: use the tokens already in hand — scanBodyForMember re-loaded the CURRENT
@@ -1834,13 +1874,15 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+        declarationLine?: number // #650: this declaration of the label, not the first
     ): MemberInfo | null {
         const classToken = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.value.toUpperCase() === structureType &&
             t.label?.toLowerCase() === className.toLowerCase() &&
-            t.finishesAt !== undefined
+            t.finishesAt !== undefined &&
+            (declarationLine === undefined || t.line === declarationLine)
         );
         if (!classToken || classToken.finishesAt === undefined) return null;
         const classEnd = classToken.finishesAt;

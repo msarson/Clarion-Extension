@@ -648,7 +648,7 @@ export class ImplementationProvider {
                     // answered null in exactly those cases.
                     const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
                     const memberInfo = selfClass
-                        ? await this.memberLocator.findMemberInClass(selfClass, callInfo.methodName, document, callInfo.paramCount)
+                        ? await this.memberLocator.findMemberInClass(selfClass, callInfo.methodName, document, callInfo.paramCount, position.line)
                         : null;
                     if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                         // #182 — arg-classification overlay (symmetric with PARENT/Definition).
@@ -662,7 +662,8 @@ export class ImplementationProvider {
                             null,
                             picked?.signature ?? memberInfo.signature ?? line, // #643
                             memberInfo.file,
-                            token
+                            token,
+                            picked?.line ?? memberInfo.line // #650
                         );
                         if (impl) return impl;
                     }
@@ -696,7 +697,7 @@ export class ImplementationProvider {
                     const receiver = await this.memberLocator.resolveReceiverClass(
                         callInfo.objectName, this.tokenCache.getTokens(document), document, position.line);
                     const memberInfo = receiver
-                        ? await this.memberLocator.findMemberInClass(receiver.className, callInfo.methodName, document, callInfo.paramCount)
+                        ? await this.memberLocator.findMemberInClass(receiver.className, callInfo.methodName, document, callInfo.paramCount, position.line)
                         : await this.memberLocator.resolveDotAccess(
                             callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
                         );
@@ -707,7 +708,7 @@ export class ImplementationProvider {
                             // file from disk, so a body only in the buffer was missed.
                             const impl = await this.findMethodImplementationCrossFile(
                                 memberInfo.className, callInfo.methodName, document, callInfo.paramCount, null,
-                                memberInfo.signature ?? line, memberInfo.file, token
+                                memberInfo.signature ?? line, memberInfo.file, token, memberInfo.line // #650
                             );
                             if (impl) {
                                 logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);
@@ -869,7 +870,8 @@ export class ImplementationProvider {
         methodName: string,
         paramCount?: number,
         declarationSignature?: string,
-        className?: string
+        className?: string,
+        declarationLine?: number
     ): Location | null {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
@@ -892,7 +894,7 @@ export class ImplementationProvider {
         }
 
         // Collect all matching candidates
-        const candidates: { lineNum: number; signature: string }[] = [];
+        let candidates: { lineNum: number; signature: string }[] = [];
 
         for (let i = 0; i < lines.length; i++) {
             if (mapBlocks.some(block => i >= block.start && i <= block.end)) continue;
@@ -908,6 +910,14 @@ export class ImplementationProvider {
         }
 
         if (candidates.length === 0) return null;
+
+        // #650: a module may declare the same local class in several procedures, each with its
+        // own `ThisWindow.Init` body after it. With the declaration in this document, a body
+        // after that declaration is this class's; the first in the file may be another's.
+        if (declarationLine !== undefined) {
+            const after = candidates.filter(c => c.lineNum > declarationLine);
+            if (after.length > 0) candidates = after;
+        }
 
         let bestIdx = 0;
         if (candidates.length > 1) {
@@ -966,12 +976,16 @@ export class ImplementationProvider {
         moduleFile?: string | null,
         declarationSignature?: string,
         declarationFile?: string,
-        token?: CancellationToken
+        token?: CancellationToken,
+        declarationLine?: number // #650: the declaration's line, when it is in currentDocument
     ): Promise<Location | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
         // First, search in current file (filtered by className to avoid matching wrong class)
-        const localImpl = this.findMethodImplementationInFile(currentDocument, methodName, paramCount, declarationSignature, className);
+        const declaredHere = declarationLine !== undefined && !!declarationFile &&
+            decodeURIComponent(declarationFile).toLowerCase() === decodeURIComponent(currentDocument.uri).toLowerCase();
+        const localImpl = this.findMethodImplementationInFile(
+            currentDocument, methodName, paramCount, declarationSignature, className, declaredHere ? declarationLine : undefined);
         if (localImpl) {
             return localImpl;
         }

@@ -279,7 +279,7 @@ export class StructureFieldResolver {
                 return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
             }
         }
-        const memberInfo = await this.memberLocator.findMemberInClass(className, fieldName, document, paramCount);
+        const memberInfo = await this.memberLocator.findMemberInClass(className, fieldName, document, paramCount, position.line); // #650
         if (!memberInfo) return null;
         logger.info(`✅ Found member "${fieldName}" in "${className}"`);
         return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);

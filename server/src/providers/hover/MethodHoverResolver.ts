@@ -288,7 +288,7 @@ export class MethodHoverResolver {
         // #622 helper, so it answered null in exactly those cases.
         const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
         let memberInfo = selfClass
-            ? await this.memberLocator.findMemberInClass(selfClass, fieldName, document, paramCount)
+            ? await this.memberLocator.findMemberInClass(selfClass, fieldName, document, paramCount, position.line)
             : null;
 
         if (!memberInfo) {
@@ -314,7 +314,8 @@ export class MethodHoverResolver {
                 document,
                 paramCount,
                 implModuleFile,
-                matchedSignature ?? memberInfo.signature // #643: the declaration's own prototype when no overload was arg-picked
+                matchedSignature ?? memberInfo.signature , // #643: the declaration's own prototype when no overload was arg-picked
+                { file: memberInfo.file, line: memberInfo.line } // #650
             );
 
             if (implLocation) {
@@ -430,7 +431,8 @@ export class MethodHoverResolver {
                 document,
                 paramCount,
                 implModuleFile,
-                matchedSignature ?? memberInfo.signature // #643
+                matchedSignature ?? memberInfo.signature, // #643
+                { file: memberInfo.file, line: memberInfo.line } // #650
             );
             emitPhases(Date.now() - tImpl);
             if (implLocation) {
@@ -693,17 +695,21 @@ export class MethodHoverResolver {
         currentDocument: TextDocument,
         paramCount?: number,
         moduleFile?: string | null,
-        declarationSignature?: string
+        declarationSignature?: string,
+        declaration?: { file: string; line: number } // #650: where the member is declared
     ): Promise<string | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
 
         // FIRST: Search the current file (local implementation)
         const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
         logger.info(`Searching current file first: ${currentPath}`);
+        const declaredHere = !!declaration &&
+            decodeURIComponent(declaration.file).toLowerCase() === decodeURIComponent(currentDocument.uri).toLowerCase();
         // #640 — the open document's text, not the file on disk: a body typed since the last
         // save, or in a file never saved, is only in the buffer.
         const localImplLine = this.searchFileForImplementation(
-            currentPath, className, methodName, paramCount, declarationSignature, currentDocument.getText());
+            currentPath, className, methodName, paramCount, declarationSignature, currentDocument.getText(),
+            declaredHere ? declaration!.line : undefined);
         if (localImplLine !== null) {
             const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
             logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
@@ -848,14 +854,15 @@ export class MethodHoverResolver {
         methodName: string,
         paramCount?: number,
         declarationSignature?: string,
-        text?: string // #640: the open document's text, when searching the file being edited
+        text?: string, // #640: the open document's text, when searching the file being edited
+        declarationLine?: number // #650: the member's declaration line, when it is in this file
     ): number | null {
         try {
             const content = text ?? fs.readFileSync(filePath, 'utf8');
             const lines = content.split(/\r?\n/);
 
             // Search for method implementation: ClassName.MethodName PROCEDURE
-            const candidates: { lineNum: number; implParamCount: number; signature: string }[] = [];
+            let candidates: { lineNum: number; implParamCount: number; signature: string }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
@@ -870,6 +877,12 @@ export class MethodHoverResolver {
             }
 
             if (candidates.length === 0) return null;
+            // #650: the same local class declared in several procedures has a body after each
+            // declaration; with the declaration in this file, a body after it is its own.
+            if (declarationLine !== undefined) {
+                const after = candidates.filter(c => c.lineNum > declarationLine);
+                if (after.length > 0) candidates = after;
+            }
             if (candidates.length === 1) {
                 logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
                 return candidates[0].lineNum;

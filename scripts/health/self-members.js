@@ -44,7 +44,8 @@ function makeLookup(doc, tokens) {
         const structure = TokenCache.getInstance().getStructure(doc);
         return async (member, line) => {
             const cls = resolveEnclosingClassName(doc, line, structure);
-            return cls ? locator.findMemberInClass(cls, member, doc, undefined) : null;
+            // #650: with the line, as the providers ask - the nearest same-named local CLASS.
+            return cls ? locator.findMemberInClass(cls, member, doc, undefined, line) : null;
         };
     }
     const { ClassMemberResolver } = server('utils/ClassMemberResolver');

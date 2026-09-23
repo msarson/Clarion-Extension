@@ -234,7 +234,7 @@ export class DefinitionProvider {
                         // ClassMemberResolver's fallback named it with the same #622 helper
                         // (resolveCurrentClassName is that helper), so it answered null then.
                         const memberInfo = selfClass
-                            ? await this.memberLocator.findMemberInClass(selfClass, methodName, document, paramCount)
+                            ? await this.memberLocator.findMemberInClass(selfClass, methodName, document, paramCount, position.line)
                             : null;
 
                         if (memberInfo) {
@@ -315,7 +315,7 @@ export class DefinitionProvider {
                             ? this.chainedResolver.resolveCurrentClassName(document, position, tokens)
                             : (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null;
                         const memberInfo = receiverClass
-                            ? await this.memberLocator.findMemberInClass(receiverClass, methodName, document, undefined)
+                            ? await this.memberLocator.findMemberInClass(receiverClass, methodName, document, undefined, isSelf ? position.line : undefined)
                             : null;
                         if (memberInfo) {
                             logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
@@ -372,7 +372,7 @@ export class DefinitionProvider {
                                 const paramCount = hasParentheses
                                     ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
-                                const memberInfo = await this.memberLocator.findMemberInClass(receiverClass.className, methodName, document, paramCount);
+                                const memberInfo = await this.memberLocator.findMemberInClass(receiverClass.className, methodName, document, paramCount, position.line);
                                 if (memberInfo) {
                                     logger.info(`✅ Found "${methodName}" in receiver class "${receiverClass.className}" at ${memberInfo.file}:${memberInfo.line}`);
                                     return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
