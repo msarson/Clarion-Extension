@@ -156,7 +156,18 @@ export class StructureFieldResolver {
             if (receiver) {
                 const paramCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
                 const access = await this.dottedAccess.resolve(receiver, fieldName, document, position.line, paramCount);
-                if (access) return await this.methodResolver.formatDottedMember(fieldName, access, document, paramCount);
+                if (access) {
+                    // #652 / #488: a GROUP / QUEUE field shows the one card a field has everywhere -
+                    // at its declaration, in PRE form and in dot form - not the member card.
+                    const isField = (access.member.structureType === 'GROUP' || access.member.structureType === 'QUEUE') &&
+                        !/\b(PROCEDURE|FUNCTION)\b/i.test(access.member.type);
+                    if (isField) {
+                        const fieldHover = await this.fieldCard(access.member.className, fieldName, document, position,
+                            access.receiverKind === 'chain');
+                        if (fieldHover) return fieldHover;
+                    }
+                    return await this.methodResolver.formatDottedMember(fieldName, access, document, paramCount);
+                }
                 if (isSelfMember || isParentMember || beforeDot.includes('.')) return null;
             }
         }
@@ -220,6 +231,31 @@ export class StructureFieldResolver {
         
         return null;
     }
+    /**
+     * #652 — the card for field `fieldName` of structure `owner`: the one its dot form `Owner.Field`
+     * has always had (#488's variable card, else the type-field card). A single-level access gets it
+     * wherever the structure is declared, as before. A chain gets it only for a structure this
+     * document declares (`FDB5.Q.Field`, which showed nothing until #652): a chain through a class
+     * member to a QUEUE TYPE in an include keeps the member card ("Queue Field · Type", as
+     * StructuredTypeMemberLabel pins), and gets null here.
+     */
+    private async fieldCard(
+        owner: string, fieldName: string, document: TextDocument, position: Position, onlyIfDeclaredHere: boolean
+    ): Promise<Hover | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        if (onlyIfDeclaredHere) {
+            const ownerLower = owner.toLowerCase();
+            if (!tokens.some(t => t.type === TokenType.Structure && t.label?.toLowerCase() === ownerLower)) return null;
+        }
+        const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(document), position.line);
+        if (scope) {
+            const reference = `${owner}.${fieldName}`;
+            const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference);
+            if (info) return this.formatter.formatVariable(reference, info, scope, document);
+        }
+        return this.resolveStructureTypeFieldHover(owner, fieldName, document);
+    }
+
     /**
      * The member `fieldName` of class (or interface) `className`: an interface method first when
      * the receiver is a reference, then the overload the call's argument types pick (#125), then

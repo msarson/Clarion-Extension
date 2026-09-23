@@ -14,8 +14,10 @@
  *  - #652: a chain (`SELF.a.b`, `obj.a.b`), walked by ChainedPropertyResolver from a root read the
  *    same way, through inline GROUP / QUEUE / RECORD members of a class body (#552).
  *
- * Anything else (a GROUP / QUEUE / FILE receiver, an interface reference, the colon forms) returns
- * null for now and callers keep their own paths (#652 fields, #653).
+ *  - #652: a receiver that names no class - a GROUP / QUEUE by its own label, or a variable of a
+ *    GROUP / QUEUE / interface type.
+ *
+ * The colon forms (#653) return null for now and callers keep their own paths.
  */
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -25,7 +27,7 @@ import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import type { MemberInfo } from '../utils/ClassMemberScan';
 
-export type ReceiverKind = 'self' | 'parent' | 'object' | 'chain';
+export type ReceiverKind = 'self' | 'parent' | 'object' | 'chain' | 'structure' | 'interface';
 
 export interface DottedMember {
     /** How the receiver was read. */
@@ -83,10 +85,19 @@ export class DottedAccessResolver {
             member = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount);
         } else {
             const r = await this.memberLocator.resolveReceiverAt(receiver, document, line);
-            if (!r) return null;
-            kind = r.kind;
-            className = r.className;
-            member = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount, r.atLine);
+            if (r) {
+                kind = r.kind;
+                className = r.className;
+                member = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount, r.atLine);
+            } else {
+                // #652: a receiver that names no class - a GROUP / QUEUE by its own label, or a
+                // variable of a GROUP / QUEUE / interface type.
+                const s = await this.resolveStructureMember(receiver, memberName, document, line, paramCount);
+                if (!s) return null;
+                kind = s.kind;
+                className = s.className;
+                member = s.member;
+            }
         }
 
         // #182 / #252: the call's argument types pick among same-arity overloads. Asked of the
@@ -106,5 +117,32 @@ export class DottedAccessResolver {
             }
         }
         return member ? { receiverKind: kind, receiverClass: className, member, pickedSignature } : null;
+    }
+
+    /**
+     * #652 — the member of a receiver that is no class: a GROUP / QUEUE declared with that label
+     * (its own fields, and those it takes from a type argument), or a variable of a GROUP / QUEUE
+     * type, or a reference to an interface. Null when the receiver is none of these.
+     */
+    private async resolveStructureMember(
+        receiver: string,
+        memberName: string,
+        document: TextDocument,
+        line: number,
+        paramCount: number | undefined
+    ): Promise<{ kind: ReceiverKind; className: string; member: MemberInfo | null } | null> {
+        if (!/^[A-Za-z_][\w:]*$/.test(receiver)) return null;
+        const byLabel = await this.memberLocator.findMemberInClass(receiver, memberName, document, paramCount, line);
+        if (byLabel) return { kind: 'structure', className: receiver, member: byLabel };
+
+        const tokens = this.tokenCache.getTokens(document);
+        const typed = await this.memberLocator.resolveVariableType(receiver, tokens, document, line);
+        if (!typed) return null;
+        if (typed.isReference) {
+            const viaInterface = await this.memberLocator.findMemberInInterface(typed.typeName, memberName, document, paramCount);
+            if (viaInterface) return { kind: 'interface', className: typed.typeName, member: viaInterface };
+        }
+        const viaType = await this.memberLocator.findMemberInClass(typed.typeName, memberName, document, paramCount);
+        return viaType ? { kind: 'structure', className: typed.typeName, member: viaType } : null;
     }
 }
