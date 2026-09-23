@@ -24,7 +24,7 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { TokenHelper } from '../utils/TokenHelper';
-import { findEnclosingClassToken, resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
+import { findEnclosingClassToken } from '../utils/EnclosingClassResolver';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
@@ -32,6 +32,7 @@ import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { DefinitionProvider } from './DefinitionProvider';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
@@ -46,8 +47,9 @@ export class ImplementationProvider {
     private crossFileResolver: CrossFileResolver;
     private crossFileCache: CrossFileCache;
     private overloadResolver: MethodOverloadResolver;
-    private chainedResolver: ChainedPropertyResolver;
     private memberLocator: MemberLocatorService;
+    /** #654 — the declaration a `receiver.member` names, shared with hover and Go to Definition. */
+    private dottedAccess: DottedAccessResolver;
     /** Created on first use — only a weak argument reference that names a real procedure needs it. */
     private definitionProvider?: DefinitionProvider;
 
@@ -57,8 +59,8 @@ export class ImplementationProvider {
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
         this.overloadResolver = new MethodOverloadResolver();
-        this.chainedResolver = new ChainedPropertyResolver();
         this.memberLocator = new MemberLocatorService(this.crossFileCache);
+        this.dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     }
 
     /**
@@ -468,256 +470,56 @@ export class ImplementationProvider {
     /**
      * Find method implementation (class methods or method calls)
      */
-    /**
-     * #125 — when a typed-variable dot-access call→impl lookup targets an
-     * overloaded method, classify the call's args and pick the matching
-     * overload before falling through to paramCount-only `resolveDotAccess`.
-     * Returns the picked decl as a ClassMemberInfo-shape for downstream
-     * `findImplementationCrossFile` lookup; returns null to signal
-     * "fall through to existing paramCount-only path" when:
-     *   - the variable type can't be resolved to a class,
-     *   - the classifier can't find the call's `(...)`,
-     *   - fewer than 2 candidates locally,
-     *   - `matchedAll=true` (un-disambiguatable).
-     */
-    private async tryArgClassifyResolve(
-        document: TextDocument,
-        callInfo: { objectName: string; methodName: string; paramCount: number },
-        callLine: number
-    ): Promise<{ type: string; className: string; line: number; file: string; signature: string } | null> {
-        const tokens = this.tokenCache.getTokens(document);
-        // #274 — pass the scope line so a procedure-local / parameter receiver resolves (mirrors
-        // the hover/definition callers, which supply position.line).
-        // #642 — through resolveReceiverClass, as hover and F12 do since #611: a receiver that
-        // is itself a CLASS (`ThisWindow CLASS(WinMgr)`) is that class, not its parent, so its
-        // own DERIVED overrides are found first.
-        const receiver = await this.memberLocator.resolveReceiverClass(callInfo.objectName, tokens, document, callLine);
-        if (!receiver) return null;
-        const className = receiver.className;
-
-        // #274 — delegate to the single enriched choke point. This method previously inlined
-        // classify + findOverload but SKIPPED the ArgumentTypeResolver enrichment, so a typed
-        // argument (e.g. a WINDOW instance passed to INIMgr.Fetch('Main', Window)) never
-        // type-resolved on the implementation path → matchedAll → the caller fell to the
-        // paramCount-only lookup and landed on the wrong overload / the declaration. Definition
-        // and hover already went through resolveOverloadDeclByArgs; this converges impl with them.
-        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-            className, callInfo.methodName, document, tokens, callLine);
-        if (!picked) return null;
-        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file, signature: picked.signature };
-    }
-
     private async findMethodImplementation(
         document: TextDocument,
         position: Position,
         line: string,
         token?: CancellationToken
     ): Promise<Location | null> {
-        // Pattern 1b: Chained access like SELF.Order.MainKey or PARENT.Foo.Bar
-        // Must be checked BEFORE Pattern 1 because Pattern 1's regex matches the last
-        // X.Y( pair in a chain (e.g. RangeList.Init() from SELF.Order.RangeList.Init())
-        // and returns before reaching this block.
+        // #654 — a member access, `receiver.member` or a chain of them (`SELF.a.b`, `obj.a.b`), names
+        // its declaration through DottedAccessResolver: the one call hover and Go to Definition make
+        // (#651, #652), so Ctrl+F12 opens the body of the declaration F12 goes to and cannot pick
+        // another. It replaces the two chain branches and the PARENT, SELF and typed-variable
+        // branches, which each named the class, tried the argument-type pick and asked for the member
+        // in turn - and so each carried its own copy of the fixes #627, #642, #643, #645 and #650.
         {
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotBeforeIndex > 0) {
-                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
-                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
-                if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
-                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, methodMatch[1], position)) { // #639
-                        const memberName = methodMatch[1];
-                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                        const paramCount = hasParens
-                            ? countParametersInCall(line, memberName)
-                            : 0;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            // #182 — arg-classification overlay: re-point at the matching
-                            // overload's declaration so both the returned decl and the impl
-                            // lookup target the arg-matched overload, not the paramCount one.
-                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
-                            const declInfo = picked
-                                ? { ...chainedInfo, line: picked.line, file: picked.file }
-                                : chainedInfo;
-                            // For methods, try to find the implementation; for properties just return declaration
-                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
-                                const implLoc = await this.findMethodImplementationCrossFile(
-                                    declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? await this.declaredSignature(declInfo.className, memberName, document, paramCount) ?? line,
-                                    declInfo.file, token
+            if (dotBeforeIndex > 0 && !/\s/.test(line.charAt(dotBeforeIndex + 1))) {
+                const afterDot = line.substring(dotBeforeIndex + 1);
+                const memberMatch = afterDot.match(/^([\w:]+)/);
+                // #639: only the member name itself - the receiver, SELF / PARENT or an argument is
+                // another word, with no implementation of this member.
+                if (memberMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, memberMatch[1], position)) {
+                    const memberName = memberMatch[1];
+                    const beforeDot = ChainedPropertyResolver.extractChain(line.substring(0, dotBeforeIndex).trim());
+                    const receiver = beforeDot.includes('.') ? beforeDot.trim() : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+                    const hasParens = /^\s*\(/.test(afterDot.substring(memberName.length));
+                    const paramCount = hasParens ? countParametersInCall(line, memberName) : undefined;
+                    if (receiver) {
+                        const access = await this.dottedAccess.resolve(receiver, memberName, document, position.line, paramCount);
+                        if (access) {
+                            const member = access.member;
+                            if (ProcedureUtils.containsProcedureKeyword(member.type)) { // #247
+                                const body = await this.findMethodImplementationCrossFile(
+                                    member.className, memberName, document, paramCount ?? 0,
+                                    await this.memberLocator.moduleFileOf(member.className, document) ?? null, // the MODULE hint
+                                    access.pickedSignature ?? member.signature ?? line, // #643
+                                    member.file, token, member.line                     // #650
                                 );
-                                if (implLoc) return implLoc;
+                                if (body) {
+                                    logger.info(`✅ ${receiver}.${memberName} → body of ${member.className}.${memberName}`);
+                                    return body;
+                                }
                             }
-                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
+                            // A property, or a method whose body is not in source: its declaration.
+                            return Location.create(member.file, Range.create(member.line, 0, member.line, 0));
                         }
+                        // Nothing names it. PARENT has nowhere else to look; another receiver keeps the
+                        // last resort it had, a body of that name in this file.
+                        if (/^parent$/i.test(receiver)) return null;
+                        return this.findMethodImplementationInFile(document, memberName, paramCount ?? 0);
                     }
                 }
-
-                // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
-                if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
-                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, methodMatch[1], position)) { // #639
-                        const memberName = methodMatch[1];
-                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                        const paramCount = hasParens
-                            ? countParametersInCall(line, memberName)
-                            : 0;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            // #182 — arg-classification overlay (var-chain variant).
-                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
-                            const declInfo = picked
-                                ? { ...chainedInfo, line: picked.line, file: picked.file }
-                                : chainedInfo;
-                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
-                                const implLoc = await this.findMethodImplementationCrossFile(
-                                    declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? await this.declaredSignature(declInfo.className, memberName, document, paramCount) ?? line,
-                                    declInfo.file, token
-                                );
-                                if (implLoc) return implLoc;
-                            }
-                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pattern 1: Method call like SELF.MethodName() or PARENT.MethodName() or object.MethodName()
-        // Also handles no-paren calls: FuzzyMatcher.Init (Clarion allows no-param methods without ())
-        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(?/gi);
-        if (methodCallMatch) {
-            const callInfo = this.extractMethodCall(line, position);
-            if (callInfo) {
-                logger.info(`Found method call: ${callInfo.objectName}.${callInfo.methodName} with ${callInfo.paramCount} params`);
-
-                // PARENT.Method() — find the parent class and search for its implementation
-                if (callInfo.objectName.toUpperCase() === 'PARENT') {
-                    const tokens = this.tokenCache.getTokens(document);
-                    // #637: PARENT's class named the way hover and F12 name it (#648).
-                    const parentInfo = await this.memberLocator.resolveParentClassAt(document, position.line);
-                    if (parentInfo) {
-                        logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
-                        // #182 — arg-classification overlay: pick the matching overload by
-                        // argument type and target its implementation via the matched decl
-                        // signature, instead of the paramCount-only call line.
-                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                            parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
-                        // #643 — the declaration the call binds to, found the way F12 finds it
-                        // (up the ancestry, by argument count): its signature, not the call line,
-                        // picks the body, and its class is where the body lives when the method
-                        // is inherited from further up than the direct parent.
-                        const declared = await this.memberLocator.findMemberInClass(
-                            parentInfo.parentClassName, callInfo.methodName, document, callInfo.paramCount);
-                        const ownerClass = declared?.className ?? parentInfo.parentClassName;
-                        const isDirectParent = ownerClass.toLowerCase() === parentInfo.parentClassName.toLowerCase();
-                        const impl = await this.findMethodImplementationCrossFile(
-                            ownerClass,
-                            callInfo.methodName,
-                            document,
-                            callInfo.paramCount,
-                            isDirectParent ? parentInfo.moduleFile ?? null : null,
-                            picked?.signature ?? declared?.signature ?? line,
-                            picked?.file ?? declared?.file,
-                            token
-                        );
-                        if (impl) return impl;
-                    }
-                    return null;
-                }
-
-                // SELF.Method() — resolve via class member lookup then cross-file search
-                if (callInfo.objectName.toUpperCase() === 'SELF') {
-                    const selfTokens = this.tokenCache.getTokens(document);
-                    // #627 — the same engine as the typed-variable branch below, so #611's rule
-                    // applies to SELF here too: a local override the call does not fit does not
-                    // hide an inherited overload that does. It matters more here than for F12,
-                    // because the member picked supplies the class name for the cross-file
-                    // implementation hunt — the wrong overload sends it after the wrong class's
-                    // body. #637: when SELF's class cannot be named there is nothing to ask —
-                    // ClassMemberResolver's fallback named it with the same #622 helper, so it
-                    // answered null in exactly those cases.
-                    const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
-                    const memberInfo = selfClass
-                        ? await this.memberLocator.findMemberInClass(selfClass, callInfo.methodName, document, callInfo.paramCount, position.line)
-                        : null;
-                    if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
-                        // #182 — arg-classification overlay (symmetric with PARENT/Definition).
-                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                            memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
-                        const impl = await this.findMethodImplementationCrossFile(
-                            memberInfo.className,
-                            callInfo.methodName,
-                            document,
-                            callInfo.paramCount,
-                            null,
-                            picked?.signature ?? memberInfo.signature ?? line, // #643
-                            memberInfo.file,
-                            token,
-                            picked?.line ?? memberInfo.line // #650
-                        );
-                        if (impl) return impl;
-                    }
-                    return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
-                }
-
-                // Typed variable: st.GetValue() where st is declared as "st StringTheory"
-                {
-                    // #125 — arg-classify overlay for typed-var dot-access call→impl resolution.
-                    const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
-                    if (argClassifyInfo) {
-                        if (ProcedureUtils.containsProcedureKeyword(argClassifyInfo.type)) { // #247
-                            // #274 — signature-aware cross-file impl lookup, mirroring the SELF/PARENT
-                            // paths: the picked overload's signature disambiguates the body, and the
-                            // declaration file (the `.inc`) lets the redirection find the sibling `.clw`
-                            // (e.g. ABUTIL.INC → ABUTIL.CLW) so impl lands on the method body, not the decl.
-                            const impl = await this.findMethodImplementationCrossFile(
-                                argClassifyInfo.className, callInfo.methodName, document, callInfo.paramCount,
-                                null, argClassifyInfo.signature, argClassifyInfo.file, token
-                            );
-                            if (impl) {
-                                logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
-                                return impl;
-                            }
-                        }
-                        return Location.create(argClassifyInfo.file, Range.create(argClassifyInfo.line, 0, argClassifyInfo.line, 0));
-                    }
-                    // #642 — the receiver's own class first (its overrides), as hover and F12;
-                    // resolveDotAccess still answers a receiver that is not a CLASS (an
-                    // interface reference).
-                    const receiver = await this.memberLocator.resolveReceiverClass(
-                        callInfo.objectName, this.tokenCache.getTokens(document), document, position.line);
-                    const memberInfo = receiver
-                        ? await this.memberLocator.findMemberInClass(receiver.className, callInfo.methodName, document, callInfo.paramCount, position.line)
-                        : await this.memberLocator.resolveDotAccess(
-                            callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
-                        );
-                    if (memberInfo) {
-                        if (ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
-                            // #640 — the same body search as the SELF branch, which reads the open
-                            // document; ClassMemberResolver.findImplementationCrossFile read the
-                            // file from disk, so a body only in the buffer was missed.
-                            const impl = await this.findMethodImplementationCrossFile(
-                                memberInfo.className, callInfo.methodName, document, callInfo.paramCount, null,
-                                memberInfo.signature ?? line, memberInfo.file, token, memberInfo.line // #650
-                            );
-                            if (impl) {
-                                logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);
-                                return impl;
-                            }
-                        }
-                        return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
-                    }
-                }
-
-                return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
             }
         }
 
@@ -801,52 +603,6 @@ export class ImplementationProvider {
         }
 
         return null;
-    }
-
-    /**
-     * Extract method call information from line: the `Object.Method` pair whose METHOD NAME the
-     * cursor is on, with the argument count of its call (0 for a no-paren call, which Clarion
-     * allows for a method without parameters).
-     *
-     * #639 — only the method name. The cursor on the receiver, on SELF / PARENT, on an argument
-     * or anywhere else in the call is a different word (F12 goes to the variable, the class or
-     * the argument there), and has no implementation of this method. Every pair on the line is
-     * considered, so the inner call of `a.Outer(b.Inner())` answers for itself.
-     */
-    private extractMethodCall(
-        line: string,
-        position: Position
-    ): { objectName: string; methodName: string; paramCount: number } | null {
-        // #644: a receiver label may carry colons (`Relate:Cust`, `ThisListManager:Browse:1`);
-        // `\w+` kept only the last segment, as F12's did before #612.
-        const pair = /([\w:]+)\.(\w+)/g;
-        let match: RegExpExecArray | null;
-
-        while ((match = pair.exec(line)) !== null) {
-            const methodStart = match.index + match[1].length + 1;
-            const methodEnd = methodStart + match[2].length;
-            // Step back onto the method name so `a.b.c` also tries `b.c`.
-            pair.lastIndex = methodStart;
-            if (position.character < methodStart || position.character > methodEnd) continue;
-
-            const args = /^\s*\(([^)]*)/.exec(line.substring(methodEnd));
-            const paramList = args ? args[1].trim() : '';
-            const paramCount = paramList === '' ? 0 : paramList.split(',').length;
-            return { objectName: match[1], methodName: match[2], paramCount };
-        }
-
-        return null;
-    }
-
-    /**
-     * #643 — the prototype of the overload `className.memberName` binds to for this argument
-     * count (up the ancestry, as F12 picks it), for the body search. The call line is no
-     * substitute: handed that, the search takes the first same-named body.
-     */
-    private async declaredSignature(
-        className: string, memberName: string, document: TextDocument, paramCount: number | null | undefined
-    ): Promise<string | undefined> {
-        return (await this.memberLocator.findMemberInClass(className, memberName, document, paramCount ?? undefined))?.signature;
     }
 
     /**

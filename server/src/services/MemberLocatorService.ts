@@ -2440,15 +2440,20 @@ export class MemberLocatorService {
         const parentClassName = await this.resolveParentName(className, document, atLine);
         if (!parentClassName) return null;
 
-        let moduleFile: string | undefined;
+        return { className, parentClassName, moduleFile: await this.moduleFileOf(parentClassName, document) };
+    }
+
+    /**
+     * The file a class's MODULE('...') attribute names, from the declaration index (#571: the
+     * copy the document's project binds to) - the body search's best hint, which also yields the
+     * file's real spelling. Undefined when the class has no MODULE attribute or is not indexed.
+     */
+    public async moduleFileOf(className: string, document: TextDocument): Promise<string | undefined> {
         await this.ensureIndexBuilt();
-        const parentInfos = this.sdi.findFor(parentClassName, document.uri); // #571
-        if (parentInfos.length > 0) {
-            const parentInfo = parentInfos.find(d => !d.isType) || parentInfos[0];
-            const moduleMatch = parentInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (moduleMatch) moduleFile = moduleMatch[1];
-        }
-        return { className, parentClassName, moduleFile };
+        const infos = this.sdi.findFor(className, document.uri);
+        if (infos.length === 0) return undefined;
+        const info = infos.find(d => !d.isType) || infos[0];
+        return info.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i)?.[1];
     }
 
     /**
