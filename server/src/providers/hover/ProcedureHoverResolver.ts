@@ -276,6 +276,26 @@ export class ProcedureHoverResolver {
                     end: { line: position.line, character: procNameEnd }
                 }
             };
+
+            // #313: the prototype may sit in an INC included inside a MAP (this file's or
+            // the MEMBER parent's), which neither lookup above follows. A bare prototype
+            // counts there as well as one in a MODULE block.
+            const includeHit = await this.mapResolver.findDeclarationInMapIncludes(procName, document, tokens, true);
+            if (includeHit) {
+                const declLineText = includeHit.doc.getText({
+                    start: { line: includeHit.declLine, character: 0 },
+                    end: { line: includeHit.declLine, character: Number.MAX_SAFE_INTEGER }
+                });
+                const includeDecl: Location = {
+                    uri: includeHit.doc.uri,
+                    range: {
+                        start: { line: includeHit.declLine, character: 0 },
+                        end: { line: includeHit.declLine, character: declLineText.length }
+                    }
+                };
+                return this.formatter.formatProcedure(procName, includeDecl, bareImplLocation, document, position);
+            }
+
             // formatProcedure returns null for a header-only card, which is all it has here.
             const bareHover = await this.formatter.formatProcedure(procName, null, bareImplLocation, document, position);
             return bareHover ?? {

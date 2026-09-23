@@ -105,6 +105,45 @@ suite('Procedure label hover without a MAP prototype', () => {
         assert.ok(!text.includes('No MAP prototype found'), `a prototyped procedure must not carry the note, got:\n${text}`);
     });
 
+    async function hoverWithMapIncludedPrototype(incName: string, incLines: string[]): Promise<string> {
+        fs.writeFileSync(path.join(tmpRoot, incName), [...incLines, ''].join('\r\n'));
+        const p = path.join(tmpRoot, `mod-${path.parse(incName).name}.clw`);
+        const content = [
+            '  MEMBER()',
+            '  MAP',
+            `    INCLUDE('${incName}')`,
+            '  END',
+            'Worker        PROCEDURE',
+            '  CODE',
+            '',
+        ].join('\r\n');
+        fs.writeFileSync(p, content);
+        const doc = TextDocument.create(`file:///${p.replace(/\\/g, '/')}`, 'clarion', 1, content);
+        return hoverText(await new HoverProvider().provideHover(doc, { line: 4, character: 2 }));
+    }
+
+    test('a bare prototype in a file INCLUDEd inside the MAP keeps its declaration card', async () => {
+        const text = await hoverWithMapIncludedPrototype('protos.inc', [
+            'Worker        PROCEDURE',
+        ]);
+
+        assert.ok(text.includes('**Worker**'), `expected the Worker card, got:\n${text}`);
+        assert.ok(text.includes('protos.inc:1'), `expected a link to the prototype in protos.inc, got:\n${text}`);
+        assert.ok(!text.includes('No MAP prototype found'), `a prototype reached through the MAP's INCLUDE must not be reported missing, got:\n${text}`);
+    });
+
+    test('a MODULE-block prototype in a file INCLUDEd inside the MAP keeps its declaration card', async () => {
+        const text = await hoverWithMapIncludedPrototype('modprotos.inc', [
+            "  MODULE('worker.clw')",
+            'Worker        PROCEDURE',
+            '  END',
+        ]);
+
+        assert.ok(text.includes('**Worker**'), `expected the Worker card, got:\n${text}`);
+        assert.ok(text.includes('modprotos.inc:2'), `expected a link to the prototype in modprotos.inc, got:\n${text}`);
+        assert.ok(!text.includes('No MAP prototype found'), `a prototype reached through the MAP's INCLUDE must not be reported missing, got:\n${text}`);
+    });
+
     test('an indented, non-compiling label (no MAP entry) is not answered as a procedure', async () => {
         // Falls through to the unrelated, pre-existing global-EQUATE match this PR does not
         // touch (see the PR description's Scope section) - this only pins down that the
