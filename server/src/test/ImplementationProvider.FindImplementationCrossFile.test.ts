@@ -3,8 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
-import { MemberInfo } from '../utils/ClassMemberScan';
 import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { HoverProvider } from '../providers/HoverProvider';
 import { SolutionManager } from '../solution/solutionManager';
@@ -15,6 +13,14 @@ import {
 } from './helpers/NoSolutionFixture';
 
 /**
+ * #637: this pinned `ClassMemberResolver.findImplementationCrossFile`, retired with that class.
+ * The body search that survives is ImplementationProvider's own `findMethodImplementationCrossFile`
+ * (the SELF, PARENT, typed-variable and chained branches all use it since #640), which carries the
+ * same redirection tier and sibling-dir fallback; the four unit cases below now pin that one, on the
+ * same fixtures and assertions. The two caller-integration cases already went through the providers.
+ *
+ * Original description, for the scenarios:
+ *
  * Unit suite for `ClassMemberResolver.findImplementationCrossFile` — backfills
  * the zero-coverage gap surfaced by Eve at `6253f9d5` Phase A / GH #112 / MT
  * `72574468`. The function is load-bearing in two production scenarios:
@@ -124,13 +130,15 @@ function fsPathFromUri(uri: string): string {
     return decodeURIComponent(uri.replace('file:///', '')).replace(/\//g, path.sep);
 }
 
-suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
+/** ImplementationProvider's cross-file body search, called the way its branches call it. */
+function findBody(className: string, methodName: string, declarationFile: string, doc: TextDocument) {
+    type Search = (className: string, methodName: string, currentDocument: TextDocument, paramCount?: number,
+        moduleFile?: string | null, declarationSignature?: string, declarationFile?: string) => Promise<{ uri: string } | null>;
+    const provider = new ImplementationProvider() as unknown as { findMethodImplementationCrossFile: Search };
+    return provider.findMethodImplementationCrossFile(className, methodName, doc, undefined, null, undefined, declarationFile);
+}
 
-    let resolver: ClassMemberResolver;
-
-    setup(() => {
-        resolver = new ClassMemberResolver();
-    });
+suite('Cross-file method body search: redirection tier and sibling-dir fallback (#112, #637)', () => {
 
     // ─── Scenario 1 — No-solution-open mode ────────────────────────────────
     suite('Scenario 1 — no-solution-open mode (sibling-dir fallback is only working path)', () => {
@@ -165,18 +173,10 @@ suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
             });
 
             const incPath = path.join(nsFix.libsrcDirs[0], 'MyClass.inc');
-            const memberInfo: MemberInfo = {
-                type: 'PROCEDURE',
-                className: 'MyClass',
-                line: 1, // `MyMethod  PROCEDURE` on line 1 (0-based) of classDecl
-                file: incPath
-            };
             const sourceDoc = TextDocument.create(nsFix.sourceUri!, 'clarion', 1,
                 "  PROGRAM\n  INCLUDE('MyClass.inc')\n  CODE\n  RETURN\n");
 
-            const result = await resolver.findImplementationCrossFile(
-                'MyClass', 'MyMethod', memberInfo, sourceDoc
-            );
+            const result = await findBody('MyClass', 'MyMethod', incPath, sourceDoc);
 
             // Bidirectional-pin (positive):
             assert.ok(result,
@@ -190,9 +190,11 @@ suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
             // **Tier-trace assertion (Bob #112 spec — fallback must be EXPLICITLY pinned):**
             // SolutionManager.instance is null in no-solution mode, so tier 2 (redirection)
             // and tier 3 (project sourceFiles) bail at the SM-null check. FRG is unbuilt
-            // (default test state). The ONLY remaining path is the sibling-dir fallback at
-            // line 1074. The resolved path being inside libsrc (where we wrote the sibling)
-            // is the structural proof the fallback hit.
+            // (default test state). In ClassMemberResolver the ONLY remaining path was the
+            // sibling-dir fallback. #637: in ImplementationProvider's search a no-solution
+            // libsrc tier answers first (checked by disabling the fallback: this case stays
+            // green, Scenario 2's positive goes red), so this case pins "the body is found in
+            // libsrc with no solution open", and Scenario 2 is what pins the fallback itself.
             const libsrcDir = path.normalize(nsFix.libsrcDirs[0]).toLowerCase();
             assert.ok(
                 path.normalize(resultPath).toLowerCase().startsWith(libsrcDir),
@@ -213,20 +215,12 @@ suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
             });
 
             const incPath = path.join(nsFix.libsrcDirs[0], 'MyClass.inc');
-            const memberInfo: MemberInfo = {
-                type: 'PROCEDURE',
-                className: 'MyClass',
-                line: 1,
-                file: incPath
-            };
             const sourceDoc = TextDocument.create(nsFix.sourceUri!, 'clarion', 1,
                 "  PROGRAM\n  INCLUDE('MyClass.inc')\n  CODE\n  RETURN\n");
 
             // Method name doesn't exist anywhere in MyClass.clw — must return null.
             // Keeps the positive-case contract honest per feedback_bidirectional_pin_assertion.
-            const result = await resolver.findImplementationCrossFile(
-                'MyClass', 'NotARealMethod', memberInfo, sourceDoc
-            );
+            const result = await findBody('MyClass', 'NotARealMethod', incPath, sourceDoc);
 
             assert.strictEqual(result, null,
                 'findImplementationCrossFile must return null for genuinely-missing method (no silent resolution)');
@@ -256,18 +250,10 @@ suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
         test('positive — resolves impl via sibling-dir fallback when redirection misses', async () => {
             cdFix = buildCrossDirFixture({ classDecl, classImpl });
 
-            const memberInfo: MemberInfo = {
-                type: 'PROCEDURE',
-                className: 'MyClass',
-                line: 1,
-                file: cdFix.incFile  // points at extras/MyClass.inc — OUTSIDE the project's sourceDir
-            };
             const sourceDoc = TextDocument.create(cdFix.sourceUri, 'clarion', 1,
                 "  PROGRAM\n  CODE\n  RETURN\n");
 
-            const result = await resolver.findImplementationCrossFile(
-                'MyClass', 'MyMethod', memberInfo, sourceDoc
-            );
+            const result = await findBody('MyClass', 'MyMethod', cdFix!.incFile, sourceDoc);
 
             // Bidirectional-pin (positive):
             assert.ok(result,
@@ -297,18 +283,10 @@ suite('ClassMemberResolver.findImplementationCrossFile (#112)', () => {
             // resolving to some other tier's result.
             cdFix = buildCrossDirFixture({ classDecl, classImpl, writeClw: false });
 
-            const memberInfo: MemberInfo = {
-                type: 'PROCEDURE',
-                className: 'MyClass',
-                line: 1,
-                file: cdFix.incFile
-            };
             const sourceDoc = TextDocument.create(cdFix.sourceUri, 'clarion', 1,
                 "  PROGRAM\n  CODE\n  RETURN\n");
 
-            const result = await resolver.findImplementationCrossFile(
-                'MyClass', 'MyMethod', memberInfo, sourceDoc
-            );
+            const result = await findBody('MyClass', 'MyMethod', cdFix!.incFile, sourceDoc);
 
             assert.strictEqual(result, null,
                 'findImplementationCrossFile must return null when sibling .clw is genuinely missing (no silent resolution from another tier)');

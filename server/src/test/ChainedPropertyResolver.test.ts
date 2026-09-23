@@ -5,7 +5,6 @@
  */
 
 import * as assert from 'assert';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { extractClassName } from '../utils/ClassNameUtils';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 

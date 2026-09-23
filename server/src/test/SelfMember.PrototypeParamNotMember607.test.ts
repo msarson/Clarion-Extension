@@ -8,11 +8,14 @@
  * prototype had been taken for a member. The real property is the inherited
  * `WindowManager.Request`. The same scan stopped only at an END in column 0, so past a
  * generated local class (whose END is indented) it read on through the rest of the file.
+ *
+ * #637: pinned ClassMemberResolver.findClassMemberInfo, which is retired; it now asks the SELF
+ * lookup hover, F12 and Ctrl+F12 run (support/selfMemberLookup.ts).
  */
 import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { selfMemberAt } from './support/selfMemberLookup';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { setServerInitialized } from '../serverState';
 
@@ -49,28 +52,23 @@ suite('Class member lookup: prototype parameters are not members (#607)', () => 
         doc = TextDocument.create('file:///c:/test607/ThisProc.clw', 'clarion', 1, SOURCE);
     });
 
-    function lookup(member: string, atLine: number) {
-        const tokens = TokenCache.getInstance().getTokens(doc);
-        return new ClassMemberResolver().findClassMemberInfo(member, doc, atLine, tokens, undefined);
-    }
-
-    test('SELF.Request resolves to the Request property, not to Run\'s parameter', () => {
-        const info = lookup('Request', 12);
+    test('SELF.Request resolves to the Request property, not to Run\'s parameter', async () => {
+        const info = await selfMemberAt(doc, 12, 'Request');
         assert.ok(info, 'Request should resolve');
         assert.strictEqual(info!.line, 4, `resolved to line ${info!.line}: ${LINES[info!.line]}`);
     });
 
-    test('a name that is only a prototype parameter is not a member', () => {
-        const info = lookup('Mode', 13);
+    test('a name that is only a prototype parameter is not a member', async () => {
+        const info = await selfMemberAt(doc, 13, 'Mode');
         assert.strictEqual(info, null, info ? `resolved to line ${info.line}: ${LINES[info.line]}` : '');
     });
 
-    test('the member scan stops at the CLASS\'s own END, even when it is indented', () => {
-        const info = lookup('Tally', 14);
+    test('the member scan stops at the CLASS\'s own END, even when it is indented', async () => {
+        const info = await selfMemberAt(doc, 14, 'Tally');
         assert.strictEqual(info, null, info ? `resolved to line ${info.line}: ${LINES[info.line]}` : '');
     });
 
-    test('a derived CLASS naming this class as its parent is not this class\'s body', () => {
+    test('a derived CLASS naming this class as its parent is not this class\'s body', async () => {
         // `Child CLASS(Base)` carries the token `Base` on its CLASS line; the lookup took
         // that for Base's own declaration and read Child's members as Base's.
         const src = [
@@ -84,8 +82,7 @@ suite('Class member lookup: prototype parameters are not members (#607)', () => 
             '  SELF.Extra = 1',                                 // 7
         ].join('\r\n');
         const d = TextDocument.create('file:///c:/test607/Child.clw', 'clarion', 1, src);
-        const tokens = TokenCache.getInstance().getTokens(d);
-        const info = new ClassMemberResolver().findClassMemberInfo('Extra', d, 7, tokens, undefined);
+        const info = await selfMemberAt(d, 7, 'Extra');
         assert.strictEqual(info, null, info ? `resolved to line ${info.line}` : '');
     });
 

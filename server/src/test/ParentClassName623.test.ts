@@ -19,7 +19,6 @@
 import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { CompletionProvider } from '../providers/CompletionProvider';
 import { createDiskSolution, DiskSolution } from './support/diskSolutionFixture';
@@ -54,11 +53,11 @@ suite('Parent class name — one reading of CLASS(Parent) (#623)', () => {
             '  RETURN',
         ];
 
-        test('getParentClassInfo reads the whole colon-bearing parent name', async () => {
+        test('the parent class name reads the whole colon-bearing parent name', async () => {
             fx = createDiskSolution({ 'classes.inc': INC, 'caller.clw': CLW });
             const doc = fx.open('caller.clw');
             const tokens = TokenCache.getInstance().getTokens(doc);
-            const info = await new ClassMemberResolver().getParentClassInfo(doc, 6, tokens);
+            const info = await new MemberLocatorService().resolveParentClassAt(doc, 6);
             assert.strictEqual(info?.parentClassName, 'MyOwn:Base',
                 `the parent of Derived is MyOwn:Base, not a fragment of it; got ${JSON.stringify(info)}`);
         });
@@ -67,7 +66,10 @@ suite('Parent class name — one reading of CLASS(Parent) (#623)', () => {
             fx = createDiskSolution({ 'classes.inc': INC, 'caller.clw': CLW });
             const doc = fx.open('caller.clw');
             const tokens = TokenCache.getInstance().getTokens(doc);
-            const info = await new ClassMemberResolver().findParentClassMemberInfo('BaseMethod', doc, 6, tokens);
+            // #637: the route hover and F12 take for PARENT since #648.
+            const locator = new MemberLocatorService();
+            const parent = await locator.resolveParentClassAt(doc, 6);
+            const info = parent ? await locator.findMemberInClass(parent.parentClassName, 'BaseMethod', doc) : null;
             assert.ok(info, 'PARENT.BaseMethod must resolve through a colon-named parent');
             assert.strictEqual(info!.className, 'MyOwn:Base');
         });
@@ -106,7 +108,7 @@ suite('Parent class name — one reading of CLASS(Parent) (#623)', () => {
             fx = createDiskSolution({ 'classes.inc': INC, 'caller.clw': CLW });
             const doc = fx.open('caller.clw');
             const tokens = TokenCache.getInstance().getTokens(doc);
-            const info = await new ClassMemberResolver().getParentClassInfo(doc, 6, tokens);
+            const info = await new MemberLocatorService().resolveParentClassAt(doc, 6);
             assert.strictEqual(info?.parentClassName, 'Base',
                 `got ${JSON.stringify(info)} — the open document carries no CLASS line at all`);
         });

@@ -1158,13 +1158,13 @@ export class ImplementationProvider {
                 }
             }
 
-            // ─── Sibling-dir fallback (cluster site 2 of 4, task 6253f9d5) ─────
+            // ─── Sibling-dir fallback (cluster site 1 of 3, the canonical one since #637) ─────
             // No solution / redirection failed — fall back to same directory as
             // declaration. Load-bearing for no-solution-open mode + cross-directory
-            // siblings outside the project's .red search paths. Move in unison with
-            // the cluster-canonical site at `ClassMemberResolver.ts:~1041` and the
-            // two companions in `MapDeclarationDiagnostics.ts:145` +
-            // `MapDeclarationCodeActionProvider.ts:resolveClwPath`. Phase A audit:
+            // siblings outside the project's .red search paths. The canonical copy lived
+            // in ClassMemberResolver until #637; move in unison with the two companions
+            // in `MapDeclarationDiagnostics.ts` + `MapDeclarationCodeActionProvider.ts:resolveClwPath`.
+            // Pinned by ImplementationProvider.FindImplementationCrossFile.test.ts (Scenario 2). Phase A audit:
             // `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
             const declDir = path.dirname(declFilePath);
             const directPath = path.join(declDir, implFileName);

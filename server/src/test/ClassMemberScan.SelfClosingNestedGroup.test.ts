@@ -29,7 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { MemberLocatorService } from '../services/MemberLocatorService';
 import {
     scanClassBodyForMember,
     scanClassBodyForAllMembers,
@@ -50,7 +50,7 @@ function countParams(line: string): number {
     return count + 1;
 }
 
-suite('ClassMemberResolver — self-closing nested GROUP with attrs/period terminator', () => {
+suite('Class body scanners — self-closing nested GROUP with attrs/period terminator', () => {
 
     suiteSetup(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scr_selfclose_'));
@@ -102,14 +102,15 @@ suite('ClassMemberResolver — self-closing nested GROUP with attrs/period termi
         assert.ok(!names.includes('InnerField'), 'InnerField is nested inside MultiLineGroup, not a direct member');
     });
 
-    test('ClassMemberResolver.findClassMemberInIncludes (the third scanner) finds a member past both self-closing GROUP forms', () => {
+    // #637: the third scanner was ClassMemberResolver.findClassMemberInIncludes, retired with the
+    // class; the member lookup that reaches a class through an INCLUDE now is findMemberInClass.
+    test('findMemberInClass, reaching the class through an INCLUDE, finds a member past both self-closing GROUP forms', async () => {
         const doc = TextDocument.create(
             `file:///${path.join(tmpDir, 'probe.clw').replace(/\\/g, '/')}`,
             'clarion', 1,
             `  INCLUDE('OuterClass.inc'),ONCE\n`
         );
-        const resolver = new ClassMemberResolver();
-        const result = resolver.findClassMemberInIncludes('OuterClass', 'AfterGroups', doc);
+        const result = await new MemberLocatorService().findMemberInClass('OuterClass', 'AfterGroups', doc);
         assert.ok(result, 'Should find AfterGroups via the INCLUDE-file scanner');
         assert.ok(result!.type.toUpperCase().includes('PROCEDURE'));
     });
@@ -149,14 +150,13 @@ suite('ClassMemberResolver — self-closing nested GROUP with attrs/period termi
             assert.ok(result, 'Should find AfterGroup past the commented self-closing GROUP on a CRLF file');
         });
 
-        test('ClassMemberResolver.findClassMemberInIncludes finds the member past a commented self-closing GROUP on a CRLF file', () => {
+        test('findMemberInClass, reaching the class through an INCLUDE, finds the member past a commented self-closing GROUP on a CRLF file', async () => {
             const doc = TextDocument.create(
                 `file:///${path.join(crlfDir, 'probe.clw').replace(/\\/g, '/')}`,
                 'clarion', 1,
                 `  INCLUDE('CrlfClass.inc'),ONCE\n`
             );
-            const resolver = new ClassMemberResolver();
-            const result = resolver.findClassMemberInIncludes('CrlfClass', 'AfterGroup', doc);
+            const result = await new MemberLocatorService().findMemberInClass('CrlfClass', 'AfterGroup', doc);
             assert.ok(result, 'Should find AfterGroup via the INCLUDE-file scanner on a CRLF file');
         });
     });

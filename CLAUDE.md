@@ -59,7 +59,7 @@ commit, issue or PR.
 ```
 node scripts/health/hover-definition-agreement.js --json=a.json [--against=prev.json]  # ~70-100s, real server
 node scripts/health/document-symbols.js --out=a.tsv [--against=prev.tsv]               # ~30s, in-process
-node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]                   # ~4 min, in-process
+node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]                   # ~7-13 min, in-process
 ```
 
 - **hover-definition-agreement**: hover and Go to Definition resolve a word
@@ -78,8 +78,10 @@ node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]            
   F12 only.
 - **document-symbols**: every outline entry of every file (the Structure view,
   breadcrumbs and workspace/symbol all read it).
-- **self-members**: what each `SELF.x` resolves to through the in-document
-  class scan (no solution index in-process, so inherited members read null).
+- **self-members**: what each `SELF.x` resolves to through the SELF lookup
+  hover, F12 and Ctrl+F12 use (no solution index in-process, so members
+  inherited from a class the includes do not reach read null). A snapshot
+  from before #637 is of the retired ClassMemberResolver engine.
 
 Shared plumbing: `scripts/health/corpus.js` (walk, snapshot, compare) and
 `scripts/health/lsp-session.js` (server startup and settle).

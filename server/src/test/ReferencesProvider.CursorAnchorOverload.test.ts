@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { setServerInitialized } from '../serverState';
 
@@ -135,20 +135,18 @@ suite('countDefaultParams — angle-bracket-only optionals (#249)', () => {
 suite('countParametersInCall — word-boundary anchor (#249)', () => {
 
     test('a longer identifier containing the name does not hijack the count', () => {
-        const resolver = new ClassMemberResolver();
         // Resolving "SetValue" on a line where SetValueEx appears FIRST: the old
         // substring indexOf anchored inside SetValueEx and counted ITS 2 args.
         assert.strictEqual(
-            resolver.countParametersInCall("  obj.SetValueEx(1,2) ; obj.SetValue('x')", 'SetValue'),
+            countParametersInCall("  obj.SetValueEx(1,2) ; obj.SetValue('x')", 'SetValue'),
             1,
             'must count SetValue(...)\'s args, not SetValueEx(...)\'s'
         );
     });
 
     test('name only present inside a longer identifier → no call found (0)', () => {
-        const resolver = new ClassMemberResolver();
         assert.strictEqual(
-            resolver.countParametersInCall('  obj.SetValueEx(1,2)', 'SetValue'),
+            countParametersInCall('  obj.SetValueEx(1,2)', 'SetValue'),
             0
         );
     });
