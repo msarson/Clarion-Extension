@@ -32,6 +32,7 @@ import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DefinitionProvider } from './DefinitionProvider';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -48,6 +49,8 @@ export class ImplementationProvider {
     private memberResolver: ClassMemberResolver;
     private chainedResolver: ChainedPropertyResolver;
     private memberLocator: MemberLocatorService;
+    /** Created on first use — only a weak argument reference that names a real procedure needs it. */
+    private definitionProvider?: DefinitionProvider;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -97,133 +100,13 @@ export class ImplementationProvider {
         //    OR if this is inside a START() call (e.g., "START(ProcName, ...)")
         if (word && wordRange) {
             const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            
+
             if (detection.isProcedure) {
                 logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-                
-                // Find the MAP declaration first
-                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
-                
-                if (mapDecl) {
-                    // Check if MAP declaration is from an INCLUDE file
-                    const mapDeclUri = mapDecl.uri;
-                    const isFromInclude = mapDeclUri !== document.uri;
-                    
-                    let implLocation: Location | null = null;
-                    
-                    if (isFromInclude) {
-                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
-                        // Load the INCLUDE file and its tokens using cache
-                        try {
-                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
-                            const cached = await this.crossFileCache.getOrLoadDocument(decodedPath);
-                            
-                            if (cached) {
-                                const { document: includeDoc, tokens: includeTokens } = cached;
-                                
-                                // Find implementation using INCLUDE file's document and tokens
-                                const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                                implLocation = await this.mapResolver.findProcedureImplementation(
-                                    word,
-                                    includeTokens,
-                                    includeDoc,
-                                    mapPosition,
-                                    line
-                                );
-                            }
-                        } catch (error) {
-                            logger.info(`Error loading INCLUDE file: ${error}`);
-                        }
-                    } else {
-                        // Now find implementation using the MAP declaration position
-                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                        implLocation = await this.mapResolver.findProcedureImplementation(
-                            word,
-                            tokens,
-                            document,
-                            mapPosition, // Use MAP position, not call position
-                            line,
-                            this.tokenCache.getStructure(document) // #258: reuse cached structure
-                        );
-                    }
-                    
-                    // Check if we're already AT the implementation - if so, don't navigate to itself
-                    if (implLocation && 
-                        implLocation.uri === document.uri && 
-                        implLocation.range.start.line === position.line) {
-                        logger.info(`❌ Already at implementation for ${word} - returning null to prevent self-navigation`);
-                        return null;
-                    }
-                    
-                    if (implLocation) {
-                        logger.info(`✅ Found procedure implementation for call: ${word}`);
-                        return implLocation;
-                    }
-                }
-                
-                // If no MAP declaration found in current file, check if this file has MEMBER
-                // and search the parent file
-                logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
-                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-                
-                if (memberToken?.referencedFile) {
-                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
-
-                    const localScope = getLocalMapScope(document.uri);
-                    // Use CrossFileResolver to find MAP declaration in parent file
-                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
-                        word,
-                        memberToken.referencedFile,
-                        document,
-                        line,
-                        localScope?.containingProcedure
-                    );
-
-                    if (memberResult) {
-                        logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
-
-                        // Now find implementation from the parent MAP declaration using cache
-                        try {
-                            const parentPath = memberResult.file;
-                            const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
-
-                            if (cached) {
-                                const { document: parentDoc, tokens: parentTokens } = cached;
-
-                                const mapPosition: Position = { line: memberResult.line, character: 0 };
-                                const implLocation = await this.mapResolver.findProcedureImplementation(
-                                    word,
-                                    parentTokens,
-                                    parentDoc,
-                                    mapPosition,
-                                    line
-                                );
-
-                                if (implLocation) {
-                                    logger.info(`✅ Found implementation via parent MAP: ${word}`);
-                                    return implLocation;
-                                }
-                            }
-                        } catch (error) {
-                            logger.info(`Error loading parent file: ${error}`);
-                        }
-                    }
-                }
-
-                // #313: the declaration may live in an INC included INSIDE a MAP (the
-                // WinEvent pattern — include('winevent.inc') in the current file's or the
-                // MEMBER parent's MAP, with module('winevent.clw') blocks in the INC).
-                // findMapDeclaration scans current-document tokens only, and
-                // findMapDeclarationInMemberFile searches the parent's MAP only for
-                // MODULE('<current file>') blocks — neither reaches those declarations,
-                // while go-to-DEFINITION does (its own walk follows the includes). Locate
-                // the declaration by walking MAP includes from both start files, then hand
-                // its own document+position to findProcedureImplementation — the exact path
-                // that already works when the cursor is physically on the declaration.
-                const viaMapInclude = await this.findImplementationViaMapIncludes(word, document, tokens);
-                if (viaMapInclude) {
-                    logger.info(`✅ Found implementation via MAP-include MODULE declaration: ${word}`);
-                    return viaMapInclude;
+                const procedureTarget = await this.resolveProcedureReferenceImplementation(
+                    word, document, position, line, tokens, detection.isArgumentReference);
+                if (procedureTarget) {
+                    return procedureTarget.location;
                 }
             }
         }
@@ -280,6 +163,213 @@ export class ImplementationProvider {
 
         logger.info(`No implementation found at this position`);
         return null;
+    }
+
+    /**
+     * Ctrl+F12 for a procedure call or reference: the implementation of the procedure the
+     * word names.
+     *
+     * Returns `{ location }` when it has taken responsibility for the word — including
+     * `{ location: null }` for "already on the implementation, nowhere to go", which must
+     * not fall through — and `null` when it has not, so provideImplementation continues to
+     * its routine, MAP-declaration and method paths.
+     *
+     * `isArgumentReference` marks the weak `SORT(Queue, CompareProc)` shape, which every
+     * bare identifier passed as an argument matches. It carries the same two obligations
+     * here as on hover and F12:
+     *
+     *   1. It must not outrank a declaration in scope. With a local `Helper LONG` in view,
+     *      `MESSAGE(Helper)` IS that local, and a variable has no implementation. This
+     *      provider has no variable tier of its own to rank behind, so it takes Go to
+     *      Definition's answer — see `definitionNamesProcedure` — which makes the two agree
+     *      by construction instead of re-deciding what can shadow.
+     *   2. It must not start the exhaustive #313 include walk, since most words reaching it
+     *      are ordinary variables with nothing to find. Hover already skips the walk for
+     *      this shape; now all three surfaces resolve it through the same cheap tiers.
+     *
+     * When the ranking declines, the result is `null` — a fall-through — so the word is
+     * answered exactly as it was before the argument shape existed.
+     */
+    private async resolveProcedureReferenceImplementation(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        tokens: Token[],
+        isArgumentReference: boolean
+    ): Promise<{ location: Location | null } | null> {
+        // Find the MAP declaration first
+        const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+
+        if (mapDecl) {
+            // Check if MAP declaration is from an INCLUDE file
+            const mapDeclUri = mapDecl.uri;
+            const isFromInclude = mapDeclUri !== document.uri;
+
+            let implLocation: Location | null = null;
+
+            if (isFromInclude) {
+                logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                // Load the INCLUDE file and its tokens using cache
+                try {
+                    const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                    const cached = await this.crossFileCache.getOrLoadDocument(decodedPath);
+
+                    if (cached) {
+                        const { document: includeDoc, tokens: includeTokens } = cached;
+
+                        // Find implementation using INCLUDE file's document and tokens
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            includeTokens,
+                            includeDoc,
+                            mapPosition,
+                            line
+                        );
+                    }
+                } catch (error) {
+                    logger.info(`Error loading INCLUDE file: ${error}`);
+                }
+            } else {
+                // Now find implementation using the MAP declaration position
+                const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                implLocation = await this.mapResolver.findProcedureImplementation(
+                    word,
+                    tokens,
+                    document,
+                    mapPosition, // Use MAP position, not call position
+                    line,
+                    this.tokenCache.getStructure(document) // #258: reuse cached structure
+                );
+            }
+
+            // Check if we're already AT the implementation - if so, don't navigate to itself
+            if (implLocation &&
+                implLocation.uri === document.uri &&
+                implLocation.range.start.line === position.line) {
+                logger.info(`❌ Already at implementation for ${word} - returning null to prevent self-navigation`);
+                return { location: null };
+            }
+
+            if (implLocation) {
+                if (isArgumentReference && !(await this.definitionNamesProcedure(document, position, [mapDecl, implLocation]))) {
+                    logger.info(`⏭️ ${word} is claimed by a declaration in scope — not a procedure reference here`);
+                    return null;
+                }
+                logger.info(`✅ Found procedure implementation for call: ${word}`);
+                return { location: implLocation };
+            }
+        }
+
+        // If no MAP declaration found in current file, check if this file has MEMBER
+        // and search the parent file
+        logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+
+        if (memberToken?.referencedFile) {
+            logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
+
+            const localScope = getLocalMapScope(document.uri);
+            // Use CrossFileResolver to find MAP declaration in parent file
+            const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                word,
+                memberToken.referencedFile,
+                document,
+                line,
+                localScope?.containingProcedure
+            );
+
+            if (memberResult) {
+                logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
+
+                // Now find implementation from the parent MAP declaration using cache
+                try {
+                    const parentPath = memberResult.file;
+                    const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
+
+                    if (cached) {
+                        const { document: parentDoc, tokens: parentTokens } = cached;
+
+                        const mapPosition: Position = { line: memberResult.line, character: 0 };
+                        const implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            parentTokens,
+                            parentDoc,
+                            mapPosition,
+                            line
+                        );
+
+                        if (implLocation) {
+                            if (isArgumentReference &&
+                                !(await this.definitionNamesProcedure(document, position, [memberResult.location, implLocation]))) {
+                                logger.info(`⏭️ ${word} is claimed by a declaration in scope — not a procedure reference here`);
+                                return null;
+                            }
+                            logger.info(`✅ Found implementation via parent MAP: ${word}`);
+                            return { location: implLocation };
+                        }
+                    }
+                } catch (error) {
+                    logger.info(`Error loading parent file: ${error}`);
+                }
+            }
+        }
+
+        // #313: the declaration may live in an INC included INSIDE a MAP (the
+        // WinEvent pattern — include('winevent.inc') in the current file's or the
+        // MEMBER parent's MAP, with module('winevent.clw') blocks in the INC).
+        // findMapDeclaration scans current-document tokens only, and
+        // findMapDeclarationInMemberFile searches the parent's MAP only for
+        // MODULE('<current file>') blocks — neither reaches those declarations,
+        // while go-to-DEFINITION does (its own walk follows the includes). Locate
+        // the declaration by walking MAP includes from both start files, then hand
+        // its own document+position to findProcedureImplementation — the exact path
+        // that already works when the cursor is physically on the declaration.
+        //
+        // Not for the weak argument shape: see obligation 2 above.
+        if (!isArgumentReference) {
+            const viaMapInclude = await this.findImplementationViaMapIncludes(word, document, tokens);
+            if (viaMapInclude) {
+                logger.info(`✅ Found implementation via MAP-include MODULE declaration: ${word}`);
+                return { location: viaMapInclude };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * True when Go to Definition resolves the word at `position` to one of `procedureSites` —
+     * the procedure's MAP declaration or its implementation — rather than to some other
+     * declaration that shadows it.
+     *
+     * Called only for the weak argument shape, and only once a procedure of that name has
+     * actually been found, so an ordinary variable argument never pays for it. Either site
+     * counts, because F12 may reach the procedure through its declaration-side tier or
+     * through a label tier that lands on the implementation.
+     */
+    private async definitionNamesProcedure(
+        document: TextDocument,
+        position: Position,
+        procedureSites: Location[]
+    ): Promise<boolean> {
+        if (!this.definitionProvider) {
+            this.definitionProvider = new DefinitionProvider();
+        }
+        const definition = await this.definitionProvider.provideDefinition(document, position);
+        const targets = (Array.isArray(definition) ? definition : definition ? [definition] : []) as any[];
+        const siteKey = (uri: string, line: number) => {
+            let path = uri.replace(/^file:\/*/i, '');
+            try { path = decodeURIComponent(path); } catch { /* keep as is */ }
+            return `${path.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase()}#${line}`;
+        };
+        const sites = new Set(procedureSites.map(s => siteKey(s.uri, s.range.start.line)));
+        return targets.some(t => {
+            const uri: string | undefined = t.uri ?? t.targetUri;
+            const range = t.range ?? t.targetSelectionRange ?? t.targetRange;
+            return !!uri && !!range && sites.has(siteKey(uri, range.start.line));
+        });
     }
 
     /**
