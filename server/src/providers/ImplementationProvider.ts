@@ -524,7 +524,7 @@ export class ImplementationProvider {
                 if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                     const afterDot = line.substring(dotBeforeIndex + 1).trim();
                     const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch) {
+                    if (methodMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, methodMatch[1], position)) { // #639
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
@@ -558,7 +558,7 @@ export class ImplementationProvider {
                 if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
                     const afterDot = line.substring(dotBeforeIndex + 1).trim();
                     const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch) {
+                    if (methodMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, methodMatch[1], position)) { // #639
                         const memberName = methodMatch[1];
                         const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
                         const paramCount = hasParens
@@ -781,43 +781,47 @@ export class ImplementationProvider {
     }
 
     /**
-     * Extract method call information from line
+     * Extract method call information from line: the `Object.Method` pair whose METHOD NAME the
+     * cursor is on, with the argument count of its call (0 for a no-paren call, which Clarion
+     * allows for a method without parameters).
+     *
+     * #639 — only the method name. The cursor on the receiver, on SELF / PARENT, on an argument
+     * or anywhere else in the call is a different word (F12 goes to the variable, the class or
+     * the argument there), and has no implementation of this method. Every pair on the line is
+     * considered, so the inner call of `a.Outer(b.Inner())` answers for itself.
      */
     private extractMethodCall(
         line: string,
         position: Position
     ): { objectName: string; methodName: string; paramCount: number } | null {
-        // First try with parens: Object.Method(...) or Object.Method()
-        const regex = /(\w+)\.(\w+)\s*\((.*?)\)/gi;
+        const pair = /(\w+)\.(\w+)/g;
         let match: RegExpExecArray | null;
 
-        while ((match = regex.exec(line)) !== null) {
-            const callStart = match.index;
-            const callEnd = match.index + match[0].length;
+        while ((match = pair.exec(line)) !== null) {
+            const methodStart = match.index + match[1].length + 1;
+            const methodEnd = methodStart + match[2].length;
+            // Step back onto the method name so `a.b.c` also tries `b.c`.
+            pair.lastIndex = methodStart;
+            if (position.character < methodStart || position.character > methodEnd) continue;
 
-            if (position.character >= callStart && position.character <= callEnd) {
-                const objectName = match[1];
-                const methodName = match[2];
-                const paramList = match[3].trim();
-                const paramCount = paramList === '' ? 0 : paramList.split(',').length;
-
-                return { objectName, methodName, paramCount };
-            }
-        }
-
-        // Fallback: no-paren dotted call — Object.Method (Clarion allows calling
-        // no-parameter methods without parentheses)
-        const noParenRegex = /(\w+)\.(\w+)(?!\s*\()/gi;
-        while ((match = noParenRegex.exec(line)) !== null) {
-            const callStart = match.index;
-            const callEnd = match.index + match[0].length;
-
-            if (position.character >= callStart && position.character <= callEnd) {
-                return { objectName: match[1], methodName: match[2], paramCount: 0 };
-            }
+            const args = /^\s*\(([^)]*)/.exec(line.substring(methodEnd));
+            const paramList = args ? args[1].trim() : '';
+            const paramCount = paramList === '' ? 0 : paramList.split(',').length;
+            return { objectName: match[1], methodName: match[2], paramCount };
         }
 
         return null;
+    }
+
+    /**
+     * #639 — true when the cursor is on the member named right after the dot at `dotIndex`, the
+     * word the chained branches resolve. Otherwise the cursor is on some other word further
+     * along the line (`SELF.Q.Field = CHOOSE(...)` with the cursor on CHOOSE).
+     */
+    private isCursorOnMemberAfterDot(line: string, dotIndex: number, memberName: string, position: Position): boolean {
+        const after = line.substring(dotIndex + 1);
+        const start = dotIndex + 1 + (after.length - after.trimStart().length);
+        return position.character >= start && position.character <= start + memberName.length;
     }
 
     /**
