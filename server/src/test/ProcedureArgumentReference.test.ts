@@ -21,7 +21,9 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { HoverProvider } from '../providers/HoverProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { ProcedureCallDetector } from '../providers/utils/ProcedureCallDetector';
+import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 import { setServerInitialized } from '../serverState';
 import { hoverLocations, definitionLocations } from './support/hoverDefinitionAgreement';
 
@@ -225,5 +227,97 @@ suite('the argument shape does not outrank a declaration in scope', () => {
         assert.ok(/Module Procedure/.test(text),
             `START(Helper) still resolves to the procedure; got:\n${text}`);
         assert.deepStrictEqual(await definitionAt(16, 'Helper'), [SHADOW_MAP_DECL_LINE]);
+    });
+});
+
+/**
+ * Go to Implementation reads the same detector, so admitting the argument shape changed
+ * its behaviour too — and it has no variable tier of its own to rank the shape behind.
+ * It takes Go to Definition's answer instead: the implementation is offered only when
+ * F12 resolves the name to the procedure, so the two surfaces agree by construction.
+ *
+ * A variable has no implementation, so a shadowed name must answer exactly as any other
+ * local does: with nothing.
+ */
+const IMPL_LINES = [
+    '    MEMBER',                 // 0
+    '    MAP',                    // 1
+    '        Helper(),LONG',      // 2
+    '    END',                    // 3
+    '',                           // 4
+    'Helper        PROCEDURE()',  // 5
+    '  CODE',                     // 6
+    '  RETURN 0',                 // 7
+    '',                           // 8
+    'Caller        PROCEDURE',    // 9
+    'Helper          LONG',       // 10
+    'Total           LONG',       // 11
+    '  CODE',                     // 12
+    '  MESSAGE(Helper)',          // 13
+    '  MESSAGE(Total)',           // 14
+    '  START(Helper)',            // 15
+    '  Missing()',                // 16
+    '',                           // 17
+    'Other         PROCEDURE',    // 18
+    '  CODE',                     // 19
+    '  Register(Helper)',         // 20
+];
+const IMPL_SOURCE = IMPL_LINES.join('\r\n');
+const IMPL_BODY_LINE = 5;
+
+suite('Go to Implementation ranks the argument shape the same way', () => {
+    let doc: TextDocument;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        doc = TextDocument.create('file:///c:/testargref/Implementation.clw', 'clarion', 1, IMPL_SOURCE);
+    });
+
+    async function implementationAt(line: number, word: string): Promise<number[]> {
+        const character = IMPL_LINES[line].indexOf(word) + 1;
+        const impl = await new ImplementationProvider().provideImplementation(doc, { line, character });
+        return definitionLocations(impl).map(l => l.line);
+    }
+
+    test('a local shadowing a MAP procedure has no implementation to go to', async () => {
+        assert.deepStrictEqual(await implementationAt(13, 'Helper'), [],
+            'MESSAGE(Helper) is the local, and a variable has no implementation');
+    });
+
+    // The guard, and the consistency target for the case above: this is what Ctrl+F12
+    // does on any local, so the shadowed name must match it.
+    test('an ordinary variable passed as an argument has no implementation either', async () => {
+        assert.deepStrictEqual(await implementationAt(14, 'Total'), []);
+    });
+
+    test('a procedure passed as an argument, with nothing shadowing it, goes to its body', async () => {
+        assert.deepStrictEqual(await implementationAt(20, 'Helper'), [IMPL_BODY_LINE],
+            'Register(Helper) with no local in scope names the procedure');
+    });
+
+    test('START() still goes to the procedure body, shadowed or not', async () => {
+        assert.deepStrictEqual(await implementationAt(15, 'Helper'), [IMPL_BODY_LINE]);
+    });
+
+    // The weak shape matches most words it sees, and the #313 include walk is the
+    // expensive tier, so it is kept to the strong shapes — as hover already does. The
+    // strong-shape half is what shows the counter can see a walk at all.
+    test('the argument shape does not start the #313 include walk; a strong shape still does', async () => {
+        const original = MapProcedureResolver.prototype.findDeclarationInMapIncludes;
+        let walks = 0;
+        MapProcedureResolver.prototype.findDeclarationInMapIncludes = function (this: MapProcedureResolver, ...args: any[]) {
+            walks++;
+            return (original as any).apply(this, args);
+        } as any;
+        try {
+            await implementationAt(14, 'Total');
+            assert.strictEqual(walks, 0, 'MESSAGE(Total) must stay on the cheap tiers');
+            walks = 0;
+            await implementationAt(16, 'Missing');
+            assert.strictEqual(walks, 1, 'Missing() is a strong shape and still reaches the walk');
+        } finally {
+            MapProcedureResolver.prototype.findDeclarationInMapIncludes = original;
+        }
     });
 });
