@@ -60,6 +60,7 @@ commit, issue or PR.
 node scripts/health/hover-definition-agreement.js --json=a.json [--against=prev.json]  # ~70-100s, real server
 node scripts/health/document-symbols.js --out=a.tsv [--against=prev.tsv]               # ~30s, in-process
 node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]                   # ~7-13 min, in-process
+node scripts/health/cards.js --positions=<agreement json> --out=a.json [--against=prev.json]  # ~2 min, real server
 ```
 
 - **hover-definition-agreement**: hover and Go to Definition resolve a word
@@ -78,6 +79,10 @@ node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]            
   F12 only.
 - **document-symbols**: every outline entry of every file (the Structure view,
   breadcrumbs and workspace/symbol all read it).
+- **cards**: the full hover text and the F12 target at the agreement sweep's
+  positions (pass its --json as --positions). The agreement sweep compares
+  locations only; this shows every card whose wording or links moved - the
+  check for a refactor of how a card is built (#651).
 - **self-members**: what each `SELF.x` resolves to through the SELF lookup
   hover, F12 and Ctrl+F12 use (no solution index in-process, so members
   inherited from a class the includes do not reach read null). A snapshot

@@ -1,6 +1,7 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
 import { findEnclosingClassToken, resolveEnclosingClassName } from '../../utils/EnclosingClassResolver';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import type { DottedMember } from '../../services/DottedAccessResolver';
 import { clarionSourceCandidates } from '../../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
@@ -262,6 +263,43 @@ export class MethodHoverResolver {
         }
 
         return null;
+    }
+
+    /**
+     * #651 — the card for a single-level member access (`SELF.x`, `PARENT.x`, `obj.x`) whose
+     * declaration DottedAccessResolver has already named: for a method, its body found the way
+     * every hover body link is found (the picked overload's prototype, #643; a body after the
+     * declaration when it is in this document, #650), else the member card. The tail the SELF,
+     * PARENT and explicit-receiver hovers each carried a copy of.
+     */
+    async formatDottedMember(
+        fieldName: string,
+        access: DottedMember,
+        document: TextDocument,
+        paramCount?: number
+    ): Promise<Hover | null> {
+        const started = Date.now();
+        const memberInfo = access.member;
+        const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
+        let hover: Hover | null = null;
+        if (isMethod) {
+            const implLocation = await this.findMethodImplementationCrossFile(
+                memberInfo.className,
+                fieldName,
+                document,
+                paramCount,
+                this.resolveModuleFile(memberInfo.className, memberInfo.file),
+                access.pickedSignature ?? memberInfo.signature,
+                { file: memberInfo.file, line: memberInfo.line }
+            );
+            if (implLocation) hover = this.formatter.formatMethodCall(fieldName, memberInfo, implLocation, document);
+        }
+        hover = hover ?? this.formatter.formatClassMember(fieldName, memberInfo);
+        const total = Date.now() - started;
+        if (total >= 250) {
+            perfLogger.perf("Member hover slow", { total_ms: total, receiver: access.receiverKind, member: fieldName, uri: document.uri });
+        }
+        return hover;
     }
 
     /**

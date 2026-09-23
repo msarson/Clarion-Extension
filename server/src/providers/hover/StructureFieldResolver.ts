@@ -8,6 +8,7 @@ import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { DottedAccessResolver } from '../../services/DottedAccessResolver';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
@@ -28,6 +29,8 @@ export class StructureFieldResolver {
     private chainedResolver = new ChainedPropertyResolver();
     private memberLocator = new MemberLocatorService();
     private overloadResolver = new MethodOverloadResolver();
+    /** #651 — the declaration a single-level `receiver.member` names, shared with Go to Definition. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     
     constructor(
         private formatter: HoverFormatter,
@@ -142,26 +145,23 @@ export class StructureFieldResolver {
         const isSelfOrParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
         logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
         
-        // This is a member access (hovering over the field after the dot)
-        if (isSelfMember) {
-            // self.member - class member
-            // If it's a method call, count parameters
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                logger.info(`Method call detected with ${paramCount} parameters`);
+        // #651 — a single-level receiver: SELF, PARENT, or a name that is a CLASS or a variable of a
+        // CLASS type. DottedAccessResolver names the declaration, the same call Go to Definition
+        // makes, so the two cannot disagree about it; the card is built from that declaration.
+        // SELF / PARENT that name nothing answer nothing, as before. Any other receiver the
+        // resolver does not cover (a GROUP/QUEUE/FILE, an interface reference) falls through to
+        // the structure-field paths below.
+        if (!beforeDot.includes('.')) {
+            const receiver = isSelfMember ? 'SELF' : isParentMember ? 'PARENT' : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+            if (receiver) {
+                const paramCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
+                const access = await this.dottedAccess.resolve(receiver, fieldName, document, position.line, paramCount);
+                if (access) return await this.methodResolver.formatDottedMember(fieldName, access, document, paramCount);
+                if (isSelfMember || isParentMember) return null;
             }
-            
-            return await this.methodResolver.resolveMethodCall(fieldName, document, position, line, paramCount);
-        } else if (isParentMember) {
-            // parent.member - inherited class member
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                logger.info(`PARENT method call detected with ${paramCount} parameters`);
-            }
-            return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
-        } else if (isSelfOrParentChain && beforeDot.includes('.')) {
+        }
+
+        if (isSelfOrParentChain && beforeDot.includes('.')) {
             // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
             let paramCount: number | undefined;
             if (hasParentheses) {
@@ -192,16 +192,8 @@ export class StructureFieldResolver {
                 const tokens = this.tokenCache.getTokens(document);
                 const callParamCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
 
-                // #611: a CLASS receiver's member is found the way F12 finds it - the receiver's
-                // own class, then its ancestors, respecting the call's argument count. The
-                // local-field lookup below matched the member name alone, on any class declared
-                // in the procedure: `Focus.Init(1,2,3)` showed the local ThisWindow's Init.
-                const receiverClass = await this.memberLocator.resolveReceiverClass(structureName, tokens, document, position.line);
-                if (receiverClass) {
-                    const classHover = await this.memberHoverInClass(receiverClass.className, receiverClass.isReference, fieldName,
-                        hasParentheses, callParamCount, tokens, document, position);
-                    if (classHover) return classHover;
-                }
+                // (#611: a CLASS receiver's member - the receiver's own class, then its ancestors,
+                // by argument count - is answered above by DottedAccessResolver, #651.)
 
                 const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
                 const currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line); // 🚀 PERFORMANCE: O(log n) vs O(n)

@@ -32,6 +32,7 @@ import { resolveViaProjectRedirection, resolveViaProjectRedirectionFromUri } fro
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
 import { getCrossFileEpoch } from '../utils/crossFileEpoch';
@@ -54,6 +55,8 @@ export class DefinitionProvider {
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private memberLocator = new MemberLocatorService();
+    /** #651 — the declaration a single-level `receiver.member` names, shared with hover. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
     private selfParentResolver: SelfParentClassResolver;
@@ -200,78 +203,22 @@ export class DefinitionProvider {
                 if (methodMatch && methodMatch[1].toLowerCase() === methodName.toLowerCase()) {
                     // Check if this looks like a method call (has parentheses)
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                    
-                    if (hasParentheses && (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith('self'))) {
-                        // This is a method call - find the declaration
-                        logger.info(`F12 on method call: ${beforeDot}.${methodName}()`);
 
-                        // #131 — arg-classification overlay for SELF.Method(args), symmetric
-                        // with the typed-var branch below. SELF resolves to the enclosing
-                        // class; classify the call args and pick the matching overload before
-                        // the paramCount-only fallback (which can't disambiguate same-arity
-                        // overloads that differ only by argument type).
-                        const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
-                        if (selfClass) {
-                            const argResolved = await this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
-                            if (argResolved) {
-                                logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
-                                return argResolved;
+                    // #651 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or a
+                    // variable of a CLASS type): DottedAccessResolver names the declaration, the same
+                    // call hover makes, so the two cannot disagree about it. It replaces the SELF-method,
+                    // PARENT-method, SELF/PARENT-property and explicit-receiver branches that each named
+                    // the class, tried the argument-type pick and asked findMemberInClass in turn. A
+                    // receiver it does not cover falls through to the paths below, as before.
+                    if (!beforeDot.includes('.')) {
+                        const receiver = beforeDot.match(/([\w:]+)\s*$/)?.[1];
+                        if (receiver) {
+                            const paramCount = hasParentheses ? countParametersInCall(line, methodName) ?? undefined : undefined;
+                            const access = await this.dottedAccess.resolve(receiver, methodName, document, position.line, paramCount);
+                            if (access) {
+                                logger.info(`✅ ${receiver}.${methodName} → ${access.member.className} at ${access.member.file}:${access.member.line}`);
+                                return Location.create(access.member.file, Range.create(access.member.line, 0, access.member.line, 0));
                             }
-                        }
-
-                        // Count parameters for overload resolution
-                        const paramCount = countParametersInCall(line, methodName);
-                        logger.info(`Method call has ${paramCount} parameters`);
-
-                        // #626 — once SELF's class is known this is the same question the
-                        // explicit-receiver branch below asks, so it goes to the same engine.
-                        // It was answered by ClassMemberResolver, which has no equivalent of
-                        // MemberLocatorService.preferFittingInheritedOverload, so `SELF.Run()`
-                        // on a class overriding only Run(USHORT,BYTE) resolved to that override
-                        // while `ThisWindow.Run()` correctly resolved to the inherited Run().
-                        // #637: when SELF's class cannot be named there is nothing to ask —
-                        // ClassMemberResolver's fallback named it with the same #622 helper
-                        // (resolveCurrentClassName is that helper), so it answered null then.
-                        const memberInfo = selfClass
-                            ? await this.memberLocator.findMemberInClass(selfClass, methodName, document, paramCount, position.line)
-                            : null;
-
-                        if (memberInfo) {
-                            logger.info(`✅ Found method declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(
-                                memberInfo.file,
-                                Range.create(memberInfo.line, 0, memberInfo.line, 0)
-                            );
-                        }
-                    }
-
-                    if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
-                        // PARENT.Method() — look up the method starting from the parent class
-                        logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
-
-                        // #131 — arg-classification overlay for PARENT.Method(args). Resolve
-                        // the parent class name, then pick the matching overload by argument
-                        // shape before the paramCount-only fallback (which otherwise picks the
-                        // first-declared overload regardless of argument type).
-                        const parentInfo = await this.memberLocator.resolveParentClassAt(document, position.line);
-                        if (parentInfo?.parentClassName) {
-                            const argResolved = await this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
-                            if (argResolved) {
-                                logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
-                                return argResolved;
-                            }
-                        }
-
-                        // #648 — once PARENT's class is named, the same engine as SELF (#626) and
-                        // an explicit receiver (#611), so an inherited overload the call fits is
-                        // not hidden by the parent's own one it does not fit.
-                        const paramCount = countParametersInCall(line, methodName);
-                        const memberInfo = parentInfo
-                            ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, methodName, document, paramCount)
-                            : null;
-                        if (memberInfo) {
-                            logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
                     }
 
@@ -301,24 +248,6 @@ export class DefinitionProvider {
                         if (chainedInfo) {
                             logger.info(`✅ Chained F12: "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
                             return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
-                        }
-                    }
-
-                    // SELF.property or PARENT.property (no parentheses) — find the class member declaration
-                    if (!hasParentheses && isSelfParentChain) {
-                        const isSelf = /\bself$/i.test(beforeDot);
-                        logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
-                        // #648 / #637 — each receiver's class named as hover names it, then the
-                        // shared member lookup (the SELF half was ClassMemberResolver's).
-                        const receiverClass = isSelf
-                            ? this.chainedResolver.resolveCurrentClassName(document, position, tokens)
-                            : (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null;
-                        const memberInfo = receiverClass
-                            ? await this.memberLocator.findMemberInClass(receiverClass, methodName, document, undefined, isSelf ? position.line : undefined)
-                            : null;
-                        if (memberInfo) {
-                            logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
                     }
 
@@ -358,25 +287,7 @@ export class DefinitionProvider {
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
 
-                            // #611: a CLASS receiver's member - the receiver's own class first (a
-                            // local `ThisWindow CLASS(WinMgr)` is ThisWindow, not WinMgr, so its
-                            // overrides count), then its ancestors, respecting the argument count.
-                            // Hover takes the same route (StructureFieldResolver.memberHoverInClass).
-                            const receiverClass = await this.memberLocator.resolveReceiverClass(structureName, tokens, document, position.line);
-                            if (receiverClass) {
-                                if (hasParentheses) {
-                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, receiverClass.className, methodName, position.line);
-                                    if (argResolved) return argResolved;
-                                }
-                                const paramCount = hasParentheses
-                                    ? countParametersInCall(line, methodName) ?? undefined
-                                    : undefined;
-                                const memberInfo = await this.memberLocator.findMemberInClass(receiverClass.className, methodName, document, paramCount, position.line);
-                                if (memberInfo) {
-                                    logger.info(`✅ Found "${methodName}" in receiver class "${receiverClass.className}" at ${memberInfo.file}:${memberInfo.line}`);
-                                    return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
-                                }
-                            }
+                            // (#611: a CLASS receiver's member is answered above by DottedAccessResolver, #651.)
 
                             // Pass position.line so resolveVariableType can also check procedure
                             // parameters (e.g. `*WindowInfo Info`). Issue #215.
