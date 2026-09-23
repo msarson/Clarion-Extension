@@ -490,9 +490,12 @@ export class ImplementationProvider {
         const tokens = this.tokenCache.getTokens(document);
         // #274 — pass the scope line so a procedure-local / parameter receiver resolves (mirrors
         // the hover/definition callers, which supply position.line).
-        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document, callLine);
-        if (!varTypeInfo?.isClass) return null;
-        const className = varTypeInfo.typeName;
+        // #642 — through resolveReceiverClass, as hover and F12 do since #611: a receiver that
+        // is itself a CLASS (`ThisWindow CLASS(WinMgr)`) is that class, not its parent, so its
+        // own DERIVED overrides are found first.
+        const receiver = await this.memberLocator.resolveReceiverClass(callInfo.objectName, tokens, document, callLine);
+        if (!receiver) return null;
+        const className = receiver.className;
 
         // #274 — delegate to the single enriched choke point. This method previously inlined
         // classify + findOverload but SKIPPED the ArgumentTypeResolver enrichment, so a typed
@@ -677,9 +680,16 @@ export class ImplementationProvider {
                         }
                         return Location.create(argClassifyInfo.file, Range.create(argClassifyInfo.line, 0, argClassifyInfo.line, 0));
                     }
-                    const memberInfo = await this.memberLocator.resolveDotAccess(
-                        callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
-                    );
+                    // #642 — the receiver's own class first (its overrides), as hover and F12;
+                    // resolveDotAccess still answers a receiver that is not a CLASS (an
+                    // interface reference).
+                    const receiver = await this.memberLocator.resolveReceiverClass(
+                        callInfo.objectName, this.tokenCache.getTokens(document), document, position.line);
+                    const memberInfo = receiver
+                        ? await this.memberLocator.findMemberInClass(receiver.className, callInfo.methodName, document, callInfo.paramCount)
+                        : await this.memberLocator.resolveDotAccess(
+                            callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
+                        );
                     if (memberInfo) {
                         if (ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                             const impl = await this.memberResolver.findImplementationCrossFile(
