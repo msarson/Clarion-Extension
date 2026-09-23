@@ -69,7 +69,13 @@ node scripts/health/self-members.js --out=a.tsv [--against=prev.tsv]            
   counterpart: `server/src/test/HoverDefinitionAgreement.test.ts`; both
   classify with `server/src/test/support/hoverDefinitionAgreement.ts`. A known
   disagreement sits in the test's `KNOWN` table with its issue; remove the
-  entry when the fix makes it agree.
+  entry when the fix makes it agree. Since #636 it also asks Go to
+  Implementation at each position and judges it against F12's answer (to the
+  body when F12 names a procedure, method or routine; nowhere else otherwise):
+  a second table, a `KNOWN_IMPLEMENTATION` table in the same test, and
+  `ImplementationAgreement.test.ts` for every `ProcedureCallDetector` shape
+  through all three features. A snapshot from before #636 compares hover and
+  F12 only.
 - **document-symbols**: every outline entry of every file (the Structure view,
   breadcrumbs and workspace/symbol all read it).
 - **self-members**: what each `SELF.x` resolves to through the in-document

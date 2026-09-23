@@ -14,6 +14,12 @@
  * location) and no-location (a keyword card, or nothing) are reported but are not defects on
  * their own.
  *
+ * #636 - Go to Implementation is asked at the same position and judged against F12's answer
+ * (classifyImplementation, the same module): to the body when F12 names a procedure, method or
+ * routine, nowhere else otherwise. wrong-target, impl-on-data and impl-only are disagreements;
+ * declaration (the fallback for a dotted data member) and no-body (the body may simply not be
+ * in source: a DLL, a compiled library) are reported, not defects on their own.
+ *
  * Positions are picked by a plain regex over the source, not by the tokenizer under test, and
  * grouped by the shape of the reference, because the two pipelines split on exactly that shape:
  *   self-member   SELF.x      (cursor on x)       parent-member  PARENT.x
@@ -109,6 +115,17 @@ function candidatesIn(file) {
     return bySlice;
 }
 
+// classifyImplementation reads the text at F12's and Ctrl+F12's targets, by normalised file key.
+const linesByFile = new Map();
+function readLines(file) {
+    if (!linesByFile.has(file)) {
+        let lines;
+        try { lines = fs.readFileSync(file, 'latin1').split(/\r?\n/); } catch { lines = undefined; }
+        linesByFile.set(file, lines);
+    }
+    return linesByFile.get(file);
+}
+
 function evenly(list, n) {
     if (list.length <= n) return list.slice();
     const step = list.length / n;
@@ -125,7 +142,7 @@ function evenly(list, n) {
         try { bySlice = candidatesIn(f); } catch { continue; }
         for (const s of SLICES) picked.push(...evenly(bySlice.get(s), PER_SLICE));
     }
-    console.log('== #609 hover / F12 agreement ==');
+    console.log('== #609 hover / F12 agreement, and #636 Ctrl+F12 ==');
     console.log(`solution: ${SLN}`);
     console.log(`sample:   ${picked.length} positions from ${files.length} of ${all.length} files, up to ${PER_SLICE} per slice per file`);
 
@@ -135,13 +152,15 @@ function evenly(list, n) {
     for (const p of picked) {
         const uri = session.open(p.file);
         const position = { line: p.line, character: p.character };
-        let hover = null, def = null, error = null;
+        let hover = null, def = null, impl = null, error = null, implError = null;
         const q0 = Date.now();
         try { hover = await session.request('textDocument/hover', { textDocument: { uri }, position }, 60000); } catch (e) { error = 'hover ' + e.message; }
         try { def = await session.request('textDocument/definition', { textDocument: { uri }, position }, 60000); } catch (e) { error = (error ? error + '; ' : '') + 'definition ' + e.message; }
+        try { impl = await session.request('textDocument/implementation', { textDocument: { uri }, position }, 60000); } catch (e) { implError = 'implementation ' + e.message; }
         const verdict = error ? 'error' : agreement.classifyAgreement(hover, def);
-        results.push({ ...p, verdict, ms: Date.now() - q0, error,
-            hover: agreement.hoverLocations(hover), def: agreement.definitionLocations(def) });
+        const implVerdict = error || implError ? 'error' : agreement.classifyImplementation(p.word, def, impl, readLines);
+        results.push({ ...p, verdict, implVerdict, ms: Date.now() - q0, error: [error, implError].filter(Boolean).join('; ') || null,
+            hover: agreement.hoverLocations(hover), def: agreement.definitionLocations(def), impl: agreement.definitionLocations(impl) });
     }
 
     const verdicts = ['agree', 'mismatch', 'f12-only', 'hover-only', 'hover-no-link', 'no-location', 'error'];
@@ -153,32 +172,50 @@ function evenly(list, n) {
     const total = v => results.filter(r => r.verdict === v).length;
     console.log('total'.padEnd(15) + verdicts.map(v => String(total(v)).padStart(14)).join(''));
 
+    const implVerdicts = ['agree', 'declaration', 'no-body', 'wrong-target', 'impl-on-data', 'impl-only', 'no-location', 'error'];
+    console.log('\n== Ctrl+F12 against F12 (#636) ==');
+    console.log('slice'.padEnd(15) + implVerdicts.map(v => v.padStart(14)).join(''));
+    for (const s of SLICES) {
+        const rows = results.filter(r => r.slice === s);
+        console.log(s.padEnd(15) + implVerdicts.map(v => String(rows.filter(r => r.implVerdict === v).length).padStart(14)).join(''));
+    }
+    const implTotal = v => results.filter(r => r.implVerdict === v).length;
+    console.log('total'.padEnd(15) + implVerdicts.map(v => String(implTotal(v)).padStart(14)).join(''));
+
     const loc = l => l.map(x => `${x.file.split('/').pop()}:${x.line + 1}`).join(', ') || '-';
     const rel = f => path.relative(CORPUS, f).replace(/\\/g, '/');
-    const bad = results.filter(r => agreement.DISAGREEMENTS.includes(r.verdict) || r.verdict === 'error');
-    if (bad.length) {
-        console.log(`\n== disagreements (${bad.length}; first ${SHOW} per slice) ==`);
+    const listBad = (title, isBad, verdictOf, targets) => {
+        const bad = results.filter(isBad);
+        if (!bad.length) { console.log(`\nNo ${title} in this sample.`); return; }
+        console.log(`\n== ${title} (${bad.length}; first ${SHOW} per slice) ==`);
         for (const s of SLICES) {
             const rows = bad.filter(r => r.slice === s).slice(0, SHOW);
             if (!rows.length) continue;
             console.log(`-- ${s}`);
             for (const r of rows) {
-                console.log(`  ${r.verdict.padEnd(11)} ${rel(r.file)}:${r.line + 1}  ${r.word}   hover -> ${loc(r.hover)}   F12 -> ${loc(r.def)}${r.error ? '   ' + r.error : ''}`);
+                console.log(`  ${verdictOf(r).padEnd(12)} ${rel(r.file)}:${r.line + 1}  ${r.word}   ${targets(r)}${r.error ? '   ' + r.error : ''}`);
             }
         }
-    } else {
-        console.log('\nNo disagreements in this sample.');
-    }
+    };
+    listBad('hover / F12 disagreements', r => agreement.DISAGREEMENTS.includes(r.verdict) || r.verdict === 'error',
+        r => r.verdict, r => `hover -> ${loc(r.hover)}   F12 -> ${loc(r.def)}`);
+    listBad('Ctrl+F12 / F12 disagreements', r => agreement.IMPLEMENTATION_DISAGREEMENTS.includes(r.implVerdict) || r.implVerdict === 'error',
+        r => r.implVerdict, r => `F12 -> ${loc(r.def)}   Ctrl+F12 -> ${loc(r.impl)}`);
 
     if (JSON_OUT) { fs.writeFileSync(JSON_OUT, JSON.stringify({ sln: SLN, results }, null, 1)); console.log('\nwrote ' + JSON_OUT); }
     if (AGAINST) {
+        const previous = JSON.parse(fs.readFileSync(AGAINST, 'utf8')).results;
+        // A snapshot from before #636 has no Ctrl+F12 answers: compare hover and F12 only.
+        const withImpl = previous.some(r => r.implVerdict !== undefined);
+        if (!withImpl) console.log(`\n(${AGAINST} predates the Ctrl+F12 check: comparing hover and F12 only)`);
         const asRows = list => list.map(r => ({
             key: `${rel(r.file)}:${r.line + 1}:${r.character}\t${r.word}`,
-            value: `${r.verdict}\thover ${loc(r.hover)}\tF12 ${loc(r.def)}`,
+            value: `${r.verdict}${withImpl ? '/' + r.implVerdict : ''}\thover ${loc(r.hover)}\tF12 ${loc(r.def)}`
+                + (withImpl ? `\tCtrl+F12 ${loc(r.impl)}` : ''),
         }));
         // compareRows hands back values as written to disk (tabs flattened), so split on space.
+        // The verdict is hover's, then Ctrl+F12's after a slash.
         const verdictOf = v => v === undefined ? '(not sampled)' : v.split(/\s/)[0];
-        const previous = JSON.parse(fs.readFileSync(AGAINST, 'utf8')).results;
         printComparison(compareRows(asRows(previous), asRows(results), (b, a) =>
             verdictOf(b) === verdictOf(a) ? `${verdictOf(a)} (locations moved)` : `${verdictOf(b)} -> ${verdictOf(a)}`), 3);
     }

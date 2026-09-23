@@ -13,7 +13,10 @@ import { TokenCache } from '../TokenCache';
 import { HoverProvider } from '../providers/HoverProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { setServerInitialized } from '../serverState';
-import { classifyAgreement, hoverLocations, definitionLocations } from './support/hoverDefinitionAgreement';
+import { ImplementationProvider } from '../providers/ImplementationProvider';
+import {
+    classifyAgreement, hoverLocations, definitionLocations, classifyImplementation, normaliseFile
+} from './support/hoverDefinitionAgreement';
 
 const LINES = [
     '  PROGRAM',                                        // 0
@@ -64,6 +67,9 @@ const LINES = [
     'Thing.Work PROCEDURE(LONG n)',                     // 45
     '  CODE',                                           // 46
     '  PARENT.Work(n)',                                 // 47
+    '',                                                 // 48
+    'Base.Work  PROCEDURE(LONG n)',                     // 49
+    '  CODE',                                           // 50
 ];
 const SOURCE = LINES.join('\r\n');
 
@@ -123,6 +129,55 @@ suite('Hover and F12 agree on the same word (#609)', () => {
                 assert.strictEqual(verdict, known.verdict, `${detail} - known #${known.issue} changed shape`);
             } else {
                 assert.strictEqual(verdict, 'agree', detail);
+            }
+        });
+    }
+});
+
+/**
+ * #636 - Go to Implementation must be consistent with Go to Definition on the same word: to the
+ * body when F12 names a procedure, method or routine, and nowhere else otherwise. Same fixture
+ * and positions as above; the rule is classifyImplementation's.
+ *
+ * `declaration` (Ctrl+F12 returns F12's own target for a dotted data member) is the provider's
+ * deliberate fallback, accepted here; the fixture has a body for every callable, so `no-body`
+ * is a failure.
+ */
+const IMPLEMENTATION_OK = ['agree', 'declaration'];
+
+/** Known inconsistencies, pinned by the verdict they give today, as KNOWN above. */
+const KNOWN_IMPLEMENTATION: Record<string, { issue: number; verdict: string }> = {
+    'typed variable':        { issue: 639, verdict: 'impl-on-data' },
+    'typed variable method': { issue: 640, verdict: 'no-body' },
+};
+
+suite('Go to Implementation agrees with F12 on the same word (#636)', () => {
+    let doc: TextDocument;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        doc = TextDocument.create('file:///c:/test609/Agree.clw', 'clarion', 1, SOURCE);
+    });
+
+    for (const [name, line, word, nth] of CASES) {
+        test(name, async () => {
+            let col = -1;
+            for (let i = 0; i <= (nth ?? 0); i++) col = LINES[line].indexOf(word, col + 1);
+            const position = { line, character: col + 1 };
+            const def = await new DefinitionProvider().provideDefinition(doc, position);
+            const impl = await new ImplementationProvider().provideImplementation(doc, position);
+            const verdict = classifyImplementation(word, def, impl,
+                file => file === normaliseFile(doc.uri) ? LINES : undefined);
+            const show = (l: { line: number }[]) => l.map(x => x.line).join(', ') || '-';
+            const detail = `${name} (${word} @${line}): ${verdict}; F12 -> ${show(definitionLocations(def))}; ` +
+                `Ctrl+F12 -> ${show(definitionLocations(impl))}`;
+            const known = KNOWN_IMPLEMENTATION[name];
+            if (known) {
+                assert.ok(!IMPLEMENTATION_OK.includes(verdict), `${detail} - #${known.issue} now agrees: remove it from KNOWN_IMPLEMENTATION`);
+                assert.strictEqual(verdict, known.verdict, `${detail} - known #${known.issue} changed shape`);
+            } else {
+                assert.ok(IMPLEMENTATION_OK.includes(verdict), detail);
             }
         });
     }
