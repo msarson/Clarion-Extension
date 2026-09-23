@@ -360,11 +360,16 @@ export class MemberLocatorService {
     }
 
     /**
-     * #650 — `className` declared as a local CLASS more than once in the document (every
-     * generated procedure has its own `ThisWindow`): the declaration a member access at
-     * `atLine` belongs to is the nearest above it (#608). Its own body answers, else its own
-     * parent does. Null when the class is not declared twice here, so a module with one
-     * declaration, and every caller without a line, keeps the tiers below unchanged.
+     * #650 — `className` declared as a CLASS in the document (a generated procedure's local
+     * `ThisWindow`; a module may declare it in several procedures): the declaration a member
+     * access at `atLine` belongs to is the nearest above it (#608). Its own body answers, else
+     * its own parent does. Undefined when the document does not declare the class, so those
+     * lookups, and every caller without a line, keep the tiers below.
+     *
+     * Also the fast path for an inherited member of a local class: the tiers below go to the
+     * declaration index first, which holds a `ThisWindow` from nearly every generated file, so
+     * the index could not name the one declaring file and fell through to the INCLUDE and MEMBER
+     * walks - 80-400ms for F12 on `SELF.Request`, where the answer is the parent's own member.
      */
     private async findMemberInNearestLocalClass(
         tokens: Token[],
@@ -379,7 +384,7 @@ export class MemberLocatorService {
         const declarations = tokens.filter(t =>
             t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS' &&
             t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
-        if (declarations.length < 2) return undefined;
+        if (declarations.length === 0) return undefined;
         const own = [...declarations].reverse().find(t => t.line <= atLine) ?? declarations[0];
 
         const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
