@@ -251,10 +251,39 @@ export class ProcedureHoverResolver {
                             end: { line: position.line, character: procNameEnd }
                         }
                     };
-                    
+
                     return this.formatter.formatProcedure(procName, memberMapResult.location, implLocation, document, position);
                 }
             }
+
+            // No MAP prototype anywhere (no local entry, no MEMBER-parent match) — the
+            // cursor is still sitting on this procedure's own declaration line, matched
+            // by PROCEDURE_IMPLEMENTATION above. Answer with that instead of falling
+            // through to variable/EQUATE tiers, which can match an unrelated same-named
+            // symbol elsewhere in the solution. A method declared in a CLASS or INTERFACE
+            // body matches the same pattern and is left to the method-declaration tier.
+            const isStandaloneProcedure = tokens.some(t =>
+                t.line === position.line &&
+                TokenHelper.isProcedureOrFunction(t) &&
+                t.subType === TokenType.GlobalProcedure);
+            if (!isStandaloneProcedure) {
+                return null;
+            }
+            const bareImplLocation: Location = {
+                uri: document.uri,
+                range: {
+                    start: { line: position.line, character: procNameStart },
+                    end: { line: position.line, character: procNameEnd }
+                }
+            };
+            // formatProcedure returns null for a header-only card, which is all it has here.
+            const bareHover = await this.formatter.formatProcedure(procName, null, bareImplLocation, document, position);
+            return bareHover ?? {
+                contents: {
+                    kind: 'markdown',
+                    value: `**${procName}** (Procedure)\n\n⚠️ No MAP prototype found`
+                }
+            };
         } else {
             // Found MAP in current file
             const implLocation: Location = {
