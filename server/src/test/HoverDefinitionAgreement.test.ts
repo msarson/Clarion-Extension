@@ -147,7 +147,6 @@ const IMPLEMENTATION_OK = ['agree', 'declaration'];
 
 /** Known inconsistencies, pinned by the verdict they give today, as KNOWN above. */
 const KNOWN_IMPLEMENTATION: Record<string, { issue: number; verdict: string }> = {
-    'typed variable method': { issue: 640, verdict: 'no-body' },
 };
 
 suite('Go to Implementation agrees with F12 on the same word (#636)', () => {

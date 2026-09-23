@@ -245,7 +245,13 @@ export class HoverFormatter {
     /**
      * Constructs hover for a method call (SELF.method) with both declaration and implementation
      */
-    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
+    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string, document?: TextDocument): Hover {
+        // #640 — a declaration or body in the document being edited is read from its open text,
+        // not from disk: it may be unsaved, or never saved at all.
+        const sameFile = (uri: string) => !!document &&
+            decodeURIComponent(uri).toLowerCase() === decodeURIComponent(document.uri).toLowerCase();
+        const readLines = (uri: string, path: string) =>
+            sameFile(uri) ? document!.getText().split('\n') : fs.readFileSync(path, 'utf-8').split('\n');
         const { category: memberCategory } =
             describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
@@ -259,8 +265,7 @@ export class HoverFormatter {
 
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
-            const declLines = declContent.split('\n');
+            const declLines = readLines(declarationInfo.file, declUri);
             const declLine = declLines[declarationInfo.line];
             docComment = DocCommentReader.read(declLines, declarationInfo.line);
             if (declLine) declSnippet = declLine.trim();
@@ -282,7 +287,7 @@ export class HoverFormatter {
             implLocationStr = this.locationLink(implLocationUri, implLine);
             if (!implUri.startsWith('test://')) {
                 try {
-                    const implLines = fs.readFileSync(implUri, 'utf-8').split('\n');
+                    const implLines = readLines(implLocationUri, implUri);
                     const implDoc = DocCommentReader.read(implLines, implLine);
                     if (implDoc) docComment = implDoc; // definition wins
                 } catch { }

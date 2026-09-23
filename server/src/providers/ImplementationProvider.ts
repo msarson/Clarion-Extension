@@ -702,8 +702,12 @@ export class ImplementationProvider {
                         );
                     if (memberInfo) {
                         if (ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
-                            const impl = await this.memberResolver.findImplementationCrossFile(
-                                memberInfo.className, callInfo.methodName, memberInfo, document, token
+                            // #640 — the same body search as the SELF branch, which reads the open
+                            // document; ClassMemberResolver.findImplementationCrossFile read the
+                            // file from disk, so a body only in the buffer was missed.
+                            const impl = await this.findMethodImplementationCrossFile(
+                                memberInfo.className, callInfo.methodName, document, callInfo.paramCount, null,
+                                memberInfo.signature ?? line, memberInfo.file, token
                             );
                             if (impl) {
                                 logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);

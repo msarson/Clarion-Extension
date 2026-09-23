@@ -317,7 +317,7 @@ export class MethodHoverResolver {
             );
 
             if (implLocation) {
-                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation, document);
             }
         }
 
@@ -433,7 +433,7 @@ export class MethodHoverResolver {
             );
             emitPhases(Date.now() - tImpl);
             if (implLocation) {
-                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
+                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation, document);
             }
         } else {
             emitPhases(0);
@@ -473,12 +473,20 @@ export class MethodHoverResolver {
                          chainedInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
-            const implLoc = await this.memberResolver.findImplementationCrossFile(
-                chainedInfo.className, fieldName, chainedInfo, document
+            // #640 — the same body search as the SELF and PARENT hovers, which reads the open
+            // document; ClassMemberResolver.findImplementationCrossFile read the file from disk.
+            // #643 — handed the declaration's own prototype, so it picks that overload's body.
+            const declared = await this.memberLocator.findMemberInClass(chainedInfo.className, fieldName, document, paramCount);
+            const implLocation = await this.findMethodImplementationCrossFile(
+                chainedInfo.className,
+                fieldName,
+                document,
+                paramCount,
+                this.resolveModuleFile(chainedInfo.className, chainedInfo.file),
+                declared?.signature
             );
-            if (implLoc) {
-                const implLocationStr = `${implLoc.uri}:${implLoc.range.start.line}`;
-                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocationStr);
+            if (implLocation) {
+                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocation, document);
             }
         }
 
@@ -691,7 +699,10 @@ export class MethodHoverResolver {
         // FIRST: Search the current file (local implementation)
         const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
         logger.info(`Searching current file first: ${currentPath}`);
-        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount, declarationSignature);
+        // #640 — the open document's text, not the file on disk: a body typed since the last
+        // save, or in a file never saved, is only in the buffer.
+        const localImplLine = this.searchFileForImplementation(
+            currentPath, className, methodName, paramCount, declarationSignature, currentDocument.getText());
         if (localImplLine !== null) {
             const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
             logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
@@ -835,10 +846,11 @@ export class MethodHoverResolver {
         className: string,
         methodName: string,
         paramCount?: number,
-        declarationSignature?: string
+        declarationSignature?: string,
+        text?: string // #640: the open document's text, when searching the file being edited
     ): number | null {
         try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            const content = text ?? fs.readFileSync(filePath, 'utf8');
             const lines = content.split(/\r?\n/);
 
             // Search for method implementation: ClassName.MethodName PROCEDURE
