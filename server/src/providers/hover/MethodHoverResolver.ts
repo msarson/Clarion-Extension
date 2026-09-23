@@ -313,7 +313,7 @@ export class MethodHoverResolver {
                 document,
                 paramCount,
                 implModuleFile,
-                matchedSignature
+                matchedSignature ?? memberInfo.signature // #643: the declaration's own prototype when no overload was arg-picked
             );
 
             if (implLocation) {
@@ -425,7 +425,7 @@ export class MethodHoverResolver {
                 document,
                 paramCount,
                 implModuleFile,
-                matchedSignature
+                matchedSignature ?? memberInfo.signature // #643
             );
             emitPhases(Date.now() - tImpl);
             if (implLocation) {

@@ -548,7 +548,8 @@ export class ImplementationProvider {
                             if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file, token
+                                    picked?.signature ?? await this.declaredSignature(declInfo.className, memberName, document, paramCount) ?? line,
+                                    declInfo.file, token
                                 );
                                 if (implLoc) return implLoc;
                             }
@@ -579,7 +580,8 @@ export class ImplementationProvider {
                             if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
                                 const implLoc = await this.findMethodImplementationCrossFile(
                                     declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file, token
+                                    picked?.signature ?? await this.declaredSignature(declInfo.className, memberName, document, paramCount) ?? line,
+                                    declInfo.file, token
                                 );
                                 if (implLoc) return implLoc;
                             }
@@ -609,14 +611,22 @@ export class ImplementationProvider {
                         // signature, instead of the paramCount-only call line.
                         const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                             parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
+                        // #643 — the declaration the call binds to, found the way F12 finds it
+                        // (up the ancestry, by argument count): its signature, not the call line,
+                        // picks the body, and its class is where the body lives when the method
+                        // is inherited from further up than the direct parent.
+                        const declared = await this.memberLocator.findMemberInClass(
+                            parentInfo.parentClassName, callInfo.methodName, document, callInfo.paramCount);
+                        const ownerClass = declared?.className ?? parentInfo.parentClassName;
+                        const isDirectParent = ownerClass.toLowerCase() === parentInfo.parentClassName.toLowerCase();
                         const impl = await this.findMethodImplementationCrossFile(
-                            parentInfo.parentClassName,
+                            ownerClass,
                             callInfo.methodName,
                             document,
                             callInfo.paramCount,
-                            parentInfo.moduleFile ?? null,
-                            picked?.signature ?? line,
-                            undefined,
+                            isDirectParent ? parentInfo.moduleFile ?? null : null,
+                            picked?.signature ?? declared?.signature ?? line,
+                            picked?.file ?? declared?.file,
                             token
                         );
                         if (impl) return impl;
@@ -650,7 +660,7 @@ export class ImplementationProvider {
                             document,
                             callInfo.paramCount,
                             null,
-                            picked?.signature ?? line,
+                            picked?.signature ?? memberInfo.signature ?? line, // #643
                             memberInfo.file,
                             token
                         );
@@ -823,6 +833,17 @@ export class ImplementationProvider {
         }
 
         return null;
+    }
+
+    /**
+     * #643 — the prototype of the overload `className.memberName` binds to for this argument
+     * count (up the ancestry, as F12 picks it), for the body search. The call line is no
+     * substitute: handed that, the search takes the first same-named body.
+     */
+    private async declaredSignature(
+        className: string, memberName: string, document: TextDocument, paramCount: number | null | undefined
+    ): Promise<string | undefined> {
+        return (await this.memberLocator.findMemberInClass(className, memberName, document, paramCount ?? undefined))?.signature;
     }
 
     /**
