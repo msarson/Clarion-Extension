@@ -204,14 +204,15 @@ export class DefinitionProvider {
                     // Check if this looks like a method call (has parentheses)
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
 
-                    // #651 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or a
-                    // variable of a CLASS type): DottedAccessResolver names the declaration, the same
-                    // call hover makes, so the two cannot disagree about it. It replaces the SELF-method,
-                    // PARENT-method, SELF/PARENT-property and explicit-receiver branches that each named
-                    // the class, tried the argument-type pick and asked findMemberInClass in turn. A
+                    // #651 / #652 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or
+                    // a variable of a CLASS type) or a chain of them (`SELF.a.b`, `obj.a.b`):
+                    // DottedAccessResolver names the declaration, the same call hover makes, so the two
+                    // cannot disagree about it. It replaces the SELF-method, PARENT-method,
+                    // SELF/PARENT-property, explicit-receiver and both chain branches that each named
+                    // the class, tried the argument-type pick and asked for the member in turn. A
                     // receiver it does not cover falls through to the paths below, as before.
-                    if (!beforeDot.includes('.')) {
-                        const receiver = beforeDot.match(/([\w:]+)\s*$/)?.[1];
+                    if (!beforeDot.includes('.') || isPureChain) {
+                        const receiver = beforeDot.includes('.') ? beforeDot.trim() : beforeDot.match(/([\w:]+)\s*$/)?.[1];
                         if (receiver) {
                             const paramCount = hasParentheses ? countParametersInCall(line, methodName) ?? undefined : undefined;
                             const access = await this.dottedAccess.resolve(receiver, methodName, document, position.line, paramCount);
@@ -222,64 +223,10 @@ export class DefinitionProvider {
                         }
                     }
 
-                    // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-                    if (isSelfParentChain && beforeDot.includes('.')) {
-                        // #131 — arg-classification overlay for chained calls like
-                        // SELF.inner.SetValue(args). Resolve the chain to the class that
-                        // owns the final member, then pick the matching overload by argument
-                        // shape before the paramCount-only step-3 lookup (which can't
-                        // disambiguate same-arity overloads). Symmetric with the SELF /
-                        // PARENT / typed-var branches.
-                        if (hasParentheses) {
-                            const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
-                            if (finalClass) {
-                                const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
-                                if (argResolved) {
-                                    logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
-                                    return argResolved;
-                                }
-                            }
-                        }
-
-                        const paramCount = hasParentheses
-                            ? countParametersInCall(line, methodName)
-                            : undefined;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount ?? undefined);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained F12: "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
-                        }
-                    }
-
                     // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
                     if (!isSelfParentChain) {
-                        // Multi-segment variable chain: variable.property.method
-                        if (isPureChain && beforeDot.includes('.')) {
-                            // #131 — arg-classification overlay for typed-var chained calls
-                            // like outer.inner.SetValue(args). Same gap and same fix as the
-                            // SELF/PARENT chained branch above: resolve the chain's final
-                            // class, then pick the matching overload by argument shape before
-                            // the paramCount-only fallback.
-                            if (hasParentheses) {
-                                const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
-                                if (finalClass) {
-                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
-                                    if (argResolved) {
-                                        logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
-                                        return argResolved;
-                                    }
-                                }
-                            }
-
-                            const paramCount = hasParentheses
-                                ? countParametersInCall(line, methodName) ?? undefined
-                                : undefined;
-                            const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount);
-                            if (chainedInfo) {
-                                logger.info(`✅ Chained F12 (var chain): "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
-                                return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
-                            }
-                        }
+                        // (A variable chain is answered above by DottedAccessResolver, #652; when it names
+                        // nothing, its last segment is still tried as a typed variable below.)
 
                         // #612: a receiver label may carry colons (`Relate:Cust`,
                         // `ThisListManager:Browse:1`); `\w+` kept only the last segment.

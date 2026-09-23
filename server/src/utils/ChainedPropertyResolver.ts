@@ -178,15 +178,21 @@ export class ChainedPropertyResolver {
 
         const root = segments[0].toUpperCase();
 
-        // Step 1: resolve the initial class from the root segment
+        // Step 1: the root's class, read as a single-level receiver is (#652): SELF / PARENT / a
+        // CLASS or a variable of a CLASS type, with the line to hand the first lookup (#650). A
+        // root that is no class - a variable of a GROUP or QUEUE type - still takes its declared
+        // type. Reading every root through resolveVariableType took a local CLASS for its parent
+        // (#642) and SELF in the second of two same-named local classes for the first (#650).
         let currentClassName: string | null;
-        if (root === 'SELF') {
-            currentClassName = this.resolveCurrentClassName(document, position, tokens);
-        } else if (root === 'PARENT') {
-            currentClassName = await this.resolveParentClassName(document, position, tokens);
+        let rootLine: number | undefined;
+        const receiver = await this.memberLocator.resolveReceiverAt(segments[0], document, position.line);
+        if (receiver) {
+            currentClassName = receiver.className;
+            rootLine = receiver.atLine;
+        } else if (root === 'SELF' || root === 'PARENT') {
+            currentClassName = null;
         } else {
-            // Non-SELF/PARENT root: resolve the variable's declared type
-            const typeInfo = await this.memberLocator.resolveVariableType(segments[0], tokens, document);
+            const typeInfo = await this.memberLocator.resolveVariableType(segments[0], tokens, document, position.line);
             if (!typeInfo) {
                 logger.info(`ChainedPropertyResolver: root "${segments[0]}" not found as class variable`);
                 return null;
@@ -216,7 +222,8 @@ export class ChainedPropertyResolver {
             logger.info(`ChainedPropertyResolver: resolving segment "${segmentName}" in "${ownerLabel}"`);
 
             const memberInfo: ChainedMemberInfo | null = owner.kind === 'class'
-                ? await this.memberLocator.findMemberInClass(owner.name, segmentName, document)
+                // #650: the root's own class may be a label declared in several procedures.
+                ? await this.memberLocator.findMemberInClass(owner.name, segmentName, document, undefined, depth === 0 ? rootLine : undefined)
                 : await this.findFieldInInlineStructure(owner, segmentName);
 
             if (!memberInfo) {
@@ -253,12 +260,5 @@ export class ChainedPropertyResolver {
         // 2-part, so a `Class.Interface.Method` implementation resolved to nothing here while the
         // copy in ClassMemberResolver handled it.
         return resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
-    }
-
-    /** Resolves the parent class name for PARENT resolution. */
-    private async resolveParentClassName(document: TextDocument, position: Position, tokens: Token[]): Promise<string | null> {
-        // #637: PARENT's class named the way hover, F12 and Go to Implementation name it (#648).
-        const info = await this.memberLocator.resolveParentClassAt(document, position.line);
-        return info?.parentClassName ?? null;
     }
 }

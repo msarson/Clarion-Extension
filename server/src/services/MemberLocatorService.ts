@@ -2451,6 +2451,32 @@ export class MemberLocatorService {
         return { className, parentClassName, moduleFile };
     }
 
+    /**
+     * #651 / #652 — the class a receiver word names at `line`, read the way every dotted access
+     * reads it: `SELF` is the enclosing method's class (#622), `PARENT` that class's parent
+     * (#648), any other name a CLASS or a variable of a CLASS type (#611 - a local CLASS is
+     * itself, not its parent). `atLine` is the line to hand the member lookup: SELF and an
+     * explicit local CLASS may be a label the module declares in several procedures (#650);
+     * PARENT's class is not. Null when the word names no class.
+     */
+    public async resolveReceiverAt(
+        receiver: string,
+        document: TextDocument,
+        line: number
+    ): Promise<{ kind: 'self' | 'parent' | 'object'; className: string; atLine?: number } | null> {
+        if (!/^[A-Za-z_][\w:]*$/.test(receiver)) return null;
+        if (/^self$/i.test(receiver)) {
+            const className = resolveEnclosingClassName(document, line, this.tokenCache.getStructure(document));
+            return className ? { kind: 'self', className, atLine: line } : null;
+        }
+        if (/^parent$/i.test(receiver)) {
+            const parent = await this.resolveParentClassAt(document, line);
+            return parent ? { kind: 'parent', className: parent.parentClassName } : null;
+        }
+        const cls = await this.resolveReceiverClass(receiver, this.tokenCache.getTokens(document), document, line);
+        return cls ? { kind: 'object', className: cls.className, atLine: line } : null;
+    }
+
     private async findClassInfoInDoc(
         className: string,
         document: TextDocument

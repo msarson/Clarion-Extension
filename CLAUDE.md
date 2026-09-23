@@ -83,6 +83,9 @@ node scripts/health/cards.js --positions=<agreement json> --out=a.json [--agains
   positions (pass its --json as --positions). The agreement sweep compares
   locations only; this shows every card whose wording or links moved - the
   check for a refactor of how a card is built (#651).
+  The agreement sample almost never lands on a chain member (`SELF.Q.Field`);
+  `node scripts/health/chain-positions.js out.json [300]` draws those, in the
+  same shape, for cards.js (#652).
 - **self-members**: what each `SELF.x` resolves to through the SELF lookup
   hover, F12 and Ctrl+F12 use (no solution index in-process, so members
   inherited from a class the includes do not reach read null). A snapshot

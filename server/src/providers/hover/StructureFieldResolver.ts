@@ -26,7 +26,6 @@ logger.setLevel("error");
  */
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
-    private chainedResolver = new ChainedPropertyResolver();
     private memberLocator = new MemberLocatorService();
     private overloadResolver = new MethodOverloadResolver();
     /** #651 — the declaration a single-level `receiver.member` names, shared with Go to Definition. */
@@ -142,46 +141,27 @@ export class StructureFieldResolver {
         const isSelfMember = /\bself$/i.test(beforeDot);
         const isParentMember = /\bparent$/i.test(beforeDot);
         const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
-        const isSelfOrParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
         logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
         
-        // #651 — a single-level receiver: SELF, PARENT, or a name that is a CLASS or a variable of a
-        // CLASS type. DottedAccessResolver names the declaration, the same call Go to Definition
-        // makes, so the two cannot disagree about it; the card is built from that declaration.
-        // SELF / PARENT that name nothing answer nothing, as before. Any other receiver the
-        // resolver does not cover (a GROUP/QUEUE/FILE, an interface reference) falls through to
-        // the structure-field paths below.
-        if (!beforeDot.includes('.')) {
-            const receiver = isSelfMember ? 'SELF' : isParentMember ? 'PARENT' : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+        // #651 / #652 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or a
+        // variable of a CLASS type) or a chain of them (`SELF.a.b`, `obj.a.b`).
+        // DottedAccessResolver names the declaration, the same call Go to Definition makes, so the
+        // two cannot disagree about it; the card is built from that declaration. SELF, PARENT and
+        // a chain that name nothing answer nothing, as before. Any other single-level receiver
+        // the resolver does not cover (a GROUP/QUEUE/FILE, an interface reference) falls through
+        // to the structure-field paths below.
+        if (!beforeDot.includes('.') || isPureChain) {
+            const receiver = beforeDot.includes('.') ? beforeDot.trim()
+                : isSelfMember ? 'SELF' : isParentMember ? 'PARENT' : beforeDot.match(/([\w:]+)\s*$/)?.[1];
             if (receiver) {
                 const paramCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
                 const access = await this.dottedAccess.resolve(receiver, fieldName, document, position.line, paramCount);
                 if (access) return await this.methodResolver.formatDottedMember(fieldName, access, document, paramCount);
-                if (isSelfMember || isParentMember) return null;
+                if (isSelfMember || isParentMember || beforeDot.includes('.')) return null;
             }
         }
 
-        if (isSelfOrParentChain && beforeDot.includes('.')) {
-            // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-            }
-            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
-            if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
-            }
-        } else if (isPureChain && beforeDot.includes('.')) {
-            // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-            }
-            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
-            if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
-            }
-        } else {
+        if (!beforeDot.includes('.')) {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             // or typed class variable access (e.g., st.GetValue() where st is StringTheory)
             const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
