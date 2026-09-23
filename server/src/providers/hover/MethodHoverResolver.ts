@@ -283,12 +283,13 @@ export class MethodHoverResolver {
         // the #611 rule (a local override that the call does not fit does not hide an
         // inherited overload that does) applies to `SELF.Run()` as it already did to
         // `ThisWindow.Run()`. Hover and F12 name SELF's class with the same #622 helper, so
-        // they cannot disagree about which class is being asked. ClassMemberResolver still
-        // answers when the class cannot be named — it infers it from scope itself.
+        // they cannot disagree about which class is being asked. #637: when the class cannot be
+        // named there is nothing to ask — ClassMemberResolver's fallback named it with the same
+        // #622 helper, so it answered null in exactly those cases.
         const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
         let memberInfo = selfClass
             ? await this.memberLocator.findMemberInClass(selfClass, fieldName, document, paramCount)
-            : this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+            : null;
 
         if (!memberInfo) {
             logger.info(`❌ member lookup returned null for ${fieldName} in SELF context`);

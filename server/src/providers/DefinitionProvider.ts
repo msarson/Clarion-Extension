@@ -230,11 +230,12 @@ export class DefinitionProvider {
                         // MemberLocatorService.preferFittingInheritedOverload, so `SELF.Run()`
                         // on a class overriding only Run(USHORT,BYTE) resolved to that override
                         // while `ThisWindow.Run()` correctly resolved to the inherited Run().
-                        // ClassMemberResolver still answers when SELF's class cannot be named —
-                        // it infers the class from scope itself.
+                        // #637: when SELF's class cannot be named there is nothing to ask —
+                        // ClassMemberResolver's fallback named it with the same #622 helper
+                        // (resolveCurrentClassName is that helper), so it answered null then.
                         const memberInfo = selfClass
                             ? await this.memberLocator.findMemberInClass(selfClass, methodName, document, paramCount)
-                            : this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+                            : null;
 
                         if (memberInfo) {
                             logger.info(`✅ Found method declaration at ${memberInfo.file}:${memberInfo.line}`);

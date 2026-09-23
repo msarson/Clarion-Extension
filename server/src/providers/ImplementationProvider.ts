@@ -603,7 +603,8 @@ export class ImplementationProvider {
                 // PARENT.Method() — find the parent class and search for its implementation
                 if (callInfo.objectName.toUpperCase() === 'PARENT') {
                     const tokens = this.tokenCache.getTokens(document);
-                    const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+                    // #637: PARENT's class named the way hover and F12 name it (#648).
+                    const parentInfo = await this.memberLocator.resolveParentClassAt(document, position.line);
                     if (parentInfo) {
                         logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
                         // #182 — arg-classification overlay: pick the matching overload by
@@ -642,14 +643,13 @@ export class ImplementationProvider {
                     // hide an inherited overload that does. It matters more here than for F12,
                     // because the member picked supplies the class name for the cross-file
                     // implementation hunt — the wrong overload sends it after the wrong class's
-                    // body. ClassMemberResolver still answers when SELF's class cannot be named;
-                    // it infers the class from scope itself.
+                    // body. #637: when SELF's class cannot be named there is nothing to ask —
+                    // ClassMemberResolver's fallback named it with the same #622 helper, so it
+                    // answered null in exactly those cases.
                     const selfClass = resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
                     const memberInfo = selfClass
                         ? await this.memberLocator.findMemberInClass(selfClass, callInfo.methodName, document, callInfo.paramCount)
-                        : this.memberResolver.findClassMemberInfo(
-                            callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
-                        );
+                        : null;
                     if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
                         // #182 — arg-classification overlay (symmetric with PARENT/Definition).
                         const picked = await this.overloadResolver.resolveOverloadDeclByArgs(

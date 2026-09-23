@@ -1,7 +1,6 @@
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { ClassMemberResolver } from './ClassMemberResolver';
 import { extractClassName } from './ClassNameUtils';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
@@ -12,7 +11,7 @@ import LoggerManager from '../logger';
 const logger = LoggerManager.getLogger("ChainedPropertyResolver");
 logger.setLevel("error");
 
-/** Same shape as the internal MemberInfo type in ClassMemberResolver */
+/** Same shape as MemberInfo in ClassMemberScan */
 export interface ChainedMemberInfo {
     type: string;
     className: string;
@@ -40,7 +39,6 @@ const BARE_STRUCTURE_RE = /^(GROUP|QUEUE|RECORD)\s*(,.*)?$/i;
  */
 export class ChainedPropertyResolver {
     private tokenCache = TokenCache.getInstance();
-    private memberResolver = new ClassMemberResolver();
     private memberLocator = new MemberLocatorService();
 
     /**
@@ -259,7 +257,8 @@ export class ChainedPropertyResolver {
 
     /** Resolves the parent class name for PARENT resolution. */
     private async resolveParentClassName(document: TextDocument, position: Position, tokens: Token[]): Promise<string | null> {
-        const info = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+        // #637: PARENT's class named the way hover, F12 and Go to Implementation name it (#648).
+        const info = await this.memberLocator.resolveParentClassAt(document, position.line);
         return info?.parentClassName ?? null;
     }
 }
