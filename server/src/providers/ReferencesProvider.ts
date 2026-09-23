@@ -24,6 +24,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { countParametersInCall, countParametersInDeclaration, getDeclarationLineText } from '../utils/ClassMemberScan';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { extractClassName } from '../utils/ClassNameUtils';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
@@ -135,6 +136,8 @@ export class ReferencesProvider {
     private scopeTypeIndex: ScopeTypeIndexService;
     /** #637 — the member lookup hover, F12 and Ctrl+F12 use for SELF / PARENT. */
     private memberLocator = new MemberLocatorService();
+    /** #654 — the declaration a member access names, shared with hover, F12 and Ctrl+F12. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, new MethodOverloadResolver());
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -929,18 +932,18 @@ export class ReferencesProvider {
 
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
+        // #654: the anchor is the declaration hover and F12 name - DottedAccessResolver (#651, #652),
+        // with the argument-type pick when the access is a call.
+        const escapedMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const isCall = new RegExp(`\\b${escapedMember}\\s*\\(`, 'i').test(cursorLineText);
+        const resolveAnchor = () => this.dottedAccess.resolve(beforeDot, memberName, document, position.line, isCall ? callArgCount : undefined);
 
         if (isSelfOrParent) {
-            // #637 — each receiver's own class, named the way hover and F12 name it (#626 for
+            // #637 / #654 — each receiver's own class, named the way hover and F12 name it (#626 for
             // SELF, #648 for PARENT), then the shared member lookup. SELF and PARENT both went
             // to ClassMemberResolver.findClassMemberInfo, which starts at SELF's class, so
             // PARENT.x in an override anchored on the override itself.
-            const receiverClass = /^parent$/i.test(beforeDot)
-                ? (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null
-                : resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
-            const info = receiverClass
-                ? await this.memberLocator.findMemberInClass(receiverClass, memberName, document, callArgCount, /^parent$/i.test(beforeDot) ? undefined : position.line)
-                : null;
+            const info = (await resolveAnchor())?.member ?? null;
             if (info) {
                 declarationFile = info.file;
                 declarationLine = info.line;
@@ -1009,6 +1012,19 @@ export class ReferencesProvider {
                         }
                     }
                     logger.info(`✅ MethodImpl cursor: "${implClass}.${memberName}" → class="${className}", decl=${declarationFile ?? 'unknown'}`);
+                }
+            }
+
+            if (!className) {
+                // #654: the declaration hover and F12 name. (References' own chain walk and Tier 2
+                // typed-variable lookup below read a local `ThisWindow CLASS(Base)` as Base, #642; they
+                // stay as the fallback for what the resolver does not name.)
+                const access = await resolveAnchor();
+                if (access) {
+                    declarationFile = access.member.file;
+                    declarationLine = access.member.line;
+                    className = access.member.className;
+                    logger.info(`✅ ${beforeDot}.${memberName} → class="${className}" at ${declarationFile}:${declarationLine}`);
                 }
             }
 
