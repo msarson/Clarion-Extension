@@ -309,12 +309,14 @@ export class DefinitionProvider {
                     if (!hasParentheses && isSelfParentChain) {
                         const isSelf = /\bself$/i.test(beforeDot);
                         logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
-                        const parentInfo = isSelf ? null : await this.memberLocator.resolveParentClassAt(document, position.line); // #648
-                        const memberInfo = isSelf
-                            ? this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, undefined)
-                            : parentInfo
-                                ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, methodName, document, undefined)
-                                : null;
+                        // #648 / #637 — each receiver's class named as hover names it, then the
+                        // shared member lookup (the SELF half was ClassMemberResolver's).
+                        const receiverClass = isSelf
+                            ? this.chainedResolver.resolveCurrentClassName(document, position, tokens)
+                            : (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null;
+                        const memberInfo = receiverClass
+                            ? await this.memberLocator.findMemberInClass(receiverClass, methodName, document, undefined)
+                            : null;
                         if (memberInfo) {
                             logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));

@@ -23,6 +23,8 @@ interface DllProjectLike {
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
 import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { MemberLocatorService } from '../services/MemberLocatorService';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { extractClassName } from '../utils/ClassNameUtils';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -132,6 +134,8 @@ export class ReferencesProvider {
     private memberResolver: ClassMemberResolver;
     private overloadResolver: MethodOverloadResolver;
     private scopeTypeIndex: ScopeTypeIndexService;
+    /** #637 — the member lookup hover, F12 and Ctrl+F12 use for SELF / PARENT. */
+    private memberLocator = new MemberLocatorService();
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -929,8 +933,16 @@ export class ReferencesProvider {
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
 
         if (isSelfOrParent) {
-            const tokens = this.tokenCache.getTokens(document);
-            const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
+            // #637 — each receiver's own class, named the way hover and F12 name it (#626 for
+            // SELF, #648 for PARENT), then the shared member lookup. SELF and PARENT both went
+            // to ClassMemberResolver.findClassMemberInfo, which starts at SELF's class, so
+            // PARENT.x in an override anchored on the override itself.
+            const receiverClass = /^parent$/i.test(beforeDot)
+                ? (await this.memberLocator.resolveParentClassAt(document, position.line))?.parentClassName ?? null
+                : resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
+            const info = receiverClass
+                ? await this.memberLocator.findMemberInClass(receiverClass, memberName, document, callArgCount)
+                : null;
             if (info) {
                 declarationFile = info.file;
                 declarationLine = info.line;
@@ -958,7 +970,8 @@ export class ReferencesProvider {
                 const implMethod = dotIdx > 0 ? implToken.label.substring(dotIdx + 1).toLowerCase() : '';
                 if (implClass && implMethod === memberName.toLowerCase()) {
                     // Treat exactly like SELF.Member resolution but with a known class name
-                    const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
+                    // #637 — the class the implementation line names, through the shared lookup.
+                    const info = await this.memberLocator.findMemberInClass(implClass, memberName, document, callArgCount);
                     if (info) {
                         declarationFile = info.file;
                         declarationLine = info.line;
