@@ -16,6 +16,12 @@ import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexe
  * to the variable tiers. Those match the bare name against anything reachable, and an
  * EQUATE of the same name in an INCLUDEd file (here an ITEMIZE entry) was presented as the
  * word under the cursor.
+ *
+ * A second, pre-existing gap surfaced alongside it: a Clarion label must start at column 0
+ * (confirmed against the real compiler elsewhere in this codebase), but the regex this
+ * resolver used to recognise a procedure implementation line accepted leading whitespace,
+ * so an indented, non-compiling label still produced a full procedure card - whether or
+ * not it had a MAP prototype.
  */
 
 let tmpRoot = '';
@@ -54,8 +60,9 @@ suite('Procedure label hover without a MAP prototype', () => {
         try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
 
-    function moduleDoc(): TextDocument {
-        const p = path.join(tmpRoot, 'module.clw');
+    function moduleDoc(indentLabels = false): TextDocument {
+        const label = (name: string) => (indentLabels ? ' ' : '') + name;
+        const p = path.join(tmpRoot, indentLabels ? 'module-indented.clw' : 'module.clw');
         const content = [
             '  MEMBER()',
             "  INCLUDE('shared.inc'),ONCE",
@@ -63,11 +70,11 @@ suite('Procedure label hover without a MAP prototype', () => {
             '        Helper(),LONG',
             '    END',
             '',
-            'Helper        PROCEDURE()',
+            `${label('Helper')}        PROCEDURE()`,
             '  CODE',
             '  RETURN 1',
             '',
-            'Worker        PROCEDURE',
+            `${label('Worker')}        PROCEDURE`,
             'Count           LONG',
             '  CODE',
             '  Count = Helper()',
@@ -79,6 +86,7 @@ suite('Procedure label hover without a MAP prototype', () => {
 
     const WORKER_LINE = 10;
     const HELPER_LINE = 6;
+    const INDENT_CHAR = 3; // cursor lands inside the name after the extra leading space
 
     test('the label answers as the procedure, not a same-named EQUATE from an include', async () => {
         const text = hoverText(await new HoverProvider().provideHover(moduleDoc(), { line: WORKER_LINE, character: 2 }));
@@ -95,5 +103,19 @@ suite('Procedure label hover without a MAP prototype', () => {
         assert.ok(text.includes('**Helper**'), `expected the Helper card, got:\n${text}`);
         assert.ok(text.includes('Helper(),LONG'), `expected the MAP prototype preview, got:\n${text}`);
         assert.ok(!text.includes('No MAP prototype found'), `a prototyped procedure must not carry the note, got:\n${text}`);
+    });
+
+    test('an indented, non-compiling label (no MAP entry) is not answered as a procedure', async () => {
+        // Falls through to the unrelated, pre-existing global-EQUATE match this PR does not
+        // touch (see the PR description's Scope section) - this only pins down that the
+        // resolver itself no longer claims an indented line is a valid procedure.
+        const text = hoverText(await new HoverProvider().provideHover(moduleDoc(true), { line: WORKER_LINE, character: INDENT_CHAR }));
+        assert.ok(!text.includes('(Procedure)'), `an indented label cannot legally declare a procedure, got:\n${text}`);
+        assert.ok(!text.includes('No MAP prototype found'), `the missing-prototype note is specific to a real procedure, got:\n${text}`);
+    });
+
+    test('an indented, non-compiling label (has a MAP entry) is not answered as a procedure either', async () => {
+        const hover = await new HoverProvider().provideHover(moduleDoc(true), { line: HELPER_LINE, character: INDENT_CHAR });
+        assert.strictEqual(hover, null, `an indented label cannot legally declare a procedure, got:\n${hoverText(hover)}`);
     });
 });

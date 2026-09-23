@@ -203,7 +203,7 @@ export class ProcedureHoverResolver {
             return null;
         }
 
-        const procName = mapProcMatch[2]; // [1] is whitespace, [2] is name, [3] is keyword
+        const procName = mapProcMatch[1]; // [1] is name, [2] is keyword
         const procNameStart = line.indexOf(procName);
         const procNameEnd = procNameStart + procName.length;
         
