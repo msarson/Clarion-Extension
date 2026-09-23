@@ -381,17 +381,21 @@ export class MethodHoverResolver {
 
         const tokens = this.tokenCache.getTokens(document);
         const t0 = Date.now();
-        let memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
+        // #648 — PARENT's class named once, then the same engine as SELF (#626) and an explicit
+        // receiver (#611): an inherited overload the call fits is not hidden by the parent's own
+        // one it does not fit.
+        const parentInfo = await this.memberLocator.resolveParentClassAt(document, position.line);
+        let memberInfo = parentInfo
+            ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, fieldName, document, paramCount)
+            : null;
         resolveMs = Date.now() - t0;
         let matchedSignature: string | undefined;
 
         if (!memberInfo) {
-            // #182 — the paramCount-only findParentClassMemberInfo misses same-arity
-            // overloads (and in-memory / cross-file cases). Fall back to resolving the
-            // parent class directly and arg-classifying — symmetric with Goto
-            // Definition's PARENT branch, whose overlay is the actual working path.
+            // #182 — the paramCount lookup misses same-arity overloads (and in-memory /
+            // cross-file cases). Fall back to arg-classifying in the parent class directly —
+            // symmetric with Goto Definition's PARENT branch.
             const tf = Date.now();
-            const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
             if (parentInfo?.parentClassName && paramCount !== undefined) {
                 const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
                     parentInfo.parentClassName, fieldName, document, tokens, position.line);

@@ -253,7 +253,7 @@ export class DefinitionProvider {
                         // the parent class name, then pick the matching overload by argument
                         // shape before the paramCount-only fallback (which otherwise picks the
                         // first-declared overload regardless of argument type).
-                        const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
+                        const parentInfo = await this.memberLocator.resolveParentClassAt(document, position.line);
                         if (parentInfo?.parentClassName) {
                             const argResolved = await this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
                             if (argResolved) {
@@ -262,8 +262,13 @@ export class DefinitionProvider {
                             }
                         }
 
+                        // #648 — once PARENT's class is named, the same engine as SELF (#626) and
+                        // an explicit receiver (#611), so an inherited overload the call fits is
+                        // not hidden by the parent's own one it does not fit.
                         const paramCount = this.memberResolver.countParametersInCall(line, methodName);
-                        const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
+                        const memberInfo = parentInfo
+                            ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, methodName, document, paramCount)
+                            : null;
                         if (memberInfo) {
                             logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
@@ -303,9 +308,12 @@ export class DefinitionProvider {
                     if (!hasParentheses && isSelfParentChain) {
                         const isSelf = /\bself$/i.test(beforeDot);
                         logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
+                        const parentInfo = isSelf ? null : await this.memberLocator.resolveParentClassAt(document, position.line); // #648
                         const memberInfo = isSelf
                             ? this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, undefined)
-                            : await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, undefined);
+                            : parentInfo
+                                ? await this.memberLocator.findMemberInClass(parentInfo.parentClassName, methodName, document, undefined)
+                                : null;
                         if (memberInfo) {
                             logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
                             return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));

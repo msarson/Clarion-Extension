@@ -32,6 +32,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAncestry';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -2369,6 +2370,38 @@ export class MemberLocatorService {
         const indexed = this.sdi.findFor(className, document.uri); // #571
         if (indexed.length === 0) return null;
         return (indexed.find(d => !d.isType) || indexed[0]).parentName ?? null;
+    }
+
+    /**
+     * #648 (#609 phase 3) — the class `PARENT` stands for at `atLine`: the parent of the class
+     * whose method encloses the line, named the way `SELF`'s class is (#622) and the way
+     * `PARENT.` completion names its parent (#628, line-aware). Plus the parent's MODULE file
+     * from the declaration index, a hint for the body search.
+     *
+     * Replaces ClassMemberResolver.getParentClassInfo, the separate copy hover, Go to Definition,
+     * Go to Implementation and the chain resolver each asked. The member lookup that follows
+     * belongs to findMemberInClass, which carries #611's overload rule; ClassMemberResolver's
+     * findParentClassMemberInfo did not, so `PARENT.Init()` with no arguments named a parent's
+     * `Init(LONG)` instead of the inherited `Init()` the call runs.
+     */
+    public async resolveParentClassAt(
+        document: TextDocument,
+        atLine: number
+    ): Promise<{ className: string; parentClassName: string; moduleFile?: string } | null> {
+        const className = resolveEnclosingClassName(document, atLine, this.tokenCache.getStructure(document));
+        if (!className) return null;
+        const parentClassName = await this.resolveParentName(className, document, atLine);
+        if (!parentClassName) return null;
+
+        let moduleFile: string | undefined;
+        await this.ensureIndexBuilt();
+        const parentInfos = this.sdi.findFor(parentClassName, document.uri); // #571
+        if (parentInfos.length > 0) {
+            const parentInfo = parentInfos.find(d => !d.isType) || parentInfos[0];
+            const moduleMatch = parentInfo.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
+            if (moduleMatch) moduleFile = moduleMatch[1];
+        }
+        return { className, parentClassName, moduleFile };
     }
 
     private async findClassInfoInDoc(
