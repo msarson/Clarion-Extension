@@ -86,6 +86,18 @@ node scripts/health/cards.js --positions=<agreement json> --out=a.json [--agains
   The agreement sample almost never lands on a chain member (`SELF.Q.Field`);
   `node scripts/health/chain-positions.js out.json [300]` draws those, in the
   same shape, for cards.js (#652).
+- **references-snapshot**: `node scripts/health/references-snapshot.js
+  --positions=a.json[,b.json] --out=r.json [--per-slice=8] [--against=prev.json]`
+  — the full Find All References list at an even draw of member-access
+  positions (agreement or chain-position JSON). References is a whole-solution
+  search, so keep the draw small: 40 positions take 12-15 min (#654).
+- **discarded-returns**: `node scripts/health/discarded-returns.js --out=a.json
+  [--files=150] [--against=prev.json]` — the discarded-return-value warnings
+  through pull diagnostics, waiting for each file's asynchronous pass. The
+  corpus holds almost none (generated code declares PROC), so it plants the
+  shapes that matter in unsaved buffers, and it refuses to report unless a
+  planted sentinel warns. Its memos persist across restarts: a before/after
+  run shares them unless the rules stamp differs (`RVD_RESOLUTION_RULES`, #654).
 - **self-members**: what each `SELF.x` resolves to through the SELF lookup
   hover, F12 and Ctrl+F12 use (no solution index in-process, so members
   inherited from a class the includes do not reach read null). A snapshot

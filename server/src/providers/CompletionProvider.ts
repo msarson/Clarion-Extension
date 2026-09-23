@@ -489,6 +489,13 @@ export class CompletionProvider {
         // VARIABLE's own name downstream as a class name. Every other caller that supports
         // parameters (definition, hover's structure-field resolver, implementation) already
         // passes it.
+        // #654: a receiver is read as hover and Go to Definition read it (#651) - a local
+        // `ThisWindow CLASS(Base)` is itself, not a variable of type Base (#642), so its own
+        // members are offered with the inherited ones.
+        const receiver = await this.memberLocator.resolveReceiverAt(chain, document, position.line);
+        if (receiver) {
+            return { className: receiver.className, callerClass };
+        }
         const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document, position.line);
         if (typeInfo) {
             return { className: typeInfo.typeName, callerClass };
@@ -534,8 +541,10 @@ export class CompletionProvider {
         } else {
             // Same reason as the plain-word branch: a chain rooted on a PARAMETER
             // (`pSomething.Member.`) needs the scope line to resolve its declared type.
-            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document, position.line);
-            currentClass = typeInfo?.typeName ?? null;
+            // #654: the receiver as hover and Go to Definition read it, as for a plain word above.
+            currentClass = (await this.memberLocator.resolveReceiverAt(segments[0], document, position.line))?.className
+                ?? (await this.memberLocator.resolveVariableType(root, tokens, document, position.line))?.typeName
+                ?? null;
         }
 
         if (!currentClass) return null;

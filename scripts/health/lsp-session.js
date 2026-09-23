@@ -24,7 +24,8 @@ const CLARION_ROOT = corpus.required('clarionRoot');
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^\//, '').replace(':', '%3A');
 
 /**
- * @param {{ sln?: string, seedFile: string, settleMs?: number, stderrLog?: string, log?: (s: string) => void }} opts
+ * @param {{ sln?: string, seedFile: string, settleMs?: number, stderrLog?: string, log?: (s: string) => void, textDocumentCapabilities?: object }} opts
+ *   textDocumentCapabilities: e.g. `{ diagnostic: {} }` to ask for pull diagnostics (textDocument/diagnostic).
  */
 async function startSession(opts) {
     if (!fs.existsSync(SERVER)) throw new Error(`Server build missing: ${SERVER} - run \`npm run compile\` first.`);
@@ -82,7 +83,7 @@ async function startSession(opts) {
         processId: process.pid,
         rootUri: toUri(path.dirname(sln)),
         workspaceFolders: [{ uri: toUri(path.dirname(sln)), name: path.basename(path.dirname(sln)) }],
-        capabilities: { textDocument: {}, workspace: { configuration: true }, window: { workDoneProgress: true } },
+        capabilities: { textDocument: opts.textDocumentCapabilities ?? {}, workspace: { configuration: true }, window: { workDoneProgress: true } },
         initializationOptions: { settings: { log: { performance: { enabled: false } } } },
     });
     notify('initialized', {});
@@ -119,7 +120,7 @@ async function startSession(opts) {
         setTimeout(() => child.kill(), 1000);
     };
 
-    return { request, notify, open, close, toUri, sln };
+    return { request, notify, open, close, toUri, sln, waitNotification };
 }
 
 module.exports = { startSession, toUri, REPO, CLARION_ROOT };

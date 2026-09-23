@@ -5,7 +5,7 @@ import { extractReturnType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate } from '../../utils/ClassMemberScan';
-import { extractClassName } from '../../utils/ClassNameUtils';
+import { extractClassName, nearestClassLabel } from '../../utils/ClassNameUtils';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -55,6 +55,11 @@ interface RvdMemoDiskPayload {
     classes: Array<{ k: string; members: [string, OverloadCandidate[]][] | null; files: [string, number][] }>;
 }
 const RVD_MEMO_BUCKET = 'rvdmemo';
+// #654: part of the persisted signature. The mtime gate proves a memo's INPUTS are unchanged, not
+// that the rules that produced it are: an upgraded server otherwise reuses an older build's answer
+// for every file not edited since. Bump it whenever how a receiver type or a class's members are
+// resolved changes. (2: a local CLASS label is the class itself, not its parent's type.)
+const RVD_RESOLUTION_RULES = 2;
 // One disk-load attempt per doc content (rvdDocKey); bounded for hygiene.
 const rvdDiskSeedAttempted = new Set<string>();
 
@@ -994,7 +999,7 @@ export async function validateDiscardedReturnValues(
     // #358-cold: on the first pass for this doc content, seed the memos from the
     // persisted envelope — a restart then skips the multi-second cold enumeration
     // (thisStartup ~3.2s measured) instead of re-walking the include universe.
-    const rvdDiskSignature = `${rvdText.length}|${rvdHash}`;
+    const rvdDiskSignature = `${RVD_RESOLUTION_RULES}|${rvdText.length}|${rvdHash}`;
     await seedRvdMemosFromDisk(rvdDocKey, openDocPathLower, rvdDiskSignature);
     const typeMemo = {
         get: (k: string) => rvdTypeMemo.get(`${rvdDocKey}|${k}`),
@@ -1171,7 +1176,14 @@ export async function validateDiscardedReturnValues(
                 // #358: capture the file(s) whose content determined this type so the memo
                 // survives an unrelated epoch bump (GlobalErrors ~1.3s otherwise re-resolves).
                 const typeProvenance = new Set<string>();
-                typePromise = memberLocator.resolveVariableType(objectName, tokens, document, undefined, typeProvenance);
+                // #654: a CLASS label this document declares is the class itself, as hover and Go
+                // to Definition read it (#611, MemberLocatorService.resolveReceiverClass) - not a
+                // variable of its parent's type (#642), which lost every method the local class
+                // declares itself. Read from the open document only, so no provenance to record.
+                const ownLabel = nearestClassLabel(tokens, objectName, lineIdx);
+                typePromise = ownLabel
+                    ? Promise.resolve({ typeName: ownLabel.value, isClass: true, isReference: false })
+                    : memberLocator.resolveVariableType(objectName, tokens, document, undefined, typeProvenance);
                 typePromise.then((info) => {
                     rvdTypeMemoFiles.set(typeFullKey, info
                         ? rvdFingerprintPaths(typeProvenance, openDocPathLower)
