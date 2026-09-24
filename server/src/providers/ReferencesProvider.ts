@@ -42,6 +42,7 @@ import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetecto
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
+import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -200,7 +201,7 @@ export class ReferencesProvider {
             const includeRefs = this.provideIncludeReferences(document, position);
             if (includeRefs) {
                 this.trace({ route: 'include', word: path.basename(decodeURIComponent(document.uri)) });
-                const deduped = this.dedupeByNormalizedLocation(includeRefs);
+                const deduped = this.restoreOnDiskSpelling(this.dedupeByNormalizedLocation(includeRefs));
                 resultCount = deduped.length;
                 return deduped;
             }
@@ -209,7 +210,7 @@ export class ReferencesProvider {
             // differ from the file-walk casing (CloneScript.clw:196 AND
             // clonescript.clw:196 in the same result set). Same discipline as the
             // #196/#252 rename-edit dedup: the key is the decoded lowercased path.
-            const locations = rawLocations && this.dedupeByNormalizedLocation(rawLocations);
+            const locations = rawLocations && this.restoreOnDiskSpelling(this.dedupeByNormalizedLocation(rawLocations));
             if (!locations || opts?.includeOmitted) {
                 resultCount = locations?.length ?? -1;
                 return locations;
@@ -244,6 +245,31 @@ export class ReferencesProvider {
             out.push(loc);
         }
         return out;
+    }
+
+    /**
+     * #655 — a file reached through the file graph arrives under its lower-cased map key
+     * (`abeip.clw` for ABEIP.CLW). Such a location is renamed to the file's spelling on disk;
+     * one whose path has any capital came from a real spelling and is left as it is, the
+     * cursor document's own URI included.
+     */
+    private restoreOnDiskSpelling(locations: Location[]): Location[] {
+        const fixed = new Map<string, string>();
+        return locations.map(loc => {
+            let uri = fixed.get(loc.uri);
+            if (uri === undefined) {
+                uri = loc.uri;
+                const fsPath = decodeURIComponent(loc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                if (/[a-z]/.test(fsPath) && fsPath === fsPath.toLowerCase()) {
+                    const spelled = onDiskSpelling(fsPath);
+                    if (spelled !== fsPath) {
+                        uri = /^file:\/\/\/[A-Za-z]%3A/i.test(loc.uri) ? pathToCanonicalUri(spelled) : fsPathToUri(spelled);
+                    }
+                }
+                fixed.set(loc.uri, uri);
+            }
+            return uri === loc.uri ? loc : { ...loc, uri };
+        });
     }
 
     /** #315 — per-invocation FAR trace fields, merged by pipeline stages. */

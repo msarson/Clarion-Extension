@@ -51,6 +51,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Find All References and Rename work on `ThisWindow.Run()`, `obj.Method()` and `Class.Method()` wherever Go to Definition does.** They found nothing on many such calls, among them every generated procedure's `ThisWindow.Run()`, because they resolved the member their own way; they now start from the declaration Go to Definition names. [#654](https://github.com/msarson/Clarion-Extension/issues/654)
 - **Completion after a procedure's own class, as `BRW1.` or `ThisWindow.`, offers the members that class declares.** It read the class as its parent and offered only the inherited members. [#654](https://github.com/msarson/Clarion-Extension/issues/654)
 - **Signature help shows the parameters of `PARENT.Method(` and of a method a procedure's own class declares.** Inside an override, `PARENT.Init(` showed nothing, and `ThisWindow.Method(` found only methods inherited from the parent. [#654](https://github.com/msarson/Clarion-Extension/issues/654)
+- **Hover links, Go to Definition and Find All References show library files under their real names.** On calls such as `ThisWindow.Run()`, the hover link and the editor tab Go to Definition opened read `abwindow.inc` for `ABWINDOW.INC`, and Find All References listed hits in library and generated files in lower case. It was the same file either way; only the name was wrong. [#655](https://github.com/msarson/Clarion-Extension/issues/655)
 
 #### Diagnostics
 

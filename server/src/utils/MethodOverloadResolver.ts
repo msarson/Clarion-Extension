@@ -9,7 +9,7 @@ import { ArgClassification, CallSiteArgumentClassifier } from './CallSiteArgumen
 import { ArgumentTypeResolver } from './ArgumentTypeResolver';
 import * as fs from 'fs';
 import * as path from 'path';
-import { pathToCanonicalUri } from './UriUtils';
+import { onDiskSpelling, pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
@@ -302,6 +302,8 @@ export class MethodOverloadResolver {
         }
         const lines = content.split('\n');
         const candidates: MethodDeclarationInfo[] = [];
+        // #655: the graph hands out lower-cased keys; a location the user sees names the file as on disk.
+        let fileUri: string | undefined;
 
         for (let j = 0; j < lines.length; j++) {
             if (!new RegExp(`^${className}\\s+CLASS`, 'i').test(lines[j])) continue;
@@ -313,7 +315,7 @@ export class MethodOverloadResolver {
                 if (new RegExp(`^\\s*(${methodName})\\s+(?:PROCEDURE|FUNCTION)`, 'i').test(methodLine)) {
                     const signature = methodLine.trim();
                     const declParamCount = ClarionPatterns.countParameters(signature);
-                    const fileUri = pathToCanonicalUri(filePath); // #251
+                    fileUri ??= pathToCanonicalUri(onDiskSpelling(filePath)); // #251
                     candidates.push({ signature, file: fileUri, line: k, paramCount: declParamCount });
                 }
             }
