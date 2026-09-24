@@ -2,7 +2,8 @@ import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
-import { HoverFormatter, VariableInfo } from './HoverFormatter';
+import { HoverFormatter, VariableInfo, typeLabel } from './HoverFormatter';
+import { LikeTypeResolver, LikeResolution } from '../../services/LikeTypeResolver';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from './CrossFileCache';
@@ -26,6 +27,7 @@ export class VariableHoverResolver {
     private sdi: StructureDeclarationIndexer;
     private symbolFinder: SymbolFinderService;
     private memberLocator: MemberLocatorService;
+    private like: LikeTypeResolver;
     
     constructor(
         private formatter: HoverFormatter,
@@ -36,6 +38,18 @@ export class VariableHoverResolver {
         this.sdi = StructureDeclarationIndexer.getInstance();
         this.symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
         this.memberLocator = new MemberLocatorService(crossFileCache);
+        this.like = new LikeTypeResolver(this.symbolFinder, tokenCache, this.memberLocator);
+    }
+
+    /** #656 — what the `LIKE(name)` declaration on `line` of `uri` is; null when it is not one. */
+    public likeFor(uri: string, line: number, document?: TextDocument): Promise<LikeResolution | null> {
+        return this.like.resolve(uri, line, document);
+    }
+
+    /** #656 — `info` with its LIKE resolution, for any card built from a declaration in `uri`. */
+    public async withLike(info: VariableInfo, uri: string, document?: TextDocument): Promise<VariableInfo> {
+        const like = await this.like.resolve(uri, info.line, document);
+        return like ? { ...info, like } : info;
     }
 
     /**
@@ -58,12 +72,12 @@ export class VariableHoverResolver {
     /**
      * Find and format hover for a local variable
      */
-    async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string, hoverLine?: number): Promise<Hover | null> {
-        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord, hoverLine);
+    async findLocalVariableHover(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string, hoverLine?: number, hoverCharacter?: number): Promise<Hover | null> {
+        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord, hoverLine, hoverCharacter);
         
         if (symbolInfo) {
             logger.info(`✅ Found variable info for ${word}: type=${symbolInfo.type}, line=${symbolInfo.location.line}`);
-            const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
+            const variableInfo = await this.withLike(this.toVariableInfo(symbolInfo, document), symbolInfo.location.uri, document); // #488, #656
             // #302 follow-up (Mark): no class-definition appendix — the declaration line and
             // location already carry everything the hover needs; F12 on the type covers "where
             // is the class defined".
@@ -85,19 +99,19 @@ export class VariableHoverResolver {
      * doing a bare-name reference. Without this, hovering such a field's own
      * declaration showed nothing.
      */
-    findStructureFieldDeclarationHover(word: string, tokens: Token[], document: TextDocument, hoverLine: number): Hover | null {
+    async findStructureFieldDeclarationHover(word: string, tokens: Token[], document: TextDocument, hoverLine: number): Promise<Hover | null> {
         const symbolInfo = this.symbolFinder.findStructureField(word, tokens, hoverLine, document);
         if (!symbolInfo) return null;
 
         logger.info(`✅ Found structure field declaration for ${word} at line ${symbolInfo.location.line}`);
-        const variableInfo = this.toVariableInfo(symbolInfo, document); // #488
+        const variableInfo = await this.withLike(this.toVariableInfo(symbolInfo, document), symbolInfo.location.uri, document); // #488, #656
         return this.formatter.formatVariable(word, variableInfo, symbolInfo.token, document, hoverLine);
     }
 
     /**
      * Find and format hover for a module-local variable
      */
-    findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Hover | null {
+    async findModuleVariableHover(searchWord: string, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover | null> {
         logger.info(`Checking for module-local variable in current file: ${searchWord}...`);
         
         const symbolInfo = this.symbolFinder.findModuleVariable(searchWord, tokens, document);
@@ -115,7 +129,7 @@ export class VariableHoverResolver {
         });
         
         const markdown = [
-            `**${symbolInfo.token.value}** — \`${symbolInfo.type}\``,
+            `**${symbolInfo.token.value}** — ${typeLabel(symbolInfo.type, (await this.like.resolve(symbolInfo.location.uri, symbolInfo.location.line, document)) ?? undefined)}`,
             ``
         ];
         
@@ -176,7 +190,7 @@ export class VariableHoverResolver {
         const labelHit = this.symbolFinder.findGlobalVariableInCurrentFile(searchWord, tokens, document);
         if (labelHit) {
             logger.info(`✅ Found global variable in current file: ${labelHit.token.value} at line ${labelHit.location.line}`);
-            return this.buildGlobalVariableHover(labelHit.token, tokens, document, hoverLine);
+            return this.globalCard(labelHit.token, tokens, document, hoverLine);
         }
 
         // Hover-only extras beyond the shared decision: global STRUCTURE labels
@@ -197,7 +211,7 @@ export class VariableHoverResolver {
 
         if (structOrProc) {
             logger.info(`✅ Found global structure/procedure label in current file: ${structOrProc.value} at line ${structOrProc.line}`);
-            return this.buildGlobalVariableHover(structOrProc, tokens, document, hoverLine);
+            return this.globalCard(structOrProc, tokens, document, hoverLine);
         }
 
         // When shallowOnly=true (e.g. checking a MEMBER parent doc), skip the recursive
@@ -216,7 +230,7 @@ export class VariableHoverResolver {
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
             logger.info(`✅ Found "${searchWord}" cross-file: ${path.basename(crossFileResult.doc.uri)}`);
-            return this.buildGlobalVariableHover(crossFileResult.token, crossFileResult.tokens, crossFileResult.doc, hoverLine);
+            return this.globalCard(crossFileResult.token, crossFileResult.tokens, crossFileResult.doc, hoverLine);
         }
 
         // Final fallback: equates.clw (implicitly global in all Clarion programs)
@@ -242,7 +256,7 @@ export class VariableHoverResolver {
             const prefixResult = await this.memberLocator.findPrefixFieldTokenInChain(prefix, fieldName, document);
             if (prefixResult) {
                 logger.info(`✅ Found "${searchWord}" as prefix:field in chain: ${path.basename(prefixResult.doc.uri)}`);
-                return this.buildGlobalVariableHover(prefixResult.token, prefixResult.tokens, prefixResult.doc);
+                return this.globalCard(prefixResult.token, prefixResult.tokens, prefixResult.doc);
             }
         }
 
@@ -253,7 +267,7 @@ export class VariableHoverResolver {
         const crossFileResult = await this.memberLocator.findVariableTokenInParentChain(searchWord, document);
         if (crossFileResult) {
             logger.info(`✅ Found "${searchWord}" in INCLUDE file: ${path.basename(crossFileResult.doc.uri)}`);
-            return this.buildGlobalVariableHover(crossFileResult.token, crossFileResult.tokens, crossFileResult.doc);
+            return this.globalCard(crossFileResult.token, crossFileResult.tokens, crossFileResult.doc);
         }
         return await this.searchEquatesFile(searchWord);
     }
@@ -326,7 +340,13 @@ export class VariableHoverResolver {
     /**
      * Build hover for a global variable
      */
-    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Hover {
+    /** #656: the global card with its LIKE resolution. */
+    private async globalCard(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover> {
+        const like = await this.like.resolve(document.uri, globalVar.line, document);
+        return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine, like ?? undefined);
+    }
+
+    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number, like?: LikeResolution): Hover {
         const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
 
         // Check if this variable is inside a CLASS or INTERFACE structure
@@ -358,7 +378,7 @@ export class VariableHoverResolver {
         const scopeInfo = this.scopeAnalyzer.getTokenScope(document, globalPos);
         
         const markdown = [
-            `**${globalVar.label ?? globalVar.value}** — \`${typeInfo}\``,
+            `**${globalVar.label ?? globalVar.value}** — ${typeLabel(typeInfo, like)}`,
             ``
         ];
         
@@ -565,7 +585,7 @@ export class VariableHoverResolver {
             );
             if (eqToken) {
                 logger.info(`✅ Found "${searchWord}" in equates.clw`);
-                return this.buildGlobalVariableHover(eqToken, equatesTokens, doc);
+                return this.globalCard(eqToken, equatesTokens, doc);
             }
         } catch (err) {
             logger.error(`Error searching equates.clw: ${err}`);

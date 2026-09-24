@@ -4,6 +4,7 @@ import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
 import * as fs from 'fs';
+import { LikeResolution } from '../../services/LikeTypeResolver';
 
 /**
  * #125 — read a file's text, preferring in-memory cache over disk. Used to
@@ -37,6 +38,14 @@ export interface VariableInfo {
      * instead of showing a bare local-variable card indistinguishable from a
      * genuinely standalone variable. */
     parentStructure?: { label: string; type: string };
+    /** #656: set when the declaration is `LIKE(name)` - shown as written and as resolved. */
+    like?: LikeResolution;
+}
+
+/** #656 — a card's type: `LIKE(name)` → `definition` for a LIKE declaration, else the type. */
+export function typeLabel(type: string, like?: LikeResolution): string {
+    if (!like) return `\`${type}\``;
+    return like.resolved ? `\`${like.written}\` → \`${like.resolved}\`` : `\`${like.written}\``;
 }
 
 export interface ParameterInfo {
@@ -124,7 +133,7 @@ export class HoverFormatter {
         const displayName = name;
         
         const markdown = [
-            `**${displayName}** — \`${info.type}\``,
+            `**${displayName}** — ${typeLabel(info.type, info.like)}`,
             ``
         ];
 

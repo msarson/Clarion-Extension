@@ -310,7 +310,7 @@ export class HoverProvider {
                 // structure field (e.g. a field inside a file-scope `GROUP,TYPE` in
                 // an .inc) — not a bare-name reference, so findGlobalVariableHover's
                 // PRE()/dot-qualifier exclusion above correctly doesn't match it.
-                const structureFieldHover = this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
+                const structureFieldHover = await this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
                 mark('structureFieldDecl(noScope)');
                 if (structureFieldHover) return structureFieldHover;
 
@@ -366,12 +366,12 @@ export class HoverProvider {
             }
 
             logger.info(`Checking if ${word} (full word) is a local variable...`);
-            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line);
+            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line, position.character);
             mark('localVar');
             if (variableHover) return variableHover;
 
             logger.info(`Checking for ${word} (full word) as module-local variable...`);
-            let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
+            let moduleVarHover = await this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
             mark('moduleVar');
             if (moduleVarHover) return moduleVarHover;
 

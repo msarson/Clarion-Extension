@@ -392,7 +392,8 @@ export class SymbolFinderService {
         scopeToken: Token,
         document: TextDocument,
         originalWord?: string,
-        hoverLine?: number
+        hoverLine?: number,
+        hoverCharacter?: number // #656: with it, the fast path needs the cursor ON the label
     ): SymbolInfo | null {
         logger.info(`Finding local variable: "${word}" in scope: ${scopeToken.value} at line ${scopeToken.line}`);
 
@@ -420,7 +421,10 @@ export class SymbolFinderService {
                 t.line === hoverLine &&
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value.toLowerCase() === wordLower);
+                t.value.toLowerCase() === wordLower &&
+                // #656: the same name further along the line - `LOC:Flag LIKE(LOC:Flag)` in a
+                // generated queue - names another declaration; only the label is this one.
+                (hoverCharacter === undefined || hoverCharacter <= t.start + t.value.length));
             // Same exclusion the token-fallback further down applies: a MAP/global
             // procedure or method declaration sharing this line is handled by
             // findProcedureDeclaration with the correct scope/type, not here.
@@ -1196,7 +1200,8 @@ export class SymbolFinderService {
         return null;
     }
 
-    private findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+    /** Public for #656: LikeTypeResolver looks for a PRE field in one given file (no include walk). */
+    findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
         const fieldNameUpper = fieldName.toUpperCase();
 
         // Find structure with matching structurePrefix (e.g. FILE,PRE(ACMDataSets))

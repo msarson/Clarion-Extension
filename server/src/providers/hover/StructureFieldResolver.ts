@@ -3,7 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType, ClarionTokenizer } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
-import { HoverFormatter } from './HoverFormatter';
+import { HoverFormatter, typeLabel } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
@@ -66,7 +66,7 @@ export class StructureFieldResolver {
                 const structureInfo = this.variableResolver.findLocalVariableInfo(word, tokens, currentScope, document, word);
                 if (structureInfo) {
                     logger.info(`✅ Found structure info for ${word}`);
-                    return this.formatter.formatVariable(word, structureInfo, currentScope, document);
+                    return this.formatter.formatVariable(word, await this.variableResolver.withLike(structureInfo, document.uri, document), currentScope, document);
                 } else {
                     logger.info(`❌ Could not find structure info for ${word}`);
                 }
@@ -194,7 +194,7 @@ export class StructureFieldResolver {
                     const variableInfo = this.variableResolver.findLocalVariableInfo(fieldName, tokens, currentScope, document, fullReference);
                     if (variableInfo) {
                         logger.info(`✅ Found structure field info for ${fullReference}`);
-                        return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
+                        return this.formatter.formatVariable(fullReference, await this.variableResolver.withLike(variableInfo, document.uri, document), currentScope, document);
                     }
 
                     // A structure declared with a type argument may ALSO add its own inline
@@ -202,7 +202,7 @@ export class StructureFieldResolver {
                     // type's has BOTH sets. The inline ones exist only in THIS declaration
                     // block, so the type-based lookup below can never reach them — it
                     // resolves SomeType and correctly reports that an inline field isn't in it.
-                    const inlineField = this.findFieldInTokens(structureName, fieldName, tokens, document.uri, position.line);
+                    const inlineField = await this.findFieldInTokens(structureName, fieldName, tokens, document.uri, position.line, document);
                     if (inlineField) {
                         logger.info(`✅ Found inline field "${fieldName}" in structure "${structureName}"`);
                         return inlineField;
@@ -251,7 +251,7 @@ export class StructureFieldResolver {
         if (scope) {
             const reference = `${owner}.${fieldName}`;
             const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference);
-            if (info) return this.formatter.formatVariable(reference, info, scope, document);
+            if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, document.uri, document), scope, document);
         }
         return this.resolveStructureTypeFieldHover(owner, fieldName, document);
     }
@@ -328,7 +328,7 @@ export class StructureFieldResolver {
     public async resolveStructureTypeFieldHover(typeName: string, fieldName: string, document: TextDocument): Promise<Hover | null> {
         // First: check the current document's own tokens (handles same-file GROUP,TYPE definitions)
         const currentTokens = this.tokenCache.getTokens(document);
-        const fromCurrentDoc = this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri);
+        const fromCurrentDoc = await this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri, undefined, document);
         if (fromCurrentDoc) return fromCurrentDoc;
 
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -342,7 +342,7 @@ export class StructureFieldResolver {
         // would bind (`.\` before the shared paths).
         const sdiHit = await this.memberLocator.resolveSdiDeclaration(typeName, path.dirname(filePath), filePath); // #571
         if (sdiHit) {
-            const fromSdi = this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri);
+            const fromSdi = await this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri, undefined, sdiHit.doc);
             if (fromSdi) return fromSdi;
         }
 
@@ -354,7 +354,7 @@ export class StructureFieldResolver {
         // `UvFieldQ.AltIDToolTip` on a `UvFieldQ QUEUE(tqRwField)` found nothing on hover.
         const parent = await this.memberLocator.loadMemberParent(document);
         if (parent) {
-            const fromParent = this.findFieldInTokens(typeName, fieldName, parent.tokens, parent.doc.uri);
+            const fromParent = await this.findFieldInTokens(typeName, fieldName, parent.tokens, parent.doc.uri, undefined, parent.doc);
             if (fromParent) return fromParent;
             const fromParentIncludes = await this.findFieldInTypeIncludes(typeName, fieldName, parent.filePath, new Set([filePath.toLowerCase()]));
             if (fromParentIncludes) return fromParentIncludes;
@@ -372,7 +372,7 @@ export class StructureFieldResolver {
      * Searches an already-tokenized token array for a field inside a named GROUP/QUEUE/FILE type.
      * Used to resolve same-file type definitions without a disk read.
      */
-    private findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number): Hover | null {
+    private async findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number, sourceDoc?: TextDocument): Promise<Hover | null> {
         const matchesName = (t: Token) =>
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
             t.start === 0 &&
@@ -408,12 +408,23 @@ export class StructureFieldResolver {
         );
         if (!fieldToken) return null;
 
+        return this.fieldTypeCard(typeName, fieldName, tokens, fieldToken, sourceUri, sourceDoc);
+    }
+
+    /**
+     * The card for a field of a GROUP/QUEUE/FILE type reached as `Owner.Field`: its type (#656: a
+     * `LIKE(name)` field as written and as resolved) and its declaration line from the source,
+     * as the declaration card shows it, not rebuilt from tokens.
+     */
+    private async fieldTypeCard(typeName: string, fieldName: string, tokens: Token[], fieldToken: Token, sourceUri: string, sourceDoc?: TextDocument): Promise<Hover> {
         const lineTokens = tokens.filter(t => t.line === fieldToken.line);
-        const declaration = lineTokens.map(t => t.value).join('  ').trim();
         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
         const fieldType = typeToken?.value ?? 'UNKNOWN';
+        const like = fieldType.toUpperCase() === 'LIKE' ? await this.variableResolver.likeFor(sourceUri, fieldToken.line, sourceDoc) : null;
+        const declaration = this.sourceLine(sourceUri, fieldToken.line)?.trim()
+            ?? lineTokens.map(t => t.value).join('  ').trim();
         const markdown = [
-            `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
+            `**${typeName} Field:** \`${fieldName}\` — ${typeLabel(fieldType, like ?? undefined)}`,
             ``,
             `\`\`\`clarion`,
             declaration,
@@ -421,6 +432,19 @@ export class StructureFieldResolver {
             this.formatter.locationLink(sourceUri, fieldToken.line)
         ].join('\n');
         return { contents: { kind: 'markdown', value: markdown } };
+    }
+
+    /** A line of a document: the editor's buffer when it is open, else the file on disk. */
+    private sourceLine(uri: string, line: number): string | undefined {
+        let text = this.tokenCache.getDocumentText(uri) ?? undefined;
+        if (text === undefined) {
+            try {
+                text = fs.readFileSync(decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'), 'utf8');
+            } catch {
+                return undefined;
+            }
+        }
+        return text.split(/\r?\n/)[line];
     }
 
     /**
@@ -646,19 +670,7 @@ export class StructureFieldResolver {
                     );
                     if (fieldToken) {
                         logger.info(`✅ Found field "${fieldName}" in type "${typeName}" at ${resolvedPath}:${fieldToken.line}`);
-                        const lineTokens = incTokens.filter(t => t.line === fieldToken.line);
-                        const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                        const typeToken = lineTokens.find(t => t.start > fieldToken.start);
-                        const fieldType = typeToken?.value ?? 'UNKNOWN';
-                        const markdown = [
-                            `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
-                            ``,
-                            `\`\`\`clarion`,
-                            declaration,
-                            `\`\`\``,
-                            this.formatter.locationLink(resolvedPath, fieldToken.line)
-                        ].join('\n');
-                        return { contents: { kind: 'markdown', value: markdown } };
+                        return this.fieldTypeCard(typeName, fieldName, incTokens, fieldToken, uri);
                     }
                 }
             }
