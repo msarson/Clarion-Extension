@@ -45,7 +45,7 @@ npm run test:client  # client suite (also Mocha; runs without an Extension Host)
 npm run test:node20  # the server suite under Node 20 via npx, whatever Node you run locally
 ```
 
-Press **F5** in VS Code to launch an Extension Development Host for manual testing.
+Press **F5** in VS Code to launch an Extension Development Host for manual testing. If it stops with "Extension host did not start in 10 seconds" (a VS Code 1.139 debugger bug), see [#665](https://github.com/msarson/Clarion-Extension/issues/665) for the workaround script.
 
 Tests are Mocha with the `tdd` interface (`suite` / `test` / `setup`), run against the compiled output in `out/`, so compile first (or keep `npm run watch` running). A few things worth knowing when writing them:
 
