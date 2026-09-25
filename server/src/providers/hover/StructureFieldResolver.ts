@@ -14,9 +14,18 @@ import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifi
 import { SolutionManager } from '../../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../../utils/RedirectionResolution';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { MemberOwnerKind } from '../../utils/ClassMemberScan'; // #668
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
+
+/** #668 — a field's declaration: its document and tokens, the label token, and the structure that owns it. */
+interface FieldDeclaration {
+    doc: TextDocument;
+    tokens: Token[];
+    token: Token;
+    owner: Token;
+}
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
 logger.setLevel("error");
@@ -159,14 +168,25 @@ export class StructureFieldResolver {
                 if (access) {
                     // #652 / #488: a GROUP / QUEUE field shows the one card a field has everywhere -
                     // at its declaration, in PRE form and in dot form - not the member card.
-                    const isField = (access.member.structureType === 'GROUP' || access.member.structureType === 'QUEUE') &&
-                        !/\b(PROCEDURE|FUNCTION)\b/i.test(access.member.type);
+                    // #668: the member's own declaration settles it when the resolver did not say:
+                    // a chain into a nested GROUP (`Mine.Inner.Flag`) comes back as a member of the
+                    // outer type with no structure kind, and belongs to the nested GROUP.
+                    const declaration = this.fieldDeclaration(access.member, fieldName, document);
+                    const isField = declaration !== null ||
+                        ((access.member.structureType === 'GROUP' || access.member.structureType === 'QUEUE') &&
+                         !/\b(PROCEDURE|FUNCTION)\b/i.test(access.member.type));
                     if (isField) {
-                        const fieldHover = await this.fieldCard(access.member.className, fieldName, document, position,
-                            access.receiverKind === 'chain');
+                        const fieldHover = await this.fieldCard(declaration?.owner.label ?? access.member.className, fieldName,
+                            document, position, access.receiverKind === 'chain', declaration ?? undefined);
                         if (fieldHover) return fieldHover;
                     }
-                    return await this.methodResolver.formatDottedMember(fieldName, access, document, paramCount);
+                    // A chain into a structure declared elsewhere keeps the member card (#652), but a
+                    // GROUP / QUEUE member is never a "Class Property" (StructuredTypeMemberLabel).
+                    const ownerKind = declaration?.owner.value.toUpperCase();
+                    const labelled = !access.member.structureType && (ownerKind === 'GROUP' || ownerKind === 'QUEUE')
+                        ? { ...access, member: { ...access.member, structureType: ownerKind as MemberOwnerKind } }
+                        : access;
+                    return await this.methodResolver.formatDottedMember(fieldName, labelled, document, paramCount);
                 }
                 if (isSelfMember || isParentMember || beforeDot.includes('.')) return null;
             }
@@ -240,7 +260,8 @@ export class StructureFieldResolver {
      * StructuredTypeMemberLabel pins), and gets null here.
      */
     private async fieldCard(
-        owner: string, fieldName: string, document: TextDocument, position: Position, onlyIfDeclaredHere: boolean
+        owner: string, fieldName: string, document: TextDocument, position: Position, onlyIfDeclaredHere: boolean,
+        declaration?: FieldDeclaration // #668: where the field is declared, when the resolver said
     ): Promise<Hover | null> {
         const tokens = this.tokenCache.getTokens(document);
         if (onlyIfDeclaredHere) {
@@ -257,7 +278,52 @@ export class StructureFieldResolver {
                 ?? this.fieldInfoAtDeclaration(owner, fieldName, tokens, scope, document);
             if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, document.uri, document), scope, document);
         }
+        // #668: a structure whose type is declared in another file (`Rows QUEUE(RowType)` with
+        // RowType in the program file) - the card that file's declaration line gives.
+        if (declaration && declaration.doc.uri !== document.uri) {
+            const card = await this.cardAtDeclaration(`${owner}.${fieldName}`, fieldName, declaration);
+            if (card) return card;
+        }
         return this.resolveStructureTypeFieldHover(owner, fieldName, document);
+    }
+
+    /**
+     * #668 — the member's declaration, when it is a field: a column-0 label on the member's line
+     * whose parent is a GROUP / QUEUE / FILE / RECORD. Read from the token cache only (the
+     * resolver has just tokenized that file); a file not in the cache is not loaded here (#662).
+     */
+    private fieldDeclaration(member: { file?: string; line?: number }, fieldName: string, document: TextDocument): FieldDeclaration | null {
+        if (!member.file || member.line === undefined) return null;
+        let doc: TextDocument | null = null;
+        let tokens: Token[] | null = null;
+        if (member.file.toLowerCase() === document.uri.toLowerCase()) {
+            doc = document;
+            tokens = this.tokenCache.getTokens(document);
+        } else {
+            tokens = this.tokenCache.getTokensByUriCaseInsensitive(member.file);
+            const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(member.file);
+            if (tokens && text !== null) doc = TextDocument.create(member.file, 'clarion', 1, text);
+        }
+        if (!doc || !tokens) return null;
+        const fieldLower = fieldName.toLowerCase();
+        const token = tokens.find(t =>
+            t.line === member.line && t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === fieldLower);
+        const owner = token?.parent;
+        if (!token || !owner || owner.type !== TokenType.Structure || !owner.label ||
+            !/^(GROUP|QUEUE|FILE|RECORD)$/i.test(owner.value)) return null;
+        return { doc, tokens, token, owner };
+    }
+
+    /** #668 — the card a hover on the field's declaration line gives, titled `Owner.Field`. */
+    private async cardAtDeclaration(reference: string, fieldName: string, d: FieldDeclaration): Promise<Hover | null> {
+        const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(d.doc), d.token.line);
+        if (scope) {
+            const info = this.variableResolver.findLocalVariableInfo(fieldName, d.tokens, scope, d.doc, undefined, d.token.line);
+            if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, d.doc.uri, d.doc), scope, d.doc);
+        }
+        return this.variableResolver.findStructureFieldDeclarationHover(fieldName, d.tokens, d.doc, d.token.line, reference);
     }
 
     /** #657 — field `fieldName` read at its declaration in structure `owner`, when this document declares it. */

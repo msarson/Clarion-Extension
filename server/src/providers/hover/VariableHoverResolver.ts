@@ -99,13 +99,16 @@ export class VariableHoverResolver {
      * doing a bare-name reference. Without this, hovering such a field's own
      * declaration showed nothing.
      */
-    async findStructureFieldDeclarationHover(word: string, tokens: Token[], document: TextDocument, hoverLine: number): Promise<Hover | null> {
+    async findStructureFieldDeclarationHover(
+        word: string, tokens: Token[], document: TextDocument, hoverLine: number,
+        title?: string // #668: the dot form's `Owner.Field`, when the card is built for a use elsewhere
+    ): Promise<Hover | null> {
         const symbolInfo = this.symbolFinder.findStructureField(word, tokens, hoverLine, document);
         if (!symbolInfo) return null;
 
         logger.info(`✅ Found structure field declaration for ${word} at line ${symbolInfo.location.line}`);
         const variableInfo = await this.withLike(this.toVariableInfo(symbolInfo, document), symbolInfo.location.uri, document); // #488, #656
-        return this.formatter.formatVariable(word, variableInfo, symbolInfo.token, document, hoverLine);
+        return this.formatter.formatVariable(title ?? word, variableInfo, symbolInfo.token, document, hoverLine);
     }
 
     /**
