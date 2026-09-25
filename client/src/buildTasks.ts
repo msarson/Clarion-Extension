@@ -509,7 +509,9 @@ function createBuildTask(execution: ShellExecution): Task {
         "Clarion Build",
         "msbuild",
         execution,
-        "clarionBuildMatcher"
+        // #667: no problem matcher. processBuildErrors reads the build log and reports these
+        // errors itself; $clarionBuildMatcher is for users' own build tasks.
+        []
     );
 
     // ✅ Set the actual command explicitly

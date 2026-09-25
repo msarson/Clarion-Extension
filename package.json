@@ -160,31 +160,14 @@
         "fileLocation": [
           "absolute"
         ],
-        "pattern": [
-          {
-            "regexp": "^\\s*\\d*>?\\s*(.+\\.(?i:clw))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
-            "file": 1,
-            "line": 2,
-            "column": 3,
-            "severity": 4,
-            "message": 5
-          },
-          {
-            "regexp": "^\\s*(?:MSBUILD|.*)\\s*:\\s+(error|warning)\\s+([A-Z0-9]+):\\s+(.+)\\s+\\[(.+)\\]$",
-            "severity": 1,
-            "code": 2,
-            "message": 3,
-            "file": 4
-          },
-          {
-            "regexp": "^\\s*\\d*>?\\s*(.+)\\((\\d+)\\):\\s+Solution file error\\s+([A-Z0-9]+):\\s+(.+)$",
-            "file": 1,
-            "line": 2,
-            "code": 3,
-            "severity": 1,
-            "message": 4
-          }
-        ]
+        "pattern": {
+          "regexp": "^\\s*(?:\\d+>)?\\s*(\\S.*?\\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*?)(?:\\s+\\[[^\\]]*\\])?\\s*$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
       }
     ],
     "keybindings": [
