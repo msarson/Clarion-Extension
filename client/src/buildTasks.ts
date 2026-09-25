@@ -32,6 +32,17 @@ function getBuildOutputChannel(): OutputChannel {
     if (!buildOutputChannel) buildOutputChannel = window.createOutputChannel("Clarion Build");
     return buildOutputChannel;
 }
+
+/**
+ * #531 / #671 — say what is being built, in which configuration, and the exact MSBuild command
+ * line (ClarionBinPath, ConfigDir), where the user can see it: the task terminal is hidden by
+ * default. Every build writes it, a single project and each project of a solution build.
+ */
+function writeBuildHeader(p: { buildTarget: "Solution" | "Project"; targetName: string; configuration: string; msBuildPath: string; buildArgs: string[] }): void {
+    const buildOut = getBuildOutputChannel();
+    for (const line of formatBuildHeader(p)) buildOut.appendLine(line);
+    buildOut.show(true);
+}
 import { globalSolutionFile, globalSettings, globalClarionPropertiesFile } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
@@ -454,11 +465,7 @@ export async function executeBuildTask(params: {
     diagnosticCollection: DiagnosticCollection;   // ✅ add
 }): Promise<void> {
     const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, configuration, diagnosticCollection } = params;
-    // #531 — say what is being built, in which configuration, and the exact MSBuild
-    // command line, where the user can see it (the task terminal is hidden by default).
-    const buildOut = getBuildOutputChannel();
-    for (const line of formatBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs })) buildOut.appendLine(line);
-    buildOut.show(true);
+    writeBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs }); // #531
 
     logger.info(`🔄 Executing build task for ${buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
     logger.info(`🔹 Working directory: ${solutionDir}`);
@@ -822,9 +829,11 @@ async function executeBuildTaskSync(params: {
     buildLogPath: string;
     buildTarget: "Solution" | "Project";
     targetName: string;
+    configuration: string; // #671
     diagnosticCollection: DiagnosticCollection;
 }): Promise<void> {
-    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, diagnosticCollection } = params;
+    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, configuration, diagnosticCollection } = params;
+    writeBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs }); // #671: each project of a solution build
 
     return new Promise((resolve, reject) => {
         const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
