@@ -45,6 +45,7 @@ async function resolveRunProject(verb: 'run' | 'debug'): Promise<ClarionProjectI
         startupGuid: workspace.getConfiguration('clarion').get<string>('startupProject') || undefined,
         activeFile: window.activeTextEditor?.document.uri.fsPath,
         projectsContaining: file => projectsContainingFile(solutionInfo.projects, file),
+        isRunnable: isRunnableProject,
     });
 
     if (target.kind === 'error') {
@@ -60,6 +61,25 @@ async function resolveRunProject(verb: 'run' | 'debug'): Promise<ClarionProjectI
         { placeHolder: `Select a project to ${verb}` }
     );
     return picked?.project;
+}
+
+/**
+ * #666 — a project Run and Debug can start: it builds a program (Exe/WinExe), or it is a library
+ * whose project names a StartProgram to host it (the rule Set as Startup Project applies). A
+ * project file that cannot be found counts as runnable here, so the caller's own check reports it.
+ */
+function isRunnableProject(project: ClarionProjectInfo): boolean {
+    let cwprojPath: string | undefined;
+    if (project.filename) {
+        cwprojPath = path.join(project.path, project.filename);
+    } else if (fs.existsSync(project.path) && fs.statSync(project.path).isDirectory()) {
+        const cwprojFile = fs.readdirSync(project.path).find(f => f.toLowerCase().endsWith('.cwproj'));
+        cwprojPath = cwprojFile ? path.join(project.path, cwprojFile) : undefined;
+    }
+    if (!cwprojPath || !fs.existsSync(cwprojPath)) {
+        return true;
+    }
+    return extractProjectOutputInfo(cwprojPath) !== undefined;
 }
 
 /** The projects whose file lists (from the language server) include `file`. */
