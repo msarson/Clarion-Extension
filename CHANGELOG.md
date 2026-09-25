@@ -66,6 +66,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Set Configuration keeps the workspace file and the folder settings in step.** Where both a `.code-workspace` file and the first folder's `.vscode/settings.json` set the configuration, a pick changed only the folder copy, so a task defined in the workspace file still built the old configuration. Both copies are now updated, and so is the solution list in each. [#663](https://github.com/msarson/Clarion-Extension/issues/663)
 - **The configuration you set is kept at startup, and the Clarion IDE is told it.** The configuration the Clarion IDE last saved for the solution replaced your `clarion.configuration` every time VS Code started, and was written back into your settings. Your setting now wins, and the IDE's saved configuration is updated to match, so the IDE opens the solution on the same one. With no configuration set, the IDE's choice is still used. [#664](https://github.com/msarson/Clarion-Extension/issues/664)
+- **Run and Debug no longer need a file open.** Ctrl+F5 and F5 start the startup project, or the solution's only project, from anywhere in the window, including the Solution View buttons. With several projects and no startup project they use the open file's project as before, and otherwise ask which project to start instead of refusing. [#666](https://github.com/msarson/Clarion-Extension/issues/666)
 
 ---
 
