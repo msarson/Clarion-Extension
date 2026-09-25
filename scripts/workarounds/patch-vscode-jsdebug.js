@@ -5,15 +5,20 @@
 // debugger to continue." The launching window's exthost.log fills with
 // `RequestError: connect ECONNREFUSED ::1:<port>`.
 //
-// Cause (VS Code 1.139, built-in js-debug 1.117.0; microsoft/vscode-js-debug#2419, #2420): js-debug
-// finds the host's inspector at http://localhost:<port>. Where localhost resolves to ::1 first, the
-// [::1] probe is refused (the inspector listens on 127.0.0.1 only) and aborts the discovery, so the
-// debugger never attaches. Setting NODE_OPTIONS=--dns-result-order=ipv4first does not help.
+// Cause (VS Code 1.139, built-in js-debug 1.117.0; microsoft/vscode-js-debug#2416): js-debug finds
+// the host's inspector at http://localhost:<port>. On Node 24.20, where localhost resolves to ::1
+// first, the [::1] probe is refused (the inspector listens on 127.0.0.1 only) and aborts the
+// discovery, so the debugger never attaches. Setting NODE_OPTIONS=--dns-result-order=ipv4first
+// does not help.
+//
+// Fixed upstream in js-debug 1.140 (PR #2417, merged 2026-09-21), which ships with VS Code 1.140.
+// That fix upgrades the HTTP library and leaves the localhost string in place, so this script goes
+// by the bundled js-debug version: 1.140 or later is reported as fixed and left alone.
 //
 // The patch points that one attach at http://127.0.0.1:<port> in the js-debug bundled with each
 // installed VS Code version. It is a local change to your VS Code install, not to this repository,
-// and an update installs a fresh unpatched copy: rerun this after an update that still has the bug.
-// Once VS Code fixes it the pattern is gone and the script says so and changes nothing.
+// and an update installs a fresh unpatched copy: rerun this after an update that is still below
+// js-debug 1.140.
 //
 //   node scripts/workarounds/patch-vscode-jsdebug.js           patch (close VS Code first)
 //   node scripts/workarounds/patch-vscode-jsdebug.js --revert  restore the originals
@@ -25,6 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 
+const FIXED_IN = [1, 140]; // first js-debug with the upstream fix
 const FROM = 'launchProgram(t){let n=await $l(`http://localhost:${t.params.port}`';
 const TO = 'launchProgram(t){let n=await $l(`http://127.0.0.1:${t.params.port}`';
 
@@ -36,6 +42,19 @@ const root = rootArg
     : path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Microsoft VS Code');
 
 const jsDebugFile = dir => path.join(dir, 'resources', 'app', 'extensions', 'ms-vscode.js-debug', 'src', 'extension.js');
+
+function readJsDebugVersion(dir) {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(dir, 'resources', 'app', 'extensions', 'ms-vscode.js-debug', 'package.json'), 'utf8')).version;
+    } catch {
+        return null;
+    }
+}
+
+function isFixed(version) {
+    const [major, minor] = version.split('.').map(Number);
+    return major > FIXED_IN[0] || (major === FIXED_IN[0] && minor >= FIXED_IN[1]);
+}
 
 if (!fs.existsSync(root)) {
     console.log(`No VS Code install at ${root}. Pass --root=<install folder>.`);
@@ -59,6 +78,11 @@ for (const version of versions) {
         fs.copyFileSync(backup, file);
         fs.unlinkSync(backup);
         console.log(`${version}: reverted`);
+        continue;
+    }
+    const jsDebugVersion = readJsDebugVersion(path.join(root, version));
+    if (jsDebugVersion && isFixed(jsDebugVersion)) {
+        console.log(`${version}: js-debug ${jsDebugVersion} includes the upstream fix; not patched`);
         continue;
     }
     const src = fs.readFileSync(file, 'utf8');
