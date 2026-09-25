@@ -62,6 +62,10 @@ All notable changes to the Clarion Extension are documented here.
 - **A discarded return value is reported on a method a procedure's own class declares.** For `BRW1.Mine()`, where the local `BRW1 CLASS(BrowseClass)` declares `Mine` with a return value, the method was looked for on BrowseClass and the call was passed over. The check's saved results from an earlier version are set aside once, so an update takes effect without editing the file. [#654](https://github.com/msarson/Clarion-Extension/issues/654)
 - **Published diagnostics say which version of the document they are for.** A slower analysis pass for one version can arrive after the editor has moved to the next, and a client that reads only the standard protocol had no way to tell, so it showed the older answer against the newer text. Reported by Bill Atchison. [#619](https://github.com/msarson/Clarion-Extension/issues/619)
 
+#### Configuration and build
+
+- **Set Configuration keeps the workspace file and the folder settings in step.** Where both a `.code-workspace` file and the first folder's `.vscode/settings.json` set the configuration, a pick changed only the folder copy, so a task defined in the workspace file still built the old configuration. Both copies are now updated, and so is the solution list in each. [#663](https://github.com/msarson/Clarion-Extension/issues/663)
+
 ---
 
 ### [1.0.5] - 2026-09-18

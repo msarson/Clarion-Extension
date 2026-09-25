@@ -14,6 +14,10 @@
  *   - WRITE each key back to the scope its effective value came from. A key set nowhere follows
  *     the scope of the solutions list, else the workspace file in a saved workspace, else the
  *     folder.
+ *   - #663: a key set in BOTH the folder and the `.code-workspace` file is written to both.
+ *     Writing only the folder copy (the one in force) left the workspace file on the old value,
+ *     so a task defined there built the old configuration. Each solutions list keeps its own
+ *     other entries: only the entry being changed is edited in each.
  *
  * vscode-API-free: `ClarionSettingsStore` is implemented over `WorkspaceConfiguration` in
  * `SettingsStorageManager` and by a fake in the tests.
@@ -57,6 +61,50 @@ export function targetForKey(store: ClarionSettingsStore, key: string): Settings
 }
 
 /**
+ * #663 — every scope a write of `key` must reach: both when a workspace file is open and the
+ * folder and the workspace file each set it, else the one `targetForKey` picks. Without a
+ * workspace file the folder's settings.json is the only file, whatever the scopes report.
+ */
+export function targetsForKey(store: ClarionSettingsStore, key: string): SettingsWriteTarget[] {
+    const own = store.inspect(key);
+    if (store.hasWorkspaceFile && own?.workspaceFolderValue !== undefined && own?.workspaceValue !== undefined) {
+        return ['WorkspaceFolder', 'Workspace'];
+    }
+    return [targetForKey(store, key)];
+}
+
+/** The value `key` holds in `target` alone. */
+function scopeValue<T>(store: ClarionSettingsStore, key: string, target: SettingsWriteTarget): T | undefined {
+    const own = store.inspect<T>(key);
+    return target === 'WorkspaceFolder' ? own?.workspaceFolderValue : own?.workspaceValue;
+}
+
+/** Write `value` to each of `targets`. */
+async function writeScopes(store: ClarionSettingsStore, key: string, value: unknown, targets: SettingsWriteTarget[]): Promise<void> {
+    for (const target of targets) {
+        await store.update(key, value, target);
+    }
+}
+
+/**
+ * Edit the solutions list in each of `targets`, starting from that scope's own list (the
+ * effective list when one target and it holds none). `edit` returns undefined to leave a list alone.
+ */
+async function editSolutionLists(
+    store: ClarionSettingsStore,
+    targets: SettingsWriteTarget[],
+    edit: (solutions: SolutionSelection[]) => SolutionSelection[] | undefined
+): Promise<void> {
+    for (const target of targets) {
+        const own = targets.length > 1
+            ? scopeValue<SolutionSelection[]>(store, 'solutions', target) ?? []
+            : store.get<SolutionSelection[]>('solutions', []);
+        const edited = edit(own.map(s => ({ ...s })));
+        if (edited) await store.update('solutions', edited, target);
+    }
+}
+
+/**
  * The selected solution: the `solutions` entry for `currentSolution`, or the first entry when
  * no current solution is recorded (#104 fallback). Null when there is none, or when
  * `currentSolution` names a solution the list does not hold.
@@ -79,40 +127,64 @@ export function readSolutionSelection(store: ClarionSettingsStore): SolutionSele
 /** Record `selection` as the current solution, each key written to its own scope. */
 export async function saveSolutionSelection(store: ClarionSettingsStore, selection: SolutionSelection): Promise<void> {
     // Targets first: writing one key must not move where the next one goes.
-    const solutionsTarget = targetForKey(store, 'solutions');
-    const currentTarget = targetForKey(store, 'currentSolution');
-    const configurationTarget = targetForKey(store, 'configuration');
-
-    const solutions = store.get<SolutionSelection[]>('solutions', []);
-    const idx = solutions.findIndex(s => sameSolutionFile(s.solutionFile, selection.solutionFile));
-    if (idx >= 0) {
-        // Keep the recorded spelling of the path, so the entry is updated, not duplicated.
-        solutions[idx] = { ...selection, solutionFile: solutions[idx].solutionFile };
-    } else {
-        solutions.push({ ...selection });
-    }
+    const solutionsTargets = targetsForKey(store, 'solutions');
+    const currentTargets = targetsForKey(store, 'currentSolution');
+    const configurationTargets = targetsForKey(store, 'configuration');
 
     // Solutions first: a settings-change listener that fires on a later write already sees it.
-    await store.update('solutions', solutions, solutionsTarget);
-    if (!sameSolutionFile(store.get<string>('currentSolution', ''), selection.solutionFile)) {
-        await store.update('currentSolution', selection.solutionFile, currentTarget);
+    await editSolutionLists(store, solutionsTargets, solutions => {
+        const idx = solutions.findIndex(s => sameSolutionFile(s.solutionFile, selection.solutionFile));
+        if (idx >= 0) {
+            // Keep the recorded spelling of the path, so the entry is updated, not duplicated.
+            solutions[idx] = { ...selection, solutionFile: solutions[idx].solutionFile };
+        } else {
+            solutions.push({ ...selection });
+        }
+        return solutions;
+    });
+    for (const target of currentTargets) {
+        const held = currentTargets.length > 1
+            ? scopeValue<string>(store, 'currentSolution', target)
+            : store.get<string>('currentSolution', '');
+        if (!sameSolutionFile(held, selection.solutionFile)) {
+            await store.update('currentSolution', selection.solutionFile, target);
+        }
     }
-    await store.update('configuration', selection.configuration, configurationTarget);
+    await writeScopes(store, 'configuration', selection.configuration, configurationTargets);
 }
 
 /** Change the configuration of the current solution. */
 export async function saveActiveConfiguration(store: ClarionSettingsStore, configuration: string): Promise<void> {
-    const solutionsTarget = targetForKey(store, 'solutions');
-    const configurationTarget = targetForKey(store, 'configuration');
+    const solutionsTargets = targetsForKey(store, 'solutions');
+    const configurationTargets = targetsForKey(store, 'configuration');
 
     const current = store.get<string>('currentSolution', '');
-    const solutions = store.get<SolutionSelection[]>('solutions', []);
-    const idx = current ? solutions.findIndex(s => sameSolutionFile(s.solutionFile, current)) : -1;
-    if (idx >= 0) {
-        solutions[idx] = { ...solutions[idx], configuration };
-        await store.update('solutions', solutions, solutionsTarget);
+    if (current) {
+        await editSolutionLists(store, solutionsTargets, solutions => {
+            const idx = solutions.findIndex(s => sameSolutionFile(s.solutionFile, current));
+            if (idx < 0) return undefined;
+            solutions[idx] = { ...solutions[idx], configuration };
+            return solutions;
+        });
     }
-    await store.update('configuration', configuration, configurationTarget);
+    await writeScopes(store, 'configuration', configuration, configurationTargets);
+}
+
+/** Empty a solution setting (`currentSolution`, `configuration`) in every scope that sets it. */
+export async function clearSolutionSetting(store: ClarionSettingsStore, key: 'currentSolution' | 'configuration'): Promise<void> {
+    await writeScopes(store, key, '', targetsForKey(store, key));
+}
+
+/** Drop `solutionFile` from each solutions list that holds it. */
+export async function removeSolutionEntry(store: ClarionSettingsStore, solutionFile: string): Promise<boolean> {
+    let removed = false;
+    await editSolutionLists(store, targetsForKey(store, 'solutions'), solutions => {
+        const filtered = solutions.filter(s => !sameSolutionFile(s.solutionFile, solutionFile));
+        if (filtered.length === solutions.length) return undefined;
+        removed = true;
+        return filtered;
+    });
+    return removed;
 }
 
 /**

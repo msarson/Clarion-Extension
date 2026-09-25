@@ -1,5 +1,5 @@
 import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext, WorkspaceConfiguration } from 'vscode';
-import { ClarionSettingsStore, SettingsWriteTarget, saveActiveConfiguration, saveSolutionSelection, sameSolutionFile, targetForKey } from './SolutionSettingsScope';
+import { ClarionSettingsStore, SettingsWriteTarget, saveActiveConfiguration, saveSolutionSelection, sameSolutionFile, targetForKey, clearSolutionSetting, removeSolutionEntry } from './SolutionSettingsScope';
 import LoggerManager from './LoggerManager';
 import { ClarionSolutionSettings } from '../globals';
 import {
@@ -238,16 +238,13 @@ export class SettingsStorageManager {
         if (!workspaceFolder) return;
 
         const store = SettingsStorageManager.clarionSettings();
-        const solutions = store.get<ClarionSolutionSettings[]>('solutions', []);
-        const filtered = solutions.filter(s => !sameSolutionFile(s.solutionFile, solutionFile));
-
-        if (filtered.length !== solutions.length) {
-            await store.update('solutions', filtered, targetForKey(store, 'solutions'));
+        // #663 — from every scope that holds it, so no copy reopens the missing solution.
+        if (await removeSolutionEntry(store, solutionFile)) {
             logger.info(`✅ Removed missing solution from solutions array: ${solutionFile}`);
         }
 
         if (sameSolutionFile(store.get<string>('currentSolution', ''), solutionFile)) {
-            await store.update('currentSolution', '', targetForKey(store, 'currentSolution'));
+            await clearSolutionSetting(store, 'currentSolution');
             logger.info(`✅ Cleared currentSolution`);
         }
 
@@ -258,7 +255,7 @@ export class SettingsStorageManager {
             await config.update('solutionFile', '', ConfigurationTarget.WorkspaceFolder);
             await config.update('propertiesFile', '', ConfigurationTarget.WorkspaceFolder);
             await config.update('version', '', ConfigurationTarget.WorkspaceFolder);
-            await store.update('configuration', '', targetForKey(store, 'configuration'));
+            await clearSolutionSetting(store, 'configuration');
             logger.info(`✅ Cleared legacy solutionFile/propertiesFile/version/configuration settings`);
         }
     }
