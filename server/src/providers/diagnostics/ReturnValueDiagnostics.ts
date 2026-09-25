@@ -12,6 +12,7 @@ import { DocumentStructure } from '../../DocumentStructure';
 import { SolutionManager } from '../../solution/solutionManager';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { getCrossFileEpoch } from '../../utils/crossFileEpoch';
+import { FileRelationshipGraph } from '../../FileRelationshipGraph';
 
 // #345 phase 4 — cross-pass RVD memos (see the per-pass → module-level note
 // inside validateDiscardedReturnValues). Keys carry (docUri, docVersion);
@@ -274,6 +275,11 @@ function isNonProcReturnMethod(typeStr: string): boolean {
 /** #294 visibility: how many files the last cross-file plain-call scan actually covered. */
 let lastCrossFileFilesScanned = 0;
 
+/** #662 — test hook: the file count of the last cross-file plain-call scan. */
+export function __lastCrossFileFilesScannedForTest(): number {
+    return lastCrossFileFilesScanned;
+}
+
 function validateCrossFilePlainCalls(
     currentTokens: Token[],
     document: TextDocument,
@@ -295,9 +301,20 @@ function validateCrossFilePlainCalls(
     const warnableProcs = new Map<string, string>(); // nameUpper → returnType
     const excluded = new Set<string>();
 
+    // #662 — the cache holds whatever any feature has tokenized (hover, F12, include walks), so
+    // scanning all of it made this pass's cost and its warnings depend on unrelated activity, and
+    // let another project's same-named procedure warn here. Scan only cached files this document
+    // can see: itself, its PROGRAM, that PROGRAM's modules and what they INCLUDE (#483's rule).
+    // With no file graph for this document (no solution loaded) the scope stays every cached file.
+    const graph = FileRelationshipGraph.getInstance();
+    const uriToPath = (u: string) => decodeURIComponent(u.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+    const currentPath = uriToPath(currentUri);
+    const graphKnowsDocument = graph.isKnown(currentPath);
+
     const filesToScan = new Map<string, { uri: string; fsPath?: string }>();
     for (const uri of cache.getAllCachedUris()) {
         if (uri.toLowerCase() === currentUri.toLowerCase()) continue;
+        if (graphKnowsDocument && graph.isDeclarationReachableFrom(uriToPath(uri), currentPath) !== true) continue;
         filesToScan.set(uri.toLowerCase(), { uri });
     }
 

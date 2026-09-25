@@ -281,6 +281,15 @@ export class FileRelationshipGraph {
         return this.scannedFiles.has(this.normalizePath(filePath));
     }
 
+    /**
+     * #662 — does the graph know this file at all: scanned by the build, or at either end of an
+     * edge? False for a file outside every project, and for everything before a graph exists.
+     */
+    public isKnown(filePath: string): boolean {
+        const p = this.normalizePath(filePath);
+        return this.scannedFiles.has(p) || this.forwardEdges.has(p) || this.reverseEdges.has(p);
+    }
+
     /** The files this node references that the closure should visit: everything but MEMBER (#522). */
     private closureTargets(filePath: string): string[] {
         const out: string[] = [];
