@@ -4,7 +4,7 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
-import { writeIdePreferences } from '../solution/ClarionIdePreferences';
+import { pushConfigurationToIde } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
@@ -66,19 +66,15 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         );
         logger.info(`💾 Called setGlobalClarionSelection with config: ${selectedConfig}`);
 
-        // Patch .sln.cache if it already exists so Clarion IDE sees the updated config
-        if (globalSolutionFile) {
-            const existingFull = readActiveConfigFromSlnCache(globalSolutionFile);
-            patchSlnCacheConfig(globalSolutionFile, buildFullConfig(selectedConfig, existingFull));
-        }
-
-        // Sync configuration back to Clarion IDE preferences
+        // Tell the Clarion IDE, so it opens the solution on the same configuration (#664).
+        const [configName, platform] = selectedConfig.split('|');
         if (globalSolutionFile && globalClarionPropertiesFile) {
-            const parts = selectedConfig.split('|');
-            await writeIdePreferences(globalSolutionFile, globalClarionPropertiesFile, {
-                activeConfiguration: parts[0],
-                activePlatform: parts[1] ?? 'Win32'
+            await pushConfigurationToIde(globalSolutionFile, globalClarionPropertiesFile, {
+                activeConfiguration: configName,
+                activePlatform: platform ?? 'Win32'
             });
+        } else if (globalSolutionFile) {
+            patchSlnCacheConfig(globalSolutionFile, buildFullConfig(configName, readActiveConfigFromSlnCache(globalSolutionFile)));
         }
 
         // #563 — status bar, Tools pane and Solution View from the one stored value.

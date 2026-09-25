@@ -21,7 +21,8 @@ import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
 import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
-import { readIdePreferences } from './ClarionIdePreferences';
+import { readIdePreferences, pushConfigurationToIde } from './ClarionIdePreferences';
+import { configurationAtLoad, explicitConfigurationFor } from '../utils/ConfigurationPrecedence'; // #664
 import LoggerManager from '../utils/LoggerManager';
 import { PathUtils } from '../PathUtils';
 import * as path from 'path';
@@ -170,27 +171,29 @@ export async function workspaceHasBeenTrusted(
             return;
         }
         
-        // Apply Clarion IDE preferences (configuration) before initializing so the right config is used
+        // Settle the configuration before initializing so the right one is used. #664: the user's
+        // explicit setting wins and the Clarion IDE is told it; the IDE's saved choice used to
+        // replace the setting on every start. With no explicit setting the IDE's choice is used.
         let idePrefStartupGuid: string | undefined;
         if (globalSolutionFile && globalClarionPropertiesFile) {
             const idePrefs = await readIdePreferences(globalSolutionFile, globalClarionPropertiesFile);
-            if (idePrefs) {
-                // Apply active configuration so initializeSolution validates/uses the IDE's choice
-                if (idePrefs.activeConfiguration && idePrefs.activePlatform) {
-                    const ideConfig = `${idePrefs.activeConfiguration}|${idePrefs.activePlatform}`;
-                    if (ideConfig !== globalSettings.configuration) {
-                        logger.info(`🔄 Applying IDE configuration: ${ideConfig}`);
-                        globalSettings.configuration = ideConfig;
-                    }
-                } else if (idePrefs.activeConfiguration) {
-                    // Platform not specified — attempt prefix match against current config
-                    if (!globalSettings.configuration?.startsWith(idePrefs.activeConfiguration + '|')) {
-                        logger.info(`🔄 Applying IDE configuration (no platform): ${idePrefs.activeConfiguration}`);
-                        globalSettings.configuration = idePrefs.activeConfiguration;
-                    }
-                }
-                idePrefStartupGuid = idePrefs.startupProjectGuid;
+            const store = SettingsStorageManager.clarionSettings();
+            const atLoad = configurationAtLoad(
+                explicitConfigurationFor(
+                    globalSolutionFile,
+                    store.get<string>('configuration', ''),
+                    store.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', [])),
+                idePrefs,
+                globalSettings.configuration);
+            if (atLoad.configuration !== globalSettings.configuration) {
+                logger.info(`🔄 Configuration ${atLoad.configuration} (from ${atLoad.source})`);
+                globalSettings.configuration = atLoad.configuration;
             }
+            if (atLoad.updateIde) {
+                logger.info(`🔄 Telling the Clarion IDE: ${atLoad.updateIde.activeConfiguration}|${atLoad.updateIde.activePlatform}`);
+                await pushConfigurationToIde(globalSolutionFile, globalClarionPropertiesFile, atLoad.updateIde);
+            }
+            idePrefStartupGuid = idePrefs?.startupProjectGuid;
         }
 
         // Try to initialize even if some settings are missing

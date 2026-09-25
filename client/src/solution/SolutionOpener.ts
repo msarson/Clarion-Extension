@@ -13,7 +13,8 @@ import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { shouldMarkExplicitlyClosed, SolutionCloseReason } from '../utils/SolutionFallbackPolicy';
 import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache } from '../utils/SlnCacheUtils';
-import { chooseConfiguration, explicitConfigurationFor } from '../utils/ConfigurationPrecedence';
+import { chooseConfiguration, explicitConfigurationFor, configurationAtLoad } from '../utils/ConfigurationPrecedence';
+import { readIdePreferences, pushConfigurationToIde } from './ClarionIdePreferences'; // #664
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -415,6 +416,17 @@ export async function openClarionSolution(
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+
+        // #664 — the Clarion IDE opens the solution on the configuration settled here.
+        if (globalClarionPropertiesFile && globalSettings.configuration) {
+            const { updateIde } = configurationAtLoad(
+                globalSettings.configuration,
+                await readIdePreferences(solutionFilePath, globalClarionPropertiesFile),
+                globalSettings.configuration);
+            if (updateIde) {
+                await pushConfigurationToIde(solutionFilePath, globalClarionPropertiesFile, updateIde);
+            }
+        }
         
         // ✅ Add to global solution history (with full settings so cross-folder restore works)
         const folderPath = path.dirname(solutionFilePath);

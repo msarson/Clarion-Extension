@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
+import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 
 const logger = LoggerManager.getLogger("ClarionIdePreferences");
 logger.setLevel("error");
@@ -124,6 +125,20 @@ export async function writeIdePreferences(slnPath: string, propertiesFile: strin
     } catch (err) {
         logger.warn(`⚠️ Failed to write IDE preferences to ${prefsPath}: ${err}`);
     }
+}
+
+/**
+ * #664 — tell the Clarion IDE which configuration to open the solution on: its preferences file
+ * and, when there is one, the `.sln.cache` it last built with. Set Configuration and the solution
+ * load both use it, so the IDE follows the configuration chosen in VS Code.
+ */
+export async function pushConfigurationToIde(
+    slnPath: string,
+    propertiesFile: string,
+    configuration: { activeConfiguration: string; activePlatform: string }
+): Promise<void> {
+    patchSlnCacheConfig(slnPath, buildFullConfig(configuration.activeConfiguration, readActiveConfigFromSlnCache(slnPath)));
+    await writeIdePreferences(slnPath, propertiesFile, configuration);
 }
 
 function replaceOrInsertProperty(xml: string, name: string, value: string): string {
