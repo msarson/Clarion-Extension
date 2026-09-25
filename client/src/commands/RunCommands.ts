@@ -4,7 +4,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
-import { buildSolutionOrProject } from '../buildTasks';
+import { buildSolutionOrProject, sharedBuildCollection } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar } from '../views/ViewManager';
 import * as path from 'path';
@@ -504,8 +504,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before running...`);
-                const { languages } = await import('vscode');
-                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-run-build"), undefined, true);
+                await buildSolutionOrProject("Project", selectedProject, sharedBuildCollection("clarion-run-build"), undefined, true); // #670
             }
 
             logger.info(`🔍 Looking for executable...`);
@@ -580,8 +579,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before debugging...`);
-                const { languages } = await import('vscode');
-                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"), undefined, true);
+                await buildSolutionOrProject("Project", selectedProject, sharedBuildCollection("clarion-debug-build"), undefined, true); // #670
             }
 
             // Resolve cwproj

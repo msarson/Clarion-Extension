@@ -8,10 +8,26 @@
 
 import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection, OutputChannel } from "vscode";
 import { describeConfiguration, formatBuildHeader } from "./utils/ClarionBuildArgs";
+import { BuildResults } from "./utils/BuildResults"; // #670
+import { hideBuildOperationStatusBar } from "./statusbar/StatusBarManager"; // #670
 
 // #531 — one persistent "Clarion Build" channel: the header of every build lands
 // here first, and the MSBuild log is appended after it when the panel option is on.
 let buildOutputChannel: OutputChannel | undefined;
+
+// #670 — every collection a build writes Problems to, registered so Clarion: Clear Build Results
+// and another build task starting can clear them all. Created once per name and reused: a new
+// collection per build (as the Run/Debug pre-builds and MSBuild errors had) is never cleared.
+export const buildResults = new BuildResults(hideBuildOperationStatusBar);
+const sharedCollections = new Map<string, DiagnosticCollection>();
+export function sharedBuildCollection(name: string): DiagnosticCollection {
+    let c = sharedCollections.get(name);
+    if (!c) {
+        c = buildResults.register(languages.createDiagnosticCollection(name));
+        sharedCollections.set(name, c);
+    }
+    return c;
+}
 function getBuildOutputChannel(): OutputChannel {
     if (!buildOutputChannel) buildOutputChannel = window.createOutputChannel("Clarion Build");
     return buildOutputChannel;
@@ -66,7 +82,7 @@ export async function runClarionBuild(
     }
 
     // ✅ Ensure we have a diagnostic collection for this extension
-    const diagCollection = diagnosticCollection || languages.createDiagnosticCollection("clarion");
+    const diagCollection = diagnosticCollection || sharedBuildCollection("clarion");
 
     // If building full solution, use dependency-aware build
     if (buildConfig.buildTarget === "Solution") {
@@ -942,7 +958,7 @@ export async function buildSolutionOrProject(
  */
 function processGeneralMSBuildErrors(output: string): boolean {
     const diagnostics: { [key: string]: Diagnostic[] } = {};
-    const diagnosticCollection = languages.createDiagnosticCollection("msbuild-errors");
+    const diagnosticCollection = sharedBuildCollection("msbuild-errors"); // #670: one, registered
 
     // Clear previous diagnostics
     diagnosticCollection.clear();

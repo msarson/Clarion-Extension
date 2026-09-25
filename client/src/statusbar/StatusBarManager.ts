@@ -39,6 +39,8 @@ let versionStatusBarItem: StatusBarItem;
 let initializationStatusBarItem: StatusBarItem;
 let operationStatusBarItem: StatusBarItem;
 let operationHideTimer: ReturnType<typeof setTimeout> | undefined;
+// #670 — the operation the item is showing, so clearing build results never hides another one.
+let operationShown: ClarionOperationType | undefined;
 
 // #273 — last-known values so the active-editor visibility refresh can re-show items with the
 // correct content when focus returns to a Clarion document (without re-plumbing their callers).
@@ -124,6 +126,7 @@ export function startOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'running', detail);
     item.tooltip = detail
@@ -137,6 +140,7 @@ export function succeedOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'success', detail);
     item.tooltip = detail
@@ -154,12 +158,18 @@ export function failOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'failure', detail);
     item.tooltip = detail
         ? `Clarion ${operation} failed: ${detail}`
         : `Clarion ${operation} failed`;
     item.show();
+}
+
+/** #670 — hide the item only when it is showing a build outcome (Clarion: Clear Build Results). */
+export function hideBuildOperationStatusBar(): void {
+    if (operationShown === 'build') hideOperationStatusBar();
 }
 
 export function hideOperationStatusBar(): void {

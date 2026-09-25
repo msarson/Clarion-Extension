@@ -245,6 +245,12 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.clearBuildResults",
+        "title": "Clear Build Results",
+        "category": "Clarion",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.runWithoutDebugging",
         "title": "Run Without Debugging",
         "category": "Clarion",
