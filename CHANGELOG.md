@@ -73,6 +73,7 @@ All notable changes to the Clarion Extension are documented here.
 - **`$clarionBuildMatcher` now finds compiler errors in your own build tasks.** The problem matcher the extension contributes never matched, so a task that named it put nothing in Problems. It now reads the compiler's error and warning lines for `.clw`, `.inc`, `.equ` and `.int` files. [#667](https://github.com/msarson/Clarion-Extension/issues/667)
 - **The extension's build result no longer outlives another build.** When your own build task starts (Ctrl+Shift+B or a script), the extension clears its last build's Problems and a failed-build message in the status bar, which described a build that was no longer current. **Clarion: Clear Build Results** does the same on demand. [#670](https://github.com/msarson/Clarion-Extension/issues/670)
 - **A full-solution build shows what it builds.** Each project of a solution build now writes the same header to the Clarion Build output as a single-project build: the project, the configuration and the MSBuild command line, which names the Clarion install used. [#671](https://github.com/msarson/Clarion-Extension/issues/671)
+- **Build errors in `.eq` files appear in Problems.** The build reported errors in `.clw`, `.inc`, `.equ` and `.int` files; one in an `.eq` equate file was left out. [#672](https://github.com/msarson/Clarion-Extension/issues/672)
 
 #### Performance
 

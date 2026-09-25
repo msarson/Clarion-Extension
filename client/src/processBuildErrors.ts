@@ -1,6 +1,7 @@
 import path = require("path");
 import { DiagnosticCollection, languages, Diagnostic, Uri, Position, Range, DiagnosticSeverity, window } from "vscode";
 import LoggerManager from './utils/LoggerManager';
+import { buildErrorPatterns } from './utils/BuildErrorPatterns'; // #672
 const logger = LoggerManager.getLogger("ProcessBuildErrors");
 logger.setLevel("error");
 
@@ -12,19 +13,9 @@ function processBuildErrors(
     logger.info("🔍 Processing build output for errors and warnings...");
     logger.info("📝 Raw Build Output:\n" + buildOutput);
 
-    // Single-line: C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
-    // Also matches: 3> C:\...\Foo.Clw(123,4): error : Message [C:\...\Bar.cwproj]
-    const errorPattern =
-        /^(?:.*?>\s*)?([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?$/gm;
-
-    // Wrapped: C:\...\Foo.Clw(123,\n    4): error : Message [C:\...\Bar.cwproj]
-    const wrappedErrorPattern =
-        /^(?:.*?>\s*)?([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\((\d+),\s*$\r?\n^\s*(\d+)\):\s+(error|warning)\s*:?\s*(.*?)(?:\s+\[([^\]]+)\])?/gm;
-
-    // Clarion compiler native format: "Message - C:\path\to\file.clw:line,col"
-    // e.g. "Unknown procedure label - C:\...\MSSQL2DriverClass.Clw:7220,3"
-    const clarionNativePattern =
-        /^(.+?)\s+-\s+([A-Za-z]:\\.*?\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT])):(\d+),(\d+)\s*$/gm;
+    // #672: the file-located patterns (single-line, wrapped, compiler-native) share one
+    // source-extension list, in utils/BuildErrorPatterns, which the tests exercise.
+    const { single: errorPattern, wrapped: wrappedErrorPattern, native: clarionNativePattern } = buildErrorPatterns();
 
     // Generic MSBuild lines without a file:  MSBUILD : error MSB1009: ...
     const fallbackPattern =
