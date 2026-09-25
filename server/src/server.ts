@@ -109,6 +109,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
+import { EventLoopLagTracker } from './utils/EventLoopLagTracker'; // #661
 import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
 import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 
@@ -3678,6 +3679,17 @@ connection.onShutdown(() => {
     };
     
     logMessage("SERVER SHUTDOWN: onShutdown handler called");
+
+    // #661 — the sampler reports per 5s window and a shorter session never closed one, so its
+    // worst block went unreported. Always report at shutdown, whatever the size (0 = measured,
+    // no block), with the lifetime worst over the sampler's first 120s.
+    const lag = eventLoopLag.final();
+    perfLogger.perf("EventLoop lag", {
+        max_blocked_ms: lag.windowMaxMs,
+        lifetime_max_blocked_ms: lag.lifetimeMaxMs,
+        final: 1,
+        since_module_load_ms: Date.now() - serverModuleLoadedAt
+    });
     logMessage(`SERVER SHUTDOWN: Active documents: ${documents.all().length}`);
     logMessage("SERVER SHUTDOWN: Clearing caches...");
     
@@ -3758,24 +3770,24 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 // from "phase X's wall-clock ballooned because something else starved the single-threaded loop"
 // — the run-3/run-4 SolutionManager-init variance (0.7s vs 15s, identical work) needs exactly
 // this attribution.
+// #661: shutdown also reports the partial window and the lifetime worst (see onShutdown).
+const eventLoopLag = new EventLoopLagTracker();
 {
     const samplerStart = Date.now();
     let lastTick = Date.now();
-    let windowMaxLag = 0;
     const heartbeat = setInterval(() => {
         const now = Date.now();
-        const lag = now - lastTick - 100;
+        eventLoopLag.record(now - lastTick - 100);
         lastTick = now;
-        if (lag > windowMaxLag) windowMaxLag = lag;
     }, 100);
     const reporter = setInterval(() => {
-        if (windowMaxLag > 100) {
+        const worst = eventLoopLag.takeWindow(100);
+        if (worst !== null) {
             perfLogger.perf("EventLoop lag", {
-                max_blocked_ms: windowMaxLag,
+                max_blocked_ms: worst,
                 since_module_load_ms: Date.now() - serverModuleLoadedAt
             });
         }
-        windowMaxLag = 0;
         if (Date.now() - samplerStart > 120_000) {
             clearInterval(heartbeat);
             clearInterval(reporter);

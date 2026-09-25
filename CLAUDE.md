@@ -34,7 +34,10 @@ node scripts/perf/lsp-driver.js --link-refresh  # assert document links reach th
 - Perf channels are enabled by the driver via
   `initializationOptions.settings.log.performance.enabled` — the `Hover slow`,
   `StartupPerf`, and `EventLoop lag | max_blocked_ms` lines are the acceptance
-  evidence (`max_blocked_ms` is the "freeze" metric).
+  evidence (`max_blocked_ms` is the "freeze" metric). The server logs it per 5s
+  window and once more at shutdown with `lifetime_max_blocked_ms`, so every run
+  ends with `max_blocked_ms over the server's life: N` even when shorter than a
+  window (#661).
 - Reference baselines for the configured solution are in `CLAUDE.local.md`. Always
   compare against those rather than against a number quoted in an issue.
 

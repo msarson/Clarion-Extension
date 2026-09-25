@@ -88,12 +88,30 @@ const notificationWaiters = [];
 const lastNotification = new Map();
 const child = fork(SERVER, ['--node-ipc'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], execArgv: [] });
 const errLog = fs.createWriteStream(STDERR_LOG);
+// #661 — the worst event-loop block the server reported: per 5s window while it runs, and a
+// final line at shutdown (lifetime_max_blocked_ms) so a run shorter than one window still has one.
+const eventLoop = { worstWindowMs: null, lifetimeMs: null };
 child.stderr.on('data', d => {
   errLog.write(d);
   for (const line of d.toString().split('\n')) {
     if (/Hover slow|EventLoop|max_blocked|Perf/i.test(line)) console.log('  [server] ' + line.trim());
+    if (/EventLoop lag/.test(line)) {
+      const w = /max_blocked_ms=(\d+)/.exec(line);
+      if (w) eventLoop.worstWindowMs = Math.max(eventLoop.worstWindowMs ?? 0, Number(w[1]));
+      const l = /lifetime_max_blocked_ms=(\d+)/.exec(line);
+      if (l) eventLoop.lifetimeMs = Number(l[1]);
+    }
   }
 });
+
+/** #661 — after shutdown: the worst block over the server's life, or say plainly it was not reported. */
+async function reportEventLoop() {
+  for (let i = 0; i < 20 && eventLoop.lifetimeMs === null; i++) await new Promise(r => setTimeout(r, 100));
+  const worst = Math.max(eventLoop.lifetimeMs ?? 0, eventLoop.worstWindowMs ?? 0);
+  console.log(eventLoop.lifetimeMs === null && eventLoop.worstWindowMs === null
+    ? 'max_blocked_ms: not reported (server did not log an EventLoop line)'
+    : `max_blocked_ms over the server's life: ${worst}`);
+}
 child.stdout.on('data', d => errLog.write(d));
 
 child.on('message', (msg) => {
@@ -601,6 +619,8 @@ async function runLinkRefreshCheck(t0) {
   console.log(`worst hover: ${Math.max(...results, 0)}ms`);
   console.log(`server perf log: ${STDERR_LOG}`);
 
-  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  try { await request('shutdown', null, 10000); } catch { }
+  await reportEventLoop();
+  try { notify('exit'); } catch { }
   setTimeout(() => { child.kill(); process.exit(0); }, 1500);
 })().catch(e => { console.error('DRIVER FAILED:', e.message); child.kill(); process.exit(1); });
