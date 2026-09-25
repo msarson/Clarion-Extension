@@ -931,10 +931,16 @@ export class ClarionTokenizer {
     private joinedDeclarationLine(startLine: number): string {
         const stripContinuation = (s: string): string => {
             // Strip end-of-line `!`-comment, then strip a trailing `|` continuation.
-            let out = s.replace(/!.*$/, '');
-            // Trailing optional ampersand-separated continuation: `&|` or `|`
-            out = out.replace(/\s*&?\s*\|\s*$/, '');
-            return out;
+            const out = s.replace(/!.*$/, '');
+            // Trailing continuation, `|` or `&|`, with the whitespace around it. #660: done by
+            // trimming, not /\s*&?\s*\|\s*$/ — unanchored, with two adjacent \s*, that regex
+            // was cubic in a long run of spaces (a prototype padding its parameter list with
+            // ~490 spaces took ~10ms a line, 2.6s for one generated class header).
+            let t = out.trimEnd();
+            if (!t.endsWith('|')) return out;
+            t = t.slice(0, -1).trimEnd();
+            if (t.endsWith('&')) t = t.slice(0, -1).trimEnd();
+            return t;
         };
         const hasContinuation = (s: string): boolean => {
             const stripped = s.replace(/!.*$/, '').trimEnd();

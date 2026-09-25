@@ -70,6 +70,10 @@ All notable changes to the Clarion Extension are documented here.
 - **Run and Debug no longer need a file open.** Ctrl+F5 and F5 start the startup project, or the solution's only project, from anywhere in the window, including the Solution View buttons. With several projects and no startup project they use the open file's project as before, and otherwise ask which project to start instead of refusing. A project that builds a library with no StartProgram is never started, and says so before offering to build. [#666](https://github.com/msarson/Clarion-Extension/issues/666)
 - **`$clarionBuildMatcher` now finds compiler errors in your own build tasks.** The problem matcher the extension contributes never matched, so a task that named it put nothing in Problems. It now reads the compiler's error and warning lines for `.clw`, `.inc`, `.equ` and `.int` files. [#667](https://github.com/msarson/Clarion-Extension/issues/667)
 
+#### Performance
+
+- **No more multi-second freeze reading a class header that pads its parameter lists with spaces.** A prototype such as `Name PROCEDURE(<hundreds of spaces>)` took time that grew with the cube of the padding, so one such header held the language server for over two seconds on a first start. It now reads in a few milliseconds. [#660](https://github.com/msarson/Clarion-Extension/issues/660)
+
 ---
 
 ### [1.0.5] - 2026-09-18
