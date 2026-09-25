@@ -101,15 +101,24 @@ suite('Fields and interface methods through the dotted-access resolver (#652)', 
         assert.strictEqual(chain.split('\n')[0], dot.split('\n')[0]);
     });
 
-    // #488's rule, where it holds today: the dot-form card is the declaration's card. (A QUEUE with a
-    // type argument does not yet match it for its own fields - `Rows.Extra` shows "Rows Field:" in
-    // dot form and a different title at the declaration - which predates #652 and is its own issue.)
-    test('Grp.Name: the dot-form card matches the declaration\'s (#488)', async () => {
-        const use = (await at(22, 'Name')).hover;
-        const decl = await hoverAt(11, 1);
-        assert.strictEqual(typeOf(use), typeOf(decl), `title type: use "${use.split('\n')[0]}" vs declaration "${decl.split('\n')[0]}"`);
-        assert.strictEqual(badge(use), badge(decl), 'badge');
-    });
+    // #488's rule: the dot-form card is the declaration's card - the type in the title and the
+    // scope badge. #657: a QUEUE's fields (its own, and those its type argument gives it) showed
+    // the older "Rows Field:" card in dot form, with no badge and the bare type.
+    const sameCardAsDeclaration: Array<[string, number, string, number]> = [
+        ['Grp.Name', 22, 'Name', 11],
+        ['Rows.Extra: the QUEUE\'s own field (#657)', 24, 'Extra', 14],
+        ['Rows.Field: a field from the QUEUE\'s type (#657)', 23, 'Field', 4],
+        ['Typed.Field: a variable of a QUEUE type (#657)', 25, 'Field', 4],
+        ['Lister.Q.Extra: a chain to the local QUEUE\'s field (#657)', 27, 'Extra', 14],
+    ];
+    for (const [name, line, word, declLine] of sameCardAsDeclaration) {
+        test(`${name}: the dot-form card matches the declaration's (#488)`, async () => {
+            const use = (await at(line, word)).hover;
+            const decl = await hoverAt(declLine, 1);
+            assert.strictEqual(typeOf(use), typeOf(decl), `title type: use "${use.split('\n')[0]}" vs declaration "${decl.split('\n')[0]}"`);
+            assert.strictEqual(badge(use), badge(decl), 'badge');
+        });
+    }
 
     test('IRef.Do(): F12 goes to the interface method', async () => {
         assert.deepStrictEqual((await at(26, 'Do')).f12, [7]);

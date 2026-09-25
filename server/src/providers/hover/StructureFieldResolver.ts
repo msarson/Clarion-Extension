@@ -250,10 +250,29 @@ export class StructureFieldResolver {
         const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(document), position.line);
         if (scope) {
             const reference = `${owner}.${fieldName}`;
-            const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference);
+            const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference)
+                // #657: the dotted name is not in the outline for every structure (a QUEUE's fields,
+                // its own or its type's), so read the field from its declaration line in this
+                // document, as a hover on that line does - the one card #488 asks for.
+                ?? this.fieldInfoAtDeclaration(owner, fieldName, tokens, scope, document);
             if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, document.uri, document), scope, document);
         }
         return this.resolveStructureTypeFieldHover(owner, fieldName, document);
+    }
+
+    /** #657 — field `fieldName` read at its declaration in structure `owner`, when this document declares it. */
+    private fieldInfoAtDeclaration(
+        owner: string, fieldName: string, tokens: Token[], scope: Token, document: TextDocument
+    ): { type: string; line: number } | null {
+        const ownerLower = owner.toLowerCase();
+        const fieldLower = fieldName.toLowerCase();
+        const declaration = tokens.find(t =>
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === fieldLower &&
+            t.parent?.label?.toLowerCase() === ownerLower);
+        if (!declaration) return null;
+        return this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, undefined, declaration.line);
     }
 
     /**

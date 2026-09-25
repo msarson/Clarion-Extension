@@ -288,10 +288,13 @@ export class VariableHoverResolver {
     /**
      * Find local variable information using the document symbol tree (public for use by other resolvers)
      */
-    public findLocalVariableInfo(word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string): { type: string; line: number } | null {
+    public findLocalVariableInfo(
+        word: string, tokens: Token[], currentScope: Token, document: TextDocument, originalWord?: string,
+        declarationLine?: number // #657: the field's own declaration line - read it as a hover on that line would
+    ): { type: string; line: number } | null {
         logger.info(`findLocalVariableInfo called for word: ${word}, scope: ${currentScope.value} at line ${currentScope.line}`);
-        
-        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord);
+
+        const symbolInfo = this.symbolFinder.findLocalVariable(word, tokens, currentScope, document, originalWord, declarationLine);
         
         if (symbolInfo) {
             logger.info(`Found variable in symbol tree: ${symbolInfo.token.value}`);
