@@ -156,10 +156,11 @@ export function registerBuildCommands(
         commands.registerCommand('clarion.buildCurrentProject', async () => {
             logger.info("🔄 Building current project or solution...");
             
-            // Get the active editor
+            // Get the active editor. #675: with none (the status bar's Build Solution, clicked
+            // from a panel), build the solution rather than refusing.
             const activeEditor = window.activeTextEditor;
             if (!activeEditor) {
-                vscodeWindow.showWarningMessage("No active file. Please open a file to build its project.");
+                await buildTasks.buildSolutionWithDependencyOrder(diagnosticCollection, solutionTreeDataProvider);
                 return;
             }
             
