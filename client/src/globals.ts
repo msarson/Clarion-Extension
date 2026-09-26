@@ -271,6 +271,16 @@ export async function setGlobalClarionSelection(
         - globalClarionVersion: ${globalClarionVersion || 'not set'}
         - _globalClarionConfiguration: ${_globalClarionConfiguration || 'not set'}`);
 
+    // #685 — the solution load comes through here, not through setActiveClarionVersion, so the
+    // "Compile: …" item (hidden at activation, before any solution) must be refreshed here too.
+    // Closing the solution passes an empty solutionFile, which hides it.
+    try {
+        const { updateVersionStatusBar } = await import('./statusbar/StatusBarManager');
+        updateVersionStatusBar(clarionVersion, clarionPropertiesFile, !!solutionFile);
+    } catch {
+        // Status bar not initialised yet — activation paints it later.
+    }
+
     // ✅ Only save to storage if all required values are set and skipSave is false
     if (skipSave) {
         logger.info("⏭️  Skipping save to storage (skipSave = true)");
