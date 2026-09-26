@@ -493,7 +493,7 @@ On a 40-project, 3,000-source solution the first navigation after opening is ava
 
 **Solution:**
 - Use the hover tooltip to verify you're on the correct symbol
-- Check that the solution's Clarion version is the one you build with — the redirection (`.red`) file it points at decides where a name resolves (**Clarion: Set Active Version**)
+- Check that the solution's Clarion version is the one you build with — the redirection (`.red`) file it points at decides where a name resolves (**Clarion: Set Version**)
 - In a multi-project solution, remember the open file's own project decides the search order (above)
 
 ### Cross-File Navigation Not Working

@@ -140,7 +140,7 @@ When opening a solution for the first time, you'll configure:
 The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "Clarion 10 Dev", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
 
 **Set or change it:**
-- `Ctrl+Shift+P` → **Clarion: Set Active Version**
+- `Ctrl+Shift+P` → **Clarion: Set Version**
 - Or click the version in the status bar
 
 If only one version is registered you are still asked which properties file to use, because a machine can have more than one.
@@ -260,7 +260,7 @@ When that is detected, the extension says which settings are shadowed and offers
 #### "ClarionCl.exe not found"
 
 **Fix:**
-1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"** and pick the version this solution builds with
+1. `Ctrl+Shift+P` → **"Clarion: Set Version"** and pick the version this solution builds with
 2. If it is missing from the list, it is no longer registered in `ClarionProperties.xml` — re-register it in the Clarion IDE, or browse to another properties file
 3. Try building again
 
@@ -321,7 +321,7 @@ Supported as the compiler supports them: `[Common]` plus name-matched sections, 
 Redirection comes from the selected **Clarion version** — its `ClarionProperties.xml` names the redirection file (e.g. `Clarion110.red`), and the extension parses it (including per-configuration sections and included `.red` files) exactly as the Clarion IDE does.
 
 **Set the version:**
-1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"**
+1. `Ctrl+Shift+P` → **"Clarion: Set Version"**
 2. Pick the installed version — the extension reads its `ClarionProperties.xml`
 
 **A configuration kept outside `%APPDATA%`:** installation discovery scans `%APPDATA%\SoftVelocity\Clarion`, which is where the IDE writes its settings — but a `ClarionProperties.xml` can live anywhere, for example in a checked-out tree that carries its own IDE settings and is opened with `/ConfigDir=`. For that case:
@@ -365,7 +365,7 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 **Access via `Ctrl+Shift+P`:**
 
 - **Clarion: Open Solution...** - the main entry point: detected solutions, browse, or recents
-- **Clarion: Set Active Version** - pick the installed Clarion this solution uses
+- **Clarion: Set Version** - pick the installed Clarion this solution uses
 - **Clarion: Set Configuration** - change Debug/Release
 - **Clarion: Generate Application** - generate an app's source
 - **Clarion: Show Extension Status** - health check

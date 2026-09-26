@@ -292,7 +292,7 @@ Build output appears in the integrated terminal.
 
 **Fix:**
 
-1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"** and pick the version this solution builds with
+1. `Ctrl+Shift+P` → **"Clarion: Set Version"** and pick the version this solution builds with
 2. If it is not in the list, it is no longer registered in `ClarionProperties.xml`
 3. Try building again
 

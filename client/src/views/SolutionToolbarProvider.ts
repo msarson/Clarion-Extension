@@ -315,7 +315,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>🐛&#xFE0E;</button>
     <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;🐛&#xFE0E;</button>
     <div class="sep"></div>
-    <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
+    <button title="Set the Clarion version for this solution" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
@@ -341,7 +341,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
     // #141 Q9 directive #2 — toolbar gating helper. Solution-only elements
     // (marked with data-solution-only) hide when no solution is open.
-    // "Open in IDE" and "Set Active Version" buttons are NOT marked because
+    // "Open in IDE" and "Set Version" buttons are NOT marked because
     // they're meaningful in both modes.
     function applySolutionLoaded(loaded) {
       document.querySelectorAll('[data-solution-only]').forEach(function(el) {

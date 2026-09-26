@@ -561,7 +561,7 @@
       },
       {
         "command": "clarion.setActiveVersion",
-        "title": "Set Active Version",
+        "title": "Set Version",
         "category": "Clarion"
       },
       {

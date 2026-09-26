@@ -57,7 +57,7 @@ When you open a Clarion solution for the first time, the extension will prompt y
 
 **Manual configuration:**
 1. Press `Ctrl+Shift+P`
-2. Type **"Clarion: Set Active Version"** (or click the version in the status bar)
+2. Type **"Clarion: Set Version"** (or click the version in the status bar)
 3. Pick the version this solution builds with — it is remembered for that solution, and can be changed later without reloading
 
 #### 2. Clarion Properties File
@@ -244,7 +244,7 @@ MyProject/
 
 **Solutions:**
 1. Pick the Clarion version again — the `bin` folder comes from it, not from a path setting:
-   - `Ctrl+Shift+P` → **"Clarion: Set Active Version"**, or click the version in the status bar
+   - `Ctrl+Shift+P` → **"Clarion: Set Version"**, or click the version in the status bar
 2. Check `settings.json` (or the `.code-workspace` file) names a version your machine registers:
    ```json
    {
@@ -276,7 +276,7 @@ MyProject/
 
 If you have multiple Clarion versions installed:
 
-1. Use the picker — `Ctrl+Shift+P` → **"Clarion: Set Active Version"** — and choose the one this solution builds with
+1. Use the picker — `Ctrl+Shift+P` → **"Clarion: Set Version"** — and choose the one this solution builds with
 2. The pick is remembered **per solution**, so solutions on different versions don't fight over one setting
 3. You can change it while the solution is open; the editor and the build both follow immediately, with no reload
 4. Versions are listed by the name the Clarion IDE registered them under in `ClarionProperties.xml`; if yours isn't listed, the list ends with **Browse for ClarionProperties.xml…**
