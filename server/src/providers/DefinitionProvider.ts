@@ -15,6 +15,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import { labelLocation } from '../utils/ProcedureNameRange'; // #690
 import { findSectionLocation } from '../utils/SectionLocator';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -218,7 +219,7 @@ export class DefinitionProvider {
                             const access = await this.dottedAccess.resolve(receiver, methodName, document, position.line, paramCount);
                             if (access) {
                                 logger.info(`✅ ${receiver}.${methodName} → ${access.member.className} at ${access.member.file}:${access.member.line}`);
-                                return Location.create(access.member.file, Range.create(access.member.line, 0, access.member.line, 0));
+                                return labelLocation(access.member.file, access.member.line, methodName); // #690
                             }
                         }
                     }
@@ -375,20 +376,14 @@ export class DefinitionProvider {
                         );
                         if (ifaceMethodInfo) {
                             logger.info(`✅ Found interface method declaration at ${ifaceMethodInfo.file}:${ifaceMethodInfo.line}`);
-                            return Location.create(ifaceMethodInfo.file, {
-                                start: { line: ifaceMethodInfo.line, character: 0 },
-                                end: { line: ifaceMethodInfo.line, character: 0 }
-                            });
+                            return labelLocation(ifaceMethodInfo.file, ifaceMethodInfo.line, methodName) /* #690 */;
                         }
                     }
                     
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
                         logger.info(`✅ Found method declaration at ${declInfo.file}:${declInfo.line} with ${declInfo.paramCount} parameters`);
-                        return Location.create(declInfo.file, {
-                            start: { line: declInfo.line, character: 0 },
-                            end: { line: declInfo.line, character: 0 }
-                        });
+                        return labelLocation(declInfo.file, declInfo.line, methodName) /* #690 */;
                     } else {
                         logger.info(`❌ No method declaration found for ${className}.${methodName}`);
                     }
@@ -827,7 +822,7 @@ export class DefinitionProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, undefined);
                         if (chainedInfo) {
                             logger.info(`Resolved chained field "${beforeDot}.${fieldName}" at ${chainedInfo.file}:${chainedInfo.line}`);
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return labelLocation(chainedInfo.file, chainedInfo.line, fieldName); // #690
                         }
                         const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                         if (finalClass) {
@@ -1267,7 +1262,7 @@ export class DefinitionProvider {
         const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
             className, methodName, document, tokens, callLine);
         if (!picked) return null;
-        return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
+        return labelLocation(picked.file, picked.line, methodName); // #690
     }
 
     private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
@@ -1313,13 +1308,13 @@ export class DefinitionProvider {
         logger.info(`Structure ${className} not found in current file, delegating to MemberLocatorService`);
         const memberInfo = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount);
         if (memberInfo) {
-            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+            return labelLocation(memberInfo.file, memberInfo.line, memberName); // #690
         }
 
         // Fourth: try INTERFACE lookup (for &InterfaceName reference variables)
         const ifaceInfo = await this.memberLocator.findMemberInInterface(className, memberName, document, paramCount);
         if (ifaceInfo) {
-            return Location.create(ifaceInfo.file, Range.create(ifaceInfo.line, 0, ifaceInfo.line, 0));
+            return labelLocation(ifaceInfo.file, ifaceInfo.line, memberName); // #690
         }
 
         // Fallback: equates.clw (implicitly global — not always in INCLUDE chain)

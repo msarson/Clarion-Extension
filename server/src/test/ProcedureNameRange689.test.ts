@@ -16,6 +16,7 @@ import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
+import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { ClarionProjectServer } from '../solution/clarionProjectServer';
 import { ClarionSourcerFileServer } from '../solution/clarionSourceFileServer';
 import { SolutionManager } from '../solution/solutionManager';
@@ -123,6 +124,13 @@ suite('Go to Definition covers the procedure name (#689)', () => {
 
     test('bug-pin: implementation label to a keyword-form MAP line covers the label where it is', async () => {
         assert.strictEqual(where(await f12('impl.clw', 5, 3)), `prog.clw:5:7-${7 + len('KeywordLongProcName')}`);
+    });
+
+    test('Go to Implementation from a call selects the procedure label (#690 follow-up)', async () => {
+        const r = await new ImplementationProvider().provideImplementation(docs.get('prog.clw')!, { line: 11, character: 5 });
+        const loc = (Array.isArray(r) ? r[0] : r) as Location;
+        assert.ok(loc, 'a location');
+        assert.strictEqual(where(loc), `impl.clw:2:0-${len('ShorthandLongProcName')}`);
     });
 
     test('bug-pin: implementation label to the PROGRAM MAP answers with the canonical URI', async () => {

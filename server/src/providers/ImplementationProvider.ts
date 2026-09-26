@@ -9,6 +9,8 @@
  */
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { labelLocation, labelRange } from '../utils/ProcedureNameRange'; // #690
+import { pathToCanonicalUri } from '../utils/UriUtils'; // #690
 import { clarionSourceCandidates } from '../utils/ClarionSourceNaming';
 import { Location, Position, Range } from 'vscode-languageserver-protocol';
 import { CancellationToken } from 'vscode-languageserver';
@@ -512,7 +514,7 @@ export class ImplementationProvider {
                                 }
                             }
                             // A property, or a method whose body is not in source: its declaration.
-                            return Location.create(member.file, Range.create(member.line, 0, member.line, 0));
+                            return labelLocation(member.file, member.line, memberName); // #690
                         }
                         // Nothing names it. PARENT has nowhere else to look; another receiver keeps the
                         // last resort it had, a body of that name in this file.
@@ -690,13 +692,8 @@ export class ImplementationProvider {
 
         const best = candidates[bestIdx];
         logger.info(`✅ Found method implementation at line ${best.lineNum}`);
-        return Location.create(
-            document.uri,
-            {
-                start: { line: best.lineNum, character: 0 },
-                end: { line: best.lineNum, character: lines[best.lineNum].length }
-            }
-        );
+        // #690: the body's label, as every other path selects it.
+        return Location.create(document.uri, labelRange(best.lineNum, /^\S*/.exec(lines[best.lineNum])![0]));
     }
 
     /**
@@ -947,7 +944,7 @@ export class ImplementationProvider {
         paramCount?: number,
         declarationSignature?: string
     ): Location | null {
-        const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+        const fileUri = pathToCanonicalUri(fullPath); // #690: canonical (#251)
 
         // Fast path: use cached tokens + DocumentStructure index to find MethodImplementation candidates.
         // Two-part label only (ClassName.MethodName) to avoid false positives with 3-part interface
@@ -965,7 +962,7 @@ export class ImplementationProvider {
                 // Single match — return immediately without disk read
                 const tok = tokenCandidates[0];
                 logger.info(`✅ Found implementation (token cache) in ${fullPath} at line ${tok.line}`);
-                return Location.create(fileUri, { start: { line: tok.line, character: 0 }, end: { line: tok.line, character: 0 } });
+                return Location.create(fileUri, labelRange(tok.line, tok.label ?? '')); // #690
             }
 
             if (tokenCandidates.length > 1 && paramCount !== undefined && !declarationSignature) {
@@ -1033,13 +1030,8 @@ export class ImplementationProvider {
 
             const best = candidates[bestIdx];
             logger.info(`✅ Found implementation in ${fullPath} at line ${best.lineNum}`);
-            return Location.create(
-                fileUri,
-                {
-                    start: { line: best.lineNum, character: 0 },
-                    end: { line: best.lineNum, character: lines[best.lineNum].length }
-                }
-            );
+            // #690: the body's label, as every other path selects it.
+            return Location.create(fileUri, labelRange(best.lineNum, /^\S*/.exec(lines[best.lineNum])![0]));
         } catch (error) {
             logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
         }

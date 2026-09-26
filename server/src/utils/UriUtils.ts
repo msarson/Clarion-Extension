@@ -33,6 +33,13 @@ export function pathToCanonicalUri(absPath: string): string {
     return 'file:///' + p;
 }
 
+/** #690 — pathToCanonicalUri for a value that may already be a `file:///` URI in any spelling. */
+export function toCanonicalUri(pathOrUri: string): string {
+    return /^file:\/\//i.test(pathOrUri)
+        ? pathToCanonicalUri(decodeURIComponent(pathOrUri.replace(/^file:\/\/\/?/i, '')))
+        : pathToCanonicalUri(pathOrUri);
+}
+
 /** Directory → (lower-cased entry name → entry name as listed). */
 const listingCache = new Map<string, Map<string, string>>();
 

@@ -1,5 +1,7 @@
 import { Range } from 'vscode-languageserver-protocol';
+import { Location } from 'vscode-languageserver-protocol';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { toCanonicalUri } from './UriUtils';
 
 /**
  * #689 — the range of a procedure's NAME, for a location that points at a procedure: an
@@ -11,6 +13,19 @@ import { Token, TokenType } from '../tokenizer/TokenTypes';
  * `lineText` finds an indented label in the keyword form; without it the label is taken to start
  * the line, which is right for an implementation.
  */
+/**
+ * #690 — a label's range: labels start in column 0 (a CLASS member, a method body's
+ * `Class.Method`), so the name's length is the whole answer.
+ */
+export function labelRange(line: number, name: string): Range {
+    return { start: { line, character: 0 }, end: { line, character: name.length } };
+}
+
+/** #690 — a location at a column-0 label, with the canonical URI (#251) whatever `fileOrUri` was. */
+export function labelLocation(fileOrUri: string, line: number, name: string): Location {
+    return Location.create(toCanonicalUri(fileOrUri), labelRange(line, name));
+}
+
 export function procedureNameRange(token: Token, lineText?: string): Range {
     const line = token.line;
     const name = token.label ?? token.value;
