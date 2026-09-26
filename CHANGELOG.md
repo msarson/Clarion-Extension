@@ -79,7 +79,7 @@ All notable changes to the Clarion Extension are documented here.
 - **The extension's build result no longer outlives another build.** When your own build task starts (Ctrl+Shift+B or a script), the extension clears its last build's Problems and a failed-build message in the status bar, which described a build that was no longer current. **Clarion: Clear Build Results** does the same on demand. [#670](https://github.com/msarson/Clarion-Extension/issues/670)
 - **A full-solution build shows what it builds.** Each project of a solution build now writes the same header to the Clarion Build output as a single-project build: the project, the configuration and the MSBuild command line, which names the Clarion install used. [#671](https://github.com/msarson/Clarion-Extension/issues/671)
 - **Build errors in `.eq` files appear in Problems.** The build reported errors in `.clw`, `.inc`, `.equ` and `.int` files; one in an `.eq` equate file was left out. [#672](https://github.com/msarson/Clarion-Extension/issues/672)
-- **Build messages no longer end in ``.** A failing pre- or post-build step could reach Problems as "…cannot find the file specified.", because MSBuild writes a line break in a tool's output as those two characters. [#678](https://github.com/msarson/Clarion-Extension/issues/678)
+- **Build messages no longer end in `\r`.** A failing pre- or post-build step could reach Problems as "…cannot find the file specified.\r", because MSBuild writes a line break in a tool's output as those two characters. [#678](https://github.com/msarson/Clarion-Extension/issues/678)
 
 #### Performance
 
