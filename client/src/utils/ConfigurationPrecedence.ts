@@ -49,6 +49,16 @@ export function normalizeConfigurationTo(value: string | null | undefined, avail
 }
 
 /**
+ * #674 — the value Set Configuration stores for the name picked: the .sln's own entry for it
+ * (`Debug|Win32` when the .sln declares full forms), the form a solution load stores (#530), so
+ * the setting has one format whichever action wrote it. The picked name when the .sln declares
+ * no such configuration.
+ */
+export function configurationToStore(picked: string, declaredBySolution: string[]): string {
+    return normalizeConfigurationTo(picked, declaredBySolution) ?? picked;
+}
+
+/**
  * Precedence: an explicit setting, then the IDE's `.sln.cache`, then the history —
  * each only when the solution actually declares it — then the sole configuration
  * when there is just one, else ask.

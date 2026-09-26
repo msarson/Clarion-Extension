@@ -8,6 +8,9 @@ import { pushConfigurationToIde } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
+import { configurationToStore } from '../utils/ConfigurationPrecedence'; // #674
+import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers'; // #674
+import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
 logger.setLevel("error"); // Production: Only log errors
@@ -44,15 +47,20 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         return;
     }
 
-    const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
+    const picked = await vscodeWindow.showQuickPick(availableConfigs, {
         placeHolder: "Select a configuration",
     });
+    // #674: store the .sln's own entry for the name picked (`Release` -> `Release|Win32`), the form a
+    // solution load stores (#530), so the setting keeps one format whichever action wrote it.
+    const selectedConfig = picked
+        ? configurationToStore(picked, extractConfigurationsFromSolution(fs.readFileSync(globalSolutionFile, 'utf-8')))
+        : undefined;
 
     if (selectedConfig) {
-        logger.info(`✅ User selected configuration: ${selectedConfig}`);
+        logger.info(`✅ User selected configuration: ${picked} (stored as ${selectedConfig})`);
         logger.info(`📊 Current globalSettings.configuration BEFORE update: ${globalSettings.configuration}`);
-        
-        vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
+
+        vscodeWindow.showInformationMessage(`Configuration set to: ${picked}`);
         
         // Update global settings and save to workspace
         globalSettings.configuration = selectedConfig;
