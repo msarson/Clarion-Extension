@@ -5,11 +5,11 @@ import { renderUnresolvedReport, UnresolvedReportData } from '../views/Unresolve
 
 /**
  * #687 (experimental) — the unresolved file references report: the server's findings rendered as a
- * page, missing references first, conditional and library-like ones folded away, each row opening
- * the reference.
+ * page, missing INCLUDEs first, then MEMBERs, with MODULE names (possibly external libraries, per the
+ * Language Reference) and conditional ones folded away; each row opens the reference.
  */
 const entry = (over: Partial<UnresolvedReportData['references'][number]>) => ({
-    kind: 'INCLUDE' as const, target: 'gone.inc', line: 4, conditional: false, classModule: false,
+    kind: 'INCLUDE' as const, target: 'gone.inc', line: 4, conditional: false, classModule: false, dll: false,
     file: 'c:/app/main.clw', category: 'missing' as const, inProject: true, ...over,
 });
 const data = (over: Partial<UnresolvedReportData> = {}): UnresolvedReportData => ({
@@ -17,34 +17,55 @@ const data = (over: Partial<UnresolvedReportData> = {}): UnresolvedReportData =>
 });
 
 suite('Unresolved file references report page (#687)', () => {
-    test('summary counts each category', () => {
+    test('summary counts each category; MODULE names are not counted as problems', () => {
         const html = renderUnresolvedReport(data({ references: [
-            entry({}), entry({ category: 'conditional' }), entry({ category: 'library', kind: 'MODULE', target: 'Win32' }),
+            entry({}), entry({ category: 'conditional' }), entry({ category: 'member', kind: 'MEMBER', target: 'prog' }),
+            entry({ category: 'module', kind: 'MODULE', target: 'Win32' }), entry({ category: 'module', kind: 'MODULE', target: 'fe.clw' }),
         ] }), 'N', 'csp');
         assert.match(html, /120 files scanned in 0\.9 s/);
-        assert.match(html, /1 missing/);
+        assert.match(html, /1 missing include,/);
+        assert.match(html, /1 MEMBER program not found/);
+        assert.match(html, /2 MODULE names without a source file \(may be external libraries\)/);
         assert.match(html, /1 conditional/);
-        assert.match(html, /1 library name/);
     });
 
-    test('missing references are split by solution sources and other files, and rows open the line', () => {
+    test('bug-pin: a MODULE name with an extension is not reported as missing', () => {
+        const html = renderUnresolvedReport(data({ references: [entry({ category: 'module', kind: 'MODULE', classModule: true, target: 'fe.clw' })] }), 'N', 'csp');
+        assert.match(html, /0 missing includes/);
+        assert.match(html, /<details><summary>MODULE names without a source file \(1\)/);
+        assert.match(html, /any unique identifier/, 'says why, from the Language Reference');
+    });
+
+    test('a MODULE row shows its LINK and DLL attributes', () => {
+        const html = renderUnresolvedReport(data({ references: [
+            entry({ category: 'module', kind: 'MODULE', classModule: true, target: 'x.clw', link: 'xlib.lib', dll: true }),
+        ] }), 'N', 'csp');
+        assert.match(html, /<td>LINK\(&#39;xlib\.lib&#39;\), DLL<\/td>/);
+    });
+
+    test('MEMBER names a program file not found get their own section', () => {
+        const html = renderUnresolvedReport(data({ references: [entry({ category: 'member', kind: 'MEMBER', target: 'prog' })] }), 'N', 'csp');
+        assert.match(html, /<h2>MEMBER: program file not found \(1\)<\/h2>/);
+    });
+
+    test('missing includes are split by solution sources and other files, and rows open the line', () => {
         const html = renderUnresolvedReport(data({ references: [
             entry({ file: 'c:/app/main.clw', inProject: true }),
             entry({ file: 'c:/clarion/libsrc/x.inc', inProject: false, target: 'y.inc', line: 9 }),
         ] }), 'N', 'csp');
-        const own = html.indexOf('in the solution&#39;s source files');
-        const other = html.indexOf('in included and library files');
+        const own = html.indexOf('Missing includes: in the solution&#39;s source files');
+        const other = html.indexOf('Missing includes: in included and library files');
         assert.ok(own >= 0 && other > own);
         assert.match(html, /<tr data-file="c:\/app\/main\.clw" data-line="4">/);
         assert.match(html, /<td>5<\/td>/, 'lines are shown 1-based');
     });
 
-    test('conditional and library entries are folded away', () => {
+    test('conditional and MODULE entries are folded away', () => {
         const html = renderUnresolvedReport(data({ references: [
-            entry({ category: 'conditional' }), entry({ category: 'library', kind: 'MODULE', target: 'Win32' }),
+            entry({ category: 'conditional' }), entry({ category: 'module', kind: 'MODULE', target: 'Win32' }),
         ] }), 'N', 'csp');
         assert.match(html, /<details><summary>Inside OMIT or COMPILE blocks \(1\)/);
-        assert.match(html, /<details><summary>MODULE names with no file extension \(1\)/);
+        assert.match(html, /<details><summary>MODULE names without a source file \(1\)/);
     });
 
     test('project sources that could not be found come first', () => {
