@@ -260,10 +260,13 @@ async function findExecutable(outputInfo: ProjectOutputInfo): Promise<string | u
  * Runs an executable in a VS Code terminal
  * @param exePath - Path to the executable
  */
-function runExecutable(exePath: string, workingDir?: string, args?: string): void {
+function runExecutable(exePath: string, workingDir?: string, args?: string, projectDir?: string): void {
     // #676: a PowerShell terminal whatever the default profile is - the line uses PowerShell's &
     // call operator (so arguments like /debug are not misparsed), which cmd and Git Bash reject.
-    const plan = runTerminalPlan(exePath, workingDir, args);
+    // #679: clarion.run.command, when set, is sent instead of the exe.
+    const command = workspace.getConfiguration('clarion').get<string>('run.command', '');
+    const plan = runTerminalPlan(exePath, workingDir, args,
+        command.trim() ? { command, projectDir: projectDir ?? path.dirname(exePath) } : undefined);
     const terminal: Terminal = window.createTerminal({ name: plan.name, cwd: plan.cwd, shellPath: plan.shellPath });
     terminal.show();
     terminal.sendText(plan.command);
@@ -509,7 +512,11 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             logger.info(`🔍 Looking for executable...`);
 
-            const exePath = await findExecutable(outputInfo);
+            const found = await findExecutable(outputInfo);
+            // #679: with clarion.run.command set, that command decides what runs, so the exe need not
+            // be where it was compiled; ${exe} then names where it would be.
+            const customRun = workspace.getConfiguration('clarion').get<string>('run.command', '').trim() !== '';
+            const exePath = found ?? (customRun ? path.join(outputInfo.projectDir, `${outputInfo.outputName}.exe`) : undefined);
 
             if (!exePath) {
                 window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
@@ -521,7 +528,8 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             runExecutable(exePath,
                 outputInfo.startWorkingDirectory ? path.resolve(outputInfo.projectDir, outputInfo.startWorkingDirectory) : undefined,
-                outputInfo.startArguments);
+                outputInfo.startArguments,
+                outputInfo.projectDir);
             
             logger.info(`✅ Command completed successfully`);
         }),

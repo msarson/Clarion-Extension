@@ -978,6 +978,12 @@
           "default": "",
           "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
         },
+        "clarion.run.command": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "A command **Run Without Debugging** executes instead of the project's output exe, in a PowerShell terminal, from the project folder. `${exe}` (the output exe), `${projectDir}` and `${args}` (the project's start arguments) are substituted. Example: `& \"${projectDir}\\CopyRun.bat\"`. Leave empty to run the output exe. Debug still starts the exe itself."
+        },
         "clarion.build.showInOutputPanel": {
           "type": "boolean",
           "default": false,
