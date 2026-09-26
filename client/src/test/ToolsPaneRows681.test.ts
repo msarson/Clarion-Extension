@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow } from '../views/ToolsPaneRows';
+import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clarionVersionRow } from '../views/ToolsPaneRows';
 import { recordBuildLog, lastBuildLog } from '../utils/LastBuildLog';
 
 /**
@@ -57,6 +57,18 @@ suite('Clarion Tools pane settings rows (#681)', () => {
 
     test('settings row opens the build settings', () => {
         assert.strictEqual(settingsRow().command, 'openBuildSettings');
+    });
+
+    test('#683: the Clarion row sets the version, and the toolbar has no gear', () => {
+        const withSolution = clarionVersionRow('Clarion 12.0.14313', true);
+        assert.deepStrictEqual(
+            { label: withSolution.label, value: withSolution.value, command: withSolution.command, title: withSolution.title },
+            { label: 'Clarion', value: 'Clarion 12.0.14313', command: 'setActiveVersion', title: 'Set the Clarion version for this solution' });
+        assert.strictEqual(clarionVersionRow('Not set', false).title, 'Set the Clarion version');
+        const toolbar = read('client', 'src', 'views', 'SolutionToolbarProvider.ts');
+        assert.ok(!/<button[^>]*data-cmd="setActiveVersion"/.test(toolbar), 'no gear button');
+        assert.ok(toolbar.includes('clarionVersionRow('), 'the pane uses the row');
+        assert.ok(toolbar.includes("case 'setActiveVersion':"), 'the row click is still handled');
     });
 
     test('the last build log is remembered while the file exists', () => {

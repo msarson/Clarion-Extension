@@ -5,7 +5,7 @@ import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFa
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
-import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow } from './ToolsPaneRows'; // #681
+import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clarionVersionRow } from './ToolsPaneRows'; // #681, #683
 import { lastBuildLog } from '../utils/LastBuildLog'; // #681
 import { toolbarIcons } from './ToolbarIcons'; // #682
 
@@ -90,7 +90,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                     vscode.commands.executeCommand('clarion.startDebugging', true);
                     break;
                 case 'setActiveVersion':
-                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point.
+                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point; since #683 the Clarion row.
                     vscode.commands.executeCommand('clarion.setActiveVersion');
                     break;
                 case 'setConfiguration':
@@ -146,8 +146,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
      * onmessage`. Hypothesis was load-bearing.
      *
      * #141 Q9 directive #2 — `solutionLoaded` field gates toolbar Build/Run/
-     * Debug button visibility in the webview. "Open in IDE" + "Set Active
-     * Version" buttons remain visible regardless (meaningful in both modes).
+     * Debug button visibility in the webview. "Open in IDE" stays visible
+     * regardless, as does the Clarion row that sets the version (#683).
      */
     public update(): void {
         if (this._view) {
@@ -177,7 +177,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
         // #535 — a name the selected ClarionProperties.xml no longer registers says so.
         const versionLabel = versionRowLabel(effectiveVersion, defaultVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
-        rows.push({ label: 'Clarion', value: versionLabel });
+        rows.push(clarionVersionRow(versionLabel, !!globalSolutionFile)); // #683 — clickable; replaced the toolbar gear
 
         // #479 — the compile-target name stopped being a unique identifier once a
         // ClarionProperties.xml could live outside %APPDATA% (see #471): two
@@ -358,8 +358,6 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndRun}</button>
     <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>${toolbarIcons.debug}</button>
     <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndDebug}</button>
-    <div class="sep"></div>
-    <button title="Set the Clarion version for this solution" data-cmd="setActiveVersion">${toolbarIcons.settings}</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>

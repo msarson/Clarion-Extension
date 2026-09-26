@@ -26,10 +26,12 @@ suite('Set Version is named for what it does (#677)', () => {
         assert.strictEqual(cmd!.title, 'Set Version'); // shown as Clarion: Set Version, as #498's and #535's prompts say
     });
 
-    test('bug-pin: the Actions gear says it sets the version for the open solution', () => {
+    test('bug-pin: the Actions view says it sets the version for the open solution', () => {
+        // #683 — the gear button is gone; the Clarion row of the details table carries the tooltip.
         const toolbar = read('client', 'src', 'views', 'SolutionToolbarProvider.ts');
-        assert.ok(!/title="Set Active Clarion Version"/.test(toolbar), 'old tooltip gone');
-        assert.ok(/title="Set the Clarion version for this solution"/.test(toolbar), 'new tooltip');
+        const rows = read('client', 'src', 'views', 'ToolsPaneRows.ts');
+        assert.ok(!/Set Active Clarion Version/.test(toolbar + rows), 'old tooltip gone');
+        assert.ok(rows.includes("'Set the Clarion version for this solution'"), 'new tooltip');
     });
 
     test('the handler\'s comment no longer claims it leaves the solution alone', () => {

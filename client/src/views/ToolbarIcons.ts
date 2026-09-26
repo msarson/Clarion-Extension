@@ -9,8 +9,6 @@ const PLAY = '<path d="M4 2.5 13 8 4 13.5Z" fill="currentColor"/>';
 const BUG = '<ellipse cx="8" cy="9.5" rx="3.3" ry="4.3" fill="currentColor"/>'
     + '<circle cx="8" cy="3.8" r="1.9" fill="currentColor"/>'
     + '<path d="M4.7 7.5 1.8 6M4.7 10H1.5M4.9 12.5 2 14.2M11.3 7.5 14.2 6M11.3 10h3.2M11.1 12.5 14 14.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>';
-const GEAR = '<circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-dasharray="2.2 2.2"/>'
-    + '<circle cx="8" cy="8" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/>';
 
 const svg = (body: string) => `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${body}</svg>`;
 /** The run or debug icon, shifted right, with the hammer small at the top left. */
@@ -22,5 +20,4 @@ export const toolbarIcons = {
     buildAndRun: withHammer(PLAY),
     debug: svg(BUG),
     buildAndDebug: withHammer(BUG),
-    settings: svg(GEAR),
 };

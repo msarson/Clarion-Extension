@@ -39,3 +39,14 @@ export function startupRow(name: string | undefined): SummaryRow {
 export function settingsRow(): SummaryRow {
     return { label: 'Settings', value: 'Build…', command: 'openBuildSettings', title: 'Open the Clarion build settings' };
 }
+
+/**
+ * #683 — the Clarion version, clickable to run Clarion: Set Version (it replaced the toolbar gear).
+ * With a solution open a pick is that solution's version (#677); without one, the default.
+ */
+export function clarionVersionRow(label: string, solutionOpen: boolean): SummaryRow {
+    return {
+        label: 'Clarion', value: label, command: 'setActiveVersion',
+        title: solutionOpen ? 'Set the Clarion version for this solution' : 'Set the Clarion version',
+    };
+}

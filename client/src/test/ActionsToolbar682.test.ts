@@ -39,7 +39,7 @@ suite('Actions toolbar layout (#682)', () => {
     test('bug-pin: the buttons draw icons, not emoji text', () => {
         assert.doesNotMatch(toolbar, /[\u{1F528}\u{1F41B}▶⚙]|&#xFE0E;/u, 'no hammer, bug, play or gear glyphs');
         const buttons = toolbar.match(/<button[\s\S]*?<\/button>/g) ?? [];
-        assert.strictEqual(buttons.length, 7);
+        assert.strictEqual(buttons.length, 6); // #683: the version gear moved to the Clarion row
         for (const b of buttons) {
             assert.match(b, /<img|\$\{toolbarIcons\.\w+\}/, `an icon in ${b.slice(0, 60)}`);
         }
@@ -49,7 +49,7 @@ suite('Actions toolbar layout (#682)', () => {
     });
 
     test('every button keeps its tooltip and command', () => {
-        for (const cmd of ['openInClarionIDE', 'build', 'run', 'buildAndRun', 'startDebugging', 'buildAndDebug', 'setActiveVersion']) {
+        for (const cmd of ['openInClarionIDE', 'build', 'run', 'buildAndRun', 'startDebugging', 'buildAndDebug']) {
             assert.match(toolbar, new RegExp(`title="[^"]+" data-cmd="${cmd}"`), cmd);
         }
     });
