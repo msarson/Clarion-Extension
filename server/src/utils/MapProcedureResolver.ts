@@ -17,6 +17,7 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from './TokenHelper';
+import { procedureNameRange } from './ProcedureNameRange'; // #689
 import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
@@ -564,7 +565,7 @@ export class MapProcedureResolver {
         }
 
         // Collect all candidate declarations
-        const candidates: Array<{ token: Token, signature: string }> = [];
+        const candidates: Array<{ token: Token, signature: string, lineText?: string }> = [];
 
         // The MAPs this lookup may search (local-MAP scoping applied once).
         const eligibleMaps = mapStructures.filter(mapToken => {
@@ -613,6 +614,7 @@ export class MapProcedureResolver {
                     // Get the full line as signature
                     // If token is from an INCLUDE, get content from the INCLUDE file
                     let signature: string;
+                    let lineText: string | undefined; // #689
                     let sourceUri: string;
                     
                     if (t.sourceFile && t.sourceContext?.isFromInclude) {
@@ -625,6 +627,7 @@ export class MapProcedureResolver {
                             const fs = require('fs');
                             const content = fs.readFileSync(t.sourceFile, 'utf8');
                             const lines = content.split('\n');
+                            lineText = lines[t.line]?.replace(/\r$/, '');
                             signature = lines[t.line]?.trim() || '';
                         } catch (error) {
                             logger.info(`   ⚠️ Could not read INCLUDE file: ${error}`);
@@ -635,10 +638,11 @@ export class MapProcedureResolver {
                         sourceUri = document.uri;
                         const content = document.getText();
                         const lines = content.split('\n');
+                        lineText = lines[t.line]?.replace(/\r$/, '');
                         signature = lines[t.line].trim();
                     }
                     
-                    candidates.push({ token: t, signature });
+                    candidates.push({ token: t, signature, lineText });
                     logger.info(`✅ Found MAP declaration candidate at line ${t.line}: ${signature}`);
                     if (t.sourceFile) {
                         logger.info(`   📁 Source: ${t.sourceFile}`);
@@ -665,10 +669,7 @@ export class MapProcedureResolver {
                 logger.info(`   📁 Location: ${targetUri}`);
             }
             
-            return Location.create(targetUri, {
-                start: { line: candidate.token.line, character: 0 },
-                end: { line: candidate.token.line, character: candidate.token.value.length }
-            });
+            return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
         }
 
         // Multiple candidates - use overload resolution
@@ -686,10 +687,7 @@ export class MapProcedureResolver {
                     ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                     : document.uri;
                 logger.info(`✅ [#248] Call-args matched MAP decl at line ${candidate.token.line}`);
-                return Location.create(targetUri, {
-                    start: { line: candidate.token.line, character: 0 },
-                    end: { line: candidate.token.line, character: candidate.token.value.length }
-                });
+                return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
             }
         }
 
@@ -712,10 +710,7 @@ export class MapProcedureResolver {
                         logger.info(`   📁 Location: ${targetUri}`);
                     }
                     
-                    return Location.create(targetUri, {
-                        start: { line: candidate.token.line, character: 0 },
-                        end: { line: candidate.token.line, character: candidate.token.value.length }
-                    });
+                    return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
                 }
             }
             
@@ -733,10 +728,7 @@ export class MapProcedureResolver {
             logger.info(`   📁 Location: ${targetUri}`);
         }
         
-        return Location.create(targetUri, {
-            start: { line: firstCandidate.token.line, character: 0 },
-            end: { line: firstCandidate.token.line, character: firstCandidate.token.value.length }
-        });
+        return Location.create(targetUri, procedureNameRange(firstCandidate.token, firstCandidate.lineText));
     }
 
     /**
@@ -949,7 +941,7 @@ export class MapProcedureResolver {
         logger.info(`   No MODULE reference found for procedure, searching current file`);
 
         // Find all GlobalProcedure implementations with matching name in current file
-        const candidates: Array<{ token: Token, signature: string }> = [];
+        const candidates: Array<{ token: Token, signature: string, lineText?: string }> = [];
         
         const implementations = TokenHelper.findTokens(tokens, {
             subType: TokenType.GlobalProcedure
@@ -974,10 +966,7 @@ export class MapProcedureResolver {
         if (candidates.length === 1) {
             const impl = candidates[0].token;
             logger.info(`Found single implementation for ${procName} at line ${impl.line}`);
-            return Location.create(document.uri, {
-                start: { line: impl.line, character: 0 },
-                end: { line: impl.line, character: impl.value.length }
-            });
+            return Location.create(document.uri, procedureNameRange(impl));
         }
 
         // Multiple candidates - use overload resolution
@@ -991,10 +980,7 @@ export class MapProcedureResolver {
             if (picked >= 0) {
                 const candidate = candidates[picked];
                 logger.info(`✅ [#248] Call-args matched implementation at line ${candidate.token.line}`);
-                return Location.create(document.uri, {
-                    start: { line: candidate.token.line, character: 0 },
-                    end: { line: candidate.token.line, character: candidate.token.value.length }
-                });
+                return Location.create(document.uri, procedureNameRange(candidate.token, candidate.lineText));
             }
         }
 
@@ -1009,10 +995,7 @@ export class MapProcedureResolver {
                 
                 if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                     logger.info(`✅ Found exact type match at line ${candidate.token.line}`);
-                    return Location.create(document.uri, {
-                        start: { line: candidate.token.line, character: 0 },
-                        end: { line: candidate.token.line, character: candidate.token.value.length }
-                    });
+                    return Location.create(document.uri, procedureNameRange(candidate.token, candidate.lineText));
                 }
             }
             
@@ -1022,10 +1005,7 @@ export class MapProcedureResolver {
         // Fallback to first candidate
         const impl = candidates[0].token;
         logger.info(`Returning first implementation at line ${impl.line}`);
-        return Location.create(document.uri, {
-            start: { line: impl.line, character: 0 },
-            end: { line: impl.line, character: impl.value.length }
-        });
+        return Location.create(document.uri, procedureNameRange(impl));
     }
 
     /**
@@ -1232,10 +1212,7 @@ export class MapProcedureResolver {
                                 
                                 if (impl) {
                                     logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                    return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                        start: { line: impl.line, character: 0 },
-                                        end: { line: impl.line, character: impl.value.length }
-                                    });
+                                    return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                 }
                                 
                                 logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1316,10 +1293,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                                start: { line: impl.line, character: 0 },
-                                                end: { line: impl.line, character: impl.value.length }
-                                            });
+                                            return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                         }
                                         
                                         logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1359,10 +1333,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found implementation directly in file at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
                 
                 logger.info(`No implementation found for ${procName}`);
@@ -1380,10 +1351,7 @@ export class MapProcedureResolver {
             );
             if (directImpl) {
                 logger.info(`✅ #484: direct implementation in ${path.basename(resolvedPath)} at line ${directImpl.line} — no MAP expansion`);
-                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                    start: { line: directImpl.line, character: 0 },
-                    end: { line: directImpl.line, character: directImpl.value.length }
-                });
+                return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(directImpl)); // #251
             }
 
             logger.info(`📋 Found MAP in ${path.basename(resolvedPath)}, searching for procedure declaration`);
@@ -1419,10 +1387,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found direct implementation in file at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
                 
                 return null;
@@ -1480,10 +1445,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                                start: { line: impl.line, character: 0 },
-                                                end: { line: impl.line, character: impl.value.length }
-                                            });
+                                            return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                         }
                                         
                                         logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1520,10 +1482,7 @@ export class MapProcedureResolver {
             if (implementations.length === 1) {
                 const impl = implementations[0];
                 logger.info(`✅ Found implementation in MODULE file at line ${impl.line}`);
-                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                    start: { line: impl.line, character: 0 },
-                    end: { line: impl.line, character: impl.value.length }
-                });
+                return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
             }
             
             // Multiple implementations - try overload resolution
@@ -1539,10 +1498,7 @@ export class MapProcedureResolver {
                 if (picked >= 0) {
                     const impl = implementations[picked];
                     logger.info(`✅ [#248] Call-args matched MODULE implementation at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
 
                 if (ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
@@ -1554,10 +1510,7 @@ export class MapProcedureResolver {
 
                         if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                             logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
-                            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                                start: { line: impl.line, character: 0 },
-                                end: { line: impl.line, character: impl.value.length }
-                            });
+                            return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                         }
                     }
                 }
@@ -1566,10 +1519,7 @@ export class MapProcedureResolver {
             // Fallback to first implementation
             const impl = implementations[0];
             logger.info(`Returning first implementation from MODULE file at line ${impl.line}`);
-            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                start: { line: impl.line, character: 0 },
-                end: { line: impl.line, character: impl.value.length }
-            });
+            return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
             
         } catch (error) {
             logger.error(`Error searching MODULE file: ${error}`);
