@@ -8,6 +8,7 @@ import { getLanguageClient } from '../LanguageClientManager';
 import LoggerManager from '../utils/LoggerManager';
 import { TrailingCoalescer } from '../utils/TrailingCoalescer';
 import * as path from 'path';
+import { ContentChangeTracker } from '../utils/ContentChangeTracker'; // #680
 import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("FileWatcherManager");
@@ -56,11 +57,13 @@ export async function createSolutionFileWatchers(
 
     // Create watchers for the solution file itself
     const solutionWatcher = workspace.createFileSystemWatcher(globalSolutionFile);
+    watchedContent.remember(globalSolutionFile); // #680
 
     // Mark as a file watcher for cleanup
     (solutionWatcher as any)._isFileWatcher = true;
 
     solutionWatcher.onDidChange(async (uri) => {
+        if (!watchedContent.changed(uri.fsPath)) { logger.info(`⏭️ #680 — solution file touched, content unchanged: ${uri.fsPath}`); return; }
         logger.info(`🔄 Solution file changed: ${uri.fsPath}`);
         await handleSolutionFileChange(context, reinitializeEnvironment);
     });
@@ -82,11 +85,13 @@ export async function createSolutionFileWatchers(
 
             if (fs.existsSync(projectFilePath)) {
                 const projectWatcher = workspace.createFileSystemWatcher(projectFilePath);
+                watchedContent.remember(projectFilePath); // #680
 
                 // Mark as a file watcher for cleanup
                 (projectWatcher as any)._isFileWatcher = true;
 
                 projectWatcher.onDidChange((uri) => {
+                    if (!watchedContent.changed(uri.fsPath)) { logger.info(`⏭️ #680 — project file touched, content unchanged: ${uri.fsPath}`); return; }
                     logger.info(`🔄 Project file changed: ${uri.fsPath}`);
                     projectChangeCoalescer?.trigger();
                 });
@@ -101,11 +106,13 @@ export async function createSolutionFileWatchers(
             if (!watchedRedFiles.has(projectRedFile) && fs.existsSync(projectRedFile)) {
                 watchedRedFiles.add(projectRedFile);
                 const redFileWatcher = workspace.createFileSystemWatcher(projectRedFile);
+                watchedContent.remember(projectRedFile); // #680
 
                 // Mark as a file watcher for cleanup
                 (redFileWatcher as any)._isFileWatcher = true;
 
                 redFileWatcher.onDidChange((uri) => {
+                    if (!watchedContent.changed(uri.fsPath)) { logger.info(`⏭️ #680 — redirection file touched, content unchanged: ${uri.fsPath}`); return; }
                     logger.info(`🔄 Redirection file changed: ${uri.fsPath}`);
                     redirectionChangeCoalescer?.trigger();
                 });
@@ -126,10 +133,12 @@ export async function createSolutionFileWatchers(
                                 if (!watchedRedFiles.has(redFile) && fs.existsSync(redFile)) {
                                     watchedRedFiles.add(redFile);
                                     const includedRedWatcher = workspace.createFileSystemWatcher(redFile);
+                                    watchedContent.remember(redFile); // #680
 
                                     (includedRedWatcher as any)._isFileWatcher = true;
 
                                     includedRedWatcher.onDidChange((uri) => {
+                                        if (!watchedContent.changed(uri.fsPath)) { logger.info(`⏭️ #680 — included redirection file touched, content unchanged: ${uri.fsPath}`); return; }
                                         logger.info(`🔄 Included redirection file changed: ${uri.fsPath}`);
                                         redirectionChangeCoalescer?.trigger();
                                     });
@@ -152,11 +161,13 @@ export async function createSolutionFileWatchers(
 
     if (fs.existsSync(globalRedFile)) {
         const globalRedWatcher = workspace.createFileSystemWatcher(globalRedFile);
+        watchedContent.remember(globalRedFile); // #680
 
         // Mark as a file watcher for cleanup
         (globalRedWatcher as any)._isFileWatcher = true;
 
         globalRedWatcher.onDidChange((uri) => {
+            if (!watchedContent.changed(uri.fsPath)) { logger.info(`⏭️ #680 — global redirection file touched, content unchanged: ${uri.fsPath}`); return; }
             logger.info(`🔄 Global redirection file changed: ${uri.fsPath}`);
             redirectionChangeCoalescer?.trigger();
         });
@@ -165,6 +176,13 @@ export async function createSolutionFileWatchers(
         logger.info(`✅ Added watcher for global redirection file: ${globalRedFile}`);
     }
 }
+
+/**
+ * #680 — a watched .sln / .cwproj / .red counts as changed only when its content changed: a file
+ * touched without being changed (a build step, git, a tool rewriting the same bytes) raised a change
+ * event too, and each reloaded the solution and announced "… updated".
+ */
+const watchedContent = new ContentChangeTracker(p => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } });
 
 /**
  * Handles changes to redirection files (.red)
