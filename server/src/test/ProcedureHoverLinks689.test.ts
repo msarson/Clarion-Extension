@@ -133,4 +133,12 @@ suite('Procedure hover links to a declaration in the PROGRAM MAP (#689)', () => 
         opens(found[0].target, 'prog.clw', 8);
         opens(found[1].target, 'impl.clw', 3);
     });
+
+    test('bug-pin (#691): every link in the card is canonical, so both halves of the footer match', async () => {
+        for (const [rel, line, ch] of [['impl.clw', 2, 3], ['caller.clw', 4, 5]] as const) {
+            for (const l of links(await card(rel, line, ch))) {
+                assert.match(l.target, /^file:\/\/\/[a-z]%3A\//, `canonical (#251), got ${l.target}`);
+            }
+        }
+    });
 });

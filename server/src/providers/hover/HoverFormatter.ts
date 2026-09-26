@@ -917,21 +917,25 @@ export class HoverFormatter {
 
     /**
      * Normalises a location to a `file:` URI for linking, or null when it can't be one.
-     * Already-URI inputs are passed through untouched (they are already percent-encoded); a plain
-     * path is converted segment-wise so spaces survive. The drive-letter segment (`d:`) is left
-     * UNESCAPED — that's the canonical `file:///d:/...` form vscode-uri/Node's pathToFileURL both
-     * produce (and what the OTHER half of a decl→impl footer already uses, since that one comes
-     * from an already-formed `file://` Location.uri). Percent-encoding it as `d%3A` — this
-     * function's first cut — was inconsistent with that and, being non-canonical, an avoidable
-     * risk for any URI consumer that special-cases the raw two-char drive-letter pattern.
+     *
+     * #691 — every link comes out in the canonical form (#251): lower-case drive, encoded colon,
+     * each segment percent-encoded so spaces survive (`file:///d%3A/src%20dir/x.clw`), whether the
+     * location arrived as a plain path or as a `file:` URI in any spelling. #389 left a plain
+     * path's drive unescaped (`file:///d:/`) to match the other half of a footer, which was then
+     * a hand-built `file:///D:/` location; since #251 locations are canonical, so that choice had
+     * become the mismatch it was meant to avoid.
      */
     private toFileUri(fileOrUri: string): string | null {
         if (!fileOrUri) return null;
-        if (fileOrUri.startsWith('file://')) return fileOrUri;
-        if (fileOrUri.includes('://')) return null;   // test:// and friends — not openable
-        const segments = fileOrUri.replace(/\\/g, '/').split('/');
+        let filePath = fileOrUri;
+        if (/^file:\/\//i.test(fileOrUri)) {
+            try { filePath = decodeURIComponent(fileOrUri.replace(/^file:\/\/\/?/i, '')); } catch { return fileOrUri; }
+        } else if (fileOrUri.includes('://')) {
+            return null;   // test:// and friends — not openable
+        }
+        const segments = filePath.replace(/\\/g, '/').split('/');
         const encoded = segments.map((seg, i) =>
-            i === 0 && /^[a-zA-Z]:$/.test(seg) ? seg : encodeURIComponent(seg));
+            i === 0 && /^[a-zA-Z]:$/.test(seg) ? `${seg[0].toLowerCase()}%3A` : encodeURIComponent(seg));
         return 'file:///' + encoded.join('/');
     }
 

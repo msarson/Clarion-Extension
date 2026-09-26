@@ -6,6 +6,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
 import { TokenCache } from '../TokenCache';
+import { pathToCanonicalUri } from '../utils/UriUtils';
 
 /**
  * resolveMethodDeclaration()'s "implementation found" footer must render as a CLICKABLE
@@ -77,7 +78,8 @@ suite('MethodHoverResolver — declaration hover implementation footer is a clic
         assert.ok(!content.includes('Implementation not found'),
             `should resolve the implementation; got: ${content}`);
 
-        const expectedLink = `[class-with-impl.clw:9](${uri}#L9)`;
+        // #691: links are canonical (#251) whatever spelling the document's URI had.
+        const expectedLink = `[class-with-impl.clw:9](${pathToCanonicalUri(filePath)}#L9)`;
         assert.ok(content.includes(expectedLink),
             `implementation footer must be a clickable markdown link, not plain text; got: ${content}`);
     });
