@@ -417,6 +417,33 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             updateSolutionToolbar();
         }),
         
+        // #681 — the Clarion Tools pane's Startup row: pick from the projects Run can start.
+        commands.registerCommand('clarion.chooseStartupProject', async () => {
+            const solutionInfo = SolutionCache.getInstance().getSolutionInfo();
+            if (!solutionInfo) {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
+            const runnable = solutionInfo.projects.filter(isRunnableProject);
+            if (runnable.length === 0) {
+                window.showWarningMessage("No project in this solution builds a program to start.");
+                return;
+            }
+            const current = (workspace.getConfiguration('clarion').get<string>('startupProject') ?? '').replace(/[{}]/g, '').toLowerCase();
+            const picked = await window.showQuickPick(
+                runnable.map(p => ({
+                    label: p.name,
+                    description: p.guid.replace(/[{}]/g, '').toLowerCase() === current ? 'current' : undefined,
+                    detail: p.path,
+                    project: p,
+                })),
+                { placeHolder: 'Select the startup project' }
+            );
+            if (picked) {
+                await commands.executeCommand('clarion.setStartupProject', { data: picked.project });
+            }
+        }),
+
         commands.registerCommand('clarion.clearStartupProject', async () => {
             logger.info("🗑️ Clearing startup project...");
             

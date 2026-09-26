@@ -5,6 +5,8 @@ import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFa
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
+import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow } from './ToolsPaneRows'; // #681
+import { lastBuildLog } from '../utils/LastBuildLog'; // #681
 
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
@@ -94,10 +96,39 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                     // #530 — the Config row in the summary table.
                     vscode.commands.executeCommand('clarion.setConfiguration');
                     break;
+                // #681 — the settings rows.
+                case 'buildLogMenu':
+                    void this.showBuildLogMenu();
+                    break;
+                case 'chooseStartupProject':
+                    vscode.commands.executeCommand('clarion.chooseStartupProject');
+                    break;
+                case 'openRunCommandSetting':
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.run.command');
+                    break;
+                case 'openBuildSettings':
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.build');
+                    break;
             }
         });
 
         logger.info("✅ Solution toolbar webview resolved");
+    }
+
+    /** #681 — the Build log row: open the last kept log, or turn keeping on or off. */
+    private async showBuildLogMenu(): Promise<void> {
+        const settings = vscode.workspace.getConfiguration('clarion.build');
+        const keep = settings.get<boolean>('preserveLogFile', false);
+        const log = lastBuildLog();
+        const picked = await vscode.window.showQuickPick(buildLogMenu(keep, !!log), { placeHolder: 'Build log' });
+        if (!picked) return;
+        if (picked.action === 'open' && log) {
+            await vscode.window.showTextDocument(vscode.Uri.file(log), { preview: true });
+            return;
+        }
+        const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+        await settings.update('preserveLogFile', picked.action === 'keep', target);
+        this.update();
     }
 
     /**
@@ -177,16 +208,21 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         if (solutionInfo) {
             rows.push({ label: 'Projects', value: String(solutionInfo.projects.length) });
 
-            const startupGuid = vscode.workspace.getConfiguration('clarion').get<string>('startupProject');
-            if (startupGuid) {
-                const startup = solutionInfo.projects.find(p =>
+            // #681 — always shown with projects, and clickable: Run and Debug start it (#666).
+            if (solutionInfo.projects.length > 0) {
+                const startupGuid = vscode.workspace.getConfiguration('clarion').get<string>('startupProject');
+                const startup = startupGuid ? solutionInfo.projects.find(p =>
                     p.guid.replace(/[{}]/g, '').toLowerCase() === startupGuid.replace(/[{}]/g, '').toLowerCase()
-                );
-                if (startup) {
-                    rows.push({ label: 'Startup', value: startup.name });
-                }
+                ) : undefined;
+                rows.push(startupRow(startup?.name));
             }
         }
+
+        // #681 — the settings that change what Build and Run do.
+        const runRow = runCommandRow(vscode.workspace.getConfiguration('clarion').get<string>('run.command', ''));
+        if (runRow) rows.push(runRow);
+        rows.push(buildLogRow(vscode.workspace.getConfiguration('clarion.build').get<boolean>('preserveLogFile', false), lastBuildLog()));
+        rows.push(settingsRow());
 
         if (this._graphStatus) {
             if (this._graphStatus.status === 'building') {

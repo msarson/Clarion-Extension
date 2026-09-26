@@ -269,6 +269,12 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.chooseStartupProject",
+        "title": "Choose Startup Project",
+        "category": "Clarion",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.clearStartupProject",
         "title": "Clear Startup Project",
         "category": "Clarion",
