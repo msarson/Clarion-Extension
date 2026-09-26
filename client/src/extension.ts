@@ -17,6 +17,7 @@ import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerRunCommands } from './commands/RunCommands';
+import { registerReportCommands } from './commands/ReportCommands'; // #687
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands, registerNoFolderSolutionCommands } from './commands/SolutionCommands';
 import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
@@ -312,6 +313,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
         ...registerRunCommands(solutionTreeDataProvider),
+        ...registerReportCommands(), // #687
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
         ...registerTreeCommands(solutionTreeDataProvider)
     );

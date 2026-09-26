@@ -107,6 +107,9 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'openRunCommandSetting':
                     vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.run.command');
                     break;
+                case 'unresolvedReport':
+                    vscode.commands.executeCommand('clarion.unresolvedReferencesReport'); // #687
+                    break;
                 case 'openBuildSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.build');
                     break;
@@ -242,7 +245,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 const missing = unresolved > 0
                     ? `, ⚠️ ${unresolved}${total ? ` of ${total}` : ''} unresolved`
                     : '';
-                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}` });
+                // #687 (experimental) — clickable: the unresolved file references report.
+                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}`, command: 'unresolvedReport', title: 'Show the file references that do not resolve (experimental)' });
             }
         }
 

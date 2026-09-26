@@ -2549,6 +2549,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                     }
                 }
                 const sourceFileCount = allFiles.length + unresolved.length;
+                graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
                 if (unresolved.length > 0) {
                     // Logged at `error` deliberately: this logger is pinned to
                     // "error", so a `warn` would be as silent as the bug. Partial
@@ -2942,6 +2943,34 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
 });
 
 // Add a handler for getting search paths for a project and extension
+// #687 (experimental) — the file references the graph could not resolve. The graph drops them when
+// it builds (and caches only resolved edges), so this rescans its files with the same resolver, in
+// chunks that yield to the event loop.
+connection.onRequest('clarion/unresolvedReferences', async () => {
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const { unresolvedReferences } = await import('./utils/UnresolvedReferences');
+    const graph = FileRelationshipGraph.getInstance();
+    const started = Date.now();
+    const files = graph.getScannedFiles();
+    const read = (file: string): string | null => {
+        try { return fs.readFileSync(file, 'latin1'); } catch { return null; }
+    };
+    const references: Array<ReturnType<typeof unresolvedReferences>[number] & { inProject: boolean }> = [];
+    for (let i = 0; i < files.length; i += 100) {
+        for (const entry of unresolvedReferences(files.slice(i, i + 100), read, (target, from) => graph.resolveReference(target, from))) {
+            references.push({ ...entry, inProject: graph.isProjectSource(entry.file) });
+        }
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    return {
+        built: graph.isBuilt,
+        filesScanned: files.length,
+        ms: Date.now() - started,
+        projectSources: graph.unresolvedProjectSources,
+        references,
+    };
+});
+
 connection.onRequest('clarion/getSearchPaths', (params: { projectName: string, extension: string }): string[] => {
     logger.info(`🔍 Received request for search paths for project ${params.projectName} and extension ${params.extension}`);
     

@@ -1123,6 +1123,20 @@ export class FileRelationshipGraph {
      * `fromFile` is preserved on the signature for the 6 token-walk callers
      * but is no longer threaded into the parser call.
      */
+    // ── #687 (experimental) — the unresolved file references report's view of the graph ──
+
+    /** Every file the graph processed (normalised paths). */
+    public getScannedFiles(): string[] { return [...this.scannedFiles]; }
+
+    /** The resolver the graph builds its edges with; null is a reference the graph dropped. */
+    public resolveReference(target: string, fromFile: string): string | null { return this.resolveFile(target, fromFile); }
+
+    /** The file is one of the solution's own sources (a .cwproj compile item), not an include or library file. */
+    public isProjectSource(filePath: string): boolean { return this.ownerProjectByFile?.has(this.normalizePath(filePath)) ?? false; }
+
+    /** #434's project sources (project/relative path) that could not be found, as of the last build. */
+    public unresolvedProjectSources: string[] = [];
+
     /**
      * #315 — normalized seed path → owning project. Built ONCE per graph build.
      * The first cut called `findProjectForFile` per resolution, which scans
