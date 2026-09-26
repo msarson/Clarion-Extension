@@ -563,8 +563,15 @@ async function offerToRemoveShadowedFolderSettings(): Promise<void> {
         const folderFile = folder ? path.join(folder.uri.fsPath, '.vscode', 'settings.json') : 'the folder settings';
         const names = shadowed.map(k => `clarion.${k}`).join(', ');
         logger.warn(`⚠️ #587 — folder settings shadow the workspace file: ${names}`);
+        // #669: modal. This is the one place the user decides which copy is right (the workspace
+        // file can hold what they meant and the folder a stale copy, or the reverse), and as a toast
+        // it hid itself before it was answered. It appears only while the two files disagree.
         const choice = await vscodeWindow.showWarningMessage(
-            `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.`,
+            `Clarion settings disagree between this workspace file and the folder settings.`,
+            {
+                modal: true,
+                detail: `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.\n\nRemove the folder copies to put the workspace file in force.`,
+            },
             'Remove from folder settings',
             'Keep as is'
         );
