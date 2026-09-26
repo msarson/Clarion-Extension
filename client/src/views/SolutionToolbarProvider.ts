@@ -7,6 +7,7 @@ import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
 import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow } from './ToolsPaneRows'; // #681
 import { lastBuildLog } from '../utils/LastBuildLog'; // #681
+import { toolbarIcons } from './ToolbarIcons'; // #682
 
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
@@ -290,28 +291,35 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   }
   tr.clickable { cursor: pointer; }
   tr.clickable:hover td { text-decoration: underline; }
+  /* #682 — a narrow side bar wraps the toolbar; buttons keep their size and are never cut off. */
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 2px;
   }
   button {
+    flex: none;
+    white-space: nowrap;
+    width: 24px;
+    height: 22px;
     background: none;
     border: none;
     cursor: pointer;
-    padding: 3px 5px;
+    padding: 0;
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    color: var(--vscode-foreground);
+    color: var(--vscode-icon-foreground, var(--vscode-foreground));
   }
+  button svg { display: block; }
   button:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
   }
   button img { width: 16px; height: 16px; }
   .sep {
+    flex: none;
     width: 1px;
     height: 16px;
     background: var(--vscode-widget-border, rgba(128,128,128,0.3));
@@ -344,14 +352,14 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   <div class="toolbar">
     <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
     <div class="sep" data-solution-only${initialHiddenAttr}></div>
-    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;</button>
+    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>${toolbarIcons.build}</button>
     <div class="sep" data-solution-only${initialHiddenAttr}></div>
-    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>▶&#xFE0E;</button>
-    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;🐛&#xFE0E;</button>
+    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>${toolbarIcons.run}</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndRun}</button>
+    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>${toolbarIcons.debug}</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndDebug}</button>
     <div class="sep"></div>
-    <button title="Set the Clarion version for this solution" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
+    <button title="Set the Clarion version for this solution" data-cmd="setActiveVersion">${toolbarIcons.settings}</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
