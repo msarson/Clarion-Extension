@@ -36,6 +36,7 @@ import { serverSettings } from '../serverSettings'; // #559
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
@@ -572,12 +573,13 @@ export class ReferencesProvider {
         }
 
         // Plain symbol path
-        const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
-        if (!symbolInfo) {
+        const foundSymbol = await this.symbolFinder.findSymbol(word, document, position);
+        if (!foundSymbol) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
             this.trace({ route: 'procedure-hunt', word });
             return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token, undefined, crossProjectDll);
         }
+        const symbolInfo = await this.mapDeclarationOfImplementation(foundSymbol, document, tokens);
 
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document, crossProjectDll);
@@ -2716,6 +2718,47 @@ export class ReferencesProvider {
     }
 
     // ─── Plain symbol helpers ─────────────────────────────────────────────────
+
+    /**
+     * A procedure's IMPLEMENTATION label in a MEMBER module resolves as its own
+     * module-scope declaration, and getFilesToSearch widens a module procedure only
+     * through the declaring file's forward MODULE edges and its includers. An
+     * implementation module has neither — the MODULE edge runs from the MAP that
+     * declares it — so FAR from `Target PROCEDURE` answered only that line, while
+     * the MAP line and every call site answered all of them (#602 from the other end).
+     *
+     * Follow the edge back the way Go to Definition does from the same label
+     * (findMapDeclarationInMemberFile) and search from that declaration, which is
+     * then the search FAR runs from the MAP line: #602 widens a PROGRAM MAP to the
+     * program. Anything else is returned unchanged.
+     */
+    private async mapDeclarationOfImplementation(symbolInfo: SymbolInfo, document: TextDocument, tokens: Token[]): Promise<SymbolInfo> {
+        if (symbolInfo.type !== 'PROCEDURE' || symbolInfo.scope.type !== 'module') return symbolInfo;
+        if (symbolInfo.location.uri !== document.uri) return symbolInfo;
+        const name = symbolInfo.token.value.toLowerCase();
+        const impl = tokens.find(t =>
+            t.line === symbolInfo.location.line &&
+            t.subType === TokenType.GlobalProcedure &&
+            (t.label ?? '').toLowerCase() === name);
+        if (!impl) return symbolInfo;
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        if (!memberToken?.referencedFile) return symbolInfo;
+
+        const signature = document.getText({
+            start: { line: impl.line, character: 0 },
+            end: { line: impl.line, character: Number.MAX_VALUE }
+        });
+        const mapDecl = await new CrossFileResolver(this.tokenCache).findMapDeclarationInMemberFile(
+            impl.label!, memberToken.referencedFile, document, signature,
+            getLocalMapScope(document.uri)?.containingProcedure);
+        if (!mapDecl) return symbolInfo;
+
+        logger.test(`[FAR] Implementation label "${impl.label}" → searching from its MAP declaration at ${path.basename(mapDecl.file)}:${mapDecl.line}`);
+        return {
+            ...symbolInfo,
+            location: { uri: mapDecl.location.uri, line: mapDecl.line, character: mapDecl.location.range.start.character },
+        };
+    }
 
     /**
      * Build an OverloadFilter for the plain-symbol path when the symbol is a
