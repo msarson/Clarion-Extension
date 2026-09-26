@@ -232,3 +232,21 @@ export async function removeFolderCopies(store: ClarionSettingsStore, keys: read
         await store.update(key, undefined, 'WorkspaceFolder');
     }
 }
+
+/**
+ * #686 — each disagreement the #669 dialog reports, as a string: the key and both files' values.
+ * Keep as is remembers them. They are kept one by one, not as a whole, because the solution load
+ * can itself bring one key into agreement (it writes the configuration to both files) while the
+ * others still differ, and that must not bring the question back.
+ */
+export function shadowedSignatures(store: ClarionSettingsStore, keys: readonly string[]): string[] {
+    return keys.map(key => {
+        const own = store.inspect<unknown>(key);
+        return JSON.stringify([key, own?.workspaceFolderValue ?? null, own?.workspaceValue ?? null]);
+    });
+}
+
+/** #686 — every current disagreement was kept before (a changed value or a new key was not). */
+export function allKept(current: readonly string[], kept: readonly string[]): boolean {
+    return current.every(signature => kept.includes(signature));
+}

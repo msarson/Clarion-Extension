@@ -1,6 +1,6 @@
 import { workspace, window as vscodeWindow, ExtensionContext, Disposable, commands } from 'vscode';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
-import { shadowedSettingKeys, removeFolderCopies } from '../utils/SolutionSettingsScope'; // #587
+import { shadowedSettingKeys, removeFolderCopies, shadowedSignatures, allKept } from '../utils/SolutionSettingsScope'; // #587, #686
 import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
@@ -258,7 +258,7 @@ export async function initializeSolution(
 ): Promise<void> {
     const solutionName = globalSolutionFile ? path.basename(globalSolutionFile) : undefined;
     updateInitializationStatusBar('loading-solution', solutionName);
-    void offerToRemoveShadowedFolderSettings();
+    void offerToRemoveShadowedFolderSettings(context);
 
     logger.info("🔄 Initializing Clarion Solution...");
     
@@ -552,13 +552,23 @@ export async function reinitializeEnvironment(
  * settings unasked. So: report the conflict once per session and offer to remove the folder copy.
  */
 let shadowedSettingsOffered = false;
-async function offerToRemoveShadowedFolderSettings(): Promise<void> {
+/** #686 — the disagreements the user chose to keep (shadowedSignatures), per workspace. */
+const KEPT_SHADOWED_SETTINGS_KEY = 'clarion.keptShadowedSettings';
+async function offerToRemoveShadowedFolderSettings(context: ExtensionContext): Promise<void> {
     if (shadowedSettingsOffered) return;
     try {
         const store = SettingsStorageManager.clarionSettings();
         const shadowed = shadowedSettingKeys(store);
         if (shadowed.length === 0) return;
         shadowedSettingsOffered = true;
+        // #686: Keep as is was answered for each of these disagreements; a changed value or another
+        // key asks again.
+        const signatures = shadowedSignatures(store, shadowed);
+        const kept = context.workspaceState.get<string[]>(KEPT_SHADOWED_SETTINGS_KEY, []);
+        if (allKept(signatures, kept)) {
+            logger.info(`#686 — folder settings shadow the workspace file (${shadowed.join(', ')}); kept as is earlier, not asking`);
+            return;
+        }
         const folder = workspace.workspaceFolders?.[0];
         const folderFile = folder ? path.join(folder.uri.fsPath, '.vscode', 'settings.json') : 'the folder settings';
         const names = shadowed.map(k => `clarion.${k}`).join(', ');
@@ -570,11 +580,16 @@ async function offerToRemoveShadowedFolderSettings(): Promise<void> {
             `Clarion settings disagree between this workspace file and the folder settings.`,
             {
                 modal: true,
-                detail: `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.\n\nRemove the folder copies to put the workspace file in force.`,
+                detail: `${names} ${shadowed.length === 1 ? 'is' : 'are'} set both in this workspace file and in ${folderFile}. The folder settings win, so the workspace file's ${shadowed.length === 1 ? 'value is' : 'values are'} ignored. An earlier version of this extension wrote them there.\n\nRemove the folder copies to put the workspace file in force. Keep as is won't ask again unless these values change.`,
             },
             'Remove from folder settings',
             'Keep as is'
         );
+        if (choice === 'Keep as is') {
+            // #686: remember it; Cancel (Escape) leaves the question for next time.
+            await context.workspaceState.update(KEPT_SHADOWED_SETTINGS_KEY, [...new Set([...kept, ...signatures])]);
+            return;
+        }
         if (choice !== 'Remove from folder settings') return;
         await removeFolderCopies(store, shadowed);
         vscodeWindow.showInformationMessage(
