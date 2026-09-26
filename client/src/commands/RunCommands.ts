@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import { spawn } from 'child_process';
 import LoggerManager from '../utils/LoggerManager';
 import { chooseRunProject } from '../utils/RunTargetChooser'; // #666
-import { runTerminalPlan } from '../utils/RunTerminal'; // #676
+import { runTerminalPlan, RunTerminals } from '../utils/RunTerminal'; // #676, #684
 
 const logger = LoggerManager.getLogger("RunCommands");
 logger.setLevel("error");
@@ -256,6 +256,9 @@ async function findExecutable(outputInfo: ProjectOutputInfo): Promise<string | u
     return undefined;
 }
 
+// #684 — one Run terminal per program; registerRunCommands forgets the ones the user closes.
+const runTerminals = new RunTerminals<Terminal>();
+
 /**
  * Runs an executable in a VS Code terminal
  * @param exePath - Path to the executable
@@ -267,7 +270,8 @@ function runExecutable(exePath: string, workingDir?: string, args?: string, proj
     const command = workspace.getConfiguration('clarion').get<string>('run.command', '');
     const plan = runTerminalPlan(exePath, workingDir, args,
         command.trim() ? { command, projectDir: projectDir ?? path.dirname(exePath) } : undefined);
-    const terminal: Terminal = window.createTerminal({ name: plan.name, cwd: plan.cwd, shellPath: plan.shellPath });
+    const terminal: Terminal = runTerminals.open(exePath,
+        () => window.createTerminal({ name: plan.name, cwd: plan.cwd, shellPath: plan.shellPath }));
     terminal.show();
     terminal.sendText(plan.command);
 }
@@ -326,6 +330,7 @@ function launchDebugger(debuggerPath: string, exePath: string, projectDir: strin
  */
 export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataProvider): Disposable[] {
     return [
+        window.onDidCloseTerminal(t => runTerminals.closed(t)), // #684
         commands.registerCommand('clarion.setStartupProject', async (node) => {
             logger.info("📌 Setting startup project...");
             
