@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import { spawn } from 'child_process';
 import LoggerManager from '../utils/LoggerManager';
 import { chooseRunProject } from '../utils/RunTargetChooser'; // #666
+import { runTerminalPlan } from '../utils/RunTerminal'; // #676
 
 const logger = LoggerManager.getLogger("RunCommands");
 logger.setLevel("error");
@@ -260,13 +261,12 @@ async function findExecutable(outputInfo: ProjectOutputInfo): Promise<string | u
  * @param exePath - Path to the executable
  */
 function runExecutable(exePath: string, workingDir?: string, args?: string): void {
-    const exeName = path.basename(exePath);
-    const cwd = workingDir ?? path.dirname(exePath);
-    const terminal: Terminal = window.createTerminal({ name: `Run: ${exeName}`, cwd });
+    // #676: a PowerShell terminal whatever the default profile is - the line uses PowerShell's &
+    // call operator (so arguments like /debug are not misparsed), which cmd and Git Bash reject.
+    const plan = runTerminalPlan(exePath, workingDir, args);
+    const terminal: Terminal = window.createTerminal({ name: plan.name, cwd: plan.cwd, shellPath: plan.shellPath });
     terminal.show();
-    // Use & call operator so PowerShell doesn't misparse arguments like /debug as division
-    const cmd = args?.trim() ? `& "${exePath}" ${args.trim()}` : `& "${exePath}"`;
-    terminal.sendText(cmd);
+    terminal.sendText(plan.command);
 }
 
 /**
