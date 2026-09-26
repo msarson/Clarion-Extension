@@ -62,6 +62,20 @@ suite('The contributed Clarion build problem matcher (#667)', () => {
         assert.strictEqual(match('C:\\app\\globals.equ(3,1): error : Syntax error [C:\\app\\App.cwproj]')?.file, 'C:\\app\\globals.equ');
     });
 
+    // #673 — MSBuild wraps console output at the terminal width, so the [project] suffix can break
+    // across lines (#659's real output); and .eq equate files were not matched.
+    test('bug-pin (#673): a [project] suffix cut by MSBuild\'s line wrap is dropped from the message', () => {
+        const r = match('C:\\app\\src\\CommonErrors.equ(6,39): error : Expected: <operand> <PICTURE> ( ) , + - CHOOSE NOT  [C:\\app\\App.cwpro');
+        assert.strictEqual(r?.message, 'Expected: <operand> <PICTURE> ( ) , + - CHOOSE NOT');
+        assert.strictEqual(r?.line, '6');
+    });
+
+    test('bug-pin (#673): an error in an .eq file matches', () => {
+        const r = match('C:\\app\\Globals.eq(2,15): error : Expected: <operand> [C:\\app\\App.cwproj]');
+        assert.strictEqual(r?.file, 'C:\\app\\Globals.eq');
+        assert.strictEqual(r?.message, 'Expected: <operand>');
+    });
+
     test('a line without the project suffix still matches', () => {
         assert.strictEqual(match('C:\\app\\viewjoin.clw(57,3): error : Unknown procedure label')?.message, 'Unknown procedure label');
     });

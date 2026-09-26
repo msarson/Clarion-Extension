@@ -161,7 +161,7 @@
           "absolute"
         ],
         "pattern": {
-          "regexp": "^\\s*(?:\\d+>)?\\s*(\\S.*?\\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]|[iI][nN][tT]))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*?)(?:\\s+\\[[^\\]]*\\])?\\s*$",
+          "regexp": "^\\s*(?:\\d+>)?\\s*(\\S.*?\\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]?|[iI][nN][tT]))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*?)(?:\\s+\\[[^\\]]*\\]?)?\\s*$",
           "file": 1,
           "line": 2,
           "column": 3,
