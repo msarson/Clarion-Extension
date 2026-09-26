@@ -7,6 +7,13 @@
 /** Source files a Clarion compile reports errors in: `.clw`, `.inc`, `.equ` and `.eq` (#672), `.int`. */
 const SOURCE_EXT = String.raw`(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]?|[iI][nN][tT])`;
 
+/** #678 — a build message as Problems shows it. */
+export function cleanBuildMessage(message: string): string {
+    // MSBuild writes a carriage return or newline in a tool's output as the two characters `\r` / `\n`;
+    // drop those, and whitespace, from the end. A backslash inside the message (a path) is kept.
+    return message.replace(/(?:\\[rn]|\s)+$/, '');
+}
+
 export function buildErrorPatterns(): { single: RegExp; wrapped: RegExp; native: RegExp } {
     const file = String.raw`([A-Za-z]:\\.*?\.${SOURCE_EXT})`;
     return {

@@ -1,7 +1,7 @@
 import path = require("path");
 import { DiagnosticCollection, languages, Diagnostic, Uri, Position, Range, DiagnosticSeverity, window } from "vscode";
 import LoggerManager from './utils/LoggerManager';
-import { buildErrorPatterns } from './utils/BuildErrorPatterns'; // #672
+import { buildErrorPatterns, cleanBuildMessage } from './utils/BuildErrorPatterns'; // #672, #678
 const logger = LoggerManager.getLogger("ProcessBuildErrors");
 logger.setLevel("error");
 
@@ -35,6 +35,7 @@ function processBuildErrors(
         message: string,
         projTail?: string
     ) => {
+        message = cleanBuildMessage(message); // #678
         const absFilePath = path.resolve(filePath);
         const lineNum = parseInt(line, 10) - 1;
         const colNum = parseInt(column, 10) - 1;
@@ -69,6 +70,7 @@ function processBuildErrors(
     };
 
     const processFallback = (type: string, msg: string) => {
+        msg = cleanBuildMessage(msg); // #678
         const baseMsg = msg.replace(/\s+\[[^\]]+\]\s*$/, "");
         if (
             coveredFallbackMsgs.has(`${type}:${msg}`) ||
