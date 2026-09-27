@@ -45,6 +45,7 @@ import {
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { readUnopenedSource } from './utils/RestoredTabSource'; // #696
 
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
@@ -702,6 +703,32 @@ let diagnosticsRefreshSupported = false;
 const lastPulledResultId = new Map<string, string>();
 let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+// #696 — a restored tab VS Code has not instantiated is pulled by URI with no didOpen (the client's
+// diagnosticPullOptions.onTabs). It is checked from disk, but only once the startup chain is done:
+// the client pulls it once, before the solution is announced, and its refresh loop re-pulls
+// instantiated documents only, so the one answer must be the full one (the cross-file pass too).
+// Checked one at a time, like the startup re-validation; the document lives in `unopenedDocs` for
+// the length of its pass so the version checks see it.
+const unopenedDocs = new Map<string, TextDocument>();
+const unopenedMtimes = new Map<string, number>();
+let startupDiagnosticsReady = false;
+const startupDiagnosticsWaiters: Array<() => void> = [];
+function markStartupDiagnosticsReady(): void {
+    if (startupDiagnosticsReady) return;
+    startupDiagnosticsReady = true;
+    for (const resolve of startupDiagnosticsWaiters.splice(0)) resolve();
+}
+const whenStartupDiagnosticsReady = (): Promise<void> =>
+    startupDiagnosticsReady ? Promise.resolve() : new Promise(resolve => startupDiagnosticsWaiters.push(resolve));
+let unopenedLane: Promise<unknown> = Promise.resolve();
+function inUnopenedLane<T>(work: () => Promise<T>): Promise<T> {
+    const run = unopenedLane.then(work);
+    unopenedLane = run.catch(() => undefined).then(() => new Promise<void>(resolve => setImmediate(resolve)));
+    return run;
+}
+/** The version a pass must still match: the open document's, else the unopened one being checked. */
+const liveVersion = (uri: string): number | undefined => documents.get(uri)?.version ?? unopenedDocs.get(uri)?.version;
+
 function publishDiagnostics(document: TextDocument, version: number, diagnostics: Diagnostic[], state: DiagnosticsState): void {
     const resultId = diagnosticsStore.record(document.uri, version, state, diagnostics);
     if (!pullDiagnosticsSupported) {
@@ -713,6 +740,7 @@ function publishDiagnostics(document: TextDocument, version: number, diagnostics
         return;
     }
     if (!diagnosticsRefreshSupported) return;
+    if (unopenedDocs.has(document.uri)) return; // #696 — answered by its own pull, never refreshed
     if (lastPulledResultId.get(document.uri) === resultId) return;
     if (diagnosticsRefreshTimer) clearTimeout(diagnosticsRefreshTimer);
     diagnosticsRefreshTimer = setTimeout(() => {
@@ -887,7 +915,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // True once a newer version of this document exists. The stale-version guard after
         // the validators discards this pass's answer in that case, so both the loop below and
         // the long-running validators that accept it can stop early instead of finishing.
-        const isStale = () => documents.get(document.uri)?.version !== startVersion;
+        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
@@ -930,8 +958,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
-        const currentDoc = documents.get(document.uri);
-        if (!currentDoc || currentDoc.version !== startVersion) {
+        if (liveVersion(document.uri) !== startVersion) { // #696 — an unopened tab's pass counts too
             perfLogger.perf("validateTextDocument stale-skip", {
                 total_ms: Date.now() - validateStart,
                 token_count: tokens.length,
@@ -1083,13 +1110,10 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 // Handle selection range requests (Shift+Alt+→ expand selection)
 // #545 — textDocument/diagnostic: answer from the store; validate first if this version
 // has no record yet (the duplicate-version guard makes a repeat call cheap).
-connection.languages.diagnostics.on(async (params) => {
+connection.languages.diagnostics.on(async (params, token) => {
     const uri = params.textDocument.uri;
     const document = documents.get(uri);
-    if (!document) {
-        diagnosticsStore.clear(uri);
-        return { kind: 'full', items: [] };
-    }
+    if (!document) return answerUnopened(uri, params.previousResultId, token);
     const stored = diagnosticsStore.get(uri);
     if (!stored || stored.version !== document.version) {
         try { await validateTextDocument(document, 'pull'); }
@@ -1099,6 +1123,42 @@ connection.languages.diagnostics.on(async (params) => {
     if (report.resultId) lastPulledResultId.set(uri, report.resultId);
     return report;
 });
+
+/**
+ * #696 — a pull for a document the editor has not opened: a restored tab. Read from disk, checked
+ * in full once the startup chain is done, one at a time; a later didOpen takes over (the open
+ * document is checked from then on). Unchanged on disk since its last pass: the stored answer.
+ */
+async function answerUnopened(uri: string, previousResultId: string | undefined, token: { isCancellationRequested: boolean }) {
+    const empty = () => { diagnosticsStore.clear(uri); return { kind: 'full' as const, items: [] }; };
+    const filePath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+    if (!readUnopenedSource(filePath)) return empty();
+    await whenStartupDiagnosticsReady();
+    return inUnopenedLane(async () => {
+        if (token.isCancellationRequested) return empty();
+        const opened = documents.get(uri);
+        if (opened) {
+            const stored = diagnosticsStore.get(uri);
+            if (!stored || stored.version !== opened.version) await validateTextDocument(opened, 'pull');
+        } else {
+            const source = readUnopenedSource(filePath);
+            if (!source) return empty();
+            const stored = diagnosticsStore.get(uri);
+            if (!stored || stored.version !== 0 || unopenedMtimes.get(uri) !== source.mtimeMs) {
+                const unopened = TextDocument.create(uri, 'clarion', 0, source.text);
+                unopenedDocs.set(uri, unopened);
+                lastValidatedVersions.delete(uri);
+                try { await validateTextDocument(unopened, 'restoredTab'); }
+                catch (err) { logger.error(`❌ restored-tab validation failed for ${uri}: ${err}`); }
+                finally { unopenedDocs.delete(uri); }
+                unopenedMtimes.set(uri, source.mtimeMs);
+            }
+        }
+        const report = diagnosticsStore.report(uri, previousResultId);
+        if (report.resultId) lastPulledResultId.set(uri, report.resultId);
+        return report;
+    });
+}
 
 // #509 — call hierarchy: prepare on the item at the cursor, then incoming / outgoing per item.
 connection.languages.callHierarchy.onPrepare(async (params, token) => {
@@ -2517,6 +2577,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
+                markStartupDiagnosticsReady(); // #696 — restored tabs may be checked now
                 // #316: the burst is over — re-resolve visible lenses whose exact scan we
                 // deferred above so their counts land now, warm and uncontended.
                 scheduleLensRefresh();
@@ -3760,6 +3821,7 @@ const drainDeferredIfNoSolution = () => {
     });
     solutionPipelineReady = true;
     startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
+    markStartupDiagnosticsReady(); // #696
     scheduleLensRefresh(); // #316: re-resolve any lens whose exact scan we deferred during the burst
     sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);

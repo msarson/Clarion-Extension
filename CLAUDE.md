@@ -25,6 +25,7 @@ node scripts/perf/lsp-driver.js --cold     # true cold start (wipes the %TEMP% c
 node scripts/perf/lsp-driver.js --sln=... --file=...
 node scripts/perf/lsp-driver.js --diag-status   # assert clarion/diagnosticsStatus ordering (#460); exit 0 = all pass
 node scripts/perf/lsp-driver.js --link-refresh  # assert document links reach the editor on startup (#620); exit 0 = all pass
+node scripts/perf/lsp-driver.js --restored-tab  # assert an unopened restored tab gets its full diagnostics (#696); exit 0 = all pass
 ```
 
 - **Cold runs:** the server persists mtime-validated caches under

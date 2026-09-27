@@ -56,11 +56,14 @@ const TOGGLE_UNRESOLVED = process.argv.includes('--toggle-unresolved');
 const PROGRESS = process.argv.includes('--progress');
 // #545 — declare pull-diagnostics support; the server then answers textDocument/diagnostic
 // and must NOT push. --pull runs the pull sequence after the settle window.
-const PULL = process.argv.includes('--pull');
+const PULL = process.argv.includes('--pull') || process.argv.includes('--restored-tab'); // #696 needs pull too
 // #620 — assert the document-link refresh ordering. The client only re-asks for links
 // when it receives clarion/refreshDocumentLinks, and DocumentLinkProvider can only answer
 // once the file graph is built, so the refresh MUST come after the build.
 const LINK_REFRESH = process.argv.includes('--link-refresh');
+// #696 — a restored tab VS Code has not instantiated is pulled by URI with no didOpen; the server
+// must answer with the full diagnostics read from disk. Self-checking, exit 0 = all pass.
+const RESTORED_TAB = process.argv.includes('--restored-tab');
 let refreshRequests = 0;
 const progressEvents = [];
 // #620 — ordered timeline of the two events whose relative order is the bug.
@@ -355,6 +358,54 @@ async function runLinkRefreshCheck(t0) {
   setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
 }
 
+// #696 — a restored tab the editor has not instantiated. The client (onTabs) pulls it by URI at
+// startup, before the solution is announced, and never re-pulls it on a refresh (the refresh loop
+// walks instantiated documents only), so the one answer must be the whole answer.
+async function runRestoredTabCheck(t0) {
+  const results = [];
+  const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
+
+  // A MEMBER naming a missing program (#695's error, cross-file, so only the full pass reports it)
+  // and an ANSI byte in a string (a UTF-8 read would make #629 report a wrongly decoded file).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'restored-tab-696-'));
+  const file = path.join(dir, 'RestoredTab696.clw');
+  fs.writeFileSync(file, Buffer.from("  MEMBER('NoSuchProg_696')\r\nDelim STRING('A³B')\r\n  MAP\r\n  END\r\n", 'latin1'));
+  const uri = toUri(file);
+
+  const pull = request('textDocument/diagnostic', { textDocument: { uri } }, 300000);
+  console.log(`[${Date.now() - t0}ms] pulled ${path.basename(file)} by URI, no didOpen`);
+  sendUpdatePaths();
+  const report = await pull;
+  const messages = (report.items || []).map(d => d.message);
+  console.log(`[${Date.now() - t0}ms] answered: ${JSON.stringify(messages)}`);
+  record('the unopened tab is answered with its cross-file error', messages.some(m => /NoSuchProg_696/.test(m) && /cannot be found/.test(m)));
+  record('an ANSI file read from disk is not reported as wrongly decoded', !messages.some(m => /UTF-8|decod|encoding/i.test(m)));
+
+  // Opening it afterwards takes over through the normal path.
+  // The open path answers in two steps (sync, then the cross-file pass, then a refresh the
+  // client re-pulls on), so ask once this version's pass is complete (#460).
+  const openComplete = (async () => {
+    for (;;) {
+      const s = await waitNotification('clarion/diagnosticsStatus', 120000);
+      if (s && s.uri === uri && s.version === 1 && s.state === 'complete') return;
+    }
+  })();
+  notify('textDocument/didOpen', { textDocument: { uri, languageId: 'clarion', version: 1, text: fs.readFileSync(file, 'latin1') } });
+  await openComplete;
+  const opened = await request('textDocument/diagnostic', { textDocument: { uri } }, 120000);
+  record('once opened, the open document is what is checked', (opened.items || []).some(d => /NoSuchProg_696/.test(d.message)));
+
+  // A pull for a file that is not there is answered empty, not held.
+  const gone = await request('textDocument/diagnostic', { textDocument: { uri: toUri(path.join(dir, 'Gone696.clw')) } }, 30000);
+  record('a missing file is answered empty', (gone.items || []).length === 0);
+
+  const failed = results.filter(r => !r.pass);
+  console.log(`\n== restored-tab assertions: ${results.length - failed.length}/${results.length} passed ==`);
+  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  fs.rmSync(dir, { recursive: true, force: true });
+  setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
+}
+
 // --- main --------------------------------------------------------------------
 (async () => {
   const t0 = Date.now();
@@ -379,6 +430,7 @@ async function runLinkRefreshCheck(t0) {
 
   if (DIAG_STATUS) { await runDiagStatusCheck(t0); return; }
   if (LINK_REFRESH) { await runLinkRefreshCheck(t0); return; }
+  if (RESTORED_TAB) { await runRestoredTabCheck(t0); return; }
 
   // Mirrors the real client's payload — SolutionInitializer.ts (clarion/updatePaths sender)
   notify('clarion/updatePaths', {

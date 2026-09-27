@@ -80,6 +80,12 @@ export async function startLanguageServer(
             configuredSolutionFile: SettingsStorageManager.clarionSettings().get<string>('currentSolution', '') // #563
                 || workspace.getConfiguration('clarion').get<string>('solutionFile', '')
         },
+        // #696 — pull diagnostics for restored tabs VS Code has not instantiated (only the tab in
+        // front is, until clicked). The document selector's `**/*.ext` patterns match them by URI;
+        // the server checks them from disk once the solution has loaded.
+        diagnosticPullOptions: {
+            onTabs: workspace.getConfiguration('clarion').get<boolean>('restoredTabDiagnostics', true),
+        },
         synchronize: {
             fileEvents: [
                 workspace.createFileSystemWatcher(fileWatcherPattern),

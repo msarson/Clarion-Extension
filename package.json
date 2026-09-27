@@ -1797,6 +1797,11 @@
           "default": "default",
           "description": "How the interfaceImplementation check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
+        "clarion.restoredTabDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the problems of every Clarion file in a restored editor tab after a restart, not only the tab in front. Each is checked from disk once the solution has loaded, one at a time. Takes effect after a window reload (issue #696)."
+        },
         "clarion.referencesCodeLens.enabled": {
           "type": "boolean",
           "default": true,
