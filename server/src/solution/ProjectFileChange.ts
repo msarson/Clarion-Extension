@@ -1,5 +1,46 @@
 import { ClarionProjectServer } from './clarionProjectServer';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
+import type { FileRelationshipGraph } from '../FileRelationshipGraph';
+
+/** The `clarion/graphStatus` payload: the Tools pane's Graph row (#434, #694). */
+export interface GraphStatus {
+    status: 'building' | 'built';
+    fileCount: number;
+    edgeCount?: number;
+    durationMs?: number;
+    sourceFileCount: number;
+    unresolvedCount: number;
+}
+
+/**
+ * Rebuild the file relationship graph from the projects' sources: the .cwproj pass (#317, with
+ * `reloadProjects` since #692) and a build configuration change (#564). Returns the seed files.
+ */
+export async function rebuildGraph(
+    graph: FileRelationshipGraph,
+    projects: ClarionProjectServer[],
+    options: { reloadProjects?: boolean; onStatus?: (status: GraphStatus) => void; onError?: (err: unknown) => void } = {}
+): Promise<string[]> {
+    if (options.reloadProjects && projects.length) await reloadProjectSourceFiles(projects);
+    graph.reset();
+    const { files, unresolved } = graphSeeds(projects);
+    graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
+    // #694 — the same status the startup build sends, so the Graph row follows the rebuild.
+    const sourceFileCount = files.length + unresolved.length;
+    options.onStatus?.({ status: 'building', fileCount: files.length, sourceFileCount, unresolvedCount: unresolved.length });
+    if (files.length) {
+        await graph.buildInBackground(files).catch(err => options.onError?.(err));
+    }
+    options.onStatus?.({
+        status: 'built',
+        fileCount: graph.fileCount,
+        edgeCount: graph.edgeCount,
+        durationMs: graph.buildDurationMs,
+        sourceFileCount,
+        unresolvedCount: unresolved.length,
+    });
+    return files;
+}
 
 /**
  * #692 — a .cwproj changed while the solution is open. The graph rebuild (#317) seeds from each

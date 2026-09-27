@@ -2675,18 +2675,12 @@ connection.onNotification('clarion/updatePaths', async (params: {
  */
 async function rebuildFileRelationshipGraph(reason: string, reloadProjects = false): Promise<string[]> {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
-    const { reloadProjectSourceFiles, graphSeeds } = await import('./solution/ProjectFileChange');
-    const graph = FileRelationshipGraph.getInstance();
-    const projects = SolutionManager.getInstance()?.solution?.projects ?? [];
-    if (reloadProjects && projects.length) await reloadProjectSourceFiles(projects);
-    graph.reset();
-    const { files: graphFiles, unresolved } = graphSeeds(projects);
-    graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
-    if (graphFiles.length) {
-        await graph.buildInBackground(graphFiles).catch(err =>
-            logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`));
-    }
-    return graphFiles;
+    const { rebuildGraph } = await import('./solution/ProjectFileChange');
+    return rebuildGraph(FileRelationshipGraph.getInstance(), SolutionManager.getInstance()?.solution?.projects ?? [], {
+        reloadProjects,
+        onStatus: status => connection.sendNotification('clarion/graphStatus', status), // #694
+        onError: err => logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`),
+    });
 }
 
 const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
