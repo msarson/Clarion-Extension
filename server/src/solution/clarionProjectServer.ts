@@ -45,6 +45,26 @@ export class ClarionProjectServer {
     /** #293 diagnostics: first few unresolved names, for the perf line. */
     public lastLoadUnresolvedSample: string[] = [];
 
+    /**
+     * #692 — re-read the project file after it changed. Loads into a fresh instance and swaps the
+     * lists in at the end: `loadSourceFilesFromProjectFile` empties them before its awaits, and a
+     * request served meanwhile would see a project with no sources.
+     */
+    async reloadSourceFiles(): Promise<void> {
+        const fresh = new ClarionProjectServer(this.name, this.type, this.path, this.guid, this.filename);
+        await fresh.loadSourceFilesFromProjectFile();
+        for (const sourceFile of fresh.sourceFiles) sourceFile.project = this;
+        this.sourceFiles = fresh.sourceFiles;
+        this.fileDrivers = fresh.fileDrivers;
+        this.libraries = fresh.libraries;
+        this.projectReferences = fresh.projectReferences;
+        this.noneFiles = fresh.noneFiles;
+        this.lastLoadReadParseMs = fresh.lastLoadReadParseMs;
+        this.lastLoadResolveMs = fresh.lastLoadResolveMs;
+        this.lastLoadUnresolved = fresh.lastLoadUnresolved;
+        this.lastLoadUnresolvedSample = fresh.lastLoadUnresolvedSample;
+    }
+
     async loadSourceFilesFromProjectFile(): Promise<void> {
         const loadStart = performance.now();
         this.lastLoadReadParseMs = 0;

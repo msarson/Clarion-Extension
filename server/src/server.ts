@@ -2527,27 +2527,14 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const buildFileRelationshipGraph = async () => {
                 const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
                 const graph = FileRelationshipGraph.getInstance();
-                const solutionManager = SolutionManager.getInstance();
-                const allFiles: string[] = [];
+                const { graphSeeds } = await import('./solution/ProjectFileChange');
                 // #434 — a source file whose path cannot be resolved used to be
                 // dropped here with no counter and no log, so a resolution
                 // failure was indistinguishable from a healthy build: the graph
                 // built over a short (or empty) list and still reported
                 // `status: 'built'`. Track the misses so the outcome can say how
                 // complete it actually is.
-                const unresolved: string[] = [];
-                if (solutionManager?.solution) {
-                    for (const project of solutionManager.solution.projects) {
-                        for (const sourceFile of project.sourceFiles) {
-                            const absPath = sourceFile.getAbsolutePath();
-                            if (absPath) {
-                                allFiles.push(absPath);
-                            } else {
-                                unresolved.push(`${project.name}/${sourceFile.relativePath || sourceFile.name}`);
-                            }
-                        }
-                    }
-                }
+                const { files: allFiles, unresolved } = graphSeeds(SolutionManager.getInstance()?.solution?.projects ?? []);
                 const sourceFileCount = allFiles.length + unresolved.length;
                 graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
                 if (unresolved.length > 0) {
@@ -2683,22 +2670,18 @@ connection.onNotification('clarion/updatePaths', async (params: {
 /**
  * Rebuild the file relationship graph from every project's source files (reset, then the
  * background closure build). Shared by the .cwproj-change pass (#317) and a build configuration
- * change (#564). Returns the seed files.
+ * change (#564). Returns the seed files. `reloadProjects` (#692, the .cwproj pass) re-reads each
+ * project's source list first: it is otherwise the one read when the solution loaded.
  */
-async function rebuildFileRelationshipGraph(reason: string): Promise<string[]> {
+async function rebuildFileRelationshipGraph(reason: string, reloadProjects = false): Promise<string[]> {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const { reloadProjectSourceFiles, graphSeeds } = await import('./solution/ProjectFileChange');
     const graph = FileRelationshipGraph.getInstance();
+    const projects = SolutionManager.getInstance()?.solution?.projects ?? [];
+    if (reloadProjects && projects.length) await reloadProjectSourceFiles(projects);
     graph.reset();
-    const smForGraph = SolutionManager.getInstance();
-    const graphFiles: string[] = [];
-    if (smForGraph?.solution) {
-        for (const project of smForGraph.solution.projects) {
-            for (const sourceFile of project.sourceFiles) {
-                const absPath = sourceFile.getAbsolutePath();
-                if (absPath) graphFiles.push(absPath);
-            }
-        }
-    }
+    const { files: graphFiles, unresolved } = graphSeeds(projects);
+    graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
     if (graphFiles.length) {
         await graph.buildInBackground(graphFiles).catch(err =>
             logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`));
@@ -2713,7 +2696,7 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
     lastValidatedVersions.clear();
 
     // Rebuild the file relationship graph — the project file list may have changed.
-    const graphFiles = await rebuildFileRelationshipGraph('constants-change');
+    const graphFiles = await rebuildFileRelationshipGraph('constants-change', true);
 
     // One doc at a time — same discipline as the startup revalidation chain.
     let docCount = 0;
