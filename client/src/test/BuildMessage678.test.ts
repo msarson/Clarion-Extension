@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { cleanBuildMessage } from '../utils/BuildErrorPatterns';
+import { cleanBuildMessage, parseBuildOutput } from '../utils/BuildErrorPatterns';
 
 /**
  * #678 (from #659) — MSBuild writes a carriage return in a tool's output as the two characters `\r`,
@@ -26,10 +26,11 @@ suite('Build messages lose MSBuild\'s escaped line breaks (#678)', () => {
         assert.strictEqual(cleanBuildMessage('Unknown procedure label'), 'Unknown procedure label');
     });
 
-    test('processBuildErrors cleans every message it reports', () => {
-        let dir = __dirname;
-        while (!fs.existsSync(path.join(dir, 'client', 'src', 'processBuildErrors.ts'))) dir = path.dirname(dir);
-        const src = fs.readFileSync(path.join(dir, 'client', 'src', 'processBuildErrors.ts'), 'utf8');
-        assert.ok((src.match(/cleanBuildMessage\(/g) ?? []).length >= 2, 'file-located and fallback messages both cleaned');
+    test('the build log parser cleans file-located and fallback messages', () => {
+        const messages = parseBuildOutput([
+            'C:\\app\\Main.clw(3,1): error : Bad thing.\\r [C:\\app\\App.cwproj]',
+            'MSBUILD : error MSB1009: Project file does not exist.\\r',
+        ].join('\r\n')).map(p => p.message);
+        assert.deepStrictEqual(messages, ['Bad thing.', 'MSB1009: Project file does not exist.']);
     });
 });

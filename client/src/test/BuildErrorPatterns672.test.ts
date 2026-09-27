@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { buildErrorPatterns } from '../utils/BuildErrorPatterns';
+import { buildErrorPatterns, parseBuildOutput } from '../utils/BuildErrorPatterns';
 
 /**
  * #672 (from #659) — processBuildErrors turned the build log into Problems only for errors in
@@ -40,10 +40,13 @@ suite('Build-log patterns for Problems (#672)', () => {
         assert.strictEqual(first(buildErrorPatterns().single, 'C:\\app\\notes.txt(1,1): error : nope [C:\\app\\App.cwproj]'), null);
     });
 
-    test('processBuildErrors uses these patterns', () => {
+    test('processBuildErrors reads the log through these patterns', () => {
         let dir = __dirname;
         while (!fs.existsSync(path.join(dir, 'client', 'src', 'processBuildErrors.ts'))) dir = path.dirname(dir);
         const src = fs.readFileSync(path.join(dir, 'client', 'src', 'processBuildErrors.ts'), 'utf8');
-        assert.ok(src.includes('buildErrorPatterns()'), 'processBuildErrors builds its patterns from BuildErrorPatterns');
+        assert.ok(src.includes('parseBuildOutput('), 'processBuildErrors reports what parseBuildOutput finds (#693)');
+        const [problem] = parseBuildOutput('C:\\app\\Globals.eq(12,5): error : Syntax error [C:\\app\\App.cwproj]');
+        assert.deepStrictEqual(problem && [problem.file?.toLowerCase(), problem.line, problem.column, problem.message],
+            [path.resolve('C:\\app\\Globals.eq').toLowerCase(), 11, 4, 'Syntax error']);
     });
 });
