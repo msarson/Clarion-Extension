@@ -25,9 +25,9 @@ The Clarion Extension provides real-time diagnostics:
 **Detects missing END statements:**
 
 ```clarion
-IF x = 1 THEN
-  DoSomething()
-  ! ❌ Error: Missing END
+  IF x = 1 THEN
+    DoSomething()
+    ! ❌ Error: Missing END
 ```
 
 **Structures checked:**
@@ -54,9 +54,9 @@ Expected END statement
 **Detects wrong termination keywords:**
 
 ```clarion
-IF x = 1 THEN
-  DoSomething()
-UNTIL   ! ❌ Error: Expected END, got UNTIL
+  IF x = 1 THEN
+    DoSomething()
+  UNTIL   ! ❌ Error: Expected END, got UNTIL
 ```
 
 ---
@@ -69,9 +69,9 @@ UNTIL   ! ❌ Error: Expected END, got UNTIL
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  x = 10
-  ! ❌ Warning: Missing RETURN statement
+  CODE
+    x = 10
+    ! ❌ Warning: Missing RETURN statement
 ```
 
 **Note:** Not required for ROUTINE blocks.
@@ -84,13 +84,13 @@ CODE
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  IF condition
-    RETURN  ! ✅ OK
-  ELSE
-    x = 10
-    ! ❌ Warning: Missing RETURN in ELSE branch
-  END
+  CODE
+    IF condition
+      RETURN  ! ✅ OK
+    ELSE
+      x = 10
+      ! ❌ Warning: Missing RETURN in ELSE branch
+    END
 ```
 
 ---
@@ -145,22 +145,22 @@ Field      LONG
 **Only OF/OROF allowed in CASE:**
 
 ```clarion
-CASE x
-  OF 1
-    DoSomething()
-  ELSE         ! ❌ Error: ELSE not allowed in CASE (use OROF)
-    DoOther()
-END
+  CASE x
+    OF 1
+      DoSomething()
+    ELSE         ! ❌ Error: ELSE not allowed in CASE (use OROF)
+      DoOther()
+  END
 ```
 
 **Should be:**
 ```clarion
-CASE x
-  OF 1
-    DoSomething()
-  OROF 2 TO 10  ! ✅ OK
-    DoOther()
-END
+  CASE x
+    OF 1
+      DoSomething()
+    OROF 2 TO 10  ! ✅ OK
+      DoOther()
+  END
 ```
 
 ---
@@ -170,19 +170,19 @@ END
 **Only BEGIN allowed in EXECUTE:**
 
 ```clarion
-EXECUTE choice
-  OF 1
-    DoSomething()  ! ❌ Error: Use BEGIN instead of OF in EXECUTE
-END
+  EXECUTE choice
+    OF 1
+      DoSomething()  ! ❌ Error: Use BEGIN instead of OF in EXECUTE
+  END
 ```
 
 **Should be:**
 ```clarion
-EXECUTE choice
-  BEGIN
-    DoSomething()  ! ✅ OK
+  EXECUTE choice
+    BEGIN
+      DoSomething()  ! ✅ OK
+    END
   END
-END
 ```
 
 ---
@@ -194,15 +194,15 @@ END
 **Detects missing OMIT terminator:**
 
 ```clarion
-OMIT('DEBUG')
-  DebugCode()
-  ! ❌ Error: Missing OMIT terminator
+  OMIT('DEBUG')
+    DebugCode()
+    ! ❌ Error: Missing OMIT terminator
 ```
 
 **Should be:**
 ```clarion
-OMIT('DEBUG')
-  DebugCode()
+  OMIT('DEBUG')
+    DebugCode()
 !   ! ✅ OK
 ```
 
@@ -213,9 +213,9 @@ OMIT('DEBUG')
 **Detects missing COMPILE terminator:**
 
 ```clarion
-COMPILE('DEBUG')
-  DebugCode()
-  ! ❌ Error: Missing COMPILE terminator
+  COMPILE('DEBUG')
+    DebugCode()
+    ! ❌ Error: Missing COMPILE terminator
 ```
 
 #### Compiled-Out Code Is Skipped
@@ -239,15 +239,15 @@ LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a lab
 **Warns when a procedure or method with a return type is called as a statement and the result is discarded:**
 
 ```clarion
-MAP
-  GetCount(), LONG
-END
+  MAP
+    GetCount(), LONG
+  END
 
-CODE
-  GetCount()        ! ⚠️ Warning: Return value of GetCount() is discarded
-  x = GetCount()    ! ✅ OK
-  obj.Calc()        ! ⚠️ Warning — method calls on typed variables are checked too
-  SELF.Calc()       ! ⚠️ Warning — SELF./PARENT. call sites are checked (v1.0)
+  CODE
+    GetCount()        ! ⚠️ Warning: Return value of GetCount() is discarded
+    x = GetCount()    ! ✅ OK
+    obj.Calc()        ! ⚠️ Warning — method calls on typed variables are checked too
+    SELF.Calc()       ! ⚠️ Warning — SELF./PARENT. call sites are checked (v1.0)
 ```
 
 **What stays quiet:**
@@ -261,13 +261,13 @@ CODE
 **Flags a literal passed to a parameter that requires an addressable variable:**
 
 ```clarion
-MAP
-  UpdateIt(*LONG counter)
-END
+  MAP
+    UpdateIt(*LONG counter)
+  END
 
-CODE
-  UpdateIt(5)     ! ⚠️ Warning: a literal has no address and can't bind to *LONG
-  UpdateIt(myVar) ! ✅ OK
+  CODE
+    UpdateIt(5)     ! ⚠️ Warning: a literal has no address and can't bind to *LONG
+    UpdateIt(myVar) ! ✅ OK
 ```
 
 Applies to `*TYPE` reference parameters and complex types (`QUEUE`/`GROUP`/`FILE`/`VIEW`/`RECORD`/`CLASS` — by-reference even without the `*`). Conservative: only fires when the call resolves to a single unambiguous same-file MAP signature.
@@ -326,7 +326,7 @@ Comments are left alone, and a line reports once rather than once per character 
 
 ```clarion
 MyProc PROCEDURE
-CODE
+  CODE
   BREAK    ! ❌ Error: BREAK must be inside a LOOP or ACCEPT block
   CYCLE    ! ❌ Error: CYCLE must be inside a LOOP or ACCEPT block
 ```
@@ -535,13 +535,13 @@ The full list of check ids, their defaults and what each one reports is in the *
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  IF condition
-    RETURN
-  END
+  CODE
+    IF condition
+      RETURN
+    END
   
-  x = 10      ! ← Dimmed (unreachable after RETURN)
-  RETURN
+    x = 10      ! ← Dimmed (unreachable after RETURN)
+    RETURN
 ```
 
 **Detected patterns:**

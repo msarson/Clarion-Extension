@@ -97,10 +97,10 @@ These settings are saved in `.vscode/settings.json` in your solution folder.
 ```clarion
 TestProc PROCEDURE
 MyVar     LONG
-CODE
-  SUB(  ← Type this and parameter hints appear!
-  MyVar = 10  ← Hover over MyVar to see type
-  ! Press F12 on MyVar to jump to declaration
+  CODE
+    SUB(  ← Type this and parameter hints appear!
+    MyVar = 10  ← Hover over MyVar to see type
+    ! Press F12 on MyVar to jump to declaration
 ```
 
 **What works immediately (same file):**

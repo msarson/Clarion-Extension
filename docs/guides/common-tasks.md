@@ -76,7 +76,7 @@ Example: `INCLUDE('file.inc', 'MySection')` → Jumps to `MySection CODE`
 
 1. Click on the MODULE name in a CLASS declaration:
    ```clarion
-   MyClass CLASS,MODULE('MyClass.clw')
+MyClass CLASS,MODULE('MyClass.clw')
    ```
 2. Press **F12**
 3. The `.clw` file opens
@@ -137,8 +137,8 @@ Example: `INCLUDE('file.inc', 'MySection')` → Jumps to `MySection CODE`
 **What it generates:**
 ```clarion
 MyClass.MyMethod PROCEDURE
-CODE
-  ! Your code here
+  CODE
+    ! Your code here
 ```
 
 ---
@@ -159,7 +159,7 @@ This is line 2
 ```
 
 ```clarion
-Output (pasted):
+  Output (pasted):
 'This is line 1' & |
 'This is line 2'
 ```

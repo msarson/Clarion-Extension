@@ -49,8 +49,8 @@ All navigation features are **scope-aware** and work across files in your soluti
 ```clarion
 MyProc PROCEDURE
 MyVar    LONG  ! ← F12 on MyVar usage jumps here
-CODE
-  MyVar = 10   ! ← F12 here
+  CODE
+    MyVar = 10   ! ← F12 here
 ```
 
 ---
@@ -127,9 +127,9 @@ MyGroup GROUP,PRE(Grp)
 Field     LONG
         END
 
-CODE
-  Grp:Field = 10    ! ← F12 jumps to Field declaration
-  MyGroup.Field = 5 ! ← F12 also works here
+  CODE
+    Grp:Field = 10    ! ← F12 jumps to Field declaration
+    MyGroup.Field = 5 ! ← F12 also works here
 ```
 
 ---
@@ -147,15 +147,15 @@ CODE
 
 **Example:**
 ```clarion
-MAP
-  MyProc()  ! ← Ctrl+F12 here
-END
+  MAP
+    MyProc()  ! ← Ctrl+F12 here
+  END
 
 ! ... later in file or another file ...
 
 MyProc PROCEDURE  ! ← Jumps here
-CODE
-  ! Implementation
+  CODE
+    ! Implementation
 ```
 
 ---
@@ -186,8 +186,8 @@ MyMethod  PROCEDURE()  ! ← Ctrl+F12 here
 
 ! Jumps to MyClass.clw:
 MyClass.MyMethod PROCEDURE
-CODE
-  ! Implementation
+  CODE
+    ! Implementation
 ```
 
 ---
@@ -199,11 +199,11 @@ CODE
 
 **Example:**
 ```clarion
-MAP
-  MODULE('MyLib.dll')
-    MyFunc(), NAME('_MyFunc')  ! ← Ctrl+F12 finds MyLib source
+  MAP
+    MODULE('MyLib.dll')
+      MyFunc(), NAME('_MyFunc')  ! ← Ctrl+F12 finds MyLib source
+    END
   END
-END
 ```
 
 **Cross-project support:** Automatically finds source files for DLLs/LIBs across your solution.
@@ -282,7 +282,7 @@ Returns: STRING
 
 **Example:**
 ```clarion
-INCLUDE('MyFile.inc', 'MySection')  ! Hover shows MySection content
+  INCLUDE('MyFile.inc', 'MySection')  ! Hover shows MySection content
 ```
 
 ---
@@ -309,11 +309,11 @@ Clarion keywords that only mean something in context say what that context is, a
 
 **Example:**
 ```clarion
-IF Customer:Status = 'A'    ! ← the hover on END points back to this line
-  DoSomething()
-ELSE                        ! ← hover says "part of IF on line 1"
-  DoSomethingElse()
-END                         ! ← hover says "closes IF (line 1)"
+  IF Customer:Status = 'A'    ! ← the hover on END points back to this line
+    DoSomething()
+  ELSE                        ! ← hover says "part of IF on line 1"
+    DoSomethingElse()
+  END                         ! ← hover says "closes IF (line 1)"
 ```
 
 This is most useful in deeply nested generated code, where the structure a terminator closes is hundreds of lines above it.
@@ -446,8 +446,8 @@ MyVar  LONG  ! Global
 
 MyProc PROCEDURE
 MyVar    STRING(10)  ! Local (shadows global)
-CODE
-  MyVar = 'test'  ! ← F12 goes to local STRING, not global LONG
+  CODE
+    MyVar = 'test'  ! ← F12 goes to local STRING, not global LONG
 ```
 
 ### Which Project's Redirection Applies
@@ -460,9 +460,9 @@ Variables in routines are accessible from the parent procedure.
 **Example:**
 ```clarion
 MyProc PROCEDURE
-CODE
-  DO MyRoutine
-  RETURN
+  CODE
+    DO MyRoutine
+    RETURN
 
 MyRoutine ROUTINE
 MyVar     LONG
