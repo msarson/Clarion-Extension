@@ -234,6 +234,19 @@ LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a lab
 
 The list is the compiler's, not the help's ([test-programs/ReservedWordsTest](../../test-programs/ReservedWordsTest/README.md), Clarion 10 and 12): 44 words that cannot be a label anywhere, a GROUP field or CLASS method included, and can name only the last parameter of a prototype. CODE, DATA, NULL and THROW are not reserved; TRY, CATCH and FINALLY are. Words such as WINDOW, CLASS, QUEUE, SELF and PARENT, which the help says may not name a PROCEDURE, build there, so they are not reported. A reserved word that starts a statement (`OF 1`, `END`) may stand in column 1 and is not reported.
 
+### Redefined SELF, PARENT or NULL
+
+**Warns where the compiler warns "Redefining system intrinsic"** — and the redefinition is real: the new name hides the intrinsic for the rest of that method.
+
+```clarion
+Shape.Fill PROCEDURE
+Self     LONG             ! ⚠️ Redefining system intrinsic: SELF
+  CODE
+  SELF.Draw(1)            ! the compiler: Field not found: DRAW
+```
+
+Reported, exactly as the compiler does (Clarion 10 and 12): SELF or PARENT as a **method's** parameter (on the implementation's header) or local variable (a ROUTINE's DATA inside a method too), and NULL as the name of a PROCEDURE or method (on its MAP prototype or CLASS member). An ordinary procedure's `Self` parameter or local, and a global PROCEDURE named `Self`, draw nothing. Setting: `clarion.diagnostics.intrinsicRedefinitions`.
+
 ---
 
 ### Discarded Return Values

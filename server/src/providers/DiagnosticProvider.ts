@@ -15,7 +15,7 @@ import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, v
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateUndeclaredVariablesAsync as _validateUndeclaredVariablesAsync } from './diagnostics/UndeclaredVariableDiagnostics';
 import { SymbolFinderService } from '../services/SymbolFinderService';
-import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
+import { validateReservedKeywordLabels, validateIntrinsicRedefinitions } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
 import { validateUnresolvedFileReferences } from './diagnostics/UnresolvedFileReferenceDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
@@ -81,6 +81,7 @@ export class DiagnosticProvider {
             ['discardedReturnPlainCalls', 'discardedReturnValues', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
             ['cycleBreakOutsideLoop', 'cycleBreakOutsideLoop', () => validateCycleBreakOutsideLoop(tokens!, document)],
             ['reservedKeywordLabels', 'reservedKeywordLabels', () => validateReservedKeywordLabels(tokens!, document)],
+            ['intrinsicRedefinitions', 'intrinsicRedefinitions', () => validateIntrinsicRedefinitions(tokens!, document)], // #702
             ['unicodeCharacters', 'unicodeCharacters', () => validateUnicodeCharacters(document)],
             ['attributeApplicability', 'attributeApplicability', () => validateAttributeApplicability(tokens!, document, structure)],
             ['itemizeBlocks', 'itemizeBlocks', () => validateItemizeBlocks(tokens!, document)],

@@ -1593,6 +1593,23 @@
           "default": "default",
           "description": "How the reservedKeywordLabels check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
+        "clarion.diagnostics.intrinsicRedefinitions.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warns where the compiler warns 'Redefining system intrinsic': SELF or PARENT as a method's parameter or local variable, NULL as the name of a PROCEDURE or method. In that method the new name hides the real SELF or PARENT. Takes effect as soon as it is changed, no reload needed (issue #702)."
+        },
+        "clarion.diagnostics.intrinsicRedefinitions.severity": {
+          "type": "string",
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "default",
+          "description": "How the intrinsicRedefinitions check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
         "clarion.diagnostics.unicodeCharacters.enabled": {
           "type": "boolean",
           "default": true,

@@ -34,7 +34,7 @@ Every check can be turned off on its own and reported at the severity you choose
 
 ### The checks
 
-`<check>` is one of the 25 ids below — for example `"clarion.diagnostics.undeclaredVariables.severity": "error"`, or `"clarion.diagnostics.unicodeCharacters.enabled": false`.
+`<check>` is one of the 26 ids below — for example `"clarion.diagnostics.undeclaredVariables.severity": "error"`, or `"clarion.diagnostics.unicodeCharacters.enabled": false`.
 
 | Check | Default | What it reports |
 |---|---|---|
@@ -50,7 +50,8 @@ Every check can be turned off on its own and reported at the severity you choose
 | `classProperties` | on | Reports a QUEUE declared directly as a CLASS property, or nested inside another QUEUE, where a QUEUE reference (&QUEUE) is required. |
 | `discardedReturnValues` | on | Reports a call whose return value is discarded when the procedure or method is not declared with the PROC attribute. Covers plain calls and method calls. |
 | `cycleBreakOutsideLoop` | on | Reports CYCLE or BREAK outside any LOOP or ACCEPT, and a CYCLE or BREAK label that names no enclosing loop. |
-| `reservedKeywordLabels` | on | Reports a label that is a reserved Clarion keyword. |
+| `reservedKeywordLabels` | on | Reports a reserved Clarion keyword used as a label (a declaration follows it). The list is the compiler's, not the help's. |
+| `intrinsicRedefinitions` | on | Warns where the compiler warns "Redefining system intrinsic": SELF or PARENT as a method's parameter or local, NULL as a PROCEDURE or method name. In that method the new name hides the real SELF or PARENT. |
 | `unicodeCharacters` | on | Reports a character that no Windows ANSI code page can represent, which would corrupt the file for the Clarion compiler. |
 | `attributeApplicability` | on | Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON. |
 | `itemizeBlocks` | on | Reports a declaration other than an EQUATE inside an ITEMIZE block. |

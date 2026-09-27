@@ -72,6 +72,73 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
 }
 
 /**
+ * #702 — SELF, PARENT and NULL are system intrinsics. Redefining one compiles with the warning
+ * "Redefining system intrinsic", and the new name really does hide the intrinsic: in a method that
+ * declares a `Self` local, `SELF.Draw(1)` fails. Compiler-verified on Clarion 10 and 12; this
+ * reports exactly where the compiler warns, and nowhere else:
+ *  - SELF / PARENT as a method's parameter, on the method implementation's header (the CLASS
+ *    prototype and an ordinary procedure's parameter draw nothing);
+ *  - SELF / PARENT as a method's local, a ROUTINE's DATA inside a method included (an ordinary
+ *    procedure's local draws nothing); a field of a structure in that data is not reported, as the
+ *    compiler's behaviour there is untested;
+ *  - NULL as the name of a PROCEDURE or method, on its MAP prototype or CLASS member.
+ */
+export function validateIntrinsicRedefinitions(tokens: Token[], document: TextDocument): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    const lineText = (line: number) => document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } });
+    const warn = (line: number, character: number, word: string, meaning: string) => diagnostics.push({
+        severity: DiagnosticSeverity.Warning,
+        range: { start: { line, character }, end: { line, character: character + word.length } },
+        message: `Redefining system intrinsic: ${word.toUpperCase()}. ${meaning}`,
+        source: 'clarion',
+    });
+    const isMethod = (t: Token) => t.type === TokenType.Procedure && t.subType === TokenType.MethodImplementation;
+    const procedures = tokens.filter(t => t.type === TokenType.Procedure &&
+        (t.subType === TokenType.MethodImplementation || t.subType === TokenType.GlobalProcedure));
+    const routines = tokens.filter(t => t.subType === TokenType.Routine);
+    const contains = (scope: Token, line: number) => scope.line < line && line <= (scope.finishesAt ?? Number.MAX_SAFE_INTEGER);
+    const innermost = (list: Token[], line: number) => list.filter(s => contains(s, line)).sort((a, b) => b.line - a.line)[0];
+
+    for (const t of tokens) {
+        // NULL named as a PROCEDURE or method, where it is declared.
+        if (t.type === TokenType.Procedure && (t.subType === TokenType.MapProcedure || t.subType === TokenType.MethodDeclaration) &&
+            t.label?.toUpperCase() === 'NULL') {
+            const text = lineText(t.line);
+            const col = text.search(/\S/);
+            warn(t.line, Math.max(col, 0), text.substr(Math.max(col, 0), 4), 'The name hides NULL.');
+            continue;
+        }
+        // SELF / PARENT as a method's parameter, on the implementation's header.
+        if (isMethod(t)) {
+            const header = lineText(t.line);
+            const open = header.indexOf('(');
+            for (const p of t.parameters ?? []) {
+                const name = p.name ?? '';
+                if (!/^(SELF|PARENT)$/i.test(name) || open < 0) continue;
+                const m = new RegExp(`\\b${name}\\b`, 'i').exec(header.slice(open));
+                if (m) warn(t.line, open + m.index, name, `In this method ${name.toUpperCase()} now means this parameter, not the object.`);
+            }
+        }
+    }
+
+    // SELF / PARENT as a method's local (or a local of a ROUTINE inside a method).
+    for (const t of tokens) {
+        if (t.type !== TokenType.Label || t.start !== 0 || !/^(SELF|PARENT)$/i.test(t.value)) continue;
+        const routine = innermost(routines, t.line);
+        const procedure = innermost(procedures, t.line);
+        const scope = routine && (!procedure || routine.line > procedure.line) ? routine : procedure;
+        if (!scope) continue;
+        if (t.line >= (scope.executionMarker?.line ?? Number.MAX_SAFE_INTEGER)) continue; // not in its data
+        const owner = scope === routine ? innermost(procedures, routine.line) : scope;
+        if (!owner || !isMethod(owner)) continue;
+        const inStructure = tokens.some(s => s.type === TokenType.Structure && s.line > scope.line && contains(s, t.line));
+        if (inStructure) continue;
+        warn(t.line, 0, t.value, `In this method ${t.value.toUpperCase()} now means this variable, not the object.`);
+    }
+    return diagnostics;
+}
+
+/**
  * True when this token is the prefix segment of a colon-qualified label — i.e.
  * the next source character after the token is ':'. A reserved keyword in that
  * position (e.g. `Return` in `Return:NotSet`) is a valid label qualifier, not a

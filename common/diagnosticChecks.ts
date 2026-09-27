@@ -26,6 +26,7 @@ export const DIAGNOSTIC_CHECKS = [
     { id: 'discardedReturnValues',       default: true,  title: 'Discarded return values' },
     { id: 'cycleBreakOutsideLoop',       default: true,  title: 'CYCLE / BREAK outside a loop' },
     { id: 'reservedKeywordLabels',       default: true,  title: 'Reserved-keyword labels' },
+    { id: 'intrinsicRedefinitions',      default: true,  title: 'Redefined SELF, PARENT or NULL' },
     { id: 'unicodeCharacters',           default: true,  title: 'Unicode characters' },
     { id: 'attributeApplicability',      default: true,  title: 'Attribute applicability' },
     { id: 'itemizeBlocks',               default: true,  title: 'ITEMIZE blocks' },
