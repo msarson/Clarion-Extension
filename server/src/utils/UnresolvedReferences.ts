@@ -1,5 +1,5 @@
 /**
- * #687 (experimental) — the file references in the graph's files that do not resolve. The
+ * #687 — the file references in the graph's files that do not resolve. The
  * FileRelationshipGraph drops an unresolved INCLUDE / MEMBER / MODULE target silently (and its disk
  * cache stores only the edges that did resolve), so the report rescans the files on demand with the
  * same resolver. Text-based, like the graph's cold scan. vscode-free for tests.

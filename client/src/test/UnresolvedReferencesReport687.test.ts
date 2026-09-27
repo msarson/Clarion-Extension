@@ -4,7 +4,7 @@ import * as path from 'path';
 import { renderUnresolvedReport, UnresolvedReportData } from '../views/UnresolvedReferencesReport';
 
 /**
- * #687 (experimental) — the unresolved file references report: the server's findings rendered as a
+ * #687 — the unresolved file references report: the server's findings rendered as a
  * page, missing INCLUDEs first, then MEMBERs, with MODULE names (possibly external libraries, per the
  * Language Reference) and conditional ones folded away; each row opens the reference.
  */
@@ -77,6 +77,17 @@ suite('Unresolved file references report page (#687)', () => {
         const html = renderUnresolvedReport(data({ references: [entry({ target: '<b>x</b>' })] }), 'N', 'csp');
         assert.ok(!html.includes('<b>x</b>'));
         assert.ok(html.includes('&lt;b&gt;x&lt;/b&gt;'));
+    });
+
+    test('no longer labelled experimental: page, command title, Graph row', () => {
+        assert.doesNotMatch(renderUnresolvedReport(data(), 'N', 'csp'), /experimental/i);
+        let dir = __dirname;
+        while (!fs.existsSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'))) dir = path.dirname(dir);
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+        const cmd = pkg.contributes.commands.find((c: { command: string }) => c.command === 'clarion.unresolvedReferencesReport');
+        assert.strictEqual(cmd.title, 'Unresolved File References');
+        const toolbar = fs.readFileSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'), 'utf8');
+        assert.doesNotMatch(toolbar, /title: '[^']*\(experimental\)'/);
     });
 
     test('an unbuilt graph says so', () => {

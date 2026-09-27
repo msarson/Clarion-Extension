@@ -1,5 +1,5 @@
 /**
- * #687 (experimental) — the unresolved file references report page. The server's
+ * #687 — the unresolved file references report page. The server's
  * clarion/unresolvedReferences answer, rendered: project sources that could not be found, missing
  * INCLUDEs (the solution's own sources first), MEMBERs whose program file was not found, then the
  * MODULE names and the conditional references folded away. A MODULE name with no file behind it is
@@ -106,7 +106,7 @@ export function renderUnresolvedReport(data: UnresolvedReportData, nonce: string
 </style>
 </head>
 <body>
-<h1>Unresolved file references <small>(experimental)</small></h1>
+<h1>Unresolved file references</h1>
 ${body}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();

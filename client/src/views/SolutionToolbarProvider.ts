@@ -245,8 +245,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 const missing = unresolved > 0
                     ? `, ⚠️ ${unresolved}${total ? ` of ${total}` : ''} unresolved`
                     : '';
-                // #687 (experimental) — clickable: the unresolved file references report.
-                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}`, command: 'unresolvedReport', title: 'Show the file references that do not resolve (experimental)' });
+                // #687 — clickable: the unresolved file references report.
+                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}`, command: 'unresolvedReport', title: 'Show the file references that do not resolve' });
             }
         }
 

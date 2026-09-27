@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { scanReferences, unresolvedReferences } from '../utils/UnresolvedReferences';
 
 /**
- * #687 (experimental) — a report of the file references that do not resolve. The graph drops an
+ * #687 — a report of the file references that do not resolve. The graph drops an
  * unresolved INCLUDE / MEMBER / MODULE target silently, so the report rescans the graph's files and
  * asks the same resolver.
  *

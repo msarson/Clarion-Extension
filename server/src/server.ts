@@ -2943,7 +2943,7 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
 });
 
 // Add a handler for getting search paths for a project and extension
-// #687 (experimental) — the file references the graph could not resolve. The graph drops them when
+// #687 — the file references the graph could not resolve. The graph drops them when
 // it builds (and caches only resolved edges), so this rescans its files with the same resolver, in
 // chunks that yield to the event loop.
 connection.onRequest('clarion/unresolvedReferences', async () => {

@@ -1123,7 +1123,7 @@ export class FileRelationshipGraph {
      * `fromFile` is preserved on the signature for the 6 token-walk callers
      * but is no longer threaded into the parser call.
      */
-    // ── #687 (experimental) — the unresolved file references report's view of the graph ──
+    // ── #687 — the unresolved file references report's view of the graph ──
 
     /** Every file the graph processed (normalised paths). */
     public getScannedFiles(): string[] { return [...this.scannedFiles]; }

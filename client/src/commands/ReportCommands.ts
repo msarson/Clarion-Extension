@@ -3,7 +3,7 @@ import { getLanguageClient } from '../LanguageClientManager';
 import { renderUnresolvedReport, UnresolvedReportData } from '../views/UnresolvedReferencesReport';
 
 /**
- * #687 (experimental) — Clarion: Unresolved File References. Asks the server to rescan the file
+ * #687 — Clarion: Unresolved File References. Asks the server to rescan the file
  * graph's files for references that do not resolve, and shows them in a webview; a row opens the
  * reference. One panel, reused and refreshed on each run.
  */

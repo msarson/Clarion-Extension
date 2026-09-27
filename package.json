@@ -270,7 +270,7 @@
       },
       {
         "command": "clarion.unresolvedReferencesReport",
-        "title": "Unresolved File References (experimental)",
+        "title": "Unresolved File References",
         "category": "Clarion",
         "when": "clarion.solutionOpen"
       },
