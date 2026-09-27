@@ -3,9 +3,10 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { scanReferences } from '../../utils/UnresolvedReferences';
 
 /**
- * #695 — an INCLUDE or MEMBER naming a file that cannot be found. Both fail the compile: a missing
- * MEMBER program is compiler-verified (C12: `Error(3): cif$fileopen NoSuchProg.CLW`, even when the
- * module uses nothing global), and nothing said so before a build. The references come from the
+ * #695 — an INCLUDE or MEMBER naming a file that cannot be found. Both fail the compile, compiler-
+ * verified on C12: `Error(3): cif$fileopen NoSuchProg.CLW` for a MEMBER program (even when the
+ * module uses nothing global), `Error(3): cif$fileopen NoSuchFile.inc` for an INCLUDE. Nothing
+ * said so before a build. The references come from the
  * scanner the #687 report uses and are resolved by the file graph's resolver, so the check, the
  * report and the graph agree.
  *
@@ -27,7 +28,7 @@ export function validateUnresolvedFileReferences(
             range: Range.create(ref.line, ref.column, ref.line, ref.column + ref.target.length),
             message: ref.kind === 'MEMBER'
                 ? `The program file '${ref.target}' named by MEMBER cannot be found. The compiler opens it, so the build will fail.`
-                : `The file '${ref.target}' named by INCLUDE cannot be found.`,
+                : `The file '${ref.target}' named by INCLUDE cannot be found. The compiler reads it in place, so the build will fail.`,
             source: 'clarion',
         });
     }

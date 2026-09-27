@@ -35,6 +35,8 @@ suite('An INCLUDE or MEMBER whose file cannot be found (#695)', () => {
         const lines = ["  MEMBER('Main')", "  INCLUDE('Gone.inc'),ONCE", "  INCLUDE('shared.inc'),ONCE"];
         assert.deepStrictEqual(where(lines), ['1:11-19']);
         assert.match(String(check(lines)[0].message), /Gone\.inc/);
+        // Compiler-verified like MEMBER: a missing INCLUDE is `Error(3): cif$fileopen NoSuchFile.inc`.
+        assert.match(String(check(lines)[0].message), /so the build will fail/);
     });
 
     test('a file that resolves is not flagged', () => {
