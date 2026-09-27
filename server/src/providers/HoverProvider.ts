@@ -230,7 +230,9 @@ export class HoverProvider {
                 let typeArgMatch: RegExpExecArray | null;
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
-                        return this.checkClassTypeHover(word, document, true);
+                        // #698 — the index holds include files; a type declared in this file is
+                        // answered from its tokens, with the same card.
+                        return (await this.checkClassTypeHover(word, document, true)) ?? this.sameFileTypeHover(word, document, tokens);
                     }
                 }
             }
@@ -1060,6 +1062,27 @@ export class HoverProvider {
         }
 
         return null;
+    }
+
+    /**
+     * #698 — the type-argument card (`CLASS(Parent)`, `LIKE(Rec)`, ...) for a structure declared
+     * in this document, which the structure index (include files) does not hold. Same card as
+     * `_checkClassTypeHoverInternal` builds from the index.
+     */
+    private sameFileTypeHover(word: string, document: TextDocument, tokens: Token[]): Hover | null {
+        const name = word.toLowerCase();
+        const declaration = tokens.find(t => t.type === TokenType.Structure && t.label?.toLowerCase() === name);
+        if (!declaration) return null;
+        const text = document.getText({ start: { line: declaration.line, character: 0 }, end: { line: declaration.line + 1, character: 0 } });
+        const structureType = declaration.value.toUpperCase();
+        const typeLabel = structureType !== 'INTERFACE' && /,\s*TYPE\b/i.test(text) ? `${structureType}, TYPE` : structureType;
+        const parent = /\bCLASS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(text)?.[1];
+        const hoverMarkdown = [
+            `**${declaration.label}** — ${typeLabel}`,
+            ``,
+            `📦 Defined in ${this.formatter.locationLink(document.uri, declaration.line)}${parent ? `\n⬆️ Extends: \`${parent}\`` : ''}`
+        ].join('\n');
+        return { contents: { kind: 'markdown', value: hoverMarkdown } };
     }
 
     /**

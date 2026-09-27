@@ -176,7 +176,10 @@ export class DefinitionProvider {
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
                         logger.test(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
-                        return this.findClassTypeDefinition(word, document);
+                        // #698 — the index holds include files, not the .clw being edited: a type
+                        // declared in this file (a member module's own CLASS, GROUP,TYPE, ...) is
+                        // answered from its tokens, which are already in memory.
+                        return (await this.findClassTypeDefinition(word, document)) ?? this.findTypeInThisFile(word, document);
                     }
                 }
             }
@@ -1595,6 +1598,20 @@ export class DefinitionProvider {
      * Checks if cursor is on a declaration line (method declaration or MAP procedure)
      * When on a declaration, F12 should not navigate (already at definition)
      */
+    /**
+     * #698 — a structure (CLASS, INTERFACE, QUEUE, GROUP, ...) or data label of this name declared
+     * in the document itself, at column 0: what a type argument such as `CLASS(Parent)` or
+     * `LIKE(Rec)` names when the type is not in an include file.
+     */
+    private findTypeInThisFile(word: string, document: TextDocument): Location | null {
+        const name = word.toLowerCase();
+        const declaration = this.tokenCache.getTokens(document).find(t =>
+            (t.type === TokenType.Structure && t.label?.toLowerCase() === name) ||
+            (t.type === TokenType.Label && t.start === 0 && t.value.toLowerCase() === name));
+        if (!declaration) return null;
+        return Location.create(document.uri, labelRange(declaration.line, declaration.label ?? declaration.value));
+    }
+
     private isOnDeclaration(line: string, position: Position, word: string): boolean {
         // Check if line contains PROCEDURE or FUNCTION keyword (but not a method implementation)
         const hasProcedureKeyword = /\b(PROCEDURE|FUNCTION)\b/i.test(line);
