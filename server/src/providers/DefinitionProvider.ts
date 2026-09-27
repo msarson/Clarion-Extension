@@ -15,7 +15,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
-import { labelLocation } from '../utils/ProcedureNameRange'; // #690
+import { labelLocation, labelRange } from '../utils/ProcedureNameRange'; // #690, #697
 import { findSectionLocation } from '../utils/SectionLocator';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -162,7 +162,7 @@ export class DefinitionProvider {
             const selfOrParent = SelfParentClassResolver.keywordAt(line, position.character);
             if (selfOrParent) {
                 const site = await this.selfParentResolver.resolve(selfOrParent, document, position);
-                return site ? Location.create(site.uri, Range.create(site.line, 0, site.line, 0)) : null;
+                return site ? Location.create(site.uri, labelRange(site.line, site.className)) : null; // #697
             }
 
             // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
@@ -1329,7 +1329,7 @@ export class DefinitionProvider {
             );
             const equatesInfo = await this.memberLocator.findMemberInClass(className, memberName, equatesDoc, paramCount);
             if (equatesInfo) {
-                return Location.create(equatesInfo.file, Range.create(equatesInfo.line, 0, equatesInfo.line, 0));
+                return Location.create(equatesInfo.file, labelRange(equatesInfo.line, memberName)); // #697
             }
         }
 
@@ -1350,7 +1350,7 @@ export class DefinitionProvider {
             t.label?.toLowerCase() === ifaceName.toLowerCase()
         );
         if (local) {
-            return Location.create(document.uri, Range.create(local.line, 0, local.line, 0));
+            return Location.create(document.uri, labelRange(local.line, local.label!)); // #697
         }
 
         // Search INCLUDE files
@@ -1369,7 +1369,7 @@ export class DefinitionProvider {
             );
             if (eq) {
                 const uri = pathToCanonicalUri(equatesPath); // #251: client-facing Location
-                return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
+                return Location.create(uri, labelRange(eq.line, eq.label!)); // #697
             }
         }
 
@@ -1459,7 +1459,7 @@ export class DefinitionProvider {
                 );
                 if (labelToken) {
                     logger.info(`Found type "${typeName}" in ${resolvedPath}:${labelToken.line}`);
-                    return Location.create(uri, Range.create(labelToken.line, 0, labelToken.line, 0));
+                    return Location.create(uri, labelRange(labelToken.line, labelToken.value)); // #697
                 }
             }
 
@@ -1492,7 +1492,7 @@ export class DefinitionProvider {
 
             const uri = pathToCanonicalUri(info.filePath); // #251: client-facing Location
             logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
-            return Location.create(uri, Range.create(info.line, 0, info.line, 0));
+            return Location.create(uri, labelRange(info.line, info.name)); // #697
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
             return null;
