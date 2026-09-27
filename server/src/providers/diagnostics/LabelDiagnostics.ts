@@ -9,8 +9,9 @@ import { Token, TokenType } from '../../ClarionTokenizer';
  * method, global PROCEDURE, ROUTINE, statement label, parameter, method parameter and local), on
  * Clarion 10 and 12 with identical results:
  *
- *  - these 44 are rejected in every one of those places but a parameter name (every word builds
- *    as a parameter; parameters are not Label tokens, so they are never checked here);
+ *  - these 44 are rejected in every one of those places; as a parameter name each builds alone
+ *    or as the last parameter and fails when another parameter follows it (parameters are not
+ *    Label tokens, so neither case is checked here);
  *  - the help's first table also lists CODE, DATA, NULL and THROW, which build everywhere;
  *  - CATCH, FINALLY and TRY are reserved in Win32 Clarion too (they were once omitted here as
  *    Clarion.NET-only);

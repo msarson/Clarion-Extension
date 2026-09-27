@@ -8,14 +8,14 @@ Issue #701. The Language Reference's *Reserved Words* page has two tables: words
 node test-programs/ReservedWordsTest/run.js --clarion=<Clarion install root> [--words=IF,CODE]
 ```
 
-It tries every word of both tables in 11 places: global data, procedure-local data, a GROUP field, a CLASS property, a CLASS method, a global PROCEDURE (MAP prototype and implementation), a ROUTINE, a procedure parameter, an executable statement's label, a method parameter and a method-local. `Foo` is the control and must build everywhere; two cases that must fail (a statement in column 1, an indented label) check that the harness notices a failure at all. A full run is 838 builds, about six minutes.
+It tries every word of both tables in 13 places: global data, procedure-local data, a GROUP field, a CLASS property, a CLASS method, a global PROCEDURE (MAP prototype and implementation), a ROUTINE, a procedure parameter (alone, first of two, last of two), an executable statement's label, a method parameter and a method-local. `Foo` is the control and must build everywhere; two cases that must fail (a statement in column 1, an indented label) check that the harness notices a failure at all. A full run is 990 builds, about seven minutes.
 
 Results: [Clarion 10](results-10.md) (10.0.12567) and [Clarion 12](results-12.md) (12.0.14204) — identical.
 
 ## What the compiler says
 
-- **44 words cannot be a label anywhere but a parameter name:** ACCEPT AND ASSERT BEGIN BREAK BY CASE CATCH CHOOSE COMPILE CONST CYCLE DO ELSE ELSIF END EXECUTE EXIT FINALLY FUNCTION GOTO IF INCLUDE LOOP MEMBER NEW NOT OF OMIT OR OROF PRAGMA PROCEDURE PROGRAM RETURN ROUTINE SECTION THEN TIMES TO TRY UNTIL WHILE XOR. That includes a GROUP field and a CLASS method or property.
-- **Every word builds as a parameter name**, of a procedure or a method.
+- **44 words cannot be a label anywhere:** ACCEPT AND ASSERT BEGIN BREAK BY CASE CATCH CHOOSE COMPILE CONST CYCLE DO ELSE ELSIF END EXECUTE EXIT FINALLY FUNCTION GOTO IF INCLUDE LOOP MEMBER NEW NOT OF OMIT OR OROF PRAGMA PROCEDURE PROGRAM RETURN ROUTINE SECTION THEN TIMES TO TRY UNTIL WHILE XOR. That includes a GROUP field and a CLASS method or property.
+- **As a parameter name, each of those 44 builds alone or as the last parameter, and fails when another parameter follows it** (`(LONG If)` and `(LONG X, LONG If)` build, `(LONG If, LONG X)` does not: `Expected: <ID> )`). Every other word builds in any position.
 - **CODE, DATA, NULL and THROW are not reserved**, though the help's first table lists them. **CATCH, FINALLY and TRY are**, in Win32 Clarion too.
 - **The second table is not enforced.** All 27 words (WINDOW, CLASS, QUEUE, SELF, PARENT, ...) build in every place, a global PROCEDURE's label included; so do SELF and PARENT as a method's parameter or local, which the help's note forbids. (The harness declares the global PROCEDURE and does not call it.)
 - **A reserved word that starts a statement may stand in column 1.** `OF 1`, `IF X = 1`, `END`, `LOOP`, `ELSE`, `RETURN` and `CODE` all build there; a statement that starts with an ordinary name (`X = 1`) does not. So a reserved word is only an error as a *label*: when a declaration follows it.

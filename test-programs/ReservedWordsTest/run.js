@@ -46,6 +46,9 @@ const PLACES = {
     globalProcedure: K => ['  PROGRAM', '  MAP', `${K} PROCEDURE`, '  END', '  CODE', `${K} PROCEDURE`, '  CODE'],
     routine: K => ['  PROGRAM', '  MAP', '  END', '  CODE', `  DO ${K}`, `${K} ROUTINE`, '  EXIT'],
     parameter: K => ['  PROGRAM', '  MAP', `P PROCEDURE(LONG ${K})`, '  END', '  CODE', '  P(1)', `P PROCEDURE(LONG ${K})`, '  CODE'],
+    // A reserved word before a comma fails where the same word alone or last builds.
+    parameterFirst: K => ['  PROGRAM', '  MAP', `P PROCEDURE(LONG ${K}, LONG Y)`, '  END', '  CODE', '  P(1, 2)', `P PROCEDURE(LONG ${K}, LONG Y)`, '  CODE'],
+    parameterLast: K => ['  PROGRAM', '  MAP', `P PROCEDURE(LONG Y, LONG ${K})`, '  END', '  CODE', '  P(1, 2)', `P PROCEDURE(LONG Y, LONG ${K})`, '  CODE'],
     statementLabel: K => ['  PROGRAM', '  MAP', '  END', 'X   LONG', '  CODE', `${K}  X = 1`],
     methodParameter: K => ['  PROGRAM', '  MAP', '  END', 'C   CLASS', `M   PROCEDURE(LONG ${K})`, '    END', '  CODE', '  C.M(1)', `C.M PROCEDURE(LONG ${K})`, '  CODE'],
     methodLocal: K => ['  PROGRAM', '  MAP', '  END', 'C   CLASS', 'M   PROCEDURE', '    END', '  CODE', '  C.M()', 'C.M PROCEDURE', `${K}   LONG`, '  CODE'],

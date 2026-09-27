@@ -2318,8 +2318,10 @@ Init      PROCEDURE()
         assert.strictEqual(labelDiags(`MyClass CLASS\nCode      PROCEDURE()\nJoin      PROCEDURE()\n        END`).length, 0);
     });
 
-    test('a reserved word as a parameter name → no error (every one builds there)', () => {
-        const code = `P  PROCEDURE(LONG If, STRING Loop)
+    test('a reserved word as the last parameter\'s name → no error (every one builds there)', () => {
+        // Compiler-verified: a reserved parameter name builds alone or last, and fails when
+        // another parameter follows it. This check looks at labels only, so neither is reported.
+        const code = `P  PROCEDURE(LONG X, STRING Loop)
   CODE`;
         assert.strictEqual(labelDiags(code).length, 0);
     });
