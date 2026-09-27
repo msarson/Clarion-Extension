@@ -3,63 +3,47 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 
 /**
- * Keywords that are fully reserved in Clarion — they may NOT be used as a label
- * for any purpose (variable, structure, or procedure).
- * Source: Clarion Language Reference, "Reserved Words" table.
- * Note: THROW, TRY, CATCH, FINALLY are Clarion.NET (Clarion#) keywords only — they
- * appear in the reserved words list in error. The Win32 Clarion compiler allows them
- * as labels (SoftVelocity's own ABFile.inc uses Throw as a CLASS method). Omitted.
+ * #701 — the words that cannot be a label, as the compiler decides it, not the Language
+ * Reference. `test-programs/ReservedWordsTest` builds every word of the help's Reserved Words
+ * tables in each place a label can go (global and local data, GROUP field, CLASS property and
+ * method, global PROCEDURE, ROUTINE, statement label, parameter, method parameter and local), on
+ * Clarion 10 and 12 with identical results:
+ *
+ *  - these 44 are rejected in every one of those places but a parameter name (every word builds
+ *    as a parameter; parameters are not Label tokens, so they are never checked here);
+ *  - the help's first table also lists CODE, DATA, NULL and THROW, which build everywhere;
+ *  - CATCH, FINALLY and TRY are reserved in Win32 Clarion too (they were once omitted here as
+ *    Clarion.NET-only);
+ *  - the help's second table ("may not be the label of any PROCEDURE statement": WINDOW, CLASS,
+ *    QUEUE, SELF, PARENT, ...) is not enforced by either compiler: all 27 build as a PROCEDURE's
+ *    label, a method, a field and a method's parameter or local, so nothing is reported for them.
  */
-const FULLY_RESERVED = new Set([
+const RESERVED = new Set([
     'ACCEPT', 'AND', 'ASSERT', 'BEGIN', 'BREAK', 'BY',
-    'CASE', 'CHOOSE', 'COMPILE', 'CONST',
+    'CASE', 'CATCH', 'CHOOSE', 'COMPILE', 'CONST',
     'CYCLE', 'DO', 'ELSE', 'ELSIF', 'END',
-    'EXECUTE', 'EXIT', 'FUNCTION', 'GOTO', 'IF',
-    'INCLUDE', 'LOOP', 'MEMBER', 'NEW', 'NOT', 'NULL',
+    'EXECUTE', 'EXIT', 'FINALLY', 'FUNCTION', 'GOTO', 'IF',
+    'INCLUDE', 'LOOP', 'MEMBER', 'NEW', 'NOT',
     'OF', 'OMIT', 'OR', 'OROF', 'PRAGMA', 'PROCEDURE',
     'PROGRAM', 'RETURN', 'ROUTINE', 'SECTION', 'THEN',
-    'TIMES', 'TO', 'UNTIL', 'WHILE', 'XOR',
+    'TIMES', 'TO', 'TRY', 'UNTIL', 'WHILE', 'XOR',
 ]);
 
 /**
- * Keywords that may be labels for data structures or executable statements,
- * but NOT for PROCEDURE or FUNCTION declarations.
- * Source: Clarion Language Reference, "Reserved Words" table.
- *
- * CODE and DATA are execution-marker keywords — valid standalone at col 0,
- * and valid as method/field names inside a structure (e.g. CLASS), but
- * invalid as the label of a global PROCEDURE/FUNCTION declaration.
- *
- * GROUP is deliberately excluded from this set: unlike the rest, a global
- * (non-nested) `Group PROCEDURE()` is valid, compiling, runnable Clarion —
- * confirmed by compiling and running the ClarionAssistant
- * `group-record-diagnostics-repro` test fixture's case G. This diagnostic
- * previously false-flagged it. The remaining keywords below are UNVERIFIED
- * for this same global-scope validity (some, e.g. SELF/PARENT, seem unlikely
- * to share it) — do not remove any of them without independently confirming
- * each one compiles as a global PROCEDURE/FUNCTION label first.
+ * What makes a column-1 word a label: a declaration follows it — a data type, a structure, a
+ * PROCEDURE / FUNCTION / ROUTINE, an EQUATE, LIKE or a `&` reference. A reserved word that
+ * STARTS a statement may stand in column 1 (compiler-verified on Clarion 10 and 12: `OF 1`,
+ * `IF X = 1`, `END`, `LOOP`, `ELSE`, `RETURN`, `CODE` all build there), and the tokenizer still
+ * calls it a Label, so without this every such line was reported. A reserved word declaring a
+ * variable of a user-defined type (`If MyType`) is not recognised; no report is better than a
+ * wrong one.
  */
-const STRUCTURE_ONLY = new Set([
-    'APPLICATION', 'CLASS', 'CODE', 'DATA', 'DETAIL', 'FILE', 'FOOTER',
-    'FORM', 'HEADER', 'ITEM', 'ITEMIZE',
-    'JOIN', 'MAP', 'MENU', 'MENUBAR', 'MODULE',
-    'OLE', 'OPTION', 'QUEUE', 'PARENT', 'RECORD',
-    'REPORT', 'SELF', 'SHEET', 'TAB', 'TOOLBAR',
-    'VIEW', 'WINDOW',
-]);
+const DECLARATION = /^\s+(?:&|(?:BYTE|SHORT|USHORT|LONG|ULONG|SIGNED|UNSIGNED|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|ASTRING|BSTRING|USTRING|DATE|TIME|BOOL|ANY|LIKE|BLOB|MEMO|GROUP|QUEUE|CLASS|INTERFACE|FILE|RECORD|KEY|INDEX|VIEW|WINDOW|REPORT|APPLICATION|ITEMIZE|EQUATE|PROCEDURE|FUNCTION|ROUTINE)\b)/i;
 
 /**
- * Validates that Clarion reserved keywords are not used as labels.
- *
- * Two cases are checked:
- *  1. A Label token whose value is fully reserved → always an error,
- *     UNLESS the label appears inside a structure (CLASS/GROUP/QUEUE etc.),
- *     where keywords are valid as field or method names.
- *  2. A Label token whose value is structure-only AND the next token on the
- *     same line is PROCEDURE or FUNCTION → error, UNLESS the label is inside
- *     a structure definition (e.g. a method declaration inside CLASS).
- *
- * Closes #69
+ * Validates that Clarion reserved keywords are not used as labels (#69): a reserved word
+ * declaring something is an error wherever it stands, inside a structure (a GROUP field, a CLASS
+ * method) as much as outside it (#701).
  */
 export function validateReservedKeywordLabels(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
@@ -68,8 +52,6 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
         const token = tokens[i];
         if (token.type !== TokenType.Label) continue;
 
-        const upper = token.value.toUpperCase();
-
         // #372: a reserved word used as the PREFIX of a colon-qualified label
         // (e.g. `Return:NotSet EQUATE(0)`) is a valid label — the keyword is a
         // qualifier, not a standalone label. A keyword-colliding prefix tokenizes
@@ -77,29 +59,11 @@ export function validateReservedKeywordLabels(tokens: Token[], document: TextDoc
         // Label whose next source character is ':'.
         if (isColonQualifiedPrefix(token, document)) continue;
 
-        if (FULLY_RESERVED.has(upper)) {
-            // Reserved words are valid as field names and method names inside structures
-            // (e.g. `Code LONG` inside GROUP, or `Code PROCEDURE()` inside CLASS)
-            if (findEnclosingStructure(tokens, i)) continue;
+        if (RESERVED.has(token.value.toUpperCase()) && declares(token, document)) {
             diagnostics.push(makeDiagnostic(
                 token,
                 `'${token.value}' is a reserved keyword and cannot be used as a label.`
             ));
-            continue;
-        }
-
-        if (STRUCTURE_ONLY.has(upper)) {
-            // Find the next non-Comment token on the same line
-            const nextToken = findNextOnLine(tokens, i + 1, token.line);
-            if (nextToken && isProcedureKeyword(nextToken)) {
-                // Structure keywords are valid method names inside CLASS/INTERFACE
-                // (e.g. `Join PROCEDURE()` inside a CLASS)
-                if (findEnclosingStructure(tokens, i)) continue;
-                diagnostics.push(makeDiagnostic(
-                    token,
-                    `'${token.value}' cannot be the label of a PROCEDURE or FUNCTION declaration.`
-                ));
-            }
         }
     }
 
@@ -123,36 +87,13 @@ function isColonQualifiedPrefix(token: Token, document: TextDocument): boolean {
     return nextChar === ':';
 }
 
-function findNextOnLine(tokens: Token[], from: number, line: number): Token | undefined {
-    for (let i = from; i < tokens.length; i++) {
-        if (tokens[i].line !== line) return undefined;
-        if (tokens[i].type !== TokenType.Comment) return tokens[i];
-    }
-    return undefined;
-}
-
-/**
- * Scans backward from labelIndex to find the innermost open Structure token
- * that contains the label's line. Uses finishesAt to determine if a structure
- * is still open at the label's position.
- */
-function findEnclosingStructure(tokens: Token[], labelIndex: number): Token | undefined {
-    const labelLine = tokens[labelIndex].line;
-    for (let j = labelIndex - 1; j >= 0; j--) {
-        const t = tokens[j];
-        if (t.type !== TokenType.Structure) continue;
-        // finishesAt undefined means the structure hasn't been closed yet
-        if (t.finishesAt === undefined || t.finishesAt >= labelLine) {
-            return t;
-        }
-        // This structure closed before our label — keep scanning outward
-    }
-    return undefined;
-}
-
-function isProcedureKeyword(token: Token): boolean {
-    const v = token.value.toUpperCase();
-    return v === 'PROCEDURE' || v === 'FUNCTION';
+/** True when a declaration follows the label on its line (see DECLARATION). */
+function declares(token: Token, document: TextDocument): boolean {
+    const rest = document.getText({
+        start: { line: token.line, character: token.start + token.value.length },
+        end: { line: token.line + 1, character: 0 },
+    });
+    return DECLARATION.test(rest);
 }
 
 function makeDiagnostic(token: Token, message: string): Diagnostic {

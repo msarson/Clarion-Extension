@@ -232,6 +232,8 @@ Code inside an **unconditional `OMIT`** block isn't part of the active build, so
 LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a label
 ```
 
+The list is the compiler's, not the help's ([test-programs/ReservedWordsTest](../../test-programs/ReservedWordsTest/README.md), Clarion 10 and 12): 44 words that cannot be a label anywhere, a GROUP field or CLASS method included, but can be a parameter name. CODE, DATA, NULL and THROW are not reserved; TRY, CATCH and FINALLY are. Words such as WINDOW, CLASS, QUEUE, SELF and PARENT, which the help says may not name a PROCEDURE, build there, so they are not reported. A reserved word that starts a statement (`OF 1`, `END`) may stand in column 1 and is not reported.
+
 ---
 
 ### Discarded Return Values

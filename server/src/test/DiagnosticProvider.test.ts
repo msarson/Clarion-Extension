@@ -2219,39 +2219,76 @@ return:json            EQUATE(1)`;
         assert.strictEqual(diags.length, 0, 'Keyword in code section should not be flagged');
     });
 
-    // ── Case 2: structure-only keywords as PROCEDURE labels ──────────────────
+    // ── #701: what the compiler says (test-programs/ReservedWordsTest, Clarion 10 and 12) ──
+    // The Reserved Words page's first table holds for 44 of its words everywhere a label can go
+    // but a parameter; CODE, DATA, NULL and THROW build everywhere. Its second table ("not the
+    // label of any PROCEDURE") does not hold: all 27 build as a PROCEDURE's label too.
 
-    test('WINDOW as PROCEDURE label → error', () => {
-        const code = `WINDOW  PROCEDURE()
-  CODE
-  RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 1, 'Should flag WINDOW as PROCEDURE label');
-        assert.ok(String(diags[0].message).toUpperCase().includes('WINDOW'));
+    test('#701 bug-pin: TRY, CATCH and FINALLY are reserved in Win32 Clarion', () => {
+        for (const word of ['Try', 'Catch', 'Finally']) {
+            const diags = labelDiags(`${word}  LONG\n  CODE`);
+            assert.strictEqual(diags.length, 1, `${word} should be flagged`);
+        }
     });
 
-    test('CLASS as PROCEDURE label → error', () => {
-        const code = `CLASS   PROCEDURE()
-  CODE
-  RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 1, 'Should flag CLASS as PROCEDURE label');
+    test('#701 bug-pin: a reserved word as a GROUP field → error (the compiler rejects it)', () => {
+        const code = `MyGroup GROUP
+If        LONG
+        END`;
+        assert.strictEqual(labelDiags(code).length, 1);
     });
 
-    test('QUEUE as PROCEDURE label → error', () => {
-        const code = `QUEUE   PROCEDURE()
+    test('#701 bug-pin: a reserved word as a CLASS method → error (the compiler rejects it)', () => {
+        const code = `MyClass CLASS
+Loop      PROCEDURE()
+        END`;
+        assert.strictEqual(labelDiags(code).length, 1);
+    });
+
+    test('#701 bug-pin: a reserved word STARTING a statement in column 1 is not a label (the compiler accepts it)', () => {
+        // Compiler-verified on Clarion 10 and 12: OF, IF, END, LOOP, ELSE, RETURN and CODE all
+        // build in column 1; only a reserved word followed by a declaration is a label.
+        const code = `TestProc  PROCEDURE()
+X    LONG
+  CODE
+  CASE X
+OF 1
+    X = 2
+  END
+IF X = 1
+    X = 3
+END
+RETURN`;
+        assert.deepStrictEqual(labelDiags(code).map(d => d.message), []);
+    });
+
+    test('#701 bug-pin: NULL and THROW are not reserved', () => {
+        for (const word of ['Null', 'Throw']) {
+            assert.strictEqual(labelDiags(`${word}  LONG\n  CODE`).length, 0, `${word} builds as a label`);
+        }
+    });
+
+    test('#701 bug-pin: WINDOW, CLASS, QUEUE and the rest of the second table build as a PROCEDURE label', () => {
+        for (const word of ['WINDOW', 'CLASS', 'QUEUE', 'REPORT', 'SELF', 'PARENT', 'JOIN']) {
+            const code = `${word}  PROCEDURE()
   CODE
   RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 1, 'Should flag QUEUE as PROCEDURE label');
+            assert.strictEqual(labelDiags(code).length, 0, `${word} PROCEDURE builds`);
+        }
+    });
+
+    test('#701 bug-pin: CODE as a PROCEDURE label builds', () => {
+        const code = `CODE    PROCEDURE()
+  CODE
+  RETURN`;
+        assert.strictEqual(labelDiags(code).length, 0);
     });
 
     test('GROUP as PROCEDURE label → no error', () => {
         const code = `GROUP   PROCEDURE()
   CODE
   RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'GROUP is valid as a global PROCEDURE label (confirmed via the group-record-diagnostics-repro test fixture, case G)');
+        assert.strictEqual(labelDiags(code).length, 0);
     });
 
     test('WINDOW as structure label (valid) → no error', () => {
@@ -2262,8 +2299,7 @@ WINDOW  WINDOW('Caption'),AT(,,300,200)
   CODE
   OPEN(WINDOW)
   RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'WINDOW as data structure label should not be flagged');
+        assert.strictEqual(labelDiags(code).length, 0, 'WINDOW as data structure label should not be flagged');
     });
 
     test('CLASS as structure label (valid) → no error', () => {
@@ -2273,50 +2309,19 @@ Init      PROCEDURE()
         END
   CODE
   RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'CLASS as CLASS structure label should not be flagged');
+        assert.strictEqual(labelDiags(code).length, 0, 'CLASS as CLASS structure label should not be flagged');
     });
 
-    // ── Case 3: reserved keywords as field/method names inside structures ─────
-
-    test('CODE as field label inside GROUP → no error', () => {
-        const code = `MyGroup GROUP
-Code      LONG
-End`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'CODE is valid as a field name inside GROUP');
+    test('CODE and DATA as fields, JOIN as a method → no error (they build)', () => {
+        assert.strictEqual(labelDiags(`MyGroup GROUP\nCode      LONG\n        END`).length, 0);
+        assert.strictEqual(labelDiags(`MyQueue QUEUE\nData      STRING(20)\n        END`).length, 0);
+        assert.strictEqual(labelDiags(`MyClass CLASS\nCode      PROCEDURE()\nJoin      PROCEDURE()\n        END`).length, 0);
     });
 
-    test('CODE as method name inside CLASS → no error', () => {
-        const code = `MyClass CLASS
-Code      PROCEDURE()
-End`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'CODE is valid as a method name inside CLASS');
-    });
-
-    test('JOIN as method name inside CLASS → no error', () => {
-        const code = `MyClass CLASS
-Join      PROCEDURE()
-End`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'JOIN is valid as a method name inside CLASS');
-    });
-
-    test('DATA as field label inside QUEUE → no error', () => {
-        const code = `MyQueue QUEUE
-Data      STRING(20)
-End`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 0, 'DATA is valid as a field name inside QUEUE');
-    });
-
-    test('CODE as standalone procedure label (outside structure) → error', () => {
-        const code = `CODE    PROCEDURE()
-  CODE
-  RETURN`;
-        const diags = labelDiags(code);
-        assert.strictEqual(diags.length, 1, 'CODE as standalone procedure label should still be flagged');
+    test('a reserved word as a parameter name → no error (every one builds there)', () => {
+        const code = `P  PROCEDURE(LONG If, STRING Loop)
+  CODE`;
+        assert.strictEqual(labelDiags(code).length, 0);
     });
 });
 
