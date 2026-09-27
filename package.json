@@ -1695,6 +1695,23 @@
           "default": "default",
           "description": "How the missingIncludes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
+        "clarion.diagnostics.unresolvedFileReferences.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an INCLUDE or MEMBER naming a file that cannot be found, which fails the compile. A MODULE name is never reported, since it may name an external library. Takes effect as soon as it is changed, no reload needed (issue #695)."
+        },
+        "clarion.diagnostics.unresolvedFileReferences.severity": {
+          "type": "string",
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "default",
+          "description": "How the unresolvedFileReferences check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
         "clarion.diagnostics.missingConstants.enabled": {
           "type": "boolean",
           "default": true,

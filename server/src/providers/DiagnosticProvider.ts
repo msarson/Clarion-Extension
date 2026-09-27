@@ -17,6 +17,7 @@ import { validateUndeclaredVariablesAsync as _validateUndeclaredVariablesAsync }
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
+import { validateUnresolvedFileReferences } from './diagnostics/UnresolvedFileReferenceDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
 import { validatePrivateProcedureCalls } from './diagnostics/PrivateProcedureDiagnostics';
 import { validateUnresolvedProcedureCalls as _validateUnresolvedProcedureCalls } from './diagnostics/UnresolvedProcedureCallDiagnostics';
@@ -209,6 +210,21 @@ export class DiagnosticProvider {
     ): Promise<Diagnostic[]> {
         if (!isDiagnosticEnabled('missingIncludes')) return []; // #542
         return applyCheckSeverity('missingIncludes', this.filterOmitted(await validateMissingIncludes(tokens, document), tokens, document)); // #543
+    }
+
+    /**
+     * Async pass: an INCLUDE or MEMBER naming a file that cannot be found (#695), resolved as the
+     * file graph resolves it. Waits for the solution: before its redirection is known every
+     * INCLUDE would look missing.
+     */
+    public static async validateUnresolvedFileReferences(document: TextDocument): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('unresolvedFileReferences')) return [];
+        if (!SolutionManager.getInstance()?.solution?.projects?.length) return [];
+        const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/, '')).replace(/\//g, '\\');
+        const { FileRelationshipGraph } = await import('../FileRelationshipGraph');
+        const graph = FileRelationshipGraph.getInstance();
+        return applyCheckSeverity('unresolvedFileReferences',
+            validateUnresolvedFileReferences(document, filePath, (target, from) => graph.resolveReference(target, from)));
     }
 
     /**

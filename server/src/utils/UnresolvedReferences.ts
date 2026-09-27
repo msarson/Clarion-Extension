@@ -8,14 +8,17 @@
  * MAP and as a CLASS attribute alike: "If the sourcefile is an external library, this string may
  * contain any unique identifier" - so a MODULE name with no file behind it, even one ending .clw,
  * may be a library's label. Those are informational, with the LINK and DLL attributes found as
- * evidence. MEMBER names the PROGRAM source file; what a missing one does is not documented, so it
- * is its own category.
+ * evidence. MEMBER names the PROGRAM source file, which the compiler opens: a missing one fails the
+ * compile even when the module uses nothing global (compiler-verified on C12, #695:
+ * `Error(3): cif$fileopen NoSuchProg.CLW`). It keeps its own category.
  */
 export interface FileReference {
     kind: 'INCLUDE' | 'MODULE' | 'MEMBER';
     target: string;
     /** 0-based line of the reference itself. */
     line: number;
+    /** #695 — 0-based column of the target's first character, inside the quotes. */
+    column: number;
     /** Inside an OMIT or COMPILE block: compiled only under some condition, if at all. */
     conditional: boolean;
     /** MODULE as a CLASS attribute (the class's implementation), not a MODULE structure in a MAP. */
@@ -111,6 +114,11 @@ function moduleStructureHasDll(all: Statement[], index: number): boolean {
     return false;
 }
 
+/** The column of a match's quoted target: just past its opening quote. */
+function quoted(m: RegExpMatchArray): number {
+    return (m.index ?? 0) + m[0].indexOf("'") + 1;
+}
+
 export function scanReferences(content: string): FileReference[] {
     const refs: FileReference[] = [];
     const all = statements(codeLines(content));
@@ -119,18 +127,20 @@ export function scanReferences(content: string): FileReference[] {
         if (index === 0) {
             const member = MEMBER_RE.exec(statement.text);
             if (member) {
-                refs.push({ kind: 'MEMBER', target: member[1], line: statement.parts[0].line, conditional, classModule: false, dll: false });
+                const onLine = MEMBER_RE.exec(statement.parts[0].code);
+                const column = onLine ? onLine.index + onLine[0].indexOf("'") + 1 : 0;
+                refs.push({ kind: 'MEMBER', target: member[1], line: statement.parts[0].line, column, conditional, classModule: false, dll: false });
                 return;
             }
         }
         const classModule = CLASS_RE.test(statement.text);
         for (const part of statement.parts) {
             for (const m of part.code.matchAll(INCLUDE_RE)) {
-                refs.push({ kind: 'INCLUDE', target: m[1], line: part.line, conditional, classModule: false, dll: false });
+                refs.push({ kind: 'INCLUDE', target: m[1], line: part.line, column: quoted(m), conditional, classModule: false, dll: false });
             }
             for (const m of part.code.matchAll(MODULE_RE)) {
                 refs.push({
-                    kind: 'MODULE', target: m[1], line: part.line, conditional, classModule,
+                    kind: 'MODULE', target: m[1], line: part.line, column: quoted(m), conditional, classModule,
                     link: classModule ? LINK_RE.exec(statement.text)?.[1] : undefined,
                     dll: classModule ? DLL_RE.test(statement.text) : moduleStructureHasDll(all, index),
                 });

@@ -76,7 +76,7 @@ export function renderUnresolvedReport(data: UnresolvedReportData, nonce: string
             + `<h2>Missing includes: in included and library files (${missing.filter(e => !e.inProject).length})</h2>${table(missing.filter(e => !e.inProject))}`
             + (member.length > 0
                 ? `<h2>MEMBER: program file not found (${member.length})</h2>`
-                    + `<p class="note">MEMBER names the PROGRAM source file the module belongs to.</p>${table(member)}`
+                    + `<p class="note">MEMBER names the PROGRAM source file the module belongs to. The compiler opens that file, so a missing one fails the build.</p>${table(member)}`
                 : '')
             + `<details><summary>MODULE names without a source file (${modules.length})</summary>`
             + `<p class="note">Not necessarily a problem. The Language Reference says of MODULE, in a MAP and on a CLASS: `

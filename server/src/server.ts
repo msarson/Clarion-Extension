@@ -901,6 +901,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['unresolvedProcCall', async () => DiagnosticProvider.validateUnresolvedProcedureCalls(tokens, document)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
+            ['unresolvedFileRef', () => DiagnosticProvider.validateUnresolvedFileReferences(document)], // #695
         ];
         // #367: sequential-with-yield for EVERY caller, not just 'sdiReady'. The old
         // ternary gave interactive edits and crossFileUpdate a Promise.all of 8
@@ -925,7 +926,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             // Real macrotask yield between validators — lets queued requests in.
             await new Promise<void>(resolve => setImmediate(resolve));
         }
-        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags] = validatorResults;
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags, unresolvedFileRefDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
@@ -943,7 +944,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...unresolvedProcCallDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...unresolvedProcCallDiags, ...ifaceImplDiags, ...unresolvedFileRefDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);

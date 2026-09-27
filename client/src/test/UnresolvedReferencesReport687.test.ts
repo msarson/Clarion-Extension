@@ -90,6 +90,11 @@ suite('Unresolved file references report page (#687)', () => {
         assert.doesNotMatch(toolbar, /title: '[^']*\(experimental\)'/);
     });
 
+    test('the MEMBER section says a missing program fails the build (compiler-verified, #695)', () => {
+        const html = renderUnresolvedReport(data({ references: [entry({ category: 'member', kind: 'MEMBER', target: 'prog' })] }), 'N', 'csp');
+        assert.match(html, /a missing one fails the build/);
+    });
+
     test('an unbuilt graph says so', () => {
         assert.match(renderUnresolvedReport(data({ built: false }), 'N', 'csp'), /has not been built yet/);
     });

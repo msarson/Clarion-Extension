@@ -34,6 +34,7 @@ export const DIAGNOSTIC_CHECKS = [
     // ── async pass (cross-file) ──
     { id: 'viewProjectFields',           default: true,  title: 'VIEW PROJECT fields' },
     { id: 'missingIncludes',             default: true,  title: 'Missing includes' },
+    { id: 'unresolvedFileReferences',    default: true,  title: 'Unresolved file references' },
     { id: 'missingConstants',            default: true,  title: 'Missing DEFINE constants' },
     { id: 'missingMapDeclarations',      default: true,  title: 'Missing MAP declarations' },
     { id: 'missingImplementations',      default: true,  title: 'Missing implementations' },
