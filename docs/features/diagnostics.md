@@ -372,6 +372,30 @@ The diagnostic clears immediately once the constants are added (the extension wa
 
 ---
 
+### INCLUDE or MEMBER File Not Found
+
+**Detects an `INCLUDE` or `MEMBER` naming a file that cannot be found**, found the same way the compiler finds it (through the redirection file):
+
+```clarion
+  MEMBER('OrderSys')              ! ❌ Error: The program file 'OrderSys' named by MEMBER cannot be found.
+  INCLUDE('Missing.inc'),ONCE     ! ❌ Error: The file 'Missing.inc' named by INCLUDE cannot be found.
+```
+
+Both fail the compile. The compiler opens a MEMBER module's program file itself, so a missing one is an error even when the module uses nothing global.
+
+**Never reported:**
+- A `MODULE('…')` name — in a MAP or on a CLASS it may name an external library by any identifier, with no source file behind it
+- A bare `MEMBER()`, which names no program
+- Anything inside an `OMIT` or `COMPILE` block
+
+It is checked once the solution has loaded; until the redirection is known every INCLUDE would look missing. Turn it off or change its level with `clarion.diagnostics.unresolvedFileReferences.enabled` / `.severity`.
+
+**Whole solution at once:** **Clarion: Unresolved File References** (or a click on the Graph row in the Clarion Tools pane) lists every INCLUDE and MEMBER that does not resolve, in files you have open or not, with the file and line. MODULE names without a source file and references inside OMIT/COMPILE are listed separately, as they are not necessarily problems. Each row opens the reference.
+
+> Not the same as the **Missing INCLUDE Diagnostic** above, which reports a *type* used without its `.inc` included; this one reports an INCLUDE or MEMBER whose *file* is missing.
+
+---
+
 ## Viewing Diagnostics
 
 ### In-Editor Indicators
@@ -404,6 +428,10 @@ The diagnostic clears immediately once the constants are added (the extension wa
 - Click any problem in list
 - Editor jumps to that line
 - Squiggle highlighted
+
+**After a restart:** VS Code restores your editor tabs but only loads the file in the tab in front. The extension checks the others too, from disk, once the solution has loaded — one at a time, so the tab you are looking at comes first — and their problems appear without clicking each tab. Turn this off with `clarion.restoredTabDiagnostics` (takes effect after a reload).
+
+**Build errors** from **Build** land in the same panel, on the file and line the compiler names (a compile error that names a file but no line lands on that file's first line). **Clarion: Clear Build Results** removes them; they are also cleared when another build task starts.
 
 ---
 
@@ -588,7 +616,9 @@ CODE
 
 1. Check `clarion.diagnostics.enabled` is `true`
 2. Verify file extension is `.clw`, `.inc`, or `.equ`
-3. Reload window: `Ctrl+Shift+P` → "Developer: Reload Window"
+3. Cross-file checks (missing INCLUDE, MAP declarations, file not found, …) wait for the solution to load; right after startup only the same-file checks may be showing
+4. A restored tab you have not clicked shows problems only with `clarion.restoredTabDiagnostics` on (the default)
+5. Reload window: `Ctrl+Shift+P` → "Developer: Reload Window"
 
 ---
 

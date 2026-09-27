@@ -376,6 +376,31 @@ The full list is in the **[Commands Reference](../reference/commands.md)**.
 
 ---
 
+## The Actions Panel
+
+The **Actions** panel at the top of the **Clarion Tools** sidebar has a toolbar and a summary of the open solution.
+
+**Toolbar:** Open in the Clarion IDE, Build, Run, Build and Run, Debug, Build and Debug. It wraps to a second line in a narrow sidebar.
+
+**Rows** (a row with a command behind it is clickable):
+
+| Row | Shows | Click |
+|---|---|---|
+| Clarion | The Clarion version in use | Set the version (for this solution when one is open) |
+| Solution | The open solution | — |
+| Config | The build configuration | Change it |
+| Projects | How many projects the solution has | — |
+| Startup | The project Run and Debug start | Choose another (also **Clarion: Choose Startup Project**) |
+| Run | *Only when `clarion.run.command` is set* | Open that setting |
+| Build log | Whether the build log is kept | Open the last log, or keep / stop keeping it |
+| Settings | — | Open the Clarion build settings |
+| Graph | The file graph: files, edges, build time, and a ⚠️ count when project sources cannot be found | Open the **Unresolved File References** report |
+| Config dir | *Only when a non-default ClarionProperties file is active* | — |
+
+The Graph row follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
+
+---
+
 ## Status Bar
 
 ### Clarion Status Items

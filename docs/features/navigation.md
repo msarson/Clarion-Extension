@@ -20,7 +20,7 @@ All navigation features are **scope-aware** and work across files in your soluti
 
 ## Go to Definition (F12)
 
-**What it does:** Jumps to where a symbol is declared or defined.
+**What it does:** Jumps to where a symbol is declared or defined, with the declared name selected — a procedure, a method's `Class.Method` label, a CLASS member, a variable, an equate, a class or interface.
 
 ### Supported Symbols
 
@@ -105,6 +105,15 @@ MyClass CLASS,MODULE('MyClass.clw')  ! ← F12 opens MyClass.clw
 - Click on a class member access (e.g., `MyObj.Property`)
 - Press **F12**
 - Jump to the member declaration in the CLASS
+
+---
+
+#### Types and Parent Classes
+- Click on a type name inside `CLASS(Parent)`, `QUEUE(Type)`, `GROUP(Type)`, `INTERFACE(Type)`, `LIKE(Type)` or `IMPLEMENTS(Interface)`
+- Press **F12** (or hover for the type's card)
+- Jump to the declaration, whether it is in an included file or in the same file
+
+**`SELF` and `PARENT`:** F12 on a bare `SELF` goes to the class the method belongs to; on `PARENT`, to its parent class.
 
 ---
 

@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.4**.
+Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.6**.
 
 Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` directly.
 
@@ -20,6 +20,7 @@ Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` di
 | `clarion.highlighting` | — | Fine-grained highlighting settings for Clarion code elements (object). |
 | `clarion.procedurePrototypeStyle` | `"keyword"` | Prototype style when the extension inserts procedure declarations into MAP/MODULE structures: `keyword` (`PROCEDURE(...)`) or `shorthand`. |
 | `clarion.maxNumberOfProblems` | `100` | Maximum number of problems the language server reports per file. |
+| `clarion.restoredTabDiagnostics` | `true` | After a restart, show the problems of every Clarion file in a restored editor tab, not only the tab in front. VS Code loads a background tab's file only when it is clicked; with this on, each restored tab is checked from disk once the solution has loaded, one at a time. Takes effect after a window reload. |
 
 ## Diagnostics
 
@@ -33,7 +34,7 @@ Every check can be turned off on its own and reported at the severity you choose
 
 ### The checks
 
-`<check>` is one of the 24 ids below — for example `"clarion.diagnostics.undeclaredVariables.severity": "error"`, or `"clarion.diagnostics.unicodeCharacters.enabled": false`.
+`<check>` is one of the 25 ids below — for example `"clarion.diagnostics.undeclaredVariables.severity": "error"`, or `"clarion.diagnostics.unicodeCharacters.enabled": false`.
 
 | Check | Default | What it reports |
 |---|---|---|
@@ -56,6 +57,7 @@ Every check can be turned off on its own and reported at the severity you choose
 | `byRefArguments` | on | Reports a literal passed to a by-reference (*TYPE) parameter. |
 | `viewProjectFields` | on | Reports a PROJECT field in a VIEW or JOIN that the projected FILE does not declare. |
 | `missingIncludes` | on | Reports a type used in the file whose declaring include file is not included. |
+| `unresolvedFileReferences` | on | Reports, as an error, an INCLUDE or MEMBER naming a file that cannot be found, which fails the compile. A MODULE name is never reported (it may name an external library), nor anything inside OMIT or COMPILE. |
 | `missingConstants` | on | Reports a type whose declaring include file needs a project DEFINE constant the project does not set. |
 | `missingMapDeclarations` | on | Reports a procedure implementation with no MAP prototype, and a prototype whose signature does not match its implementation. |
 | `missingImplementations` | on | Reports a MAP prototype with no implementation. |
@@ -71,7 +73,8 @@ Every check can be turned off on its own and reported at the severity you choose
 | `clarion.build.showInOutputPanel` | `false` | Also mirror build output into the Output panel (in addition to the Problems panel). |
 | `clarion.build.logFilePath` | `""` | Custom path for the build output log. Empty = solution directory. |
 | `clarion.build.preserveLogFile` | `false` | Keep `build_output.log` after the build completes. |
-| `clarion.startupProject` | `""` | GUID of the project run by **Ctrl+F5** (Run Without Debugging). Unset = the project containing the current file. Usually set via right-click → *Set as Startup Project* in the Solution View. |
+| `clarion.startupProject` | `""` | GUID of the project run by **Ctrl+F5** (Run Without Debugging). Unset = the project containing the current file. Usually set via right-click → *Set as Startup Project* in the Solution View, the Startup row in the Clarion Tools pane, or **Clarion: Choose Startup Project**. |
+| `clarion.run.command` | `""` | A command **Run Without Debugging** executes instead of the project's output exe, in a PowerShell terminal, from the project folder. `${exe}` (the output exe), `${projectDir}` and `${args}` (the project's start arguments) are substituted, for example `& "${projectDir}\CopyRun.bat"`. Empty runs the output exe. Debug still starts the exe itself. |
 | `clarion.configuration` | `""` | Selected build configuration (Debug/Release/custom). Usually set via the status bar or `Clarion: Set Configuration`. |
 
 ## Paste as Clarion String
