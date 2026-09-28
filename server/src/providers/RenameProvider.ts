@@ -13,6 +13,7 @@ import { ReferencesProvider } from './ReferencesProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { DefinitionProvider } from './DefinitionProvider';
 import { serverSettings } from '../serverSettings';
+import { onDiskSpelling } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 /** #527 — what a rename left alone, for the client to show. */
@@ -418,17 +419,21 @@ export class RenameProvider {
 
     /** #527 — true when the project's .cwproj marks this file `<Generated>true</Generated>`. */
     private isGeneratedIn(project: ProjectLike, fsPath: string): boolean {
-        const norm = path.normalize(fsPath).toLowerCase();
+        // fsPath may already be on-disk spelled (ReferencesProvider does that), and on-disk spelling
+        // can rewrite an ancestor folder entirely — a short 8.3 alias such as a shortened %TEMP%
+        // becomes its long name. Spell every side the same way, or one folder never compares equal.
+        const norm = onDiskSpelling(path.normalize(fsPath)).toLowerCase();
         // #551 — the IDE flags EVERY <Compile> entry a template adds as Generated, including
         // third-party class sources it merely links (NYSTemplateHelper.CLW under
         // Accessory\libsrc\win). Generated means template OUTPUT: a file under a library
         // path is library source however the .cwproj flags it.
         for (const libDir of serverSettings.libsrcPaths ?? []) {
-            if (libDir && norm.startsWith(path.normalize(libDir).toLowerCase().replace(/[\\/]+$/, '') + path.sep)) return false;
+            if (libDir && norm.startsWith(onDiskSpelling(path.normalize(libDir)).toLowerCase().replace(/[\\/]+$/, '') + path.sep)) return false;
         }
+        const base = onDiskSpelling(path.normalize(project.path));
         for (const sf of project.sourceFiles ?? []) {
             if (!sf?.relativePath) continue;
-            const abs = path.isAbsolute(sf.relativePath) ? sf.relativePath : path.join(project.path, sf.relativePath);
+            const abs = path.isAbsolute(sf.relativePath) ? onDiskSpelling(path.normalize(sf.relativePath)) : path.join(base, sf.relativePath);
             if (path.normalize(abs).toLowerCase() === norm) return sf.generated === true;
         }
         return false;
