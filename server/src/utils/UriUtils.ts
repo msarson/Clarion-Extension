@@ -68,9 +68,29 @@ export function onDiskSpelling(absPath: string): string {
             }
             listingCache.set(current.toLowerCase(), listing);
         }
-        const actual = listing.get(wanted);
+        let actual = listing.get(wanted);
+        // A short 8.3 name (PROGRA~1, or a shortened %TEMP%) is never listed under that name.
+        if (!actual && wanted.includes('~')) {
+            actual = longNameOf(current, parts[i]);
+            if (actual) listing.set(wanted, actual);
+        }
         if (!actual) return absPath;
         current = path.join(current, actual);
     }
     return current;
+}
+
+/**
+ * The long name of short-name entry `segment` in `parentDir`. `fs.realpathSync.native` expands
+ * it, but also swaps a subst or mapped drive for its target, so its answer counts only when it
+ * is still an entry of `parentDir` as given.
+ */
+function longNameOf(parentDir: string, segment: string): string | undefined {
+    try {
+        const resolved = fs.realpathSync.native(path.join(parentDir, segment));
+        if (path.dirname(resolved).toLowerCase() !== path.resolve(parentDir).toLowerCase()) return undefined;
+        return path.basename(resolved);
+    } catch {
+        return undefined;
+    }
 }
