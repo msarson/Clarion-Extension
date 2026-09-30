@@ -1455,11 +1455,7 @@ export class DefinitionProvider {
             }
 
             if (incTokens && incTokens.length > 0) {
-                const labelToken = incTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(incTokens, typeName);
                 if (labelToken) {
                     logger.info(`Found type "${typeName}" in ${resolvedPath}:${labelToken.line}`);
                     return Location.create(uri, labelRange(labelToken.line, labelToken.value)); // #697

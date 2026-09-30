@@ -562,11 +562,7 @@ export class StructureFieldResolver {
             // First search the equates.clw tokens directly
             const equatesTokens = solutionManager!.getEquatesTokens();
             if (equatesTokens && equatesTokens.length > 0) {
-                const labelToken = equatesTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(equatesTokens, typeName);
                 if (labelToken) {
                     const lineTokens = equatesTokens.filter(t => t.line === labelToken.line);
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
@@ -639,11 +635,7 @@ export class StructureFieldResolver {
             }
 
             if (incTokens && incTokens.length > 0) {
-                const labelToken = incTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(incTokens, typeName);
                 if (labelToken) {
                     // Find the structure keyword to show the declaration line
                     const labelIdx = incTokens.indexOf(labelToken);

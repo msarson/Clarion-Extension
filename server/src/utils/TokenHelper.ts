@@ -64,6 +64,23 @@ export class TokenHelper {
         return /\.[^\\/.]+$/.test(name) ? name : `${name}.clw`;
     }
 
+    /**
+     * The column-0 label that DECLARES `typeName` as a type: a line that opens a
+     * structure (CLASS/INTERFACE/QUEUE/GROUP/RECORD/FILE/...) or an EQUATE/ITEMIZE.
+     * A plain data field with the same label (`Name STRING(20)` inside some FILE's
+     * RECORD) is skipped, so a type walk over an include chain keeps looking instead
+     * of reporting that field as the type.
+     */
+    public static findTypeDeclarationLabel(tokens: Token[], typeName: string): Token | undefined {
+        const wanted = typeName.toLowerCase();
+        return tokens.find(t => {
+            if ((t.type !== TokenType.Label && t.type !== TokenType.Variable) || t.start !== 0) return false;
+            if (t.value.toLowerCase() !== wanted) return false;
+            return tokens.some(o => o.line === t.line && o.start > t.start &&
+                (o.type === TokenType.Structure || /^(EQUATE|ITEMIZE)$/i.test(o.value)));
+        });
+    }
+
     /** #337 — PROGRAM header lookup (ClarionDocument-typed, no line cap). */
     public static findProgramHeaderToken(tokens: Token[]): Token | undefined {
         return tokens.find(t =>
