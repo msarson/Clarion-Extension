@@ -16,6 +16,7 @@ import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
 import { AttributeService } from '../utils/AttributeService';
 import { DirectiveService } from '../utils/DirectiveService';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
@@ -760,12 +761,7 @@ export class WordCompletionProvider {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-        const programPathRaw = (graph.isBuilt
-            ? graph.getProgramFile(currentPath)
-            : undefined) ?? this.getProgramFileFromTokens(tokens);
-        const programPath = programPathRaw
-            ? (path.isAbsolute(programPathRaw) ? programPathRaw : path.join(path.dirname(currentPath), programPathRaw))
-            : undefined;
+        const programPath = this.resolveProgramPath(tokens, currentPath, graph);
 
         if (!programPath) return;
 
@@ -803,6 +799,45 @@ export class WordCompletionProvider {
         this.collectGlobalLabels(programTokens, procDeclLines, isLabel, record);
         this.collectGlobalPrefixedFields(programTokens, record);
         WordCompletionProvider.programGlobalsByTokens.set(programTokens, recorded);
+    }
+
+    private static readonly MAX_SHIM_HOPS = 3;
+
+    /**
+     * The PROGRAM a MEMBER module belongs to, following a MEMBER-via-INCLUDE shim
+     * (`INCLUDE('member.clw')` as the first statement, the shim holding the MEMBER).
+     *
+     * The graph records the MEMBER edge on the shim, not on the modules that include it, and
+     * the module's own tokens carry no MEMBER, so without following the shim a shim-headed
+     * module found no PROGRAM at all and got none of its globals. Same rule as the hover and
+     * definition paths (SymbolFinderService / MemberLocatorService.resolveMemberHeaderToken):
+     * only the first statement is consulted, redirection first, bounded hops.
+     */
+    private resolveProgramPath(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= WordCompletionProvider.MAX_SHIM_HOPS; hop++) {
+            const raw = (graph.isBuilt ? graph.getProgramFile(filePath) : undefined)
+                ?? this.getProgramFileFromTokens(tokens);
+            if (raw) {
+                if (path.isAbsolute(raw)) return raw;
+                const name = TokenHelper.normalizeMemberFilename(raw);
+                return resolveViaProjectRedirection(name, filePath) ?? path.join(path.dirname(filePath), name);
+            }
+
+            const shim = TokenHelper.findShimIncludeToken(tokens);
+            if (!shim?.referencedFile) return undefined;
+            const relative = path.join(path.dirname(filePath), shim.referencedFile);
+            const shimPath = resolveViaProjectRedirection(shim.referencedFile, filePath)
+                ?? (fs.existsSync(relative) ? relative : undefined);
+            if (!shimPath || visited.has(shimPath.toLowerCase())) return undefined;
+            visited.add(shimPath.toLowerCase());
+
+            const shimFile = this.getTokensForFile(shimPath);
+            if (!shimFile) return undefined;
+            tokens = shimFile.tokens;
+            filePath = shimPath;
+        }
+        return undefined;
     }
 
     /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
