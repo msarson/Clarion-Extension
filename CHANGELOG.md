@@ -111,6 +111,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Editing
 
 - **Introduce EQUATE puts the EQUATE above a use in data.** On a literal inside a declaration, such as a LIST's `FORMAT('...')` in a procedure's WINDOW, the EQUATE was inserted just before `CODE`, below its use, and the build failed with `Unknown identifier`. It now goes before the declaration that uses it; a literal in executable code still goes just before `CODE`. [#709](https://github.com/msarson/Clarion-Extension/issues/709)
+- **Introduce EQUATE takes the whole of a string built from several literals.** On `'some string' & | 'Some more string' & | 'even more string'`, the EQUATE held only the literal under the cursor; it now holds the whole chain, continuation lines and all, and the whole chain is replaced by the name. The chain stops at anything that is not a literal, so `'a' & Name & 'b'` keeps its meaning. [#710](https://github.com/msarson/Clarion-Extension/issues/710)
 
 ---
 

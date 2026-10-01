@@ -33,7 +33,7 @@ function args(actions: ReturnType<IntroduceEquateCodeActionProvider['provideCode
     assert.strictEqual(actions.length, 1, 'expected one Introduce EQUATE action');
     const a = actions[0].command!.arguments!;
     return {
-        literal: a[1] as { line: number; startChar: number; endChar: number },
+        literal: a[1] as { line: number; startChar: number; endChar: number; endLine?: number },
         value: a[2] as string,
         scopes: a[3] as EquateScope[]
     };
@@ -285,5 +285,62 @@ suite('#709 Introduce EQUATE places the EQUATE above a use in data', () => {
         ].join('\n');
         const { scopes } = args(invoke(src, 'file:///eq709-code.clw', 8, 11));
         assert.strictEqual(scope(scopes, 'This procedure').insertLine, 7);
+    });
+});
+
+/**
+ * #710 — a string built from literals joined with `&` across `|` lines lost all but the literal
+ * under the cursor. The EQUATE now takes the whole chain verbatim and the whole chain is replaced
+ * (compiler-verified: an EQUATE of concatenated string constants builds, `|` lines included). The
+ * chain is only string literals and `&`, so it stops at anything else.
+ */
+suite('#710 Introduce EQUATE takes the whole concatenated string', () => {
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+    });
+
+    const SRC = [
+        '  PROGRAM',                             // 0
+        '  MAP',                                 // 1
+        '  END',                                 // 2
+        'S  STRING(80)',                         // 3
+        '  CODE',                                // 4
+        "  S = 'some string' & |",               // 5
+        "      'Some more string' & |",          // 6
+        "      'even more string'",              // 7
+    ].join('\n');
+    const CHAIN = "'some string' & |\n      'Some more string' & |\n      'even more string'";
+
+    test('bug-pin: on the middle literal, the EQUATE value is the whole chain and the range covers it', () => {
+        const { value, literal } = args(invoke(SRC, 'file:///eq710-mid.clw', 6, 10));
+        assert.strictEqual(value, CHAIN);
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 7, endChar: 24 });
+    });
+
+    test('bug-pin: on the first or the last literal, the same whole chain', () => {
+        assert.strictEqual(args(invoke(SRC, 'file:///eq710-first.clw', 5, 9)).value, CHAIN);
+        assert.strictEqual(args(invoke(SRC, 'file:///eq710-last.clw', 7, 10)).value, CHAIN);
+    });
+
+    test('a chain on one line', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', '  CODE', "  S = 'a' & 'b' & 'c'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-oneline.clw', 5, 13));
+        assert.strictEqual(value, "'a' & 'b' & 'c'");
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 5, endChar: 21 });
+    });
+
+    test('the chain stops at anything that is not a literal: the meaning is unchanged', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', 'V  STRING(10)', '  CODE', "  S = 'a' & V & 'b'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-var.clw', 6, 8));
+        assert.strictEqual(value, "'a'");
+        assert.deepStrictEqual(literal, { line: 6, startChar: 6, endLine: 6, endChar: 9 });
+    });
+
+    test('a lone literal is unchanged', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', '  CODE', "  S = 'only'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-lone.clw', 5, 9));
+        assert.strictEqual(value, "'only'");
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 5, endChar: 12 });
     });
 });

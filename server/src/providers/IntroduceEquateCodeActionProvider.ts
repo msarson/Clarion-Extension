@@ -34,12 +34,69 @@ export function extractMemberProgramName(tokens: Token[]): string | null {
     return name.length > 0 ? name : null;
 }
 
-/** The literal found under the cursor / selection. */
+/** The literal found under the cursor / selection; `endLine` > `line` for a #710 chain. */
 interface FoundLiteral {
     line: number;
     startChar: number;
+    endLine: number;
     endChar: number;
     text: string;
+}
+
+/** A Clarion string literal (`''` is an embedded quote). */
+const STRING_LITERAL = /'(?:[^']|'')*'/y;
+
+/**
+ * #710 — the run of string literals joined by `&` around the literal at (`line`, `start`), across
+ * the statement's `|` continuation lines: `'a' & | 'b' & | 'c'` from any of the three. Only
+ * literals and `&` take part, so the run stops at anything else and replacing it by one EQUATE
+ * keeps the expression's meaning. Null when the literal stands alone.
+ */
+export function stringChainAt(lines: string[], line: number, start: number):
+    { line: number; startChar: number; endLine: number; endChar: number } | null {
+    // The statement's lines: up while the line above continues, down while this one continues.
+    const codeEnd = (text: string): number => {
+        let inString = false;
+        for (let i = 0; i < text.length; i++) {
+            if (text[i] === "'") inString = !inString;
+            else if (text[i] === '!' && !inString) return i;
+        }
+        return text.length;
+    };
+    const continues = (l: number) => /\|\s*$/.test(lines[l].slice(0, codeEnd(lines[l])));
+    let first = line;
+    while (first > 0 && continues(first - 1)) first--;
+    let last = line;
+    while (last < lines.length - 1 && continues(last)) last++;
+
+    // Flatten the statement to a stream of pieces with their positions, dropping `|` and comments.
+    type Piece = { kind: 'str' | 'amp' | 'other'; line: number; start: number; end: number };
+    const pieces: Piece[] = [];
+    for (let l = first; l <= last; l++) {
+        const text = lines[l];
+        let end = codeEnd(text);
+        if (l < last) end = text.slice(0, end).replace(/\|\s*$/, '').length;
+        let i = 0;
+        while (i < end) {
+            if (/\s/.test(text[i])) { i++; continue; }
+            STRING_LITERAL.lastIndex = i;
+            const m = STRING_LITERAL.exec(text);
+            if (m && i + m[0].length <= end) { pieces.push({ kind: 'str', line: l, start: i, end: i + m[0].length }); i += m[0].length; continue; }
+            if (text[i] === '&') { pieces.push({ kind: 'amp', line: l, start: i, end: i + 1 }); i++; continue; }
+            let j = i;
+            while (j < end && !/[\s&']/.test(text[j])) j++;
+            pieces.push({ kind: 'other', line: l, start: i, end: Math.max(j, i + 1) });
+            i = Math.max(j, i + 1);
+        }
+    }
+    const at = pieces.findIndex(p => p.kind === 'str' && p.line === line && p.start === start);
+    if (at < 0) return null;
+    let lo = at;
+    while (lo >= 2 && pieces[lo - 1].kind === 'amp' && pieces[lo - 2].kind === 'str') lo -= 2;
+    let hi = at;
+    while (hi + 2 < pieces.length && pieces[hi + 1].kind === 'amp' && pieces[hi + 2].kind === 'str') hi += 2;
+    if (lo === hi) return null;
+    return { line: pieces[lo].line, startChar: pieces[lo].start, endLine: pieces[hi].line, endChar: pieces[hi].end };
 }
 
 /**
@@ -57,8 +114,19 @@ export class IntroduceEquateCodeActionProvider {
 
     provideCodeActions(document: TextDocument, range: Range): CodeAction[] {
         const tokens = TokenCache.getInstance().getTokens(document);
-        const literal = this.findLiteral(tokens, range);
+        let literal = this.findLiteral(tokens, range);
         if (!literal) return [];
+        // #710 — a string in a `&` chain of literals: the EQUATE takes the whole chain, verbatim.
+        if (literal.text.startsWith("'")) {
+            const chain = stringChainAt(document.getText().split(/\r?\n/), literal.line, literal.startChar);
+            if (chain) {
+                const text = document.getText({
+                    start: { line: chain.line, character: chain.startChar },
+                    end: { line: chain.endLine, character: chain.endChar },
+                }).replace(/\r\n/g, '\n');
+                literal = { ...chain, text };
+            }
+        }
 
         const structure = TokenCache.getInstance().getStructure(document);
         const scopes = this.computeScopes(document, structure, tokens, literal.line);
@@ -74,7 +142,7 @@ export class IntroduceEquateCodeActionProvider {
                 command: 'clarion.introduceEquate',
                 arguments: [
                     document.uri,
-                    { line: literal.line, startChar: literal.startChar, endChar: literal.endChar },
+                    { line: literal.line, startChar: literal.startChar, endLine: literal.endLine, endChar: literal.endChar },
                     literal.text,
                     scopes
                 ]
@@ -98,7 +166,7 @@ export class IntroduceEquateCodeActionProvider {
                 ? (from >= ts && from <= te)   // cursor within the token
                 : (ts < to && te > from);      // selection overlaps the token
             if (hit) {
-                return { line, startChar: ts, endChar: te, text: t.value };
+                return { line, startChar: ts, endLine: line, endChar: te, text: t.value };
             }
         }
         return null;
