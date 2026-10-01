@@ -108,6 +108,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - **No more multi-second freeze reading a class header that pads its parameter lists with spaces.** A prototype such as `Name PROCEDURE(<hundreds of spaces>)` took time that grew with the cube of the padding, so one such header held the language server for over two seconds on a first start. It now reads in a few milliseconds. [#660](https://github.com/msarson/Clarion-Extension/issues/660)
 
+#### Editing
+
+- **Introduce EQUATE puts the EQUATE above a use in data.** On a literal inside a declaration, such as a LIST's `FORMAT('...')` in a procedure's WINDOW, the EQUATE was inserted just before `CODE`, below its use, and the build failed with `Unknown identifier`. It now goes before the declaration that uses it; a literal in executable code still goes just before `CODE`. [#709](https://github.com/msarson/Clarion-Extension/issues/709)
+
 ---
 
 ### [1.0.5] - 2026-09-18

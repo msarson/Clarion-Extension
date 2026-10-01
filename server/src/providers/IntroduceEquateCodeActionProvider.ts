@@ -116,38 +116,66 @@ export class IntroduceEquateCodeActionProvider {
 
         // Routine-local data — only when the routine actually has a DATA section.
         if (node.kind === ScopeKind.Routine && node.token?.hasLocalData && node.token.executionMarker) {
-            scopes.push({ label: 'This routine (routine data)', insertLine: node.token.executionMarker.line });
+            scopes.push({ label: 'This routine (routine data)', insertLine: this.above(document, tokens, line, node.token.executionMarker.line, node.token.line) });
         }
 
         // The enclosing procedure/method's local data.
         const procNode = node.kind === ScopeKind.Routine ? node.parent : node;
         if (procNode && (procNode.kind === ScopeKind.Procedure || procNode.kind === ScopeKind.Method)
             && procNode.token?.executionMarker) {
-            scopes.push({ label: 'This procedure (local data)', insertLine: procNode.token.executionMarker.line });
+            scopes.push({ label: 'This procedure (local data)', insertLine: this.above(document, tokens, line, procNode.token.executionMarker.line, procNode.token.line) });
         }
 
         // File-level: global data in a PROGRAM (same file), module data + (if the MEMBER names a
         // program) cross-file global into that PROGRAM file.
-        scopes.push(...this.fileScopes(document, structure, tokens));
+        scopes.push(...this.fileScopes(document, structure, tokens, line));
         return scopes;
+    }
+
+    /**
+     * #709 — where the EQUATE goes in a data section that ends at `dataEnd` (its CODE, or the first
+     * procedure for module data). A literal in executable code: just before `dataEnd`, as ever. A
+     * literal IN that data (above `dataEnd`): before the declaration that contains it, since an
+     * EQUATE must be declared before it is used in data — inserted at `dataEnd`, a WINDOW's
+     * FORMAT('...') could not see it ("Unknown identifier").
+     */
+    private above(document: TextDocument, tokens: Token[], literalLine: number, dataEnd: number, scopeStart: number): number {
+        return literalLine < dataEnd ? this.declarationStart(document, tokens, literalLine, scopeStart) : dataEnd;
+    }
+
+    /**
+     * The first line of the declaration containing `line`: the outermost structure opened inside
+     * the scope and still open at `line` (a whole WINDOW, not the LIST line inside it), else the
+     * first line of a `|`-continued statement.
+     */
+    private declarationStart(document: TextDocument, tokens: Token[], line: number, scopeStart: number): number {
+        let start = line;
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.line > scopeStart && t.line < start && (t.finishesAt ?? -1) >= line) start = t.line;
+        }
+        const code = (l: number) => document.getText({ start: { line: l, character: 0 }, end: { line: l + 1, character: 0 } })
+            .replace(/'[^']*'/g, "''").replace(/!.*$/, '').trimEnd();
+        while (start - 1 > scopeStart && /\|$/.test(code(start - 1))) start--;
+        return start;
     }
 
     private fileScopes(
         document: TextDocument,
         structure: ReturnType<TokenCache['getStructure']>,
-        tokens: Token[]
+        tokens: Token[],
+        literalLine: number
     ): EquateScope[] {
         const isProgram = tokens.some(t => t.value.toUpperCase() === 'PROGRAM');
         if (isProgram) {
             const insertLine = this.globalInsertLine(tokens);
-            return insertLine === null ? [] : [{ label: 'Global', insertLine }];
+            return insertLine === null ? [] : [{ label: 'Global', insertLine: this.above(document, tokens, literalLine, insertLine, -1) }];
         }
 
         // MEMBER file: module data (this file), before the first procedure IMPLEMENTATION.
         const out: EquateScope[] = [];
         const firstProcLine = this.firstProcedureImplLine(structure);
         if (firstProcLine !== null) {
-            out.push({ label: 'This module', insertLine: firstProcLine });
+            out.push({ label: 'This module', insertLine: this.above(document, tokens, literalLine, firstProcLine, -1) });
         }
 
         // Cross-file global: MEMBER('name') → the program is name.clw; a bare/empty MEMBER names no
