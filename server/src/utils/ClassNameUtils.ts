@@ -13,6 +13,7 @@
 
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenHelper } from './TokenHelper';
+import { tokensOnLine } from './TokenLineIndex';
 
 /**
  * #608 — the declaration label for `className` nearest above `atLine`.
@@ -22,15 +23,40 @@ import { TokenHelper } from './TokenHelper';
  * declaration above it, not the first one in the file.
  */
 export function nearestClassLabel(tokens: Token[], className: string, atLine: number): Token | null {
-    const wanted = className.toLowerCase();
     let best: Token | null = null;
-    for (const classToken of TokenHelper.findClassStructures(tokens)) {
-        const label = tokens.find(t =>
-            t.type === TokenType.Label && t.line === classToken.line && t.value.toLowerCase() === wanted);
-        if (!label) continue;
+    for (const label of classLabelsNamed(tokens, className)) {
         if (!best || (label.line <= atLine && (best.line > atLine || label.line > best.line))) best = label;
     }
     return best;
+}
+
+/**
+ * #711 — for each CLASS structure, in document order, the first Label on its line under each name:
+ * what the loop above used to find by walking every token once per class (classes x tokens per call,
+ * on every receiver the discarded-return pass resolves and on hover/F12 of `obj.member`). Built once
+ * per token array; a cached array is never mutated after it is handed out, and the length check
+ * catches one that grew anyway.
+ */
+const classLabelIndexes = new WeakMap<Token[], { length: number; byName: Map<string, Token[]> }>();
+function classLabelsNamed(tokens: Token[], className: string): Token[] {
+    let ix = classLabelIndexes.get(tokens);
+    if (!ix || ix.length !== tokens.length) {
+        const byName = new Map<string, Token[]>();
+        for (const classToken of TokenHelper.findClassStructures(tokens)) {
+            const seen = new Set<string>();
+            for (const t of tokensOnLine(tokens, classToken.line)) {
+                if (t.type !== TokenType.Label) continue;
+                const k = t.value.toLowerCase();
+                if (seen.has(k)) continue;
+                seen.add(k);
+                const list = byName.get(k);
+                if (list) list.push(t); else byName.set(k, [t]);
+            }
+        }
+        ix = { length: tokens.length, byName };
+        classLabelIndexes.set(tokens, ix);
+    }
+    return ix.byName.get(className.toLowerCase()) ?? [];
 }
 
 /**
