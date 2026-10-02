@@ -5,6 +5,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
 import { tokensOnLine } from './TokenLineIndex';
+import { memberHeaderToken } from './TokenIndexes';
 
 /**
  * Shared utility for token and scope navigation
@@ -20,10 +21,9 @@ export class TokenHelper {
      * is the header.
      */
     public static findMemberHeaderToken(tokens: Token[]): Token | undefined {
-        return tokens.find(t =>
-            t.value !== undefined &&
-            t.value.toUpperCase() === 'MEMBER' &&
-            t.referencedFile !== undefined);
+        // #711 — once per token array: for a file with no MEMBER (a PROGRAM, an include) the
+        // search walked every token, on every hover that climbed the parent chain.
+        return memberHeaderToken(tokens);
     }
 
     /**

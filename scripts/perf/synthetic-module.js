@@ -68,6 +68,8 @@ function procedure(i, total) {
         '      OF EVENT:Accepted',
         '        DO SaveQueue',
         `        Loc:Total = Loc:Total + PQ${i}:Amount`,
+        `        F${i % 40}:Amount = Loc:Total`,
+        '        Glo:Today = TODAY()',
         `        IF Loc:Count > 10 AND Loc:Flag = 1`,
         `          Loc:Message = 'Too many rows in ' & Loc:Name`,
         `          MESSAGE(Loc:Message)`,

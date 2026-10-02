@@ -1,4 +1,6 @@
 import { Token, TokenType } from '../tokenizer/TokenTypes';
+import { structuresWithLabel } from './TokenIndexes';
+import { findInLineRange } from './TokenLineIndex';
 
 /**
  * #610 - `StructureLabel:Member`, the colon form of Field Qualification.
@@ -21,16 +23,15 @@ export function findLabelQualifiedMember(
     const labelUpper = structureLabel.toUpperCase();
     const memberUpper = memberName.toUpperCase();
 
-    const structure = tokens.find(t =>
+    // #711 — structures by label, and the member search inside the structure's own lines only.
+    const structure = structuresWithLabel(tokens, structureLabel).find(t =>
         t.type === TokenType.Structure &&
         t.label?.toUpperCase() === labelUpper &&
         !/^(CLASS|INTERFACE)$/i.test(t.value)
     );
     if (!structure) return null;
 
-    const member = tokens.find(t => {
-        if (t.line <= structure.line) return false;
-        if (structure.finishesAt !== undefined && t.line > structure.finishesAt) return false;
+    const member = findInLineRange(tokens, structure.line + 1, structure.finishesAt ?? Number.MAX_SAFE_INTEGER, t => {
         if (t.type === TokenType.Label && t.start === 0 && t.value.toUpperCase() === memberUpper) return true;
         return t.type === TokenType.Structure && t.label?.toUpperCase() === memberUpper;
     });

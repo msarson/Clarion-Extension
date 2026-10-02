@@ -1,4 +1,5 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
+import { globalScopeIndex } from '../../utils/GlobalScopeIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
@@ -199,18 +200,8 @@ export class VariableHoverResolver {
         // Hover-only extras beyond the shared decision: global STRUCTURE labels
         // (QUEUE/GROUP/CLASS declared with the name in `label`) and
         // procedure/function labels, which render as structure/procedure cards.
-        const firstCodeToken = tokens.find(t =>
-            t.type === TokenType.Keyword &&
-            t.value.toUpperCase() === 'CODE'
-        );
-        const globalScopeEndLine = firstCodeToken ? firstCodeToken.line : Number.MAX_SAFE_INTEGER;
-
-        const structOrProc = tokens.find(t =>
-            t.start === 0 &&
-            t.line < globalScopeEndLine &&
-            (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) &&
-            t.label?.toLowerCase() === searchWord.toLowerCase()
-        );
+        // Before the first CODE; #711 — indexed once per token array (a miss walked every token).
+        const structOrProc = globalScopeIndex(tokens).structureOrProcedureLabels.get(searchWord.toLowerCase());
 
         if (structOrProc) {
             logger.info(`✅ Found global structure/procedure label in current file: ${structOrProc.value} at line ${structOrProc.line}`);

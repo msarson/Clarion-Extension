@@ -9,6 +9,7 @@
  * See GitHub issue #50 for the refactor rationale.
  */
 
+import { tokensWithPrefix, includeTokens } from '../utils/TokenIndexes';
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -840,9 +841,7 @@ export class MemberLocatorService {
     // ---------------------------------------------------------------------------
 
     private static includeTargetsFromTokens(tokens: Token[]): string[] {
-        return tokens
-            .filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile)
-            .map(t => t.referencedFile!);
+        return includeTokens(tokens).map(t => t.referencedFile!); // #711 — indexed once per token array
     }
 
     /** One pass over raw text: every column-0 label (lower-cased) and every INCLUDE target. */
@@ -1070,7 +1069,8 @@ export class MemberLocatorService {
         // structure's own prefix too, even though it's an attribute argument, not a real field.
         // Real fields are always declared on later lines, so this line comparison cleanly excludes
         // that noise without touching the tokenizer's core (widely-depended-on) structure walker.
-        const fieldMatch = tokens.find(t =>
+        const withPrefix = tokensWithPrefix(tokens, prefix); // #711 — was two walks of every token
+        const fieldMatch = withPrefix.find(t =>
             t.isStructureField &&
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             t.value.toUpperCase() === fieldUpper &&
@@ -1078,7 +1078,7 @@ export class MemberLocatorService {
         );
         if (fieldMatch) return fieldMatch;
 
-        const prefixed = tokens.find(t =>
+        const prefixed = withPrefix.find(t =>
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
             (t.value.toUpperCase() === fieldUpper || t.label?.toUpperCase() === fieldUpper)
@@ -1096,8 +1096,7 @@ export class MemberLocatorService {
         fromDir: string,
         visited: Set<string>
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
-        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
-        for (const inc of includeTokens) {
+        for (const inc of includeTokens(tokens)) { // #711 — indexed once per token array
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());

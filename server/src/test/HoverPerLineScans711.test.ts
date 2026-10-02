@@ -19,22 +19,22 @@ const { syntheticModuleText } = require(path.join(__dirname, '..', '..', '..', '
 suite('#711 a warm hover does not walk the whole token array', function () {
     this.timeout(120000);
 
-    const readsForWarmHover = async (lines: number): Promise<number> => {
+    const readsForWarmHover = async (lines: number, needle: string, mustAnswer: boolean): Promise<number> => {
         setServerInitialized(true);
         const text: string = syntheticModuleText(lines);
-        const doc = TextDocument.create(`file:///c%3A/t711/hover-${lines}.clw`, 'clarion', 1, text);
+        const doc = TextDocument.create(`file:///c%3A/t711/hover-${lines}-${needle.replace(/W/g, '')}.clw`, 'clarion', 1, text);
         const cache = TokenCache.getInstance();
         const tokens = cache.getTokens(doc);
 
-        // A local read in the second procedure's CODE: `Loc:Total` on an assignment line.
+        // The second occurrence of `needle`, in the second procedure's CODE.
         const textLines = text.split(/\r?\n/);
         let seen = 0;
         let at: Position | undefined;
         for (let i = 0; i < textLines.length && !at; i++) {
-            const c = textLines[i].indexOf('Loc:Total +=');
+            const c = textLines[i].indexOf(needle);
             if (c >= 0 && ++seen === 2) at = Position.create(i, c + 3);
         }
-        assert.ok(at, 'the synthetic module has a Loc:Total assignment');
+        assert.ok(at, `the synthetic module has ${needle}`);
 
         let reads = 0;
         const counted = new Proxy(tokens, {
@@ -48,16 +48,26 @@ suite('#711 a warm hover does not walk the whole token array', function () {
 
         const provider = new HoverProvider();
         const first = await provider.provideHover(doc, at!);      // warm-up: per-version indexes
-        assert.ok(first, 'the hover answers');
+        if (mustAnswer) assert.ok(first, 'the hover answers');
         reads = 0;
         await provider.provideHover(doc, at!);
         return reads;
     };
 
-    test('bug-pin: four times the module costs a warm hover about the same token reads', async () => {
-        const small = await readsForWarmHover(2000);
-        const large = await readsForWarmHover(8000);
+    const assertFlat = async (needle: string, mustAnswer: boolean) => {
+        const small = await readsForWarmHover(2000, needle, mustAnswer);
+        const large = await readsForWarmHover(8000, needle, mustAnswer);
         const ratio = large / small;
-        assert.ok(ratio < 2, `a warm hover read ${large} tokens at 8k lines, ${small} at 2k: ${ratio.toFixed(1)}x (a whole-document walk is ~4x)`);
+        assert.ok(ratio < 2, `hovering ${needle}: a warm hover read ${large} tokens at 8k lines, ${small} at 2k: ${ratio.toFixed(1)}x (a whole-document walk is ~4x)`);
+    };
+
+    test('bug-pin: four times the module costs a warm hover about the same token reads (a local)', async () => {
+        await assertFlat('Loc:Total +=', true);
+    });
+
+    // A global declared in the PROGRAM, not this module: the current-file global lookups answer no,
+    // and each walked every token to say so (real generated code hovers these constantly).
+    test('bug-pin: the same holds for a global from another file', async () => {
+        await assertFlat('Glo:Today =', false);
     });
 });

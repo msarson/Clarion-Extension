@@ -54,3 +54,17 @@ export function tokensOnLine(tokens: Token[], line: number): Token[] {
     }
     return idx.byLine.get(line) ?? NONE;
 }
+
+/**
+ * #711 — `tokens.find(t => startLine <= t.line && t.line <= endLine && pred(t))` without walking
+ * the tokens outside the range: token arrays are in document order, so the range starts by binary
+ * search and ends at the first token past `endLine`.
+ */
+export function findInLineRange(tokens: Token[], startLine: number, endLine: number, pred: (t: Token) => boolean): Token | undefined {
+    for (let i = firstTokenAfterLine(tokens, startLine - 1); i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.line > endLine) break;
+        if (pred(t)) return t;
+    }
+    return undefined;
+}

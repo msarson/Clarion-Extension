@@ -13,7 +13,9 @@
  *     → DefinitionProvider (format as Location)
  */
 
-import { tokensOnLine } from '../utils/TokenLineIndex';
+import { tokensOnLine, findInLineRange } from '../utils/TokenLineIndex';
+import { topLevelLabels } from '../utils/TokenIndexes';
+import { globalScopeIndex } from '../utils/GlobalScopeIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../providers/ClarionDocumentSymbolProvider';
@@ -541,8 +543,7 @@ export class SymbolFinderService {
             const scopeStart = scopeToken.line;
             const scopeEnd = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
             const wordLower = searchText.toLowerCase();
-            const labelToken = tokens.find(t =>
-                t.line >= scopeStart && t.line <= scopeEnd &&
+            const labelToken = findInLineRange(tokens, scopeStart, scopeEnd, t => // #711 — the scope's lines only
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === wordLower &&
@@ -552,8 +553,7 @@ export class SymbolFinderService {
             if (labelToken) {
                 // Skip MAP/global procedure declarations — these are handled by
                 // findProcedureDeclaration (step 5) with the correct scope and type.
-                const isProcDecl = tokens.some(t =>
-                    t.line === labelToken.line &&
+                const isProcDecl = tokensOnLine(tokens, labelToken.line).some(t =>
                     (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     (t.subType === TokenType.MapProcedure ||
                      t.subType === TokenType.GlobalProcedure ||
@@ -845,7 +845,7 @@ export class SymbolFinderService {
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
         
         // Find variable in module scope (exclude structure fields which have a parent token)
-        const candidateVars = tokens.filter(t =>
+        const candidateVars = topLevelLabels(tokens, word).filter(t => // #711 — was a walk of every token
             t.type === TokenType.Label &&
             t.start === 0 &&
             t.parent === undefined &&
@@ -864,7 +864,7 @@ export class SymbolFinderService {
         logger.info(`✅ Found module variable: ${moduleVar.value} at line ${moduleVar.line}`);
         
         const typeInfo = SymbolFinderService.extractTypeInfo(moduleVar, tokens);
-        const lineTokens = tokens.filter(t => t.line === moduleVar.line);
+        const lineTokens = tokensOnLine(tokens, moduleVar.line);
         const declaration = lineTokens.map(t => t.value).join(' ');
         
         return {
@@ -1432,43 +1432,19 @@ export class SymbolFinderService {
      * this exact decision with F12 instead of running its own scan.
      */
     public findGlobalVariableInCurrentFile(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
-        const firstCodeToken = tokens.find(t =>
-            t.type === TokenType.Keyword &&
-            t.value.toUpperCase() === 'CODE'
-        );
-
-        // If no CODE found, look for first PROCEDURE as the boundary
-        const firstProcedure = tokens.find(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.GlobalProcedure
-        );
-
-        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
-        let globalScopeEndLine: number;
-        if (firstCodeToken) {
-            globalScopeEndLine = firstCodeToken.line;
-        } else if (firstProcedure) {
-            globalScopeEndLine = firstProcedure.line;
-        } else {
-            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
-        }
-
-        const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.parent === undefined &&
-            t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === word.toLowerCase()
-        );
+        // Global scope ends at the first CODE, or the first PROCEDURE if there is no CODE.
+        // #711 — the labels before it are indexed once per token array: a miss (the usual answer
+        // for a word declared in another file) walked every token in the document.
+        const globalVar = globalScopeIndex(tokens).plainLabels.get(word.toLowerCase());
 
         if (!globalVar) {
             return null;
         }
 
-        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
+        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
 
         const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
-        const lineTokens = tokens.filter(t => t.line === globalVar.line);
+        const lineTokens = tokensOnLine(tokens, globalVar.line);
         const declaration = lineTokens.map(t => t.value).join(' ');
 
         return {
@@ -2143,8 +2119,7 @@ export class SymbolFinderService {
         );
         if (!procToken) return null;
 
-        const labelToken = tokens.find(t =>
-            t.line === procToken.line &&
+        const labelToken = tokensOnLine(tokens, procToken.line).find(t => // #711
             t.start === 0 &&
             t.type === TokenType.Label &&
             t.value.toLowerCase() === wordLower
