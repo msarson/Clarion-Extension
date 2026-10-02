@@ -400,12 +400,18 @@ export class ScopeAnalyzer {
     }
 
     private isProgramFile(tokens: Token[]): boolean {
+        // #711 — asked on every hover; for a MEMBER module the answer is a walk of every token.
+        const hit = ScopeAnalyzer.programFileMemo.get(tokens);
+        if (hit && hit.length === tokens.length) return hit.isProgram;
         // PROGRAM at column 0 is tokenized as Label, not ClarionDocument
-        return tokens.some(token => 
+        const isProgram = tokens.some(token => 
             (token.type === TokenType.Label || token.type === TokenType.ClarionDocument) && 
             token.value.toUpperCase() === 'PROGRAM'
         );
+        ScopeAnalyzer.programFileMemo.set(tokens, { length: tokens.length, isProgram });
+        return isProgram;
     }
+    private static programFileMemo = new WeakMap<Token[], { length: number; isProgram: boolean }>();
 
     private getMemberModuleName(tokens: Token[]): string | undefined {
         // MEMBER at column 0 is tokenized as Label, not ClarionDocument

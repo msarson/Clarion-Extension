@@ -22,10 +22,28 @@ import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
 import { getCrossFileEpoch } from './crossFileEpoch';
+import { CrossFileResolver } from './CrossFileResolver';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
+
+/**
+ * #711 — a module source as the server sees it: the open buffer's text as the token cache last
+ * tokenized it, else disk (the shared cross-file policy, CrossFileResolver.loadExternalFileContent).
+ * Reading disk for an open, edited file gave stale implementation lines, and tokenizing that text
+ * under the file's uri replaced the live buffer's tokens — so the next request re-tokenized the
+ * whole buffer: two full tokenizations per hover after an edit on a large module.
+ */
+function moduleSourceDocument(fsPath: string): TextDocument {
+    const uri = pathToCanonicalUri(fsPath);
+    const text = CrossFileResolver.loadExternalFileContent(TokenCache.getInstance(), uri, fsPath);
+    if (text === undefined) throw new Error(`cannot read ${fsPath}`);
+    return TextDocument.create(uri, 'clarion', 1, text);
+}
+function moduleSourceTokens(fsPath: string): Token[] {
+    return TokenCache.getInstance().getTokens(moduleSourceDocument(fsPath));
+}
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
@@ -206,8 +224,7 @@ export class MapProcedureResolver {
             if (cached) return { document: cached.document, tokens: cached.tokens };
         }
         try {
-            const content = fsSync.readFileSync(filePath, 'utf8');
-            const doc = TextDocument.create(pathToCanonicalUri(filePath), 'clarion', 1, content);
+            const doc = moduleSourceDocument(filePath); // #711 — the open buffer, not disk
             return { document: doc, tokens: TokenCache.getInstance().getTokens(doc) };
         } catch {
             return null;
@@ -1198,11 +1215,7 @@ export class MapProcedureResolver {
                             const resolved = redirectionParser.findFile(clwFile);
                             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                 logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                const clwUri = pathToCanonicalUri(resolved.path);
-                                const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                const tokenCache = TokenCache.getInstance();
-                                const clwTokens = tokenCache.getTokens(clwDocument);
+                                const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                 
                                 // Find the procedure implementation
                                 const impl = clwTokens.find(t =>
@@ -1279,11 +1292,7 @@ export class MapProcedureResolver {
                                     const resolved = redirectionParser.findFile(moduleTokenInMap.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                        const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = pathToCanonicalUri(resolved.path);
-                                        const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                        const tokenCache = TokenCache.getInstance();
-                                        const clwTokens = tokenCache.getTokens(clwDocument);
+                                        const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                         
                                         // Find the procedure implementation
                                         const impl = clwTokens.find(t =>
@@ -1431,11 +1440,7 @@ export class MapProcedureResolver {
                                     const resolved = redirectionParser.findFile(moduleToken.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                        const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = pathToCanonicalUri(resolved.path);
-                                        const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                        const tokenCache = TokenCache.getInstance();
-                                        const clwTokens = tokenCache.getTokens(clwDocument);
+                                        const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                         
                                         // Find the procedure implementation
                                         const impl = clwTokens.find(t =>

@@ -4,6 +4,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { OmitCompileDetector } from '../../utils/OmitCompileDetector';
+import { tokensOnLine } from '../../utils/TokenLineIndex';
 import LoggerManager from '../../logger';
 
 const logger = LoggerManager.getLogger("HoverContextBuilder");
@@ -75,7 +76,7 @@ export class HoverContextBuilder {
         });
 
         // Get tokens on current line
-        const currentLineTokens = tokens.filter(t => t.line === position.line);
+        const currentLineTokens = tokensOnLine(tokens, position.line).slice(); // #711 — was a walk of every token
 
         // If the cursor is inside a comment or after a line-continuation marker (|),
         // return null — hovers should never fire on comment text.

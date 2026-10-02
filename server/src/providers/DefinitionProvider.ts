@@ -994,7 +994,7 @@ export class DefinitionProvider {
         // impl / routine). Replaces the former FIRST-match scan, which only matched the bare
         // TokenType.Procedure subtype (missing GlobalProcedure / MethodImplementation) and had a
         // CLASS-with-dot branch that never fired (a CLASS token's value is 'CLASS').
-        return new ScopeResolver(tokens).resolveScopeAt(currentLine).token ?? undefined;
+        return ScopeResolver.forTokens(tokens).resolveScopeAt(currentLine).token ?? undefined; // #711
     }
 
     /**

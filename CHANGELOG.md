@@ -64,6 +64,7 @@ All notable changes to the Clarion Extension are documented here.
 - **A GROUP inside a CLASS, or a structure inside a TYPE, is no longer taken for a global type.** The declaration index listed these members by their bare name, so completion after an undeclared `Settings.` offered a library class member's fields, and hovering it named an unrelated field as a type. An undeclared name now gets neither. [#704](https://github.com/msarson/Clarion-Extension/pull/704) @geircodes
 - **Completion in a member module offers the globals the PROGRAM includes in its data section.** A global declared in a file the PROGRAM pulls in with `INCLUDE` was missing from the list, although hover and Go to Definition found it. [#705](https://github.com/msarson/Clarion-Extension/pull/705) @geircodes
 - **Completion follows a MEMBER statement taken from an included shim file.** In a module whose `MEMBER('program')` comes from a file it includes first, completion offered none of the PROGRAM's globals; hover and Go to Definition already followed the shim. [#706](https://github.com/msarson/Clarion-Extension/pull/706) @geircodes
+- **Go to Definition from a MAP prototype follows unsaved edits in the module.** When the module holding the procedure was open with unsaved changes, it read the saved file and landed on the line the procedure had at the last save. It now reads the open editor's text. [#711](https://github.com/msarson/Clarion-Extension/issues/711)
 
 #### Diagnostics
 
@@ -110,6 +111,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Performance
 
 - **No more multi-second freeze reading a class header that pads its parameter lists with spaces.** A prototype such as `Name PROCEDURE(<hundreds of spaces>)` took time that grew with the cube of the padding, so one such header held the language server for over two seconds on a first start. It now reads in a few milliseconds. [#660](https://github.com/msarson/Clarion-Extension/issues/660)
+- **Hover stays fast in very large modules, also straight after an edit.** On a 60,000-line generated module a hover took over 150 ms with nothing changed, and up to 18 seconds after an edit. It now answers in a few milliseconds when nothing has changed, and in about half a second after an edit. [#711](https://github.com/msarson/Clarion-Extension/issues/711)
 
 #### Editing
 

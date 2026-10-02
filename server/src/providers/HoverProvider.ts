@@ -38,6 +38,7 @@ import { SymbolFinderService } from '../services/SymbolFinderService';
 import { SelfParentClassResolver, ClassDeclarationSite } from '../utils/SelfParentClassResolver';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
+import { tokensOnLine } from '../utils/TokenLineIndex';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -282,9 +283,8 @@ export class HoverProvider {
             // If cursor is on a PROCEDURE/FUNCTION declaration line, prioritize that exact
             // declaration scope for parameter hover (works even when currentScope is null
             // on declaration lines before CODE).
-            const declarationScope = tokens.find(t =>
-                TokenHelper.isProcedureOrFunction(t) &&
-                t.line === position.line
+            const declarationScope = tokensOnLine(tokens, position.line).find(t => // #711
+                TokenHelper.isProcedureOrFunction(t)
             );
             if (declarationScope) {
                 const declarationParamHover = this.variableResolver.findParameterHover(word, document, declarationScope);
@@ -1287,10 +1287,9 @@ export class HoverProvider {
         }
 
         // Also hover directly on an INTERFACE structure's label token (col 0)
-        const ifaceStruct = tokens.find(t =>
+        const ifaceStruct = tokensOnLine(tokens, position.line).find(t => // #711
             t.type === TokenType.Structure &&
-            t.subType === TokenType.Interface &&
-            t.line === position.line
+            t.subType === TokenType.Interface
         );
         if (ifaceStruct && ifaceStruct.label?.toLowerCase() === word.toLowerCase()) {
             return this.buildInterfaceHover(ifaceStruct, word, document);

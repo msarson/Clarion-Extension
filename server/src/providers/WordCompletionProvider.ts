@@ -578,7 +578,7 @@ export class WordCompletionProvider {
         // Issue #233 (Rule 4): resolve a Local Derived Method's declaring procedure
         // deterministically (the procedure whose LOCAL data declared its class) rather than
         // guessing the owner by token range.
-        const resolver = new ScopeResolver(tokens);
+        const resolver = ScopeResolver.forTokens(tokens); // #711
 
         if (containingRoutine) {
             // Routine-local data section

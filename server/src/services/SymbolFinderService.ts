@@ -13,6 +13,7 @@
  *     → DefinitionProvider (format as Location)
  */
 
+import { tokensOnLine } from '../utils/TokenLineIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../providers/ClarionDocumentSymbolProvider';
@@ -198,7 +199,7 @@ export class SymbolFinderService {
      */
     public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
         // 🚀 PERF: build line tokens once — avoids O(n) indexOf + multiple O(n) filter passes
-        const lineTokens = tokens.filter(t => t.line === labelToken.line);
+        const lineTokens = tokensOnLine(tokens, labelToken.line); // #711 — was a walk of every token
         const idx = lineTokens.indexOf(labelToken);
         if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
         const next = lineTokens[idx + 1];
@@ -302,10 +303,12 @@ export class SymbolFinderService {
     ): SymbolInfo | null {
         logger.info(`Finding parameter: "${word}" in scope: ${scopeToken.value}`);
         
-        const content = document.getText();
-        const lines = content.split('\n');
-        const procedureLine = lines[scopeToken.line];
-        
+        // #711 — the one line, not a split of the whole document on every hover.
+        const procedureLine = document.getText({
+            start: { line: scopeToken.line, character: 0 },
+            end: { line: scopeToken.line + 1, character: 0 },
+        }).replace(/\n$/, '');
+
         if (!procedureLine) {
             return null;
         }
@@ -386,6 +389,21 @@ export class SymbolFinderService {
      * Uses ClarionDocumentSymbolProvider to leverage the already-parsed symbol tree.
      * This is more efficient than re-parsing tokens and handles nesting correctly.
      */
+    /**
+     * #711 — the document's symbol tree, built once per token array. It was rebuilt on every hover
+     * that looked up a local (about 100 ms a hover on a 60k-line module, buffer unchanged). The
+     * tree depends only on the tokens, and the token cache returns the same array until the
+     * document changes; a WeakMap lets an edit's discarded array take its tree with it.
+     */
+    private readonly symbolTrees = new WeakMap<Token[], { uri: string; symbols: ReturnType<ClarionDocumentSymbolProvider['provideDocumentSymbols']> }>();
+    private symbolTree(tokens: Token[], document: TextDocument): ReturnType<ClarionDocumentSymbolProvider['provideDocumentSymbols']> {
+        const cached = this.symbolTrees.get(tokens);
+        if (cached && cached.uri === document.uri) return cached.symbols;
+        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri, document);
+        this.symbolTrees.set(tokens, { uri: document.uri, symbols });
+        return symbols;
+    }
+
     findLocalVariable(
         word: string,
         tokens: Token[],
@@ -417,8 +435,7 @@ export class SymbolFinderService {
         // (no name collision to mask the miss) got no hover at all.
         if (hoverLine !== undefined) {
             const wordLower = searchText.toLowerCase();
-            const declToken = tokens.find(t =>
-                t.line === hoverLine &&
+            const declToken = tokensOnLine(tokens, hoverLine).find(t => // #711
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === wordLower &&
@@ -428,8 +445,7 @@ export class SymbolFinderService {
             // Same exclusion the token-fallback further down applies: a MAP/global
             // procedure or method declaration sharing this line is handled by
             // findProcedureDeclaration with the correct scope/type, not here.
-            const isProcDecl = declToken !== undefined && tokens.some(t =>
-                t.line === declToken.line &&
+            const isProcDecl = declToken !== undefined && tokensOnLine(tokens, declToken.line).some(t =>
                 (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                 (t.subType === TokenType.MapProcedure ||
                  t.subType === TokenType.GlobalProcedure ||
@@ -451,7 +467,7 @@ export class SymbolFinderService {
         }
 
         // Get the symbol tree (pass document for better results)
-        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri, document);
+        const symbols = this.symbolTree(tokens, document);
 
         // Find the procedure/method symbol containing this scope
         const procedureSymbol = this.findProcedureContainingLine(symbols, scopeToken.line);
@@ -481,8 +497,7 @@ export class SymbolFinderService {
         let varSymbolIsControl = false;
         if (rawVarSymbol !== null && bareSearch) {
             const nameLower = searchText.toLowerCase();
-            const lineNameTokens = tokens.filter(t =>
-                t.line === rawVarSymbol.range.start.line &&
+            const lineNameTokens = tokensOnLine(tokens, rawVarSymbol.range.start.line).filter(t => // #711
                 t.value.toLowerCase() === nameLower
             );
             const hasDataLabel = lineNameTokens.some(t =>
@@ -505,8 +520,7 @@ export class SymbolFinderService {
         let varSymbolIsShadowedField = false;
         if (rawVarSymbol !== null && bareSearch && !varSymbolIsControl) {
             const nameLower = searchText.toLowerCase();
-            const matchTok = tokens.find(t =>
-                t.line === rawVarSymbol.range.start.line &&
+            const matchTok = tokensOnLine(tokens, rawVarSymbol.range.start.line).find(t => // #711
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === nameLower);
             if (matchTok && (matchTok.structurePrefix || SymbolFinderService.requiresDotQualification(matchTok))) {
@@ -607,7 +621,7 @@ export class SymbolFinderService {
             // scanning every GlobalProcedure (the former broad scan leaked unrelated procedures'
             // locals, so hover disagreed with completion in files with multiple procedures).
             if (scopeToken.subType === TokenType.MethodImplementation) {
-                const declaringProc = new ScopeResolver(tokens).findDeclaringProcedureForMethod(scopeToken);
+                const declaringProc = ScopeResolver.forTokens(tokens).findDeclaringProcedureForMethod(scopeToken); // #711
                 if (declaringProc) {
                     logger.info(`Scope is a Local Derived Method — searching declaring procedure at line ${declaringProc.line} for "${searchText}"`);
 

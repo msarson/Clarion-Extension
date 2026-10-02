@@ -146,6 +146,7 @@ import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from '../../ser
 import * as path from 'path';
 import * as fs from 'fs';
 import LoggerManager from '../../logger';
+import { tokensByLine, linesInRanges } from '../../utils/TokenLineIndex';
 
 const logger = LoggerManager.getLogger("ReturnValueDiagnostics");
 logger.setLevel("error");
@@ -343,6 +344,7 @@ function validateCrossFilePlainCalls(
             otherTokens = loaded.tokens;
         }
         if (!otherTokens) continue;
+        const otherByLine = tokensByLine(otherTokens); // #711
 
         for (let i = 0; i < otherTokens.length; i++) {
             const t = otherTokens[i];
@@ -351,7 +353,7 @@ function validateCrossFilePlainCalls(
             const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
             if (!name || excluded.has(name) || localMapNames.has(name)) continue;
 
-            const lineTokens = otherTokens.filter(tok => tok.line === t.line);
+            const lineTokens = otherByLine.get(t.line) ?? [];
             if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
                 excluded.add(name);
                 warnableProcs.delete(name);
@@ -401,8 +403,9 @@ function validateCrossFilePlainCalls(
     const diagnostics: Diagnostic[] = [];
     const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_:]*\s*[+\-*/&|]?=/;
 
+    const inCode = linesInRanges(codeRanges, docLines.length); // #711
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
-        if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
+        if (!inCode[lineIdx]) continue;
 
         const rawLine = docLines[lineIdx];
         // CRLF: `docLines` comes from a plain split('\n'), so a CRLF file leaves
@@ -488,6 +491,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
         structure.process();
     }
 
+    const byLine = tokensByLine(tokens); // #711 — was a whole-document filter/find per procedure
     const declarationsWithReturnTypes: Array<{
         name: string;
         returnType: string;
@@ -499,8 +503,10 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
         const token = tokens[i];
 
         if (token.type === TokenType.Structure && token.value.toUpperCase() === 'MAP') {
-            let mapEndLine = -1;
-            for (let j = i + 1; j < tokens.length; j++) {
+            // #711 — the structure pass knows where the MAP ends. The END-in-column-0 scan below
+            // missed the usual indented `  END`, so this loop ran over the whole rest of the file.
+            let mapEndLine = token.finishesAt ?? -1;
+            for (let j = i + 1; mapEndLine === -1 && j < tokens.length; j++) {
                 if (tokens[j].value.toUpperCase() === 'END' && tokens[j].start === 0) {
                     mapEndLine = tokens[j].line;
                     break;
@@ -511,8 +517,8 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                 if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
-                    const procNameToken = tokens.find(t =>
-                        t.line === tokens[j].line && t.start === 0 && t.type === TokenType.Label
+                    const procNameToken = (byLine.get(tokens[j].line) ?? []).find(t =>
+                        t.start === 0 && t.type === TokenType.Label
                     );
                     if (!procNameToken) continue;
 
@@ -523,7 +529,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                             parenDepth--;
                             if (parenDepth === 0) {
                                 if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                    const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                    const lineTokens = byLine.get(tokens[j].line) ?? [];
                                     const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
                                     const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
                                     if (!hasProc && !hasDerived) {
@@ -547,8 +553,8 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
         }
 
         if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-            const classNameToken = tokens.find(t =>
-                t.type === TokenType.Label && t.line === token.line
+            const classNameToken = (byLine.get(token.line) ?? []).find(t =>
+                t.type === TokenType.Label
             );
             if (!classNameToken) continue;
 
@@ -567,8 +573,8 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                 if ((TokenHelper.isProcedureOrFunction(tokens[j]) || tokens[j].type === TokenType.Routine) &&
                     (tokens[j].value.toUpperCase() === 'PROCEDURE' || tokens[j].value.toUpperCase() === 'FUNCTION')) {
 
-                    const methodNameToken = tokens.find(t =>
-                        t.line === tokens[j].line && t.start === 0 && t.type === TokenType.Label
+                    const methodNameToken = (byLine.get(tokens[j].line) ?? []).find(t =>
+                        t.start === 0 && t.type === TokenType.Label
                     );
                     if (!methodNameToken) continue;
 
@@ -579,7 +585,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                             parenDepth--;
                             if (parenDepth === 0) {
                                 if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                    const lineTokens = tokens.filter(t => t.line === tokens[j].line);
+                                    const lineTokens = byLine.get(tokens[j].line) ?? [];
                                     const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
                                     const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
                                     if (!hasProc && !hasDerived) {
@@ -603,33 +609,44 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
         }
     }
 
-    for (const decl of declarationsWithReturnTypes) {
+    // #711 — the implementations (PROCEDUREs outside MAP/CLASS), by full name, in document order,
+    // found once. Walking every token for every declaration was quadratic.
+    const implementationsByName = new Map<string, number[]>();
+    if (declarationsWithReturnTypes.length > 0) {
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            if (!((TokenHelper.isProcedureOrFunction(token) || token.type === TokenType.Routine) &&
+                (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION'))) continue;
 
-            if ((TokenHelper.isProcedureOrFunction(token) || token.type === TokenType.Routine) &&
-                (token.value.toUpperCase() === 'PROCEDURE' || token.value.toUpperCase() === 'FUNCTION')) {
+            // #163 — skip DECLARATIONs (nested in MAP/CLASS); only IMPLEMENTATIONs
+            // reach the RETURN-statement analysis below. Was: inMapOrClass/mapClassDepth.
+            if (isInsideMapOrClass(structure, token)) continue;
 
-                // #163 — skip DECLARATIONs (nested in MAP/CLASS); only IMPLEMENTATIONs
-                // reach the RETURN-statement analysis below. Was: inMapOrClass/mapClassDepth.
-                if (isInsideMapOrClass(structure, token)) continue;
-
-                let fullName = '';
-                if (i > 0 && (tokens[i - 1].type === TokenType.Label || tokens[i - 1].type === TokenType.Variable)) {
-                    fullName = tokens[i - 1].value;
-                    if (i > 2 && tokens[i - 2].value === '.' && tokens[i - 3].type === TokenType.Label) {
-                        fullName = tokens[i - 3].value + '.' + fullName;
-                    } else if (i > 1 && tokens[i - 2].type === TokenType.Label) {
-                        const line = docLines[token.line];
-                        const cName = tokens[i - 2].value;
-                        const mName = tokens[i - 1].value;
-                        if (line.includes(cName + '.' + mName)) {
-                            fullName = cName + '.' + mName;
-                        }
+            let fullName = '';
+            if (i > 0 && (tokens[i - 1].type === TokenType.Label || tokens[i - 1].type === TokenType.Variable)) {
+                fullName = tokens[i - 1].value;
+                if (i > 2 && tokens[i - 2].value === '.' && tokens[i - 3].type === TokenType.Label) {
+                    fullName = tokens[i - 3].value + '.' + fullName;
+                } else if (i > 1 && tokens[i - 2].type === TokenType.Label) {
+                    const line = docLines[token.line];
+                    const cName = tokens[i - 2].value;
+                    const mName = tokens[i - 1].value;
+                    if (line.includes(cName + '.' + mName)) {
+                        fullName = cName + '.' + mName;
                     }
                 }
+            }
+            const key = fullName.toLowerCase();
+            const list = implementationsByName.get(key);
+            if (list) list.push(i); else implementationsByName.set(key, [i]);
+        }
+    }
 
-                if (fullName.toLowerCase() === decl.name.toLowerCase()) {
+    for (const decl of declarationsWithReturnTypes) {
+        for (const i of implementationsByName.get(decl.name.toLowerCase()) ?? []) {
+            const token = tokens[i];
+            {
+                {
                     const implLine = docLines[token.line] || '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(decl.signature);
                     const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
@@ -728,6 +745,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
     const warnableProcs = new Map<string, string>();
     const excluded = new Set<string>();
 
+    const byLine = tokensByLine(tokens); // #711 — was a whole-document filter/find per procedure
     const hasSubType = tokens.some(t => t.subType === TokenType.MapProcedure);
 
     if (hasSubType) {
@@ -738,7 +756,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
             const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
             if (!name || excluded.has(name)) continue;
 
-            const lineTokens = tokens.filter(tok => tok.line === t.line);
+            const lineTokens = byLine.get(t.line) ?? [];
             if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
                 excluded.add(name);
                 warnableProcs.delete(name);
@@ -786,7 +804,7 @@ export function validateDiscardedReturnValuesForPlainCalls(
         const name = (t.label ?? '').toUpperCase();
         if (!name || excluded.has(name)) continue;
 
-        const lineTokens = tokens.filter(tok => tok.line === t.line);
+        const lineTokens = byLine.get(t.line) ?? [];
         if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
             excluded.add(name);
             warnableProcs.delete(name);
@@ -845,8 +863,8 @@ export function validateDiscardedReturnValuesForPlainCalls(
                 (TokenHelper.isProcedureOrFunction(t) || t.type === TokenType.Routine) &&
                 (val === 'PROCEDURE' || val === 'FUNCTION' || val === 'ROUTINE') &&
                 t.line > codeStart) {
-                const labelOnLine = tokens.find(l =>
-                    l.line === t.line && l.start === 0 && l.type === TokenType.Label
+                const labelOnLine = (byLine.get(t.line) ?? []).find(l =>
+                    l.start === 0 && l.type === TokenType.Label
                 );
                 if (labelOnLine) {
                     codeRanges.push({ start: codeStart, end: t.line - 1 });
@@ -863,8 +881,9 @@ export function validateDiscardedReturnValuesForPlainCalls(
 
     const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_:]*\s*[+\-*/&|]?=/;
 
+    const inCode = linesInRanges(codeRanges, docLines.length); // #711
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
-        if (!codeRanges.some(r => lineIdx >= r.start && lineIdx <= r.end)) continue;
+        if (!inCode[lineIdx]) continue;
 
         const rawLine = docLines[lineIdx];
         const stripped = rawLine.replace(/!.*/, '').trim(); // CRLF-safe — see comment above the first occurrence
@@ -1103,6 +1122,14 @@ export async function validateDiscardedReturnValues(
     // timeout. Yield on a time budget so interactive requests interleave.
     const timeSlice = makeTimeSlicer();
 
+    // #711 — the first range covering each line (what `codeRanges.find` returned), built once.
+    const rangeOfLine: (typeof codeRanges[number] | undefined)[] = new Array(docLines.length);
+    for (const r of codeRanges) {
+        for (let l = Math.max(0, r.start); l <= r.end && l < docLines.length; l++) {
+            if (!rangeOfLine[l]) rangeOfLine[l] = r;
+        }
+    }
+
     for (let lineIdx = 0; lineIdx < docLines.length; lineIdx++) {
         await timeSlice();
         // The document changed under this pass. The caller's stale-version guard discards
@@ -1120,7 +1147,7 @@ export async function validateDiscardedReturnValues(
             });
             return [];
         }
-        const range = codeRanges.find(r => lineIdx >= r.start && lineIdx <= r.end);
+        const range = rangeOfLine[lineIdx]; // #711 — was a search of every range per line
         if (!range) continue;
 
         const rawLine = docLines[lineIdx];
