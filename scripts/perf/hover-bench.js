@@ -10,7 +10,7 @@
  *   node scripts/perf/hover-bench.js [--sizes=10000,30000,60000] [--n=40] [--edits=15] [--bursts=8]
  *                                    [--server=<path to server.js>] [--clarion=<install root>] [--json=out.json]
  *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged] [--log=<file>]
- *                                    [--shape=giant] [--edit=near]
+ *                                    [--shape=giant] [--edit=near] [--pauses=N] [--pause-ms=650]
  *
  * --detail prints each unchanged hover in order and by word kind (a slow kind vs a slow first hover).
  * --ranged sends each edit as a one-character ranged didChange (a space typed at the end of a line
@@ -36,6 +36,8 @@ const CLARION = arg('clarion', process.env.CLARION_ROOT || 'C:\\Clarion\\Clarion
 const CPU_PROF = arg('cpu-prof', '');
 const SHAPE = arg('shape', 'procedures'); // #715: 'giant' = one procedure that is nearly the whole module
 const EDIT = arg('edit', 'end');         // #715: 'near' = a comment typed on the line above each hovered word
+const PAUSES = Number(arg('pauses', 0));     // #715: edits followed by a pause, then a hover during re-validation
+const PAUSE_MS = Number(arg('pause-ms', 650));
 const LOG = arg('log', ''); // #715: append the server's log messages here, with the performance channel on
 
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => d.toLowerCase() + '%3A');
@@ -176,11 +178,26 @@ async function benchSize(size) {
     const burst = [];
     for (let k = 0; k < BURSTS; k++) { const p = pos[(k * 11) % pos.length]; for (let j = 0; j < 5; j++) change(p); burst.push(await hover(p)); }
 
+    // #715 step 2 — an edit, a pause long enough for the re-validation to start (the server waits
+    // 500 ms after the last change), then a hover that lands while it runs; and how long after the
+    // edit that version's diagnostics are complete (clarion/diagnosticsStatus).
+    const paused = [], complete = [];
+    for (let k = 0; k < PAUSES; k++) {
+        const p = pos[(k * 13 + 5) % pos.length];
+        const target = version + 1;
+        const done = s.waitFor('clarion/diagnosticsStatus', q => q && q.uri === uri && q.version === target && q.state === 'complete', 60000);
+        const t0 = performance.now();
+        change(p);
+        await new Promise(r => setTimeout(r, PAUSE_MS));
+        paused.push(await hover(p));
+        await done.then(() => complete.push(performance.now() - t0), () => complete.push(60000));
+    }
+
     await Promise.race([s.request('shutdown', null), new Promise(r => setTimeout(r, 15000))]);
     s.notify('exit');
     await new Promise(r => setTimeout(r, 1500));
     s.child.kill();
-    return { size: sol.lines, procedures: sol.procedures, settleMs, unchanged: stats(unchanged), edited: stats(edited), burst: stats(burst) };
+    return { size: sol.lines, procedures: sol.procedures, settleMs, unchanged: stats(unchanged), edited: stats(edited), burst: stats(burst), paused: stats(paused), complete: stats(complete) };
 }
 
 (async () => {
@@ -191,7 +208,8 @@ async function benchSize(size) {
         results.push(r);
         console.log(`${String(r.size).padStart(6)} lines | unchanged p50 ${r.unchanged.p50} p95 ${r.unchanged.p95} max ${r.unchanged.max}` +
             ` | edited p50 ${r.edited.p50} p95 ${r.edited.p95} max ${r.edited.max}` +
-            ` | burst p50 ${r.burst.p50} p95 ${r.burst.p95} max ${r.burst.max}  (ms)`);
+            ` | burst p50 ${r.burst.p50} p95 ${r.burst.p95} max ${r.burst.max}` +
+            (r.paused.n ? ` | during re-validation p50 ${r.paused.p50} p95 ${r.paused.p95} max ${r.paused.max} | diagnostics complete p50 ${r.complete.p50} p95 ${r.complete.p95} max ${r.complete.max}` : "") + "  (ms)");
     }
     const json = arg('json', '');
     if (json) fs.writeFileSync(json, JSON.stringify({ server: SERVER, when: new Date().toISOString(), results }, null, 2));

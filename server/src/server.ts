@@ -801,9 +801,21 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
+        // True once a newer version of this document exists: this pass's answer would be
+        // discarded, so it stops at its next yield and the version is reported superseded.
+        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
         const syncStart = Date.now();
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller, getOpenDocumentContent);
+        // #715 step 2: the sync checks yield to requests between them. As one block they held
+        // a hover that arrived during the pass for up to a second on a 60k-line module.
+        const syncDiagnostics = await DiagnosticProvider.validateDocumentYielding(document, tokens, caller, isStale);
         const syncMs = Date.now() - syncStart;
+        if (syncDiagnostics === null) {
+            // #460: superseded — a newer version arrived during the sync pass; nothing was
+            // published for this one, and the newer version's pass is the live one.
+            sendDiagnosticsStatus(document.uri, startVersion, 'superseded');
+            return;
+        }
+        const diagnostics = syncDiagnostics;
 
         // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
         // files. Library files (StringTheory, ABC, etc.) are stable, read-only
@@ -912,10 +924,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
-        // True once a newer version of this document exists. The stale-version guard after
-        // the validators discards this pass's answer in that case, so both the loop below and
-        // the long-running validators that accept it can stop early instead of finishing.
-        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
+        // isStale (above): the stale-version guard after the validators discards this pass's
+        // answer once it is true, so both the loop below and the long-running validators that
+        // accept it can stop early instead of finishing.
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.

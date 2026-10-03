@@ -130,27 +130,35 @@ function getConditionalBlockRanges(tokens: Token[], document: TextDocument): Arr
     return ranges;
 }
 
-function isInConditionalBlock(line: number, ranges: Array<{ start: number; end: number }>): boolean {
-    return ranges.some(range => line > range.start && line <= range.end);
+/**
+ * Which lines are inside an OMIT/COMPILE block (after its directive, up to and including its
+ * terminator), as a per-line lookup. #715: each token was tested against every block, which on
+ * a module with a thousand OMIT blocks made the two checks below quadratic.
+ */
+function conditionalLines(ranges: Array<{ start: number; end: number }>, lineCount: number): Uint8Array {
+    const inside = new Uint8Array(lineCount + 1);
+    for (const { start, end } of ranges) {
+        for (let line = start + 1; line <= end && line <= lineCount; line++) inside[line] = 1;
+    }
+    return inside;
 }
 
 // ─── Exported validation functions ───────────────────────────────────────────
 
 export function validateStructureTerminators(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
-    const conditionalRanges = getConditionalBlockRanges(tokens, document);
+    const insideConditional = conditionalLines(getConditionalBlockRanges(tokens, document), document.lineCount);
 
-    for (const token of tokens) {
-        if (isInConditionalBlock(token.line, conditionalRanges)) continue;
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+        const token = tokens[tokenIndex];
+        if (insideConditional[token.line] === 1) continue;
         if (token.type !== TokenType.Structure) continue;
 
         const structureType = token.value.toUpperCase();
         if (!requiresTerminator(structureType)) continue;
 
-        if (structureType === 'IF') {
-            const tokenIndex = tokens.indexOf(token);
-            if (isSingleLineIfThen(tokens, tokenIndex)) continue;
-        }
+        // #715: the index came from tokens.indexOf(token), a scan of the token array per IF.
+        if (structureType === 'IF' && isSingleLineIfThen(tokens, tokenIndex)) continue;
 
         if (structureType === 'MODULE') {
             const classOnSameLine = tokens.find(t =>
@@ -281,11 +289,11 @@ export function validateConditionalBlocks(tokens: Token[], document: TextDocumen
 
 export function validateFileStructures(tokens: Token[], document: TextDocument): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
-    const conditionalRanges = getConditionalBlockRanges(tokens, document);
+    const insideConditional = conditionalLines(getConditionalBlockRanges(tokens, document), document.lineCount);
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
-        if (isInConditionalBlock(token.line, conditionalRanges)) continue;
+        if (insideConditional[token.line] === 1) continue;
 
         if (token.type === TokenType.Structure && token.value.toUpperCase() === 'FILE') {
             // RECORD presence comes from the parent-child tree (token.children, populated
