@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
+import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 
 const logger = LoggerManager.getLogger("ClarionIdePreferences");
 logger.setLevel("error");
@@ -16,7 +17,7 @@ export interface IdePreferences {
  * Uses the WIN32 variant: hash1 = hash2 = (5381<<16)+5381, processes char-pairs as int32.
  * All arithmetic wraps at 32-bit signed integer boundaries (matching .NET behaviour).
  *
- * Test vector: "c:\development\ibsworking\ap1.sln" → "ecfee7f0"
+ * Test vector: "c:\dev\sample\MySln.sln" → "ef421397"
  */
 export function computeSlnHash(slnPath: string): string {
     const s = slnPath.toLowerCase();
@@ -47,7 +48,7 @@ export function computeSlnHash(slnPath: string): string {
  * Returns the full path to the Clarion IDE preferences XML for the given solution.
  * The folder is derived from the propertiesFile path:
  *   e.g. C:\...\SoftVelocity\Clarion\10.0\ClarionProperties.xml
- *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.sln.ecfee7f0.xml
+ *     →  C:\...\SoftVelocity\Clarion\10.0\preferences\MySln.sln.ef421397.xml
  */
 export function getPreferencesFilePath(slnPath: string, propertiesFile: string): string {
     const preferencesDir = path.join(path.dirname(propertiesFile), 'preferences');
@@ -124,6 +125,20 @@ export async function writeIdePreferences(slnPath: string, propertiesFile: strin
     } catch (err) {
         logger.warn(`⚠️ Failed to write IDE preferences to ${prefsPath}: ${err}`);
     }
+}
+
+/**
+ * #664 — tell the Clarion IDE which configuration to open the solution on: its preferences file
+ * and, when there is one, the `.sln.cache` it last built with. Set Configuration and the solution
+ * load both use it, so the IDE follows the configuration chosen in VS Code.
+ */
+export async function pushConfigurationToIde(
+    slnPath: string,
+    propertiesFile: string,
+    configuration: { activeConfiguration: string; activePlatform: string }
+): Promise<void> {
+    patchSlnCacheConfig(slnPath, buildFullConfig(configuration.activeConfiguration, readActiveConfigFromSlnCache(slnPath)));
+    await writeIdePreferences(slnPath, propertiesFile, configuration);
 }
 
 function replaceOrInsertProperty(xml: string, name: string, value: string): string {

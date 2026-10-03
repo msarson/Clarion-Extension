@@ -45,6 +45,7 @@ import {
 } from 'vscode-languageserver-protocol';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { readUnopenedSource } from './utils/RestoredTabSource'; // #696
 
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
@@ -109,6 +110,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { moduleTargetMatchesFile } from './utils/ClarionSourceNaming';
 import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
+import { EventLoopLagTracker } from './utils/EventLoopLagTracker'; // #661
 import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
 import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 
@@ -701,13 +703,44 @@ let diagnosticsRefreshSupported = false;
 const lastPulledResultId = new Map<string, string>();
 let diagnosticsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+// #696 — a restored tab VS Code has not instantiated is pulled by URI with no didOpen (the client's
+// diagnosticPullOptions.onTabs). It is checked from disk, but only once the startup chain is done:
+// the client pulls it once, before the solution is announced, and its refresh loop re-pulls
+// instantiated documents only, so the one answer must be the full one (the cross-file pass too).
+// Checked one at a time, like the startup re-validation; the document lives in `unopenedDocs` for
+// the length of its pass so the version checks see it.
+const unopenedDocs = new Map<string, TextDocument>();
+const unopenedMtimes = new Map<string, number>();
+let startupDiagnosticsReady = false;
+const startupDiagnosticsWaiters: Array<() => void> = [];
+function markStartupDiagnosticsReady(): void {
+    if (startupDiagnosticsReady) return;
+    startupDiagnosticsReady = true;
+    for (const resolve of startupDiagnosticsWaiters.splice(0)) resolve();
+}
+const whenStartupDiagnosticsReady = (): Promise<void> =>
+    startupDiagnosticsReady ? Promise.resolve() : new Promise(resolve => startupDiagnosticsWaiters.push(resolve));
+let unopenedLane: Promise<unknown> = Promise.resolve();
+function inUnopenedLane<T>(work: () => Promise<T>): Promise<T> {
+    const run = unopenedLane.then(work);
+    unopenedLane = run.catch(() => undefined).then(() => new Promise<void>(resolve => setImmediate(resolve)));
+    return run;
+}
+/** The version a pass must still match: the open document's, else the unopened one being checked. */
+const liveVersion = (uri: string): number | undefined => documents.get(uri)?.version ?? unopenedDocs.get(uri)?.version;
+
 function publishDiagnostics(document: TextDocument, version: number, diagnostics: Diagnostic[], state: DiagnosticsState): void {
     const resultId = diagnosticsStore.record(document.uri, version, state, diagnostics);
     if (!pullDiagnosticsSupported) {
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
+        // #619: publish the version these diagnostics were computed for (LSP 3.15, optional).
+        // A pass for v1 can land after the client has moved to v2 — without the field the
+        // stale answer is attributed to v2. `clarion/diagnosticsStatus` (#460) tells a client
+        // that knows the custom notification; the standard field tells every other client.
+        connection.sendDiagnostics({ uri: document.uri, version, diagnostics });
         return;
     }
     if (!diagnosticsRefreshSupported) return;
+    if (unopenedDocs.has(document.uri)) return; // #696 — answered by its own pull, never refreshed
     if (lastPulledResultId.get(document.uri) === resultId) return;
     if (diagnosticsRefreshTimer) clearTimeout(diagnosticsRefreshTimer);
     diagnosticsRefreshTimer = setTimeout(() => {
@@ -882,7 +915,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // True once a newer version of this document exists. The stale-version guard after
         // the validators discards this pass's answer in that case, so both the loop below and
         // the long-running validators that accept it can stop early instead of finishing.
-        const isStale = () => documents.get(document.uri)?.version !== startVersion;
+        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
@@ -896,6 +929,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             ['undeclaredVar', () => DiagnosticProvider.validateUndeclaredVariables(tokens, document, symbolFinder)],
             ['unresolvedProcCall', async () => DiagnosticProvider.validateUnresolvedProcedureCalls(tokens, document)],
             ['ifaceImpl', () => DiagnosticProvider.validateClassInterfaceImplementation(tokens, document, memberLocator)],
+            ['unresolvedFileRef', () => DiagnosticProvider.validateUnresolvedFileReferences(document)], // #695
         ];
         // #367: sequential-with-yield for EVERY caller, not just 'sdiReady'. The old
         // ternary gave interactive edits and crossFileUpdate a Promise.all of 8
@@ -920,12 +954,11 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             // Real macrotask yield between validators — lets queued requests in.
             await new Promise<void>(resolve => setImmediate(resolve));
         }
-        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags] = validatorResults;
+        const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags, unresolvedFileRefDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
 
         // Stale-version guard: document may have changed while we were resolving types
-        const currentDoc = documents.get(document.uri);
-        if (!currentDoc || currentDoc.version !== startVersion) {
+        if (liveVersion(document.uri) !== startVersion) { // #696 — an unopened tab's pass counts too
             perfLogger.perf("validateTextDocument stale-skip", {
                 total_ms: Date.now() - validateStart,
                 token_count: tokens.length,
@@ -938,7 +971,7 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             return;
         }
 
-        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...unresolvedProcCallDiags, ...ifaceImplDiags];
+        const asyncDiags = [...viewProjectFieldsDiags, ...discardedReturnDiags, ...missingIncludeDiags, ...missingConstantsDiags, ...missingMapDeclDiags, ...missingImplDiags, ...privateCallDiags, ...undeclaredVarDiags, ...unresolvedProcCallDiags, ...ifaceImplDiags, ...unresolvedFileRefDiags];
         // Always send the final combined list so previously-raised async diagnostics
         // (e.g. map-impl-signature-mismatch) are cleared when they are no longer relevant.
         diagnostics.push(...asyncDiags);
@@ -1077,13 +1110,10 @@ connection.onFoldingRanges((params: FoldingRangeParams) => {
 // Handle selection range requests (Shift+Alt+→ expand selection)
 // #545 — textDocument/diagnostic: answer from the store; validate first if this version
 // has no record yet (the duplicate-version guard makes a repeat call cheap).
-connection.languages.diagnostics.on(async (params) => {
+connection.languages.diagnostics.on(async (params, token) => {
     const uri = params.textDocument.uri;
     const document = documents.get(uri);
-    if (!document) {
-        diagnosticsStore.clear(uri);
-        return { kind: 'full', items: [] };
-    }
+    if (!document) return answerUnopened(uri, params.previousResultId, token);
     const stored = diagnosticsStore.get(uri);
     if (!stored || stored.version !== document.version) {
         try { await validateTextDocument(document, 'pull'); }
@@ -1093,6 +1123,42 @@ connection.languages.diagnostics.on(async (params) => {
     if (report.resultId) lastPulledResultId.set(uri, report.resultId);
     return report;
 });
+
+/**
+ * #696 — a pull for a document the editor has not opened: a restored tab. Read from disk, checked
+ * in full once the startup chain is done, one at a time; a later didOpen takes over (the open
+ * document is checked from then on). Unchanged on disk since its last pass: the stored answer.
+ */
+async function answerUnopened(uri: string, previousResultId: string | undefined, token: { isCancellationRequested: boolean }) {
+    const empty = () => { diagnosticsStore.clear(uri); return { kind: 'full' as const, items: [] }; };
+    const filePath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+    if (!readUnopenedSource(filePath)) return empty();
+    await whenStartupDiagnosticsReady();
+    return inUnopenedLane(async () => {
+        if (token.isCancellationRequested) return empty();
+        const opened = documents.get(uri);
+        if (opened) {
+            const stored = diagnosticsStore.get(uri);
+            if (!stored || stored.version !== opened.version) await validateTextDocument(opened, 'pull');
+        } else {
+            const source = readUnopenedSource(filePath);
+            if (!source) return empty();
+            const stored = diagnosticsStore.get(uri);
+            if (!stored || stored.version !== 0 || unopenedMtimes.get(uri) !== source.mtimeMs) {
+                const unopened = TextDocument.create(uri, 'clarion', 0, source.text);
+                unopenedDocs.set(uri, unopened);
+                lastValidatedVersions.delete(uri);
+                try { await validateTextDocument(unopened, 'restoredTab'); }
+                catch (err) { logger.error(`❌ restored-tab validation failed for ${uri}: ${err}`); }
+                finally { unopenedDocs.delete(uri); }
+                unopenedMtimes.set(uri, source.mtimeMs);
+            }
+        }
+        const report = diagnosticsStore.report(uri, previousResultId);
+        if (report.resultId) lastPulledResultId.set(uri, report.resultId);
+        return report;
+    });
+}
 
 // #509 — call hierarchy: prepare on the item at the cursor, then incoming / outgoing per item.
 connection.languages.callHierarchy.onPrepare(async (params, token) => {
@@ -1857,7 +1923,7 @@ connection.onDocumentLinks((params: DocumentLinkParams): DocumentLink[] => {
     // #297: while an announced solution is still loading, the FRG's no-solution guard falls
     // through and builds a THROWAWAY degraded-mode graph for this document (measured 3.2s on
     // the queue during the busiest window). Skip — the server sends
-    // clarion/refreshDocumentLinks at solutionReady, so links populate then.
+    // clarion/refreshDocumentLinks once the FRG build finishes (#620), so links populate then.
     if (solutionAnnounced && !SolutionManager.getInstance()?.solution) return [];
     return documentLinkProvider.provideDocumentLinks(document);
 });
@@ -2307,14 +2373,11 @@ connection.onNotification('clarion/updatePaths', async (params: {
             // validateTextDocument runs async; individual completion times appear
             // as `validateTextDocument complete` perf entries above.
 
-            // Doc-link refresh post-solution-ready. DocumentLinkProvider uses
-            // FRG, which isn't ready until solution-load completes; editors
-            // request links right after onDidOpen and cache the empty result.
-            // Custom notification (rather than a standard LSP refresh request,
-            // which doesn't exist for document links — see GH #160). Client
-            // re-invokes the provider per visible editor.
-            connection.sendNotification('clarion/refreshDocumentLinks');
-            logger.info("🔗 Document-link refresh notification sent to client");
+            // #620: the doc-link refresh used to be sent HERE, at solution-ready. It has
+            // moved to immediately after the FRG build below — the graph the provider reads
+            // is no longer built by this point (#297 put it on the background lane behind
+            // the SDI build and a settle), so a refresh sent here told the client to re-ask
+            // ~2.3s too early and it cached a second empty result.
 
             // #189 Phase 2 — precompute CodeLens reference counts in the background.
             // #290: moved to run AFTER the sdiReady validation pass (see the SDI prebuild block
@@ -2406,6 +2469,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 await new Promise<void>(resolve => setTimeout(resolve, 2000));
                 await buildFileRelationshipGraph();
 
+                // #620: NOW the client can be told to re-ask for document links, and not before.
+                // DocumentLinkProvider answers [] until the graph is built, and the editor asks
+                // once (right after onDidOpen) and caches whatever it gets. There is no standard
+                // LSP refresh request for document links (GH #160), so this custom notification is
+                // the only thing that makes the client re-invoke the provider per visible editor.
+                // It must stay adjacent to the build — every path that (re)builds the graph sends
+                // it: here, the constants-change rebuild and the configuration-change rebuild.
+                connection.sendNotification('clarion/refreshDocumentLinks');
+                logger.info("🔗 Document-link refresh notification sent to client (post-FRG build)");
+
                 // #319: the reference-count index builds BEFORE the revalidation pass.
                 // The undeclaredVar validator's cross-file miss path (the sibling-MEMBER
                 // walk in SymbolFinderService) prunes through this index; under the old
@@ -2479,7 +2552,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 const warmFinder = new SymbolFinderService(tokenCache, new ScopeAnalyzer(tokenCache, undefined as never));
                 // #358: also tokenize each open MEMBER module's parent file here. A MEMBER's
                 // globals (GlobalErrors/thisStartup) are declared deep in that parent, and on
-                // IBSWorking the parent (IBSCommon.clw, 873 KB / 68k tokens) costs ~1.1s to
+                // WorkingLib the parent (CommonLib.clw, 873 KB / 68k tokens) costs ~1.1s to
                 // tokenize — paid by the first cold receiver-type resolution unless warmed off
                 // the felt path here. Shared parents are tokenized once (getTokensByUri guard).
                 const warmLocator = new MemberLocatorService();
@@ -2504,6 +2577,7 @@ connection.onNotification('clarion/updatePaths', async (params: {
                 // #301: end of the startup background chain - hover drops the "still indexing"
                 // fallback from here on.
                 startupBackgroundActive = false;
+                markStartupDiagnosticsReady(); // #696 — restored tabs may be checked now
                 // #316: the burst is over — re-resolve visible lenses whose exact scan we
                 // deferred above so their counts land now, warm and uncontended.
                 scheduleLensRefresh();
@@ -2515,28 +2589,16 @@ connection.onNotification('clarion/updatePaths', async (params: {
             const buildFileRelationshipGraph = async () => {
                 const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
                 const graph = FileRelationshipGraph.getInstance();
-                const solutionManager = SolutionManager.getInstance();
-                const allFiles: string[] = [];
+                const { graphSeeds } = await import('./solution/ProjectFileChange');
                 // #434 — a source file whose path cannot be resolved used to be
                 // dropped here with no counter and no log, so a resolution
                 // failure was indistinguishable from a healthy build: the graph
                 // built over a short (or empty) list and still reported
                 // `status: 'built'`. Track the misses so the outcome can say how
                 // complete it actually is.
-                const unresolved: string[] = [];
-                if (solutionManager?.solution) {
-                    for (const project of solutionManager.solution.projects) {
-                        for (const sourceFile of project.sourceFiles) {
-                            const absPath = sourceFile.getAbsolutePath();
-                            if (absPath) {
-                                allFiles.push(absPath);
-                            } else {
-                                unresolved.push(`${project.name}/${sourceFile.relativePath || sourceFile.name}`);
-                            }
-                        }
-                    }
-                }
+                const { files: allFiles, unresolved } = graphSeeds(SolutionManager.getInstance()?.solution?.projects ?? []);
                 const sourceFileCount = allFiles.length + unresolved.length;
+                graph.unresolvedProjectSources = unresolved; // #687 — the report lists them
                 if (unresolved.length > 0) {
                     // Logged at `error` deliberately: this logger is pinned to
                     // "error", so a `warn` would be as silent as the bug. Partial
@@ -2670,27 +2732,17 @@ connection.onNotification('clarion/updatePaths', async (params: {
 /**
  * Rebuild the file relationship graph from every project's source files (reset, then the
  * background closure build). Shared by the .cwproj-change pass (#317) and a build configuration
- * change (#564). Returns the seed files.
+ * change (#564). Returns the seed files. `reloadProjects` (#692, the .cwproj pass) re-reads each
+ * project's source list first: it is otherwise the one read when the solution loaded.
  */
-async function rebuildFileRelationshipGraph(reason: string): Promise<string[]> {
+async function rebuildFileRelationshipGraph(reason: string, reloadProjects = false): Promise<string[]> {
     const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
-    const graph = FileRelationshipGraph.getInstance();
-    graph.reset();
-    const smForGraph = SolutionManager.getInstance();
-    const graphFiles: string[] = [];
-    if (smForGraph?.solution) {
-        for (const project of smForGraph.solution.projects) {
-            for (const sourceFile of project.sourceFiles) {
-                const absPath = sourceFile.getAbsolutePath();
-                if (absPath) graphFiles.push(absPath);
-            }
-        }
-    }
-    if (graphFiles.length) {
-        await graph.buildInBackground(graphFiles).catch(err =>
-            logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`));
-    }
-    return graphFiles;
+    const { rebuildGraph } = await import('./solution/ProjectFileChange');
+    return rebuildGraph(FileRelationshipGraph.getInstance(), SolutionManager.getInstance()?.solution?.projects ?? [], {
+        reloadProjects,
+        onStatus: status => connection.sendNotification('clarion/graphStatus', status), // #694
+        onError: err => logger.error(`❌ [FRG] ${reason} rebuild failed: ${err}`),
+    });
 }
 
 const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
@@ -2700,7 +2752,7 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
     lastValidatedVersions.clear();
 
     // Rebuild the file relationship graph — the project file list may have changed.
-    const graphFiles = await rebuildFileRelationshipGraph('constants-change');
+    const graphFiles = await rebuildFileRelationshipGraph('constants-change', true);
 
     // One doc at a time — same discipline as the startup revalidation chain.
     let docCount = 0;
@@ -2712,6 +2764,9 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
         }
         docCount++;
     }
+    // #620: the graph was just rebuilt, so the links the client holds are stale — same
+    // notification the startup and configuration-change paths send.
+    connection.sendNotification('clarion/refreshDocumentLinks');
     perfLogger.perf("projectConstantsChanged coalesced pass complete", {
         ms: Date.now() - passStart,
         doc_count: docCount,
@@ -2927,6 +2982,34 @@ connection.onRequest('clarion/findFile', async (params: { filename: string, sour
 });
 
 // Add a handler for getting search paths for a project and extension
+// #687 — the file references the graph could not resolve. The graph drops them when
+// it builds (and caches only resolved edges), so this rescans its files with the same resolver, in
+// chunks that yield to the event loop.
+connection.onRequest('clarion/unresolvedReferences', async () => {
+    const { FileRelationshipGraph } = await import('./FileRelationshipGraph');
+    const { unresolvedReferences } = await import('./utils/UnresolvedReferences');
+    const graph = FileRelationshipGraph.getInstance();
+    const started = Date.now();
+    const files = graph.getScannedFiles();
+    const read = (file: string): string | null => {
+        try { return fs.readFileSync(file, 'latin1'); } catch { return null; }
+    };
+    const references: Array<ReturnType<typeof unresolvedReferences>[number] & { inProject: boolean }> = [];
+    for (let i = 0; i < files.length; i += 100) {
+        for (const entry of unresolvedReferences(files.slice(i, i + 100), read, (target, from) => graph.resolveReference(target, from))) {
+            references.push({ ...entry, inProject: graph.isProjectSource(entry.file) });
+        }
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    return {
+        built: graph.isBuilt,
+        filesScanned: files.length,
+        ms: Date.now() - started,
+        projectSources: graph.unresolvedProjectSources,
+        references,
+    };
+});
+
 connection.onRequest('clarion/getSearchPaths', (params: { projectName: string, extension: string }): string[] => {
     logger.info(`🔍 Received request for search paths for project ${params.projectName} and extension ${params.extension}`);
     
@@ -3664,6 +3747,17 @@ connection.onShutdown(() => {
     };
     
     logMessage("SERVER SHUTDOWN: onShutdown handler called");
+
+    // #661 — the sampler reports per 5s window and a shorter session never closed one, so its
+    // worst block went unreported. Always report at shutdown, whatever the size (0 = measured,
+    // no block), with the lifetime worst over the sampler's first 120s.
+    const lag = eventLoopLag.final();
+    perfLogger.perf("EventLoop lag", {
+        max_blocked_ms: lag.windowMaxMs,
+        lifetime_max_blocked_ms: lag.lifetimeMaxMs,
+        final: 1,
+        since_module_load_ms: Date.now() - serverModuleLoadedAt
+    });
     logMessage(`SERVER SHUTDOWN: Active documents: ${documents.all().length}`);
     logMessage("SERVER SHUTDOWN: Clearing caches...");
     
@@ -3727,6 +3821,7 @@ const drainDeferredIfNoSolution = () => {
     });
     solutionPipelineReady = true;
     startupBackgroundActive = false; // #301: nothing is coming - drop the hover fallback
+    markStartupDiagnosticsReady(); // #696
     scheduleLensRefresh(); // #316: re-resolve any lens whose exact scan we deferred during the burst
     sdiPipelineReady = true; // no solution → no SDI prebuild will ever fire; unblock the async pass
     const queuedUris = Array.from(deferredAsyncDocs);
@@ -3744,24 +3839,24 @@ setTimeout(drainDeferredIfNoSolution, 2000);
 // from "phase X's wall-clock ballooned because something else starved the single-threaded loop"
 // — the run-3/run-4 SolutionManager-init variance (0.7s vs 15s, identical work) needs exactly
 // this attribution.
+// #661: shutdown also reports the partial window and the lifetime worst (see onShutdown).
+const eventLoopLag = new EventLoopLagTracker();
 {
     const samplerStart = Date.now();
     let lastTick = Date.now();
-    let windowMaxLag = 0;
     const heartbeat = setInterval(() => {
         const now = Date.now();
-        const lag = now - lastTick - 100;
+        eventLoopLag.record(now - lastTick - 100);
         lastTick = now;
-        if (lag > windowMaxLag) windowMaxLag = lag;
     }, 100);
     const reporter = setInterval(() => {
-        if (windowMaxLag > 100) {
+        const worst = eventLoopLag.takeWindow(100);
+        if (worst !== null) {
             perfLogger.perf("EventLoop lag", {
-                max_blocked_ms: windowMaxLag,
+                max_blocked_ms: worst,
                 since_module_load_ms: Date.now() - serverModuleLoadedAt
             });
         }
-        windowMaxLag = 0;
         if (Date.now() - samplerStart > 120_000) {
             clearInterval(heartbeat);
             clearInterval(reporter);

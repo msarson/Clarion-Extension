@@ -5,9 +5,9 @@ import { SolutionManager } from '../solution/solutionManager';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { WordCompletionProvider } from './WordCompletionProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
-import { MemberEnumItem } from '../utils/ClassMemberResolver';
+import { MemberEnumItem } from '../utils/ClassMemberScan';
+import { extractClassName } from '../utils/ClassNameUtils';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { PropertyService } from '../utils/PropertyService';
 import { EventService } from '../utils/EventService';
 import { Token } from '../ClarionTokenizer';
@@ -471,7 +471,7 @@ export class CompletionProvider {
         if (chainUpper === 'PARENT') {
             // resolveCurrentClassName gives us the class; we need its parent
             if (!callerClass) return null;
-            const parentClass = await this.resolveParentOf(callerClass, document);
+            const parentClass = await this.resolveParentOf(callerClass, document, position.line);
             if (!parentClass) return null;
             return { className: parentClass, callerClass };
         }
@@ -489,6 +489,13 @@ export class CompletionProvider {
         // VARIABLE's own name downstream as a class name. Every other caller that supports
         // parameters (definition, hover's structure-field resolver, implementation) already
         // passes it.
+        // #654: a receiver is read as hover and Go to Definition read it (#651) - a local
+        // `ThisWindow CLASS(Base)` is itself, not a variable of type Base (#642), so its own
+        // members are offered with the inherited ones.
+        const receiver = await this.memberLocator.resolveReceiverAt(chain, document, position.line);
+        if (receiver) {
+            return { className: receiver.className, callerClass };
+        }
         const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document, position.line);
         if (typeInfo) {
             return { className: typeInfo.typeName, callerClass };
@@ -529,13 +536,15 @@ export class CompletionProvider {
             currentClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
         } else if (root === 'PARENT') {
             currentClass = callerClass
-                ? await this.resolveParentOf(callerClass, document)
+                ? await this.resolveParentOf(callerClass, document, position.line)
                 : null;
         } else {
             // Same reason as the plain-word branch: a chain rooted on a PARAMETER
             // (`pSomething.Member.`) needs the scope line to resolve its declared type.
-            const typeInfo = await this.memberLocator.resolveVariableType(root, tokens, document, position.line);
-            currentClass = typeInfo?.typeName ?? null;
+            // #654: the receiver as hover and Go to Definition read it, as for a plain word above.
+            currentClass = (await this.memberLocator.resolveReceiverAt(segments[0], document, position.line))?.className
+                ?? (await this.memberLocator.resolveVariableType(root, tokens, document, position.line))?.typeName
+                ?? null;
         }
 
         if (!currentClass) return null;
@@ -547,7 +556,7 @@ export class CompletionProvider {
             const member = members.find(m => m.name.toUpperCase() === seg.toUpperCase());
             if (!member) return null;
 
-            const nextClass = ClassMemberResolver.extractClassName(member.type);
+            const nextClass = extractClassName(member.type);
             if (!nextClass) return null;
             currentClass = nextClass;
         }
@@ -556,15 +565,13 @@ export class CompletionProvider {
     }
 
     /** Finds the parent class of a given class (via ClassDefinitionIndexer). */
-    private async resolveParentOf(className: string, document: TextDocument): Promise<string | null> {
-        // Quick scan in document text
-        const lines = document.getText().split('\n');
-        const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');
-        for (const line of lines) {
-            const m = line.match(pattern);
-            if (m) return m[1];
-        }
-        return null;
+    private async resolveParentOf(className: string, document: TextDocument, atLine?: number): Promise<string | null> {
+        // #623: this used to scan the open document's text and stop there. A class declared in an
+        // .inc — where generated and hand-written Clarion classes normally live — has no CLASS
+        // line in the .clw being edited, so PARENT. offered nothing at all. The same shape already
+        // worked through ClassMemberResolver.getParentClassInfo, which consults the include chain
+        // and the declaration index; both now take the same two tiers.
+        return this.memberLocator.resolveParentName(className, document, atLine);
     }
 
     // -------------------------------------------------------------------------

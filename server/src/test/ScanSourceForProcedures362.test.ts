@@ -1,5 +1,4 @@
 import * as assert from 'assert';
-import * as fs from 'fs';
 import { scanSourceForProcedures } from '../utils/StructureDeclarationIndexer';
 
 /**
@@ -266,18 +265,5 @@ suite('scanSourceForProcedures (#362)', () => {
         assert.ok(byName.has('EventMapper.Construct'), 'implementation before the leak point indexed');
         assert.ok(byName.has('EventMapper.Map'), 'Class.Method implementation after a Map member is still indexed');
         assert.ok(byName.has('GlobalAfterMap'), 'global after a Map member is still indexed');
-    });
-
-    test('finds real procedures in IBSCommon.clw when present', function () {
-        const real = 'F:\\TestApps\\Direct10Source\\IBSCommon.clw';
-        if (!fs.existsSync(real)) { this.skip(); return; }
-        const procs = scanSourceForProcedures(fs.readFileSync(real, 'utf8'), real);
-        const names = new Set(procs.map(p => p.name));
-        assert.ok(procs.length > 50, `expected many procedures, got ${procs.length}`);
-        // Sampled from the real file's column-0 PROCEDURE lines.
-        assert.ok(names.has('DctInit'), 'DctInit indexed');
-        assert.ok(names.has('fe_ClassVersion'), 'fe_ClassVersion indexed');
-        // At least one Class.Method implementation is present in a program module.
-        assert.ok(procs.some(p => p.kind === 'method'), 'at least one Class.Method implementation indexed');
     });
 });

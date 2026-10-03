@@ -1,3 +1,4 @@
+import { extractParentName, DerivableKeyword } from './ParentClassName';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
@@ -39,7 +40,14 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // This changes the FILE SET, not just the parse — every existing cache predates those
 // files entirely (a real project's own source directory can go from contributing a
 // single incidental file to dozens of genuine local declarations once this lands).
-const DISK_CACHE_VERSION = 6;
+// v7 (#623): extractParent now accepts a colon in the parent's NAME, so `CLASS(MyOwn:Base)`
+// indexes with a parentName instead of none. Same trap as v5 — the file has not changed, so
+// without this bump every warm cache keeps serving the old parentless entry and the whole
+// inheritance chain stays broken for exactly the classes the fix is for.
+// v8: scanSourceForDeclarations no longer indexes a structure declared inside a CLASS
+// body or a `,TYPE` structure (a member, not a global type). Library files
+// never change, so without this bump every warm cache keeps those member entries.
+const DISK_CACHE_VERSION = 8;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -242,10 +250,16 @@ function extractPre(line: string): string {
     return m ? m[1] : '';
 }
 
-/** Extract parent name from TYPE(...) clause */
+/**
+ * Extract parent name from TYPE(...) clause.
+ *
+ * #623: this is the eighth and most consequential copy of the `CLASS(Parent)` read — it fills
+ * `parentName` in the index every other tier falls back to, so its `\w` (which stops at a colon)
+ * meant a class derived from `MyOwn:Base` was indexed with no parent at all, and no amount of
+ * fixing the callers would have recovered it.
+ */
 function extractParent(keyword: string, line: string): string | undefined {
-    const m = new RegExp(keyword + '\\s*\\(\\s*([A-Za-z_]\\w*)\\s*\\)', 'i').exec(line);
-    return m ? m[1] : undefined;
+    return extractParentName(line, [keyword as DerivableKeyword]) ?? undefined;
 }
 
 /** Extract MODULE('...') attribute */
@@ -270,6 +284,16 @@ export function scanSourceForDeclarations(
     let inItemize = false;
     let itemizePre = '';
     let itemizeLine = 0;
+
+    // Open TYPE_PATTERN structures, innermost last. A structure declared inside a CLASS
+    // body or inside any `,TYPE` structure is a member, reached through its owner - never
+    // by its bare name. A member label sits at column 0 like every other label, so the
+    // column cannot tell a member from a global: only the enclosing structure can.
+    // Without tracking it, a member such as
+    // `Settings GROUP(SomeType)` inside a library CLASS was indexed as a global GROUP
+    // named Settings: every undeclared `Settings.` then got that type's fields as
+    // completion, and the #361 hover gate passed for a name no include declares.
+    const structureStack: { kind: string; isType: boolean; name: string; sawBody: boolean }[] = [];
 
     for (let i = 0; i < lines.length; i++) {
         const rawLine = lines[i];
@@ -349,23 +373,69 @@ export function scanSourceForDeclarations(
             continue;
         }
 
+        const t = trimmed.trim();
+        // A structure closes with END or a `.` - on its own line, trailing a member
+        // line (`Field LONG.`), or collapsed (`. .`). Same forms scanSourceForProcedures pops.
+        if (structureStack.length > 0 && END_PATTERN.test(t)) {
+            structureStack.pop();
+            continue;
+        }
+        if (structureStack.length > 0 && PERIODS_ONLY_PATTERN.test(t)) {
+            let closes = (t.match(/\./g) as RegExpMatchArray).length;
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
+            continue;
+        }
+
         // Type-like structures (CLASS, INTERFACE, QUEUE, GROUP, RECORD, FILE, VIEW)
         if ((m = TYPE_PATTERN.exec(trimmed))) {
             const name = m[1];
             const keyword = m[2].toUpperCase() as StructureType;
             const remainder = trimmed.substring(m[0].length);
             const isType = /,\s*TYPE\b/i.test(remainder) || /\bTYPE\b/i.test(remainder);
-            results.push({
-                name,
-                filePath,
-                line: i,
-                structureType: keyword,
-                parentName: extractParent(keyword, trimmed),
-                moduleName: keyword === 'CLASS' ? extractModule(trimmed) : undefined,
-                isType,
-                lineContent: trimmed
-            });
+            // COMPILE/OMIT alternatives give ONE structure two header lines that share
+            // one body and one END: the second header repeats the open structure's name
+            // before any body line. It replaces that header rather than nesting in it.
+            let top: (typeof structureStack)[number] | undefined = structureStack[structureStack.length - 1];
+            const alternate = !!top && !top.sawBody && top.name.toLowerCase() === name.toLowerCase();
+            // A CLASS/INTERFACE cannot be declared inside another structure (a member can
+            // only reference one), so its header always starts a top-level declaration and
+            // closes anything left open above it.
+            if (!alternate && (keyword === 'CLASS' || keyword === 'INTERFACE')) {
+                structureStack.length = 0;
+                top = undefined;
+            }
+            const enclosing = alternate ? structureStack.slice(0, -1) : structureStack;
+            const isMember = enclosing.some(s => s.kind === 'CLASS' || s.isType);
+            if (!isMember) {
+                results.push({
+                    name,
+                    filePath,
+                    line: i,
+                    structureType: keyword,
+                    parentName: extractParent(keyword, trimmed),
+                    moduleName: keyword === 'CLASS' ? extractModule(trimmed) : undefined,
+                    isType,
+                    lineContent: trimmed
+                });
+            }
+            if (alternate) structureStack.pop();
+            else if (top) top.sawBody = true;   // a nested structure is part of its owner's body
+            structureStack.push({ kind: keyword, isType, name, sawBody: false });
+            // Closed on the same line: `Rec GROUP,PRE(R).`, `Settings GROUP(SomeType) END`.
+            // String literals are blanked first so NAME('x.') or NAME('END') cannot close it.
+            const code = remainder.replace(/'[^']*'/g, "''");
+            let closes = countTrailingTerminators(code) + (/\bEND\s*$/i.test(code) ? 1 : 0);
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
             continue;
+        }
+
+        // A trailing `.` on a member line closes its structure after that line.
+        if (structureStack.length > 0) {
+            // A member line is body. Around an alternative header, the COMPILE/OMIT line is
+            // excluded by name and the terminator line is never a column-0 label.
+            if (/^[A-Za-z_]/.test(trimmed) && !/^(COMPILE|OMIT)\s*\(/i.test(t)) structureStack[structureStack.length - 1].sawBody = true;
+            let closes = countTrailingTerminators(t.replace(/'[^']*'/g, "''"));
+            while (closes-- > 0 && structureStack.length > 0) structureStack.pop();
         }
     }
 

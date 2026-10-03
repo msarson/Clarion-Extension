@@ -31,14 +31,15 @@ describe('#471 — ConfigDir build argument', () => {
     it('names the FOLDER holding the selected ClarionProperties.xml', () => {
         const props = path.join('F:', 'CWRoot', 'Settings', 'ClarionProperties.xml');
         const arg = buildConfigDirArg(props);
-        assert.strictEqual(arg, `/property:ConfigDir="${path.join('F:', 'CWRoot', 'Settings')}"`);
+        assert.strictEqual(arg, `/property:ConfigDir=${path.join('F:', 'CWRoot', 'Settings')}`);
     });
 
-    it('quotes the value so a path containing spaces survives the shell', () => {
+    it('passes a path containing spaces bare: MSBuild is started without a shell (#708)', () => {
+        // It used to be quoted "so a path containing spaces survives the shell" — and the shell
+        // layer is what lost the quotes (#708). With ProcessExecution the launcher quotes it.
         const props = path.join('C:', 'Program Files', 'My Clarion', 'ClarionProperties.xml');
         const arg = buildConfigDirArg(props);
-        assert.ok(arg.includes('"'), `must be quoted; got: ${arg}`);
-        assert.ok(arg.endsWith('"'), `the value must be closed; got: ${arg}`);
+        assert.ok(!arg.includes('"'), `no quotes of its own; got: ${arg}`);
         assert.ok(arg.includes('Program Files'), `got: ${arg}`);
     });
 

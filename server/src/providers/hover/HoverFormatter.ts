@@ -4,6 +4,7 @@ import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
 import * as fs from 'fs';
+import { LikeResolution } from '../../services/LikeTypeResolver';
 
 /**
  * #125 — read a file's text, preferring in-memory cache over disk. Used to
@@ -37,6 +38,14 @@ export interface VariableInfo {
      * instead of showing a bare local-variable card indistinguishable from a
      * genuinely standalone variable. */
     parentStructure?: { label: string; type: string };
+    /** #656: set when the declaration is `LIKE(name)` - shown as written and as resolved. */
+    like?: LikeResolution;
+}
+
+/** #656 — a card's type: `LIKE(name)` → `definition` for a LIKE declaration, else the type. */
+export function typeLabel(type: string, like?: LikeResolution): string {
+    if (!like) return `\`${type}\``;
+    return like.resolved ? `\`${like.written}\` → \`${like.resolved}\`` : `\`${like.written}\``;
 }
 
 export interface ParameterInfo {
@@ -98,13 +107,15 @@ export class HoverFormatter {
     /**
      * Constructs hover for a parameter
      */
-    formatParameter(name: string, info: ParameterInfo, scope: Token): Hover {
+    formatParameter(name: string, info: ParameterInfo, scope: Token, documentUri?: string): Hover {
+        // #617: the declaring PROCEDURE line as a link, like every other declaration card.
+        const where = documentUri ? this.locationLink(documentUri, info.line) : `line ${info.line + 1}`;
         const markdown = [
             `**Parameter:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `${scope.value}, line ${info.line + 1}`
+            `${scope.value}, ${where}`
         ].join('\n');
 
         return {
@@ -122,7 +133,7 @@ export class HoverFormatter {
         const displayName = name;
         
         const markdown = [
-            `**${displayName}** — \`${info.type}\``,
+            `**${displayName}** — ${typeLabel(info.type, info.like)}`,
             ``
         ];
 
@@ -243,7 +254,13 @@ export class HoverFormatter {
     /**
      * Constructs hover for a method call (SELF.method) with both declaration and implementation
      */
-    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string): Hover {
+    formatMethodCall(name: string, declarationInfo: ClassMemberInfo, implementationLocation: string, document?: TextDocument): Hover {
+        // #640 — a declaration or body in the document being edited is read from its open text,
+        // not from disk: it may be unsaved, or never saved at all.
+        const sameFile = (uri: string) => !!document &&
+            decodeURIComponent(uri).toLowerCase() === decodeURIComponent(document.uri).toLowerCase();
+        const readLines = (uri: string, path: string) =>
+            sameFile(uri) ? document!.getText().split('\n') : fs.readFileSync(path, 'utf-8').split('\n');
         const { category: memberCategory } =
             describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
@@ -257,8 +274,7 @@ export class HoverFormatter {
 
         try {
             const declUri = decodeURIComponent(declarationInfo.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
-            const declLines = declContent.split('\n');
+            const declLines = readLines(declarationInfo.file, declUri);
             const declLine = declLines[declarationInfo.line];
             docComment = DocCommentReader.read(declLines, declarationInfo.line);
             if (declLine) declSnippet = declLine.trim();
@@ -280,7 +296,7 @@ export class HoverFormatter {
             implLocationStr = this.locationLink(implLocationUri, implLine);
             if (!implUri.startsWith('test://')) {
                 try {
-                    const implLines = fs.readFileSync(implUri, 'utf-8').split('\n');
+                    const implLines = readLines(implLocationUri, implUri);
                     const implDoc = DocCommentReader.read(implLines, implLine);
                     if (implDoc) docComment = implDoc; // definition wins
                 } catch { }
@@ -901,21 +917,25 @@ export class HoverFormatter {
 
     /**
      * Normalises a location to a `file:` URI for linking, or null when it can't be one.
-     * Already-URI inputs are passed through untouched (they are already percent-encoded); a plain
-     * path is converted segment-wise so spaces survive. The drive-letter segment (`d:`) is left
-     * UNESCAPED — that's the canonical `file:///d:/...` form vscode-uri/Node's pathToFileURL both
-     * produce (and what the OTHER half of a decl→impl footer already uses, since that one comes
-     * from an already-formed `file://` Location.uri). Percent-encoding it as `d%3A` — this
-     * function's first cut — was inconsistent with that and, being non-canonical, an avoidable
-     * risk for any URI consumer that special-cases the raw two-char drive-letter pattern.
+     *
+     * #691 — every link comes out in the canonical form (#251): lower-case drive, encoded colon,
+     * each segment percent-encoded so spaces survive (`file:///d%3A/src%20dir/x.clw`), whether the
+     * location arrived as a plain path or as a `file:` URI in any spelling. #389 left a plain
+     * path's drive unescaped (`file:///d:/`) to match the other half of a footer, which was then
+     * a hand-built `file:///D:/` location; since #251 locations are canonical, so that choice had
+     * become the mismatch it was meant to avoid.
      */
     private toFileUri(fileOrUri: string): string | null {
         if (!fileOrUri) return null;
-        if (fileOrUri.startsWith('file://')) return fileOrUri;
-        if (fileOrUri.includes('://')) return null;   // test:// and friends — not openable
-        const segments = fileOrUri.replace(/\\/g, '/').split('/');
+        let filePath = fileOrUri;
+        if (/^file:\/\//i.test(fileOrUri)) {
+            try { filePath = decodeURIComponent(fileOrUri.replace(/^file:\/\/\/?/i, '')); } catch { return fileOrUri; }
+        } else if (fileOrUri.includes('://')) {
+            return null;   // test:// and friends — not openable
+        }
+        const segments = filePath.replace(/\\/g, '/').split('/');
         const encoded = segments.map((seg, i) =>
-            i === 0 && /^[a-zA-Z]:$/.test(seg) ? seg : encodeURIComponent(seg));
+            i === 0 && /^[a-zA-Z]:$/.test(seg) ? `${seg[0].toLowerCase()}%3A` : encodeURIComponent(seg));
         return 'file:///' + encoded.join('/');
     }
 

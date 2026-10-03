@@ -7,11 +7,15 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { SelfParentClassResolver } from '../utils/SelfParentClassResolver';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { TokenHelper } from '../utils/TokenHelper';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService'; // #374
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import { labelLocation, labelRange } from '../utils/ProcedureNameRange'; // #690, #697
 import { findSectionLocation } from '../utils/SectionLocator';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -29,6 +33,7 @@ import { resolveViaProjectRedirection, resolveViaProjectRedirectionFromUri } fro
 import { SymbolFinderService } from '../services/SymbolFinderService';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
 import { getCrossFileEpoch } from '../utils/crossFileEpoch';
@@ -43,7 +48,6 @@ logger.setLevel("error");
 export class DefinitionProvider {
     private tokenCache = TokenCache.getInstance();
     private symbolProvider = new ClarionDocumentSymbolProvider();
-    private memberResolver = new ClassMemberResolver();
     private chainedResolver = new ChainedPropertyResolver();
     private overloadResolver = new MethodOverloadResolver();
     private argTypeResolver = new ArgumentTypeResolver();
@@ -52,13 +56,17 @@ export class DefinitionProvider {
     private fileResolver = new FileDefinitionResolver();
     private crossFileResolver = new CrossFileResolver(this.tokenCache);
     private memberLocator = new MemberLocatorService();
+    /** #651 — the declaration a single-level `receiver.member` names, shared with hover. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
+    private selfParentResolver: SelfParentClassResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
+        this.selfParentResolver = new SelfParentClassResolver(this.symbolFinder);
     }
 
     /**
@@ -120,6 +128,19 @@ export class DefinitionProvider {
                 return null;
             }
 
+            // #614: a `?Name` field equate is the control that declares it, resolved by the rule
+            // hover uses (utils/FieldEquateResolver). Terminal, like hover: the word ladder below
+            // drops the `?`, strips the name to its last segment, and `?LOC:X:Prompt` went to an
+            // unrelated `Prompt EQUATE` in a library include.
+            const feqToken = TokenHelper.getFieldEquateTokenAt(tokens, position.line, position.character);
+            if (feqToken) {
+                const target = resolveFieldEquate(this.tokenCache.getStructure(document), feqToken.value, position.line);
+                if (!target) return null;
+                const controls = target.kind === 'control' ? [target.control] : target.controls.map(c => c.control);
+                const at = (c: Token) => Location.create(document.uri, Range.create(c.line, c.start, c.line, c.start + c.value.length));
+                return controls.length === 1 ? at(controls[0]) : controls.map(at);
+            }
+
             // Get the word at the current position
             const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
             if (!wordRange) {
@@ -136,6 +157,14 @@ export class DefinitionProvider {
                 end: { line: position.line, character: Number.MAX_VALUE }
             });
 
+            // #606: a bare SELF or PARENT is the class it stands for. Answer here, even with
+            // nothing: the later paths would word-search and land on any symbol spelled so.
+            const selfOrParent = SelfParentClassResolver.keywordAt(line, position.character);
+            if (selfOrParent) {
+                const site = await this.selfParentResolver.resolve(selfOrParent, document, position);
+                return site ? Location.create(site.uri, labelRange(site.line, site.className)) : null; // #697
+            }
+
             // ⚡ FAST PATH: if the cursor is on a type argument — CLASS(Type), QUEUE(Type),
             // GROUP(Type), INTERFACE(Type), or LIKE(Type) — skip all slow symbol resolution
             // and go straight to the SDI-based type lookup (pre-built, O(1)).
@@ -147,7 +176,10 @@ export class DefinitionProvider {
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
                         logger.test(`⚡ [DEF] Fast-path: "${word}" is a type argument — skipping to SDI lookup`);
-                        return this.findClassTypeDefinition(word, document);
+                        // #698 — the index holds include files, not the .clw being edited: a type
+                        // declared in this file (a member module's own CLASS, GROUP,TYPE, ...) is
+                        // answered from its tokens, which are already in memory.
+                        return (await this.findClassTypeDefinition(word, document)) ?? this.findTypeInThisFile(word, document);
                     }
                 }
             }
@@ -175,140 +207,39 @@ export class DefinitionProvider {
                 if (methodMatch && methodMatch[1].toLowerCase() === methodName.toLowerCase()) {
                     // Check if this looks like a method call (has parentheses)
                     const hasParentheses = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                    
-                    if (hasParentheses && (beforeDot.toLowerCase() === 'self' || beforeDot.toLowerCase().endsWith('self'))) {
-                        // This is a method call - find the declaration
-                        logger.info(`F12 on method call: ${beforeDot}.${methodName}()`);
 
-                        // #131 — arg-classification overlay for SELF.Method(args), symmetric
-                        // with the typed-var branch below. SELF resolves to the enclosing
-                        // class; classify the call args and pick the matching overload before
-                        // the paramCount-only fallback (which can't disambiguate same-arity
-                        // overloads that differ only by argument type).
-                        const selfClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
-                        if (selfClass) {
-                            const argResolved = await this.tryArgClassifyResolve(tokens, document, selfClass, methodName, position.line);
-                            if (argResolved) {
-                                logger.info(`✅ Arg-classify resolved SELF.${methodName} in ${selfClass} to line ${argResolved.range.start.line}`);
-                                return argResolved;
+                    // #651 / #652 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or
+                    // a variable of a CLASS type) or a chain of them (`SELF.a.b`, `obj.a.b`):
+                    // DottedAccessResolver names the declaration, the same call hover makes, so the two
+                    // cannot disagree about it. It replaces the SELF-method, PARENT-method,
+                    // SELF/PARENT-property, explicit-receiver and both chain branches that each named
+                    // the class, tried the argument-type pick and asked for the member in turn. A
+                    // receiver it does not cover falls through to the paths below, as before.
+                    if (!beforeDot.includes('.') || isPureChain) {
+                        const receiver = beforeDot.includes('.') ? beforeDot.trim() : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+                        if (receiver) {
+                            const paramCount = hasParentheses ? countParametersInCall(line, methodName) ?? undefined : undefined;
+                            const access = await this.dottedAccess.resolve(receiver, methodName, document, position.line, paramCount);
+                            if (access) {
+                                logger.info(`✅ ${receiver}.${methodName} → ${access.member.className} at ${access.member.file}:${access.member.line}`);
+                                return labelLocation(access.member.file, access.member.line, methodName); // #690
                             }
-                        }
-
-                        // Count parameters for overload resolution
-                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
-                        logger.info(`Method call has ${paramCount} parameters`);
-                        
-                        const memberInfo = this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, paramCount);
-                        
-                        if (memberInfo) {
-                            logger.info(`✅ Found method declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(
-                                memberInfo.file,
-                                Range.create(memberInfo.line, 0, memberInfo.line, 0)
-                            );
-                        }
-                    }
-
-                    if (hasParentheses && (beforeDot.toLowerCase() === 'parent' || beforeDot.toLowerCase().endsWith('parent'))) {
-                        // PARENT.Method() — look up the method starting from the parent class
-                        logger.info(`F12 on PARENT method call: PARENT.${methodName}()`);
-
-                        // #131 — arg-classification overlay for PARENT.Method(args). Resolve
-                        // the parent class name, then pick the matching overload by argument
-                        // shape before the paramCount-only fallback (which otherwise picks the
-                        // first-declared overload regardless of argument type).
-                        const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
-                        if (parentInfo?.parentClassName) {
-                            const argResolved = await this.tryArgClassifyResolve(tokens, document, parentInfo.parentClassName, methodName, position.line);
-                            if (argResolved) {
-                                logger.info(`✅ Arg-classify resolved PARENT.${methodName} in ${parentInfo.parentClassName} to line ${argResolved.range.start.line}`);
-                                return argResolved;
-                            }
-                        }
-
-                        const paramCount = this.memberResolver.countParametersInCall(line, methodName);
-                        const memberInfo = await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, paramCount);
-                        if (memberInfo) {
-                            logger.info(`✅ Found PARENT method declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
-                        }
-                    }
-
-                    // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-                    if (isSelfParentChain && beforeDot.includes('.')) {
-                        // #131 — arg-classification overlay for chained calls like
-                        // SELF.inner.SetValue(args). Resolve the chain to the class that
-                        // owns the final member, then pick the matching overload by argument
-                        // shape before the paramCount-only step-3 lookup (which can't
-                        // disambiguate same-arity overloads). Symmetric with the SELF /
-                        // PARENT / typed-var branches.
-                        if (hasParentheses) {
-                            const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
-                            if (finalClass) {
-                                const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
-                                if (argResolved) {
-                                    logger.info(`✅ Arg-classify resolved chained ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
-                                    return argResolved;
-                                }
-                            }
-                        }
-
-                        const paramCount = hasParentheses
-                            ? this.memberResolver.countParametersInCall(line, methodName)
-                            : undefined;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount ?? undefined);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained F12: "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
-                        }
-                    }
-
-                    // SELF.property or PARENT.property (no parentheses) — find the class member declaration
-                    if (!hasParentheses && isSelfParentChain) {
-                        const isSelf = /\bself$/i.test(beforeDot);
-                        logger.info(`F12 on ${isSelf ? 'SELF' : 'PARENT'} property: ${methodName}`);
-                        const memberInfo = isSelf
-                            ? this.memberResolver.findClassMemberInfo(methodName, document, position.line, tokens, undefined)
-                            : await this.memberResolver.findParentClassMemberInfo(methodName, document, position.line, tokens, undefined);
-                        if (memberInfo) {
-                            logger.info(`✅ Found property declaration at ${memberInfo.file}:${memberInfo.line}`);
-                            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
                         }
                     }
 
                     // Typed variable member: st.GetValue() where st is declared as "st StringTheory"
                     if (!isSelfParentChain) {
-                        // Multi-segment variable chain: variable.property.method
-                        if (isPureChain && beforeDot.includes('.')) {
-                            // #131 — arg-classification overlay for typed-var chained calls
-                            // like outer.inner.SetValue(args). Same gap and same fix as the
-                            // SELF/PARENT chained branch above: resolve the chain's final
-                            // class, then pick the matching overload by argument shape before
-                            // the paramCount-only fallback.
-                            if (hasParentheses) {
-                                const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
-                                if (finalClass) {
-                                    const argResolved = await this.tryArgClassifyResolve(tokens, document, finalClass, methodName, position.line);
-                                    if (argResolved) {
-                                        logger.info(`✅ Arg-classify resolved chained var-chain ${beforeDot}.${methodName} in ${finalClass} to line ${argResolved.range.start.line}`);
-                                        return argResolved;
-                                    }
-                                }
-                            }
+                        // (A variable chain is answered above by DottedAccessResolver, #652; when it names
+                        // nothing, its last segment is still tried as a typed variable below.)
 
-                            const paramCount = hasParentheses
-                                ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
-                                : undefined;
-                            const chainedInfo = await this.chainedResolver.resolve(beforeDot, methodName, document, position, paramCount);
-                            if (chainedInfo) {
-                                logger.info(`✅ Chained F12 (var chain): "${methodName}" resolved at ${chainedInfo.file}:${chainedInfo.line}`);
-                                return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
-                            }
-                        }
-
-                        const structureNameMatch = beforeDot.match(/(\w+)\s*$/);
+                        // #612: a receiver label may carry colons (`Relate:Cust`,
+                        // `ThisListManager:Browse:1`); `\w+` kept only the last segment.
+                        const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
                         if (structureNameMatch) {
                             const structureName = structureNameMatch[1];
+
+                            // (#611: a CLASS receiver's member is answered above by DottedAccessResolver, #651.)
+
                             // Pass position.line so resolveVariableType can also check procedure
                             // parameters (e.g. `*WindowInfo Info`). Issue #215.
                             const typeInfo = await this.memberLocator.resolveVariableType(structureName, tokens, document, position.line);
@@ -329,7 +260,7 @@ export class DefinitionProvider {
                                     }
                                 }
                                 const paramCount = hasParentheses
-                                    ? this.memberResolver.countParametersInCall(line, methodName) ?? undefined
+                                    ? countParametersInCall(line, methodName) ?? undefined
                                     : undefined;
                                 const result = await this.findClassMemberInType(tokens, classType, methodName, document, paramCount);
                                 if (result) {
@@ -401,71 +332,17 @@ export class DefinitionProvider {
             // Check if this is a procedure call in CODE (e.g., "MyProcedure()" or "ProcessOrder(param)")
             // OR if this is inside a START() call (e.g., "START(ProcName, ...)")
             // Navigate to the MAP declaration or PROCEDURE implementation
-            const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            
-            logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, line="${line.trim()}"`);
-            
-            if (detection.isProcedure) {
-                logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-                
-                // Count parameters for overload resolution
-                const paramCount = this.memberResolver.countParametersInCall(line, word);
-                logger.info(`Procedure call has ${paramCount} parameters`);
-                
-                // First, try to find MAP declaration in current file
-                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
-                
-                // Check if we're already AT the MAP declaration - if so, jump to implementation instead
-                if (mapDecl && 
-                    mapDecl.uri === document.uri && 
-                    mapDecl.range.start.line === position.line) {
-                    logger.info(`📍 Already at MAP declaration for ${word} - finding implementation instead`);
-                    
-                    // Navigate to implementation (like Ctrl+F12 would do)
-                    const implLocation = await this.mapResolver.findProcedureImplementation(
-                        word,
-                        tokens,
-                        document,
-                        position,
-                        line, // Pass declaration signature for overload matching
-                        this.tokenCache.getStructure(document) // #258: reuse cached structure
-                    );
-                    
-                    if (implLocation) {
-                        logger.info(`✅ Found implementation at line ${implLocation.range.start.line}`);
-                        return implLocation;
-                    } else {
-                        logger.info(`❌ No implementation found for MAP declaration: ${word}`);
-                        return null;
-                    }
-                }
-                
-                if (mapDecl) {
-                    logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
-                    return mapDecl;
-                }
-                
-                // If not found locally and file has MEMBER, check parent file's MAP
-                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-                
-                if (memberToken?.referencedFile) {
-                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
-                    
-                    const localScope = getLocalMapScope(document.uri);
-                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
-                        word,
-                        memberToken.referencedFile,
-                        document,
-                        line,
-                        localScope?.containingProcedure
-                    );
-                    if (memberResult) {
-                        logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
-                        return memberResult.location;
-                    }
-                }
-                
-                logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
+            //
+            // The weak `SORT(Queue, CompareProc)` argument shape is deliberately NOT admitted
+            // here. It would answer ahead of the parameter, label and symbol tiers below, and a
+            // bare argument naming an in-scope variable IS that variable — the language reads
+            // it as the nearest declaration in scope, and reaches a same-named procedure only
+            // through `Name()`. It is retried after those tiers instead; see the second call to
+            // this method further down.
+            const strongProcedureCall = await this.resolveProcedureCallDefinition(
+                word, document, position, line, tokens, wordRange, false);
+            if (strongProcedureCall) {
+                return strongProcedureCall.location;
             }
 
             // Check if this is a method implementation line (e.g., "StringTheory.Construct PROCEDURE")
@@ -502,20 +379,14 @@ export class DefinitionProvider {
                         );
                         if (ifaceMethodInfo) {
                             logger.info(`✅ Found interface method declaration at ${ifaceMethodInfo.file}:${ifaceMethodInfo.line}`);
-                            return Location.create(ifaceMethodInfo.file, {
-                                start: { line: ifaceMethodInfo.line, character: 0 },
-                                end: { line: ifaceMethodInfo.line, character: 0 }
-                            });
+                            return labelLocation(ifaceMethodInfo.file, ifaceMethodInfo.line, methodName) /* #690 */;
                         }
                     }
                     
                     const declInfo = this.overloadResolver.findMethodDeclaration(className, methodName, document, tokens, paramCount, line);
                     if (declInfo) {
                         logger.info(`✅ Found method declaration at ${declInfo.file}:${declInfo.line} with ${declInfo.paramCount} parameters`);
-                        return Location.create(declInfo.file, {
-                            start: { line: declInfo.line, character: 0 },
-                            end: { line: declInfo.line, character: 0 }
-                        });
+                        return labelLocation(declInfo.file, declInfo.line, methodName) /* #690 */;
                     } else {
                         logger.info(`❌ No method declaration found for ${className}.${methodName}`);
                     }
@@ -707,6 +578,19 @@ export class DefinitionProvider {
                 return symbolDefinition;
             }
 
+            // A procedure named as a bare argument — `SORT(Queue, CompareRows)`. Resolved
+            // HERE rather than with the other procedure forms above, because every tier
+            // between the two call sites answers for a declaration that shadows it: a
+            // parameter, an in-scope label (already sorted innermost-first), a cross-file
+            // symbol. Reaching this line means none of them claimed the word, so a procedure
+            // of that name is what the reference means.
+            trace.route = 'argumentReference';
+            const argumentProcedureCall = await this.resolveProcedureCallDefinition(
+                word, document, position, line, tokens, wordRange, true);
+            if (argumentProcedureCall) {
+                return argumentProcedureCall.location;
+            }
+
             // Check if we're inside a MAP block and the word is a procedure declaration
             // Navigate to the PROCEDURE implementation
             // Guard: skip if cursor is inside a PROCEDURE parameter list (word is a parameter type, not a call)
@@ -778,6 +662,101 @@ export class DefinitionProvider {
     }
 
     /**
+     * F12 for a procedure call or reference: the MAP declaration, or the implementation
+     * when the cursor is already on that declaration.
+     *
+     * Returns `{ location }` when it has taken responsibility for the word — including
+     * `{ location: null }` for "this is a procedure and there is nowhere to go", which
+     * must not fall through to the tiers below — and `null` when it has not, so the
+     * caller continues down its ladder.
+     *
+     * `allowArgumentReference` admits the weak `SORT(Queue, CompareProc)` shape. The
+     * caller passes false above the variable tiers and true below them, which is what
+     * keeps an in-scope declaration ahead of a same-named procedure.
+     */
+    private async resolveProcedureCallDefinition(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        tokens: Token[],
+        wordRange: Range | undefined,
+        allowArgumentReference: boolean
+    ): Promise<{ location: Definition | null } | null> {
+        const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
+
+        logger.info(`🔍 Checking for procedure call: word="${word}", isProcedure=${detection.isProcedure}, isStartCall=${detection.isStartCall}, isArgumentReference=${detection.isArgumentReference}, allowArgumentReference=${allowArgumentReference}, line="${line.trim()}"`);
+
+        if (!detection.isProcedure) {
+            return null;
+        }
+        if (detection.isArgumentReference !== allowArgumentReference) {
+            return null;
+        }
+
+        logger.info(`🔍 Detected potential procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
+
+        // Count parameters for overload resolution
+        const paramCount = countParametersInCall(line, word);
+        logger.info(`Procedure call has ${paramCount} parameters`);
+
+        // First, try to find MAP declaration in current file
+        const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+
+        // Check if we're already AT the MAP declaration - if so, jump to implementation instead
+        if (mapDecl &&
+            mapDecl.uri === document.uri &&
+            mapDecl.range.start.line === position.line) {
+            logger.info(`📍 Already at MAP declaration for ${word} - finding implementation instead`);
+
+            // Navigate to implementation (like Ctrl+F12 would do)
+            const implLocation = await this.mapResolver.findProcedureImplementation(
+                word,
+                tokens,
+                document,
+                position,
+                line, // Pass declaration signature for overload matching
+                this.tokenCache.getStructure(document) // #258: reuse cached structure
+            );
+
+            if (implLocation) {
+                logger.info(`✅ Found implementation at line ${implLocation.range.start.line}`);
+                return { location: implLocation };
+            }
+            logger.info(`❌ No implementation found for MAP declaration: ${word}`);
+            return { location: null };
+        }
+
+        if (mapDecl) {
+            logger.info(`✅ Found MAP declaration for procedure call: ${word}`);
+            return { location: mapDecl };
+        }
+
+        // If not found locally and file has MEMBER, check parent file's MAP
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+
+        if (memberToken?.referencedFile) {
+            logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
+
+            const localScope = getLocalMapScope(document.uri);
+            const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                word,
+                memberToken.referencedFile,
+                document,
+                line,
+                localScope?.containingProcedure
+            );
+            if (memberResult) {
+                logger.info(`✅ Found MAP declaration in MEMBER file for procedure call: ${word}`);
+                return { location: memberResult.location };
+            }
+        }
+
+        logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
+        return null;
+    }
+
+    /**
      * Finds the definition of a structure field reference
      * Handles both dot notation (Structure.Field) and prefix notation (PREFIX:Field)
      * Also handles class member access (self.Member or variable.Member)
@@ -846,7 +825,7 @@ export class DefinitionProvider {
                         const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, undefined);
                         if (chainedInfo) {
                             logger.info(`Resolved chained field "${beforeDot}.${fieldName}" at ${chainedInfo.file}:${chainedInfo.line}`);
-                            return Location.create(chainedInfo.file, Range.create(chainedInfo.line, 0, chainedInfo.line, 0));
+                            return labelLocation(chainedInfo.file, chainedInfo.line, fieldName); // #690
                         }
                         const finalClass = await this.chainedResolver.resolveFinalClassName(beforeDot, document, position);
                         if (finalClass) {
@@ -1015,7 +994,7 @@ export class DefinitionProvider {
         // impl / routine). Replaces the former FIRST-match scan, which only matched the bare
         // TokenType.Procedure subtype (missing GlobalProcedure / MethodImplementation) and had a
         // CLASS-with-dot branch that never fired (a CLASS token's value is 'CLASS').
-        return new ScopeResolver(tokens).resolveScopeAt(currentLine).token ?? undefined;
+        return ScopeResolver.forTokens(tokens).resolveScopeAt(currentLine).token ?? undefined; // #711
     }
 
     /**
@@ -1103,7 +1082,7 @@ export class DefinitionProvider {
 
     // #360/#361 — F12 (findSymbolDefinition) on a symbol in a big PROGRAM file walks
     // findSymbol's tier cascade + the parent/include chains: ~15s cold for a NetTalk
-    // proc (NetDebugTrace) on IBSCommon.clw. Cache the RESULT per (uri, word, line),
+    // proc (NetDebugTrace) on CommonLib.clw. Cache the RESULT per (uri, word, line),
     // invalidated by the cross-file epoch (the #340 watcher / #355 drift path), so a
     // repeat F12 on the same call site is instant. Keyed by line (not scope) so the
     // #330 self-exclusion — which is position-specific — stays correct per call site.
@@ -1245,47 +1224,9 @@ export class DefinitionProvider {
     private async findClassMember(tokens: Token[], memberName: string, document: TextDocument, currentLine: number): Promise<Location | null> {
         logger.info(`Looking for class member ${memberName} in current context`);
 
-        const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
-        
-        // Find the current class or method context
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, currentLine); // 🚀 PERFORMANCE: O(log n) vs O(n)
-        if (!currentScope) {
-            logger.info('No scope found - cannot determine class context');
-            return null;
-        }
-
-        // If we're in a routine, we need the parent scope (the method/procedure) to get the class name
-        if (currentScope.subType === TokenType.Routine) {
-            logger.info(`Current scope is a routine (${currentScope.value}), looking for parent scope`);
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope); // 🚀 PERFORMANCE: O(1) vs O(n)
-            if (parentScope) {
-                currentScope = parentScope;
-                logger.info(`Using parent scope: ${currentScope.value}`);
-            } else {
-                logger.info('No parent scope found for routine');
-                return null;
-            }
-        }
-
-        // For method implementations, extract the class name (e.g., "StringTheory._Malloc" -> "StringTheory")
-        let className: string | null = null;
-        if (currentScope.value.includes('.')) {
-            className = currentScope.value.split('.')[0];
-            logger.info(`Extracted class name from method: ${className}`);
-        } else {
-            // Scope value doesn't have class name, try to parse from the actual line
-            const content = document.getText();
-            const lines = content.split('\n');
-            const scopeLine = lines[currentScope.line];
-            logger.info(`Scope line text: "${scopeLine}"`);
-            
-            // Match ClassName.MethodName PROCEDURE pattern
-            const classMethodMatch = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-            if (classMethodMatch) {
-                className = classMethodMatch[1];
-                logger.info(`Extracted class name from line: ${className}`);
-            }
-        }
+        // #622: shared walk — this was a verbatim copy plus logging, carrying the 2-part pattern.
+        const className = resolveEnclosingClassName(document, currentLine, this.tokenCache.getStructure(document));
+        logger.info(`Class context for line ${currentLine}: ${className ?? '(none)'}`);
 
         if (!className) {
             logger.info('Could not determine class name from context');
@@ -1324,7 +1265,7 @@ export class DefinitionProvider {
         const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
             className, methodName, document, tokens, callLine);
         if (!picked) return null;
-        return Location.create(picked.file, Range.create(picked.line, 0, picked.line, 0));
+        return labelLocation(picked.file, picked.line, methodName); // #690
     }
 
     private async findClassMemberInType(tokens: Token[], className: string, memberName: string, document: TextDocument, paramCount?: number): Promise<Location | null> {
@@ -1370,13 +1311,13 @@ export class DefinitionProvider {
         logger.info(`Structure ${className} not found in current file, delegating to MemberLocatorService`);
         const memberInfo = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount);
         if (memberInfo) {
-            return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
+            return labelLocation(memberInfo.file, memberInfo.line, memberName); // #690
         }
 
         // Fourth: try INTERFACE lookup (for &InterfaceName reference variables)
         const ifaceInfo = await this.memberLocator.findMemberInInterface(className, memberName, document, paramCount);
         if (ifaceInfo) {
-            return Location.create(ifaceInfo.file, Range.create(ifaceInfo.line, 0, ifaceInfo.line, 0));
+            return labelLocation(ifaceInfo.file, ifaceInfo.line, memberName); // #690
         }
 
         // Fallback: equates.clw (implicitly global — not always in INCLUDE chain)
@@ -1391,7 +1332,7 @@ export class DefinitionProvider {
             );
             const equatesInfo = await this.memberLocator.findMemberInClass(className, memberName, equatesDoc, paramCount);
             if (equatesInfo) {
-                return Location.create(equatesInfo.file, Range.create(equatesInfo.line, 0, equatesInfo.line, 0));
+                return Location.create(equatesInfo.file, labelRange(equatesInfo.line, memberName)); // #697
             }
         }
 
@@ -1412,7 +1353,7 @@ export class DefinitionProvider {
             t.label?.toLowerCase() === ifaceName.toLowerCase()
         );
         if (local) {
-            return Location.create(document.uri, Range.create(local.line, 0, local.line, 0));
+            return Location.create(document.uri, labelRange(local.line, local.label!)); // #697
         }
 
         // Search INCLUDE files
@@ -1431,7 +1372,7 @@ export class DefinitionProvider {
             );
             if (eq) {
                 const uri = pathToCanonicalUri(equatesPath); // #251: client-facing Location
-                return Location.create(uri, Range.create(eq.line, 0, eq.line, 0));
+                return Location.create(uri, labelRange(eq.line, eq.label!)); // #697
             }
         }
 
@@ -1514,14 +1455,10 @@ export class DefinitionProvider {
             }
 
             if (incTokens && incTokens.length > 0) {
-                const labelToken = incTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(incTokens, typeName);
                 if (labelToken) {
                     logger.info(`Found type "${typeName}" in ${resolvedPath}:${labelToken.line}`);
-                    return Location.create(uri, Range.create(labelToken.line, 0, labelToken.line, 0));
+                    return Location.create(uri, labelRange(labelToken.line, labelToken.value)); // #697
                 }
             }
 
@@ -1554,7 +1491,7 @@ export class DefinitionProvider {
 
             const uri = pathToCanonicalUri(info.filePath); // #251: client-facing Location
             logger.test(`✅ ${info.structureType} type F12: "${word}" → ${info.filePath}:${info.line + 1}`);
-            return Location.create(uri, Range.create(info.line, 0, info.line, 0));
+            return Location.create(uri, labelRange(info.line, info.name)); // #697
         } catch (e) {
             logger.error(`findClassTypeDefinition error: ${e}`);
             return null;
@@ -1657,6 +1594,20 @@ export class DefinitionProvider {
      * Checks if cursor is on a declaration line (method declaration or MAP procedure)
      * When on a declaration, F12 should not navigate (already at definition)
      */
+    /**
+     * #698 — a structure (CLASS, INTERFACE, QUEUE, GROUP, ...) or data label of this name declared
+     * in the document itself, at column 0: what a type argument such as `CLASS(Parent)` or
+     * `LIKE(Rec)` names when the type is not in an include file.
+     */
+    private findTypeInThisFile(word: string, document: TextDocument): Location | null {
+        const name = word.toLowerCase();
+        const declaration = this.tokenCache.getTokens(document).find(t =>
+            (t.type === TokenType.Structure && t.label?.toLowerCase() === name) ||
+            (t.type === TokenType.Label && t.start === 0 && t.value.toLowerCase() === name));
+        if (!declaration) return null;
+        return Location.create(document.uri, labelRange(declaration.line, declaration.label ?? declaration.value));
+    }
+
     private isOnDeclaration(line: string, position: Position, word: string): boolean {
         // Check if line contains PROCEDURE or FUNCTION keyword (but not a method implementation)
         const hasProcedureKeyword = /\b(PROCEDURE|FUNCTION)\b/i.test(line);

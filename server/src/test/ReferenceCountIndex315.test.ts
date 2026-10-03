@@ -209,7 +209,7 @@ suite('ClarionCodeLensProvider #315 — locally-declared classes emit file-scope
     ].join('\n');
 
     test('method impl of a class declared in the same CLW → fileScoped', () => {
-        const lenses = lensesFor('file:///c:/apps/ap1.clw', LOCAL_CLASS_SOURCE);
+        const lenses = lensesFor('file:///c:/apps/app1.clw', LOCAL_CLASS_SOURCE);
         const impl = lenses.map(l => l.data as { symbolName: string; fileScoped?: boolean })
             .find(d => d.symbolName === 'ThisGPF.Initialize');
         assert.ok(impl, 'method implementation lens exists');
@@ -260,7 +260,7 @@ suite('ReferencesProvider #315 — inline class-instance receivers (ThisGPF shap
     let fixture: MultiFileFixture;
 
     const filesMap: { [rel: string]: string } = {
-        'ap1.clw': [
+        'app1.clw': [
             '  PROGRAM',                                        // 0
             '  MAP',                                            // 1
             '  END',                                            // 2
@@ -274,7 +274,7 @@ suite('ReferencesProvider #315 — inline class-instance receivers (ThisGPF shap
             '  RETURN',                                         // 10
         ].join('\n'),
         'memb1.clw': [
-            "  MEMBER('ap1.clw')",
+            "  MEMBER('app1.clw')",
             'SomeProc PROCEDURE',
             '  CODE',
             '  ThisGPF.Initialize()',                           // 3 — member-module call site
@@ -297,27 +297,27 @@ suite('ReferencesProvider #315 — inline class-instance receivers (ThisGPF shap
 
     test('lens click (impl-label cursor) finds the global-CODE call site', async () => {
         const provider = new ReferencesProvider();
-        const doc = fixture.documents['ap1.clw'];
+        const doc = fixture.documents['app1.clw'];
         // The lens passes {line: impl line, character: after the dot}.
         const refs = await provider.provideReferences(doc, { line: 8, character: 8 }, { includeDeclaration: true });
 
         assert.ok(refs, 'FAR must return references');
-        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('ap1.clw')).map(r => r.range.start.line);
+        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('app1.clw')).map(r => r.range.start.line);
         assert.ok(inAp1.includes(7),
-            `global-CODE call site (line 7) must be found; got ap1 lines=[${inAp1.join(',')}]`);
+            `global-CODE call site (line 7) must be found; got app1 lines=[${inAp1.join(',')}]`);
         assert.ok(refs!.some(r => r.uri.toLowerCase().endsWith('memb1.clw')),
             'member-module call site still found');
     });
 
     test('decl cursor (class block) finds the global-CODE call site too', async () => {
         const provider = new ReferencesProvider();
-        const doc = fixture.documents['ap1.clw'];
+        const doc = fixture.documents['app1.clw'];
         const refs = await provider.provideReferences(doc, { line: 4, character: 0 }, { includeDeclaration: true });
 
         assert.ok(refs, 'FAR must return references');
-        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('ap1.clw')).map(r => r.range.start.line);
+        const inAp1 = refs!.filter(r => r.uri.toLowerCase().endsWith('app1.clw')).map(r => r.range.start.line);
         assert.ok(inAp1.includes(7),
-            `global-CODE call site (line 7) must be found; got ap1 lines=[${inAp1.join(',')}]`);
+            `global-CODE call site (line 7) must be found; got app1 lines=[${inAp1.join(',')}]`);
     });
 });
 
@@ -339,7 +339,7 @@ suite('ReferencesProvider #315 — program-file cursor must not scan the whole s
     setup(() => {
         setServerInitialized(true);
         const filesMap: { [rel: string]: string } = {
-            'ap1.clw': [
+            'app1.clw': [
                 '  PROGRAM',
                 '  MAP',
                 '  END',
@@ -353,7 +353,7 @@ suite('ReferencesProvider #315 — program-file cursor must not scan the whole s
                 '  RETURN',
             ].join('\n'),
             'memb1.clw': [
-                "  MEMBER('ap1.clw')",
+                "  MEMBER('app1.clw')",
                 'SomeProc PROCEDURE',
                 '  CODE',
                 '  ThisGPF.Initialize()',
@@ -377,7 +377,7 @@ suite('ReferencesProvider #315 — program-file cursor must not scan the whole s
         fixture = buildMultiFileFixture({
             files: filesMap,
             projectRoot: dir,
-            frg: { programFile: 'ap1.clw', memberFiles: ['memb1.clw'] }
+            frg: { programFile: 'app1.clw', memberFiles: ['memb1.clw'] }
         });
 
         scannedFiles = [];
@@ -398,7 +398,7 @@ suite('ReferencesProvider #315 — program-file cursor must not scan the whole s
 
     test('lens click on the PROGRAM file searches the app family, not other apps', async () => {
         const provider = new ReferencesProvider();
-        const doc = fixture.documents['ap1.clw'];
+        const doc = fixture.documents['app1.clw'];
         const refs = await provider.provideReferences(doc, { line: 8, character: 8 }, { includeDeclaration: true });
 
         assert.ok(refs && refs.length > 0, 'FAR must return references');
@@ -415,7 +415,7 @@ suite('ReferencesProvider #315 — member edges resolved to a different program 
 
     // Mark's FAR trace: frg_built=true but frg_member_edges_of_doc=0 →
     // project-fallback over 2,989 files. FRG's resolveFile asks every
-    // project's redirection parser in solution order, so MEMBER('ap1.clw')
+    // project's redirection parser in solution order, so MEMBER('app1.clw')
     // edges can resolve to a DIFFERENT copy of the program file than the one
     // the editor opens (redirection search order puts the project root before
     // genfiles\src). The family lookup must fall back to matching MEMBER
@@ -430,7 +430,7 @@ suite('ReferencesProvider #315 — member edges resolved to a different program 
     setup(() => {
         setServerInitialized(true);
         const filesMap: { [rel: string]: string } = {
-            'ap1.clw': [
+            'app1.clw': [
                 '  PROGRAM',
                 '  MAP',
                 '  END',
@@ -443,7 +443,7 @@ suite('ReferencesProvider #315 — member edges resolved to a different program 
                 '  RETURN',
             ].join('\n'),
             'memb1.clw': [
-                "  MEMBER('ap1.clw')",
+                "  MEMBER('app1.clw')",
                 'SomeProc PROCEDURE',
                 '  CODE',
                 '  ThisGPF.Initialize()',
@@ -464,13 +464,13 @@ suite('ReferencesProvider #315 — member edges resolved to a different program 
         fixture = buildMultiFileFixture({ files: filesMap, projectRoot: dir });
 
         // Seed the member edge pointing at a DIFFERENT-directory copy of
-        // ap1.clw — the shape resolveFile produces when another redirection
+        // app1.clw — the shape resolveFile produces when another redirection
         // path wins. Exact-path lookup for the opened doc finds nothing.
         const { FileRelationshipGraph } = require('../FileRelationshipGraph') as typeof import('../FileRelationshipGraph');
         FileRelationshipGraph.getInstance().seedEdgesForTest([{
             type: 'MEMBER',
             fromFile: path.join(dir, 'memb1.clw'),
-            toFile: 'C:\\SomeOtherCopy\\ap1.clw',
+            toFile: 'C:\\SomeOtherCopy\\app1.clw',
             fromLine: 0,
         }]);
 
@@ -494,7 +494,7 @@ suite('ReferencesProvider #315 — member edges resolved to a different program 
 
     test('family widens via basename-matched MEMBER edges instead of falling back to all projects', async () => {
         const provider = new ReferencesProvider();
-        const doc = fixture.documents['ap1.clw'];
+        const doc = fixture.documents['app1.clw'];
         const refs = await provider.provideReferences(doc, { line: 7, character: 8 }, { includeDeclaration: true });
 
         assert.ok(refs && refs.length > 0, 'FAR must return references');
@@ -512,7 +512,7 @@ suite('FileRelationshipGraph #315 — MEMBER behind a template banner still edge
     // Review finding: the cold regex path only looked for MEMBER() on physical
     // lines 0-1. Template-generated modules put a comment banner before
     // MEMBER('app.clw'), so EVERY generated module lost its edge — the graph on
-    // Mark's VM had zero MEMBER edges for ap1.clw under any path. Clarion
+    // Mark's VM had zero MEMBER edges for app1.clw under any path. Clarion
     // allows comments/blank lines before MEMBER; the window must be "until the
     // first real statement", not "first two lines".
 
@@ -521,7 +521,7 @@ suite('FileRelationshipGraph #315 — MEMBER behind a template banner still edge
     setup(() => {
         setServerInitialized(true);
         dir = fs.mkdtempSync(path.join(os.tmpdir(), 'frg315member_'));
-        fs.writeFileSync(path.join(dir, 'ap1.clw'), [
+        fs.writeFileSync(path.join(dir, 'app1.clw'), [
             '  PROGRAM',
             '  MAP',
             '  END',
@@ -531,7 +531,7 @@ suite('FileRelationshipGraph #315 — MEMBER behind a template banner still edge
             '!ABCIncludeFile',
             '! Generated by a template — banner line 2',
             '',
-            "  MEMBER('ap1.clw')                                    ! This is a MEMBER module",
+            "  MEMBER('app1.clw')                                    ! This is a MEMBER module",
             'SomeProc PROCEDURE',
             '  CODE',
         ].join('\r\n'));
@@ -547,9 +547,9 @@ suite('FileRelationshipGraph #315 — MEMBER behind a template banner still edge
         const { FileRelationshipGraph } = require('../FileRelationshipGraph') as typeof import('../FileRelationshipGraph');
         const graph = FileRelationshipGraph.getInstance();
         graph.reset();
-        await graph.buildInBackground([path.join(dir, 'ap1.clw'), path.join(dir, 'memb1.clw')]);
+        await graph.buildInBackground([path.join(dir, 'app1.clw'), path.join(dir, 'memb1.clw')]);
 
-        const members = graph.getMemberFiles(path.join(dir, 'ap1.clw'));
+        const members = graph.getMemberFiles(path.join(dir, 'app1.clw'));
         assert.strictEqual(members.length, 1,
             `MEMBER edge must exist despite the banner (got ${members.length})`);
         assert.ok(members[0].toLowerCase().endsWith('memb1.clw'));
@@ -560,15 +560,15 @@ suite('FileRelationshipGraph #315 — MEMBER behind a template banner still edge
         fs.writeFileSync(path.join(dir, 'notmember.clw'), [
             '! banner',
             '  PROGRAM',
-            "  MEMBER('ap1.clw')",   // illegal position — must not create an edge
+            "  MEMBER('app1.clw')",   // illegal position — must not create an edge
             '  CODE',
         ].join('\r\n'));
         const { FileRelationshipGraph } = require('../FileRelationshipGraph') as typeof import('../FileRelationshipGraph');
         const graph = FileRelationshipGraph.getInstance();
         graph.reset();
-        await graph.buildInBackground([path.join(dir, 'ap1.clw'), path.join(dir, 'notmember.clw')]);
+        await graph.buildInBackground([path.join(dir, 'app1.clw'), path.join(dir, 'notmember.clw')]);
 
-        const members = graph.getMemberFiles(path.join(dir, 'ap1.clw'));
+        const members = graph.getMemberFiles(path.join(dir, 'app1.clw'));
         assert.strictEqual(members.length, 0, 'MEMBER after PROGRAM must not edge');
     });
 });

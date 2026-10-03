@@ -168,7 +168,9 @@ suite('HoverProvider — declaring a field inside a PRE()-less GROUP', () => {
         const nameCol = lines[useLine].indexOf('Filter.Name') + 'Filter.'.length;
 
         const hover = hoverText(await provider.provideHover(doc, Position.create(useLine, nameCol + 1)));
-        assert.ok(hover.includes('Filter Field') && hover.includes('LONG'),
+        // #657: the dotted form now shows the field's declaration card (#488), not the older
+        // "Filter Field:" card - still the GROUP's LONG field, not the top-level Name STRING.
+        assert.ok(hover.includes('**Filter.Name**') && hover.includes('LONG') && hover.includes('GROUP `Filter`') && !hover.includes('STRING'),
             `Dotted Filter.Name reference must still resolve to the GROUP field; got: ${hover}`);
     });
 });

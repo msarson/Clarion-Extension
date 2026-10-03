@@ -17,14 +17,33 @@ import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from './TokenHelper';
+import { procedureNameRange } from './ProcedureNameRange'; // #689
 import { pathToCanonicalUri } from './UriUtils';
 import { resolveViaProjectRedirection, projectsOwnerFirst } from './RedirectionResolution';
 import { cooperativeCheckpoint, makeTimeSlicer } from './cooperativeScan';
 import { getCrossFileEpoch } from './crossFileEpoch';
+import { CrossFileResolver } from './CrossFileResolver';
 import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
+
+/**
+ * #711 — a module source as the server sees it: the open buffer's text as the token cache last
+ * tokenized it, else disk (the shared cross-file policy, CrossFileResolver.loadExternalFileContent).
+ * Reading disk for an open, edited file gave stale implementation lines, and tokenizing that text
+ * under the file's uri replaced the live buffer's tokens — so the next request re-tokenized the
+ * whole buffer: two full tokenizations per hover after an edit on a large module.
+ */
+function moduleSourceDocument(fsPath: string): TextDocument {
+    const uri = pathToCanonicalUri(fsPath);
+    const text = CrossFileResolver.loadExternalFileContent(TokenCache.getInstance(), uri, fsPath);
+    if (text === undefined) throw new Error(`cannot read ${fsPath}`);
+    return TextDocument.create(uri, 'clarion', 1, text);
+}
+function moduleSourceTokens(fsPath: string): Token[] {
+    return TokenCache.getInstance().getTokens(moduleSourceDocument(fsPath));
+}
 
 const logger = LoggerManager.getLogger("MapProcedureResolver");
 logger.setLevel("error");
@@ -32,7 +51,7 @@ logger.setLevel("error");
 /**
  * #361 — walk-RESULT cache for findDeclarationInMapIncludes, keyed by
  * host+procName. The walk recursively reads + tokenizes the reachable MAP
- * include chain; on IBSCommon.clw a hover over a NetTalk procedure (NetDebugTrace)
+ * include chain; on CommonLib.clw a hover over a NetTalk procedure (NetDebugTrace)
  * cost ~89s, and hovering repeatedly around a block re-paid it every time. The
  * walk result (including a NEGATIVE "no declaration reachable") is memoized here
  * and reused until the cross-file epoch bumps (the #340 watcher / #355 drift path
@@ -61,11 +80,17 @@ export class MapProcedureResolver {
      * INCLUDE targets from the given document AND its MEMBER parent. Shared by the
      * goto-implementation and hover call-site routes — both then run the proven
      * declaration-side resolution from the returned document/position.
+     *
+     * `acceptBarePrototype` also accepts a prototype that is not inside a MODULE
+     * block. An included file's text becomes part of the MAP that includes it, so a
+     * bare `Name PROCEDURE` there is a local prototype. Off by default: the existing
+     * callers look for procedures implemented in another module.
      */
     public async findDeclarationInMapIncludes(
         procName: string,
         document: TextDocument,
-        tokens: Token[]
+        tokens: Token[],
+        acceptBarePrototype = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         // #313 follow-up: MAP procedure names never contain dots — a dotted word is
         // member access, and running this walk for it cost 12s per hover on
@@ -83,7 +108,7 @@ export class MapProcedureResolver {
             mapDeclWalkCache.clear();
             mapDeclWalkEpoch = epoch;
         }
-        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}`;
+        const cacheKey = `${document.uri.toLowerCase()}|${procName.toLowerCase()}${acceptBarePrototype ? '|bare' : ''}`;
         if (mapDeclWalkCache.has(cacheKey)) {
             const cached = mapDeclWalkCache.get(cacheKey)!;
             if (!cached) return null;
@@ -143,7 +168,7 @@ export class MapProcedureResolver {
 
         const visited = new Set<string>();
         for (const start of startPaths) {
-            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true);
+            const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true, acceptBarePrototype);
             if (hit) {
                 mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine });
                 return hit;
@@ -172,6 +197,19 @@ export class MapProcedureResolver {
         return decl ? decl.line : null;
     }
 
+    /**
+     * A prototype in a MAP-included file that is not inside a MODULE block. Tokenized
+     * on its own, such a line is a GlobalProcedure; anything inside a CLASS or
+     * INTERFACE has a method subtype and is excluded.
+     */
+    private findBareProcDeclLine(tokens: Token[], nameLower: string): number | null {
+        const decl = tokens.find(t =>
+            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MapProcedure) &&
+            t.label?.toLowerCase() === nameLower
+        );
+        return decl ? decl.line : null;
+    }
+
     /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
     private resolveIncludeTarget(fileName: string, fromPath: string): string | null {
         const sameDir = pathUtil.join(pathUtil.dirname(fromPath), fileName);
@@ -186,8 +224,7 @@ export class MapProcedureResolver {
             if (cached) return { document: cached.document, tokens: cached.tokens };
         }
         try {
-            const content = fsSync.readFileSync(filePath, 'utf8');
-            const doc = TextDocument.create(pathToCanonicalUri(filePath), 'clarion', 1, content);
+            const doc = moduleSourceDocument(filePath); // #711 — the open buffer, not disk
             return { document: doc, tokens: TokenCache.getInstance().getTokens(doc) };
         } catch {
             return null;
@@ -200,7 +237,8 @@ export class MapProcedureResolver {
         procName: string,
         visited: Set<string>,
         depth = 0,
-        mapScopedRoot = false
+        mapScopedRoot = false,
+        acceptBarePrototype = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         if (depth > 4) return null;
         const key = fromPath.toLowerCase();
@@ -266,13 +304,14 @@ export class MapProcedureResolver {
             if (!inc) continue;
 
             // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower);
+            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
+                ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
             if (declLine !== null) {
                 logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
                 return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
-            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1);
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, false, acceptBarePrototype);
             if (nested) return nested;
         }
         return null;
@@ -543,7 +582,7 @@ export class MapProcedureResolver {
         }
 
         // Collect all candidate declarations
-        const candidates: Array<{ token: Token, signature: string }> = [];
+        const candidates: Array<{ token: Token, signature: string, lineText?: string }> = [];
 
         // The MAPs this lookup may search (local-MAP scoping applied once).
         const eligibleMaps = mapStructures.filter(mapToken => {
@@ -563,7 +602,7 @@ export class MapProcedureResolver {
 
         // #484 — two passes. The document's OWN MAP tokens first: a generated app
         // declares every procedure in its PROGRAM's MAP, and expanding that MAP's
-        // INCLUDEs meant tokenising every header it pulls in (ap1's MAP INCLUDEs a
+        // INCLUDEs meant tokenising every header it pulls in (app1's MAP INCLUDEs a
         // 5,992-line library source) on the first hover / F12 — ~1.7s — for a
         // prototype sitting right there in the document. The expansion now runs
         // only when the document itself does not declare the name.
@@ -592,6 +631,7 @@ export class MapProcedureResolver {
                     // Get the full line as signature
                     // If token is from an INCLUDE, get content from the INCLUDE file
                     let signature: string;
+                    let lineText: string | undefined; // #689
                     let sourceUri: string;
                     
                     if (t.sourceFile && t.sourceContext?.isFromInclude) {
@@ -604,6 +644,7 @@ export class MapProcedureResolver {
                             const fs = require('fs');
                             const content = fs.readFileSync(t.sourceFile, 'utf8');
                             const lines = content.split('\n');
+                            lineText = lines[t.line]?.replace(/\r$/, '');
                             signature = lines[t.line]?.trim() || '';
                         } catch (error) {
                             logger.info(`   ⚠️ Could not read INCLUDE file: ${error}`);
@@ -614,10 +655,11 @@ export class MapProcedureResolver {
                         sourceUri = document.uri;
                         const content = document.getText();
                         const lines = content.split('\n');
+                        lineText = lines[t.line]?.replace(/\r$/, '');
                         signature = lines[t.line].trim();
                     }
                     
-                    candidates.push({ token: t, signature });
+                    candidates.push({ token: t, signature, lineText });
                     logger.info(`✅ Found MAP declaration candidate at line ${t.line}: ${signature}`);
                     if (t.sourceFile) {
                         logger.info(`   📁 Source: ${t.sourceFile}`);
@@ -644,10 +686,7 @@ export class MapProcedureResolver {
                 logger.info(`   📁 Location: ${targetUri}`);
             }
             
-            return Location.create(targetUri, {
-                start: { line: candidate.token.line, character: 0 },
-                end: { line: candidate.token.line, character: candidate.token.value.length }
-            });
+            return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
         }
 
         // Multiple candidates - use overload resolution
@@ -665,10 +704,7 @@ export class MapProcedureResolver {
                     ? pathToCanonicalUri(candidate.token.sourceFile) // #251
                     : document.uri;
                 logger.info(`✅ [#248] Call-args matched MAP decl at line ${candidate.token.line}`);
-                return Location.create(targetUri, {
-                    start: { line: candidate.token.line, character: 0 },
-                    end: { line: candidate.token.line, character: candidate.token.value.length }
-                });
+                return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
             }
         }
 
@@ -691,10 +727,7 @@ export class MapProcedureResolver {
                         logger.info(`   📁 Location: ${targetUri}`);
                     }
                     
-                    return Location.create(targetUri, {
-                        start: { line: candidate.token.line, character: 0 },
-                        end: { line: candidate.token.line, character: candidate.token.value.length }
-                    });
+                    return Location.create(targetUri, procedureNameRange(candidate.token, candidate.lineText));
                 }
             }
             
@@ -712,10 +745,7 @@ export class MapProcedureResolver {
             logger.info(`   📁 Location: ${targetUri}`);
         }
         
-        return Location.create(targetUri, {
-            start: { line: firstCandidate.token.line, character: 0 },
-            end: { line: firstCandidate.token.line, character: firstCandidate.token.value.length }
-        });
+        return Location.create(targetUri, procedureNameRange(firstCandidate.token, firstCandidate.lineText));
     }
 
     /**
@@ -845,7 +875,7 @@ export class MapProcedureResolver {
         
         // #484 — the document's own tokens first. In a generated app the prototype
         // AND its MODULE('x.clw') block are both in the PROGRAM's MAP, so expanding
-        // the MAP's INCLUDEs (tokenising every header — ap1's MAP pulls in a
+        // the MAP's INCLUDEs (tokenising every header — app1's MAP pulls in a
         // 5,992-line library source, ~1s) proved nothing the document did not
         // already say. Keyed by NAME, as the expanded walk below is, because
         // `position` may carry an INCLUDE file's line number when the declaration
@@ -928,7 +958,7 @@ export class MapProcedureResolver {
         logger.info(`   No MODULE reference found for procedure, searching current file`);
 
         // Find all GlobalProcedure implementations with matching name in current file
-        const candidates: Array<{ token: Token, signature: string }> = [];
+        const candidates: Array<{ token: Token, signature: string, lineText?: string }> = [];
         
         const implementations = TokenHelper.findTokens(tokens, {
             subType: TokenType.GlobalProcedure
@@ -953,10 +983,7 @@ export class MapProcedureResolver {
         if (candidates.length === 1) {
             const impl = candidates[0].token;
             logger.info(`Found single implementation for ${procName} at line ${impl.line}`);
-            return Location.create(document.uri, {
-                start: { line: impl.line, character: 0 },
-                end: { line: impl.line, character: impl.value.length }
-            });
+            return Location.create(document.uri, procedureNameRange(impl));
         }
 
         // Multiple candidates - use overload resolution
@@ -970,10 +997,7 @@ export class MapProcedureResolver {
             if (picked >= 0) {
                 const candidate = candidates[picked];
                 logger.info(`✅ [#248] Call-args matched implementation at line ${candidate.token.line}`);
-                return Location.create(document.uri, {
-                    start: { line: candidate.token.line, character: 0 },
-                    end: { line: candidate.token.line, character: candidate.token.value.length }
-                });
+                return Location.create(document.uri, procedureNameRange(candidate.token, candidate.lineText));
             }
         }
 
@@ -988,10 +1012,7 @@ export class MapProcedureResolver {
                 
                 if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                     logger.info(`✅ Found exact type match at line ${candidate.token.line}`);
-                    return Location.create(document.uri, {
-                        start: { line: candidate.token.line, character: 0 },
-                        end: { line: candidate.token.line, character: candidate.token.value.length }
-                    });
+                    return Location.create(document.uri, procedureNameRange(candidate.token, candidate.lineText));
                 }
             }
             
@@ -1001,10 +1022,7 @@ export class MapProcedureResolver {
         // Fallback to first candidate
         const impl = candidates[0].token;
         logger.info(`Returning first implementation at line ${impl.line}`);
-        return Location.create(document.uri, {
-            start: { line: impl.line, character: 0 },
-            end: { line: impl.line, character: impl.value.length }
-        });
+        return Location.create(document.uri, procedureNameRange(impl));
     }
 
     /**
@@ -1038,8 +1056,8 @@ export class MapProcedureResolver {
             // The old flow required redirection to resolve the PHYSICAL binary before trying the
             // source-project fallback — a DLL that isn't built (or whose output dir isn't in the
             // RED paths) dead-ended F12 even though every needed source file is in the solution.
-            // Go straight from the library basename to its main source (IBSUTILS.DLL →
-            // ibsutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
+            // Go straight from the library basename to its main source (ACMUTILS.DLL →
+            // acmutils.clw); the existing MAP-walk below then follows the real MODULE('x.clw').
             // #313 (docs: MODULE — "specify MEMBER source file"): the sourcefile string
             // routinely OMITS the extension — the Language Reference's own example is
             // MODULE('Loadit') for loadit.clw, and shipped headers do the same
@@ -1100,7 +1118,7 @@ export class MapProcedureResolver {
                             logger.info(`⚠️ Resolved to compiled binary (${ext}), searching for source file instead`);
                             
                             // Try to find the source file in other projects
-                            // Strategy: Find the main CLW file for this DLL (e.g., IBSCommon.clw for IBSCOMMON.DLL)
+                            // Strategy: Find the main CLW file for this DLL (e.g., CommonLib.clw for COMMONLIB.DLL)
                             // That file will have a MAP which declares where the procedure is implemented
                             const actualExt = path.extname(resolvedPath);
                             const baseName = path.basename(resolvedPath, actualExt);
@@ -1112,7 +1130,7 @@ export class MapProcedureResolver {
                                 logger.info(`   🏗️ Checking project: ${proj.name} at ${proj.path}`);
                                 const sourceFiles = proj.sourceFiles || [];
                                 
-                                // Look for exact match first: IBSCommon.clw for IBSCOMMON.DLL
+                                // Look for exact match first: CommonLib.clw for COMMONLIB.DLL
                                 const mainFile = sourceFiles.find(sf => {
                                     if (!sf || !sf.name) return false;
                                     if (!sf.name.toLowerCase().endsWith('.clw')) return false;
@@ -1197,11 +1215,7 @@ export class MapProcedureResolver {
                             const resolved = redirectionParser.findFile(clwFile);
                             if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                 logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                const clwUri = pathToCanonicalUri(resolved.path);
-                                const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                const tokenCache = TokenCache.getInstance();
-                                const clwTokens = tokenCache.getTokens(clwDocument);
+                                const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                 
                                 // Find the procedure implementation
                                 const impl = clwTokens.find(t =>
@@ -1211,10 +1225,7 @@ export class MapProcedureResolver {
                                 
                                 if (impl) {
                                     logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                    return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                        start: { line: impl.line, character: 0 },
-                                        end: { line: impl.line, character: impl.value.length }
-                                    });
+                                    return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                 }
                                 
                                 logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1281,11 +1292,7 @@ export class MapProcedureResolver {
                                     const resolved = redirectionParser.findFile(moduleTokenInMap.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                        const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = pathToCanonicalUri(resolved.path);
-                                        const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                        const tokenCache = TokenCache.getInstance();
-                                        const clwTokens = tokenCache.getTokens(clwDocument);
+                                        const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                         
                                         // Find the procedure implementation
                                         const impl = clwTokens.find(t =>
@@ -1295,10 +1302,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                                start: { line: impl.line, character: 0 },
-                                                end: { line: impl.line, character: impl.value.length }
-                                            });
+                                            return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                         }
                                         
                                         logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1338,10 +1342,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found implementation directly in file at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
                 
                 logger.info(`No implementation found for ${procName}`);
@@ -1359,10 +1360,7 @@ export class MapProcedureResolver {
             );
             if (directImpl) {
                 logger.info(`✅ #484: direct implementation in ${path.basename(resolvedPath)} at line ${directImpl.line} — no MAP expansion`);
-                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                    start: { line: directImpl.line, character: 0 },
-                    end: { line: directImpl.line, character: directImpl.value.length }
-                });
+                return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(directImpl)); // #251
             }
 
             logger.info(`📋 Found MAP in ${path.basename(resolvedPath)}, searching for procedure declaration`);
@@ -1398,10 +1396,7 @@ export class MapProcedureResolver {
                 if (implementations.length > 0) {
                     const impl = implementations[0];
                     logger.info(`✅ Found direct implementation in file at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
                 
                 return null;
@@ -1445,11 +1440,7 @@ export class MapProcedureResolver {
                                     const resolved = redirectionParser.findFile(moduleToken.referencedFile);
                                     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
                                         logger.info(`✅ Resolved CLW file: ${resolved.path}`);
-                                        const clwContent = fs.readFileSync(resolved.path, 'utf8');
-                                        const clwUri = pathToCanonicalUri(resolved.path);
-                                        const clwDocument = TextDocument.create(clwUri, 'clarion', 1, clwContent);
-                                        const tokenCache = TokenCache.getInstance();
-                                        const clwTokens = tokenCache.getTokens(clwDocument);
+                                        const clwTokens = moduleSourceTokens(resolved.path); // #711 — the open buffer, not disk
                                         
                                         // Find the procedure implementation
                                         const impl = clwTokens.find(t =>
@@ -1459,10 +1450,7 @@ export class MapProcedureResolver {
                                         
                                         if (impl) {
                                             logger.info(`✅ Found implementation in ${path.basename(resolved.path)} at line ${impl.line}`);
-                                            return Location.create(pathToCanonicalUri(resolved.path), { // #251
-                                                start: { line: impl.line, character: 0 },
-                                                end: { line: impl.line, character: impl.value.length }
-                                            });
+                                            return Location.create(pathToCanonicalUri(resolved.path), procedureNameRange(impl)); // #251
                                         }
                                         
                                         logger.info(`⚠️ Implementation not found in ${path.basename(resolved.path)}`);
@@ -1499,10 +1487,7 @@ export class MapProcedureResolver {
             if (implementations.length === 1) {
                 const impl = implementations[0];
                 logger.info(`✅ Found implementation in MODULE file at line ${impl.line}`);
-                return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                    start: { line: impl.line, character: 0 },
-                    end: { line: impl.line, character: impl.value.length }
-                });
+                return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
             }
             
             // Multiple implementations - try overload resolution
@@ -1518,10 +1503,7 @@ export class MapProcedureResolver {
                 if (picked >= 0) {
                     const impl = implementations[picked];
                     logger.info(`✅ [#248] Call-args matched MODULE implementation at line ${impl.line}`);
-                    return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                        start: { line: impl.line, character: 0 },
-                        end: { line: impl.line, character: impl.value.length }
-                    });
+                    return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                 }
 
                 if (ProcedureUtils.containsProcedureKeyword(declarationSignature)) {
@@ -1533,10 +1515,7 @@ export class MapProcedureResolver {
 
                         if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                             logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
-                            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                                start: { line: impl.line, character: 0 },
-                                end: { line: impl.line, character: impl.value.length }
-                            });
+                            return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
                         }
                     }
                 }
@@ -1545,10 +1524,7 @@ export class MapProcedureResolver {
             // Fallback to first implementation
             const impl = implementations[0];
             logger.info(`Returning first implementation from MODULE file at line ${impl.line}`);
-            return Location.create(pathToCanonicalUri(resolvedPath), { // #251
-                start: { line: impl.line, character: 0 },
-                end: { line: impl.line, character: impl.value.length }
-            });
+            return Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(impl)); // #251
             
         } catch (error) {
             logger.error(`Error searching MODULE file: ${error}`);

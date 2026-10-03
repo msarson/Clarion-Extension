@@ -25,7 +25,14 @@ import * as path from "path";
  */
 export function buildConfigDirArg(clarionPropertiesFile: string | undefined | null): string {
     if (!clarionPropertiesFile) return "";
-    return `/property:ConfigDir="${path.dirname(clarionPropertiesFile)}"`;
+    // #708 — bare: MSBuild is started without a shell, and the launcher quotes an argument
+    // containing a space itself. A quote of our own reaches MSBuild literally.
+    return `/property:ConfigDir=${path.dirname(clarionPropertiesFile)}`;
+}
+
+/** #708 — an argument as it would be typed at a prompt: quoted when it contains whitespace. */
+export function displayArg(arg: string): string {
+    return /\s/.test(arg) ? `"${arg}"` : arg;
 }
 
 /**
@@ -56,7 +63,7 @@ export function formatBuildHeader(p: {
     const what = p.buildTarget === 'Solution' ? 'solution' : 'project';
     return [
         `Building ${what} ${p.targetName} — ${describeConfiguration(p.configuration)}`,
-        `MSBuild: ${p.msBuildPath} ${p.buildArgs.join(' ')}`.trimEnd(),
+        `MSBuild: ${displayArg(p.msBuildPath)} ${p.buildArgs.map(displayArg).join(' ')}`.trimEnd(),
         '',
     ];
 }

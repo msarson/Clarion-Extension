@@ -34,12 +34,69 @@ export function extractMemberProgramName(tokens: Token[]): string | null {
     return name.length > 0 ? name : null;
 }
 
-/** The literal found under the cursor / selection. */
+/** The literal found under the cursor / selection; `endLine` > `line` for a #710 chain. */
 interface FoundLiteral {
     line: number;
     startChar: number;
+    endLine: number;
     endChar: number;
     text: string;
+}
+
+/** A Clarion string literal (`''` is an embedded quote). */
+const STRING_LITERAL = /'(?:[^']|'')*'/y;
+
+/**
+ * #710 — the run of string literals joined by `&` around the literal at (`line`, `start`), across
+ * the statement's `|` continuation lines: `'a' & | 'b' & | 'c'` from any of the three. Only
+ * literals and `&` take part, so the run stops at anything else and replacing it by one EQUATE
+ * keeps the expression's meaning. Null when the literal stands alone.
+ */
+export function stringChainAt(lines: string[], line: number, start: number):
+    { line: number; startChar: number; endLine: number; endChar: number } | null {
+    // The statement's lines: up while the line above continues, down while this one continues.
+    const codeEnd = (text: string): number => {
+        let inString = false;
+        for (let i = 0; i < text.length; i++) {
+            if (text[i] === "'") inString = !inString;
+            else if (text[i] === '!' && !inString) return i;
+        }
+        return text.length;
+    };
+    const continues = (l: number) => /\|\s*$/.test(lines[l].slice(0, codeEnd(lines[l])));
+    let first = line;
+    while (first > 0 && continues(first - 1)) first--;
+    let last = line;
+    while (last < lines.length - 1 && continues(last)) last++;
+
+    // Flatten the statement to a stream of pieces with their positions, dropping `|` and comments.
+    type Piece = { kind: 'str' | 'amp' | 'other'; line: number; start: number; end: number };
+    const pieces: Piece[] = [];
+    for (let l = first; l <= last; l++) {
+        const text = lines[l];
+        let end = codeEnd(text);
+        if (l < last) end = text.slice(0, end).replace(/\|\s*$/, '').length;
+        let i = 0;
+        while (i < end) {
+            if (/\s/.test(text[i])) { i++; continue; }
+            STRING_LITERAL.lastIndex = i;
+            const m = STRING_LITERAL.exec(text);
+            if (m && i + m[0].length <= end) { pieces.push({ kind: 'str', line: l, start: i, end: i + m[0].length }); i += m[0].length; continue; }
+            if (text[i] === '&') { pieces.push({ kind: 'amp', line: l, start: i, end: i + 1 }); i++; continue; }
+            let j = i;
+            while (j < end && !/[\s&']/.test(text[j])) j++;
+            pieces.push({ kind: 'other', line: l, start: i, end: Math.max(j, i + 1) });
+            i = Math.max(j, i + 1);
+        }
+    }
+    const at = pieces.findIndex(p => p.kind === 'str' && p.line === line && p.start === start);
+    if (at < 0) return null;
+    let lo = at;
+    while (lo >= 2 && pieces[lo - 1].kind === 'amp' && pieces[lo - 2].kind === 'str') lo -= 2;
+    let hi = at;
+    while (hi + 2 < pieces.length && pieces[hi + 1].kind === 'amp' && pieces[hi + 2].kind === 'str') hi += 2;
+    if (lo === hi) return null;
+    return { line: pieces[lo].line, startChar: pieces[lo].start, endLine: pieces[hi].line, endChar: pieces[hi].end };
 }
 
 /**
@@ -57,8 +114,19 @@ export class IntroduceEquateCodeActionProvider {
 
     provideCodeActions(document: TextDocument, range: Range): CodeAction[] {
         const tokens = TokenCache.getInstance().getTokens(document);
-        const literal = this.findLiteral(tokens, range);
+        let literal = this.findLiteral(tokens, range);
         if (!literal) return [];
+        // #710 — a string in a `&` chain of literals: the EQUATE takes the whole chain, verbatim.
+        if (literal.text.startsWith("'")) {
+            const chain = stringChainAt(document.getText().split(/\r?\n/), literal.line, literal.startChar);
+            if (chain) {
+                const text = document.getText({
+                    start: { line: chain.line, character: chain.startChar },
+                    end: { line: chain.endLine, character: chain.endChar },
+                }).replace(/\r\n/g, '\n');
+                literal = { ...chain, text };
+            }
+        }
 
         const structure = TokenCache.getInstance().getStructure(document);
         const scopes = this.computeScopes(document, structure, tokens, literal.line);
@@ -74,7 +142,7 @@ export class IntroduceEquateCodeActionProvider {
                 command: 'clarion.introduceEquate',
                 arguments: [
                     document.uri,
-                    { line: literal.line, startChar: literal.startChar, endChar: literal.endChar },
+                    { line: literal.line, startChar: literal.startChar, endLine: literal.endLine, endChar: literal.endChar },
                     literal.text,
                     scopes
                 ]
@@ -98,7 +166,7 @@ export class IntroduceEquateCodeActionProvider {
                 ? (from >= ts && from <= te)   // cursor within the token
                 : (ts < to && te > from);      // selection overlaps the token
             if (hit) {
-                return { line, startChar: ts, endChar: te, text: t.value };
+                return { line, startChar: ts, endLine: line, endChar: te, text: t.value };
             }
         }
         return null;
@@ -116,38 +184,66 @@ export class IntroduceEquateCodeActionProvider {
 
         // Routine-local data — only when the routine actually has a DATA section.
         if (node.kind === ScopeKind.Routine && node.token?.hasLocalData && node.token.executionMarker) {
-            scopes.push({ label: 'This routine (routine data)', insertLine: node.token.executionMarker.line });
+            scopes.push({ label: 'This routine (routine data)', insertLine: this.above(document, tokens, line, node.token.executionMarker.line, node.token.line) });
         }
 
         // The enclosing procedure/method's local data.
         const procNode = node.kind === ScopeKind.Routine ? node.parent : node;
         if (procNode && (procNode.kind === ScopeKind.Procedure || procNode.kind === ScopeKind.Method)
             && procNode.token?.executionMarker) {
-            scopes.push({ label: 'This procedure (local data)', insertLine: procNode.token.executionMarker.line });
+            scopes.push({ label: 'This procedure (local data)', insertLine: this.above(document, tokens, line, procNode.token.executionMarker.line, procNode.token.line) });
         }
 
         // File-level: global data in a PROGRAM (same file), module data + (if the MEMBER names a
         // program) cross-file global into that PROGRAM file.
-        scopes.push(...this.fileScopes(document, structure, tokens));
+        scopes.push(...this.fileScopes(document, structure, tokens, line));
         return scopes;
+    }
+
+    /**
+     * #709 — where the EQUATE goes in a data section that ends at `dataEnd` (its CODE, or the first
+     * procedure for module data). A literal in executable code: just before `dataEnd`, as ever. A
+     * literal IN that data (above `dataEnd`): before the declaration that contains it, since an
+     * EQUATE must be declared before it is used in data — inserted at `dataEnd`, a WINDOW's
+     * FORMAT('...') could not see it ("Unknown identifier").
+     */
+    private above(document: TextDocument, tokens: Token[], literalLine: number, dataEnd: number, scopeStart: number): number {
+        return literalLine < dataEnd ? this.declarationStart(document, tokens, literalLine, scopeStart) : dataEnd;
+    }
+
+    /**
+     * The first line of the declaration containing `line`: the outermost structure opened inside
+     * the scope and still open at `line` (a whole WINDOW, not the LIST line inside it), else the
+     * first line of a `|`-continued statement.
+     */
+    private declarationStart(document: TextDocument, tokens: Token[], line: number, scopeStart: number): number {
+        let start = line;
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.line > scopeStart && t.line < start && (t.finishesAt ?? -1) >= line) start = t.line;
+        }
+        const code = (l: number) => document.getText({ start: { line: l, character: 0 }, end: { line: l + 1, character: 0 } })
+            .replace(/'[^']*'/g, "''").replace(/!.*$/, '').trimEnd();
+        while (start - 1 > scopeStart && /\|$/.test(code(start - 1))) start--;
+        return start;
     }
 
     private fileScopes(
         document: TextDocument,
         structure: ReturnType<TokenCache['getStructure']>,
-        tokens: Token[]
+        tokens: Token[],
+        literalLine: number
     ): EquateScope[] {
         const isProgram = tokens.some(t => t.value.toUpperCase() === 'PROGRAM');
         if (isProgram) {
             const insertLine = this.globalInsertLine(tokens);
-            return insertLine === null ? [] : [{ label: 'Global', insertLine }];
+            return insertLine === null ? [] : [{ label: 'Global', insertLine: this.above(document, tokens, literalLine, insertLine, -1) }];
         }
 
         // MEMBER file: module data (this file), before the first procedure IMPLEMENTATION.
         const out: EquateScope[] = [];
         const firstProcLine = this.firstProcedureImplLine(structure);
         if (firstProcLine !== null) {
-            out.push({ label: 'This module', insertLine: firstProcLine });
+            out.push({ label: 'This module', insertLine: this.above(document, tokens, literalLine, firstProcLine, -1) });
         }
 
         // Cross-file global: MEMBER('name') → the program is name.clw; a bare/empty MEMBER names no

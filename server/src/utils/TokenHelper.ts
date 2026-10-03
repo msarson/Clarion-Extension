@@ -4,6 +4,8 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
+import { tokensOnLine } from './TokenLineIndex';
+import { memberHeaderToken } from './TokenIndexes';
 
 /**
  * Shared utility for token and scope navigation
@@ -19,10 +21,9 @@ export class TokenHelper {
      * is the header.
      */
     public static findMemberHeaderToken(tokens: Token[]): Token | undefined {
-        return tokens.find(t =>
-            t.value !== undefined &&
-            t.value.toUpperCase() === 'MEMBER' &&
-            t.referencedFile !== undefined);
+        // #711 — once per token array: for a file with no MEMBER (a PROGRAM, an include) the
+        // search walked every token, on every hover that climbed the parent chain.
+        return memberHeaderToken(tokens);
     }
 
     /**
@@ -62,6 +63,23 @@ export class TokenHelper {
      */
     public static normalizeMemberFilename(name: string): string {
         return /\.[^\\/.]+$/.test(name) ? name : `${name}.clw`;
+    }
+
+    /**
+     * The column-0 label that DECLARES `typeName` as a type: a line that opens a
+     * structure (CLASS/INTERFACE/QUEUE/GROUP/RECORD/FILE/...) or an EQUATE/ITEMIZE.
+     * A plain data field with the same label (`Name STRING(20)` inside some FILE's
+     * RECORD) is skipped, so a type walk over an include chain keeps looking instead
+     * of reporting that field as the type.
+     */
+    public static findTypeDeclarationLabel(tokens: Token[], typeName: string): Token | undefined {
+        const wanted = typeName.toLowerCase();
+        return tokens.find(t => {
+            if ((t.type !== TokenType.Label && t.type !== TokenType.Variable) || t.start !== 0) return false;
+            if (t.value.toLowerCase() !== wanted) return false;
+            return tokens.some(o => o.line === t.line && o.start > t.start &&
+                (o.type === TokenType.Structure || /^(EQUATE|ITEMIZE)$/i.test(o.value)));
+        });
     }
 
     /** #337 — PROGRAM header lookup (ClarionDocument-typed, no line cap). */
@@ -184,7 +202,7 @@ export class TokenHelper {
         // disagreed. Returns undefined at global/module scope.
         const resolver = ('getParent' in tokensOrStructure)
             ? (tokensOrStructure as DocumentStructure).getScopeResolver()
-            : new ScopeResolver(tokensOrStructure as Token[]);
+            : ScopeResolver.forTokens(tokensOrStructure as Token[]); // #711
         return resolver.resolveScopeAt(line).token ?? undefined;
     }
 
@@ -219,7 +237,7 @@ export class TokenHelper {
             // Issue #233 Stage 2: unify the legacy path onto the resolver — the parent scope of
             // a routine is the enclosing procedure/method in its visible chain. Replaces the old
             // "closest parent by highest line" range reduce.
-            const node = new ScopeResolver(tokensOrStructure as Token[]).resolveScopeAt(routineScope.line);
+            const node = ScopeResolver.forTokens(tokensOrStructure as Token[]).resolveScopeAt(routineScope.line); // #711
             return node.parent?.token ?? undefined;
         }
     }
@@ -475,16 +493,14 @@ export class TokenHelper {
      * and hover should be suppressed at that position.
      */
     public static isPositionInComment(tokens: Token[], line: number, character: number): boolean {
-        return tokens.some(t =>
-            t.line === line &&
+        return tokensOnLine(tokens, line).some(t =>
             (t.type === TokenType.Comment || t.type === TokenType.LineContinuation) &&
             t.start <= character
         );
     }
 
     public static isPositionInString(tokens: Token[], line: number, character: number): boolean {
-        if (tokens.some(t =>
-            t.line === line &&
+        if (tokensOnLine(tokens, line).some(t =>
             t.type === TokenType.String &&
             t.start <= character &&
             character <= t.start + t.value.length
@@ -498,8 +514,7 @@ export class TokenHelper {
         // ran the full resolver chain on string contents. Scan the covering
         // token's source text for quoted spans instead — '' is an escaped quote,
         // not a terminator.
-        const covering = tokens.find(t =>
-            t.line === line &&
+        const covering = tokensOnLine(tokens, line).find(t =>
             t.type !== TokenType.Comment &&
             t.start <= character &&
             character < t.start + t.value.length
@@ -549,16 +564,14 @@ export class TokenHelper {
      * inclusive on both bounds.
      */
     public static getFileRefArgStringToken(tokens: Token[], line: number, character: number): Token | null {
-        const fileRefTokens = tokens.filter(t =>
-            t.line === line &&
+        const fileRefTokens = tokensOnLine(tokens, line).filter(t =>
             t.referencedFile !== undefined &&
             t.referencedFile.length > 0
         );
         if (fileRefTokens.length === 0) return null;
 
         for (const fileRef of fileRefTokens) {
-            const firstStringAfter = tokens.find(t =>
-                t.line === line &&
+            const firstStringAfter = tokensOnLine(tokens, line).find(t =>
                 t.type === TokenType.String &&
                 t.start > fileRef.start
             );
@@ -585,15 +598,14 @@ export class TokenHelper {
         line: number,
         character: number
     ): { section: Token; includeFile: string } | null {
-        const includeTokens = tokens.filter(t =>
-            t.line === line &&
+        const includeTokens = tokensOnLine(tokens, line).filter(t =>
             t.value?.toUpperCase() === 'INCLUDE' &&
             t.referencedFile !== undefined &&
             t.referencedFile.length > 0
         );
         for (const inc of includeTokens) {
-            const strings = tokens
-                .filter(t => t.line === line && t.type === TokenType.String && t.start > inc.start)
+            const strings = tokensOnLine(tokens, line)
+                .filter(t => t.type === TokenType.String && t.start > inc.start)
                 .sort((a, b) => a.start - b.start);
             if (strings.length < 2) continue;
             const second = strings[1];
@@ -628,8 +640,8 @@ export class TokenHelper {
      * it names nothing, so there is no control to resolve.
      */
     public static getFieldEquateTokenAt(tokens: Token[], line: number, character: number): Token | null {
-        for (const t of tokens) {
-            if (t.line !== line || t.type !== TokenType.FieldEquateLabel) continue;
+        for (const t of tokensOnLine(tokens, line)) { // #711
+            if (t.type !== TokenType.FieldEquateLabel) continue;
             if (t.value.length <= 1) continue; // bare `?` — anonymous control marker
             if (t.start <= character && character <= t.start + t.value.length) {
                 return t;
@@ -681,7 +693,9 @@ export class TokenHelper {
         afterLine?: number;
         inScope?: Token;
     }): Token[] {
-        return tokens.filter(t => {
+        // #711 — a line criterion reads that line's tokens, not every token in the document.
+        const pool = criteria.line !== undefined ? tokensOnLine(tokens, criteria.line) : tokens;
+        return pool.filter(t => {
             // Type filtering
             if (criteria.type !== undefined && t.type !== criteria.type) return false;
             if (criteria.types && !criteria.types.includes(t.type)) return false;

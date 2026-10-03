@@ -4,7 +4,6 @@ import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { TokenHelper } from '../utils/TokenHelper';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { findSectionLocation } from '../utils/SectionLocator';
@@ -36,8 +35,10 @@ import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { IncludeVerifier } from '../utils/IncludeVerifier';
 import { SymbolFinderService } from '../services/SymbolFinderService';
+import { SelfParentClassResolver, ClassDeclarationSite } from '../utils/SelfParentClassResolver';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
-import { ScopeKind, ScopeNode } from '../scope/ScopeTypes';
+import { tokensOnLine } from '../utils/TokenLineIndex';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -61,7 +62,6 @@ interface HoverTrace {
  */
 export class HoverProvider {
     private tokenCache = TokenCache.getInstance();
-    private memberResolver = new ClassMemberResolver();
     private overloadResolver = new MethodOverloadResolver();
     private crossFileCache: CrossFileCache;
     private mapResolver: MapProcedureResolver;
@@ -84,6 +84,7 @@ export class HoverProvider {
     private structureFieldResolver: StructureFieldResolver;
     private includeVerifier: IncludeVerifier;
     private symbolFinder: SymbolFinderService;
+    private selfParentResolver: SelfParentClassResolver;
 
     constructor() {
         const solutionManager = SolutionManager.getInstance();
@@ -95,7 +96,7 @@ export class HoverProvider {
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.variableResolver = new VariableHoverResolver(this.formatter, this.scopeAnalyzer, this.tokenCache, this.crossFileCache);
         this.procedureResolver = new ProcedureHoverResolver(this.mapResolver, this.crossFileResolver, this.formatter);
-        this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.memberResolver, this.formatter);
+        this.methodResolver = new MethodHoverResolver(this.overloadResolver, this.formatter);
         this.routineResolver = new RoutineHoverResolver(this.formatter);
         this.contextBuilder = new HoverContextBuilder();
         this.structureFieldResolver = new StructureFieldResolver(
@@ -114,6 +115,7 @@ export class HoverProvider {
         );
         this.includeVerifier = IncludeVerifier.getInstance();
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
+        this.selfParentResolver = new SelfParentClassResolver(this.symbolFinder);
     }
 
     /**
@@ -229,7 +231,9 @@ export class HoverProvider {
                 let typeArgMatch: RegExpExecArray | null;
                 while ((typeArgMatch = typeArgRegex.exec(line)) !== null) {
                     if (typeArgMatch[1].toLowerCase() === word.toLowerCase()) {
-                        return this.checkClassTypeHover(word, document, true);
+                        // #698 — the index holds include files; a type declared in this file is
+                        // answered from its tokens, with the same card.
+                        return (await this.checkClassTypeHover(word, document, true)) ?? this.sameFileTypeHover(word, document, tokens);
                     }
                 }
             }
@@ -252,6 +256,14 @@ export class HoverProvider {
                 }
             }
 
+            // #606: a bare SELF or PARENT is the class it stands for; outside a method it
+            // keeps the keyword card the router gives it.
+            const selfOrParent = SelfParentClassResolver.keywordAt(line, position.character);
+            if (selfOrParent) {
+                const site = await this.selfParentResolver.resolve(selfOrParent, document, position);
+                if (site) return this.buildSelfParentHover(selfOrParent, site);
+            }
+
             // Route through the router for keywords, procedures, methods, symbols, attributes, builtins
             const routedHover = await this.router.route(context);
             mark('router');
@@ -271,9 +283,8 @@ export class HoverProvider {
             // If cursor is on a PROCEDURE/FUNCTION declaration line, prioritize that exact
             // declaration scope for parameter hover (works even when currentScope is null
             // on declaration lines before CODE).
-            const declarationScope = tokens.find(t =>
-                TokenHelper.isProcedureOrFunction(t) &&
-                t.line === position.line
+            const declarationScope = tokensOnLine(tokens, position.line).find(t => // #711
+                TokenHelper.isProcedureOrFunction(t)
             );
             if (declarationScope) {
                 const declarationParamHover = this.variableResolver.findParameterHover(word, document, declarationScope);
@@ -301,7 +312,7 @@ export class HoverProvider {
                 // structure field (e.g. a field inside a file-scope `GROUP,TYPE` in
                 // an .inc) — not a bare-name reference, so findGlobalVariableHover's
                 // PRE()/dot-qualifier exclusion above correctly doesn't match it.
-                const structureFieldHover = this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
+                const structureFieldHover = await this.variableResolver.findStructureFieldDeclarationHover(word, tokens, document, position.line);
                 mark('structureFieldDecl(noScope)');
                 if (structureFieldHover) return structureFieldHover;
 
@@ -328,6 +339,10 @@ export class HoverProvider {
                 mark('structType(noScope)');
                 if (structTypeHover) return structTypeHover;
 
+                const argRefHover = await this.resolveArgumentReferenceHover(word, document, position, wordRange, line);
+                mark('argumentReference(noScope)');
+                if (argRefHover) return argRefHover;
+
                 return null;
             }
 
@@ -353,12 +368,12 @@ export class HoverProvider {
             }
 
             logger.info(`Checking if ${word} (full word) is a local variable...`);
-            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line);
+            let variableHover = await this.variableResolver.findLocalVariableHover(word, tokens, currentScope, document, word, position.line, position.character);
             mark('localVar');
             if (variableHover) return variableHover;
 
             logger.info(`Checking for ${word} (full word) as module-local variable...`);
-            let moduleVarHover = this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
+            let moduleVarHover = await this.variableResolver.findModuleVariableHover(word, tokens, document, position.line);
             mark('moduleVar');
             if (moduleVarHover) return moduleVarHover;
 
@@ -412,7 +427,7 @@ export class HoverProvider {
                     }
 
                     // Not a procedure — check for global variable in parent's own scope only.
-                    // Use full word (e.g., Access:IBSDataSets) — colon is part of the label name.
+                    // Use full word (e.g., Access:ACMDataSets) — colon is part of the label name.
                     // shallowOnly=true: skips recursive include chain, handled by findInIncludesAndEquates below.
                     const globalVarHover = await this.variableResolver.findGlobalVariableHover(word, parentTokens, parentDoc, position.line, true);
                     mark('parentGlobalVar');
@@ -444,13 +459,46 @@ export class HoverProvider {
                 logger.info(`✅ HOVER-RETURN: Found structure type hover for ${word}`);
                 return structTypeHover;
             }
-            
+
+            const argRefHover = await this.resolveArgumentReferenceHover(word, document, position, wordRange, line);
+            mark('argumentReference');
+            if (argRefHover) {
+                logger.info(`✅ HOVER-RETURN: Found procedure-reference hover for argument ${word}`);
+                return argRefHover;
+            }
+
             logger.info(`❌ HOVER-RETURN: No hover information found for ${word}`);
             return null;
         } catch (error) {
             logger.error(`Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * A procedure named as a bare argument — `SORT(Queue, CompareRows)` — resolved as
+     * the LAST tier, after every variable tier above has declined.
+     *
+     * The shape it rests on matches any identifier passed to anything, so ranking it
+     * where the router resolves the other procedure forms (step 3, ahead of locals,
+     * module data, globals and includes) would let a procedure answer for a name the
+     * language reads as a variable: a bare argument resolves to the nearest declaration
+     * in scope, and a same-named procedure is reachable there only as `Name()`. Running
+     * it here inverts that by construction — a variable wins because it was asked
+     * first, with no need to enumerate which kinds of declaration can shadow.
+     *
+     * The stronger forms (`Name(`, `START(Name)`, a standalone call) are unaffected:
+     * they identify a procedure on their own evidence and keep their place in the
+     * router.
+     */
+    private async resolveArgumentReferenceHover(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        wordRange: Range,
+        line: string
+    ): Promise<Hover | null> {
+        return this.procedureResolver.resolveProcedureCall(word, document, position, wordRange, line, true);
     }
 
     /**
@@ -937,6 +985,25 @@ export class HoverProvider {
         return this.variableResolver.findInIncludesAndEquates(word, tokens, document);
     }
 
+    /** #606: the class card for a bare SELF or PARENT, in the shape of checkClassTypeHover's. */
+    private buildSelfParentHover(keyword: 'SELF' | 'PARENT', site: ClassDeclarationSite): Hover {
+        const typeLabel = site.isType ? 'CLASS, TYPE' : 'CLASS';
+        const role = keyword === 'SELF' ? 'the object this method runs on' : 'the parent class';
+        const parentLine = site.parentName ? `\n⬆️ Extends: \`${site.parentName}\`` : '';
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**${keyword}** → **${site.className}** — ${typeLabel}`,
+                    ``,
+                    `_${role}_`,
+                    ``,
+                    `📦 Defined in ${this.formatter.locationLink(site.uri, site.line)}${parentLine}`,
+                ].join('\n'),
+            },
+        };
+    }
+
     /**
      * Check if a word is a CLASS type and provide hover with definition info
      * @param word The word to check
@@ -995,6 +1062,27 @@ export class HoverProvider {
         }
 
         return null;
+    }
+
+    /**
+     * #698 — the type-argument card (`CLASS(Parent)`, `LIKE(Rec)`, ...) for a structure declared
+     * in this document, which the structure index (include files) does not hold. Same card as
+     * `_checkClassTypeHoverInternal` builds from the index.
+     */
+    private sameFileTypeHover(word: string, document: TextDocument, tokens: Token[]): Hover | null {
+        const name = word.toLowerCase();
+        const declaration = tokens.find(t => t.type === TokenType.Structure && t.label?.toLowerCase() === name);
+        if (!declaration) return null;
+        const text = document.getText({ start: { line: declaration.line, character: 0 }, end: { line: declaration.line + 1, character: 0 } });
+        const structureType = declaration.value.toUpperCase();
+        const typeLabel = structureType !== 'INTERFACE' && /,\s*TYPE\b/i.test(text) ? `${structureType}, TYPE` : structureType;
+        const parent = /\bCLASS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(text)?.[1];
+        const hoverMarkdown = [
+            `**${declaration.label}** — ${typeLabel}`,
+            ``,
+            `📦 Defined in ${this.formatter.locationLink(document.uri, declaration.line)}${parent ? `\n⬆️ Extends: \`${parent}\`` : ''}`
+        ].join('\n');
+        return { contents: { kind: 'markdown', value: hoverMarkdown } };
     }
 
     /**
@@ -1080,27 +1168,13 @@ export class HoverProvider {
     private buildFieldEquateHover(feqToken: Token, document: TextDocument, position: Position): Hover | null {
         const structure = this.tokenCache.getStructure(document);
 
-        // 1. The usual case: a window declared in the enclosing procedure. The same
-        //    `?Name` — `?Cancel` above all — recurs across unrelated windows, so the
-        //    procedure's own window is the only reading that is certain.
-        for (const proc of this.enclosingProcedures(structure, position.line)) {
-            for (const win of structure.getContainerStructuresInProcedure(proc)) {
-                const hit = structure.findControl(feqToken.value, win);
-                if (hit) {
-                    return this.renderFieldEquateCard(feqToken, hit, win, document, structure);
-                }
-            }
+        // #614: the same resolution Go to Definition uses (utils/FieldEquateResolver).
+        const target = resolveFieldEquate(structure, feqToken.value, position.line);
+        if (target?.kind === 'control') {
+            return this.renderFieldEquateCard(feqToken, target.control, target.container, document, structure);
         }
-
-        // 2. Not the enclosing procedure's — but a window can be declared in a class
-        //    or in another source entirely, so absence here is not absence. A
-        //    declaration found elsewhere in THIS file is offered as a candidate and
-        //    labelled with its owner, never as the current procedure's control.
-        const declarations = structure.findControlDeclarations(feqToken.value);
-        if (declarations.length === 1) {
-            return this.renderFieldEquateCard(feqToken, declarations[0].control, null, document, structure);
-        }
-        if (declarations.length > 1) {
+        if (target?.kind === 'candidates') {
+            const declarations = target.controls;
             // The same name across several windows is ordinary Clarion. Listing the
             // candidates is the honest answer; picking one would be a coin toss.
             const lines: string[] = [
@@ -1124,39 +1198,6 @@ export class HoverProvider {
         // 3. Declared in another source, or not at all. Either way this file cannot
         //    say which — and no card beats a confident wrong one.
         return null;
-    }
-
-    /**
-     * Procedure/method tokens whose windows a `?Name` on `line` could refer to,
-     * innermost first.
-     *
-     * The scope chain matters because of the ABC shape: a generated procedure holds
-     * its WINDOW in local data and its event handling in the methods of a locally
-     * declared `WindowManager` subclass. A `?Name` inside one of those methods is
-     * outside the method's own line range, so the method alone never resolves it —
-     * `ScopeResolver` links the method to the procedure whose local data declared
-     * its CLASS, and that is the procedure holding the window.
-     */
-    private enclosingProcedures(structure: ReturnType<TokenCache['getStructure']>, line: number): Token[] {
-        const out: Token[] = [];
-        const seen = new Set<Token>();
-        const push = (t: Token | null | undefined) => {
-            if (t && !seen.has(t)) { seen.add(t); out.push(t); }
-        };
-
-        let node: ScopeNode | null;
-        try {
-            node = structure.getScopeResolver().resolveScopeAt(line);
-        } catch {
-            return out;
-        }
-        for (let n: ScopeNode | null = node; n; n = n.parent) {
-            if (n.kind === ScopeKind.Procedure || n.kind === ScopeKind.Method) {
-                push(n.token);
-            }
-            push(n.declaringProcedure?.token);
-        }
-        return out;
     }
 
     /**
@@ -1246,10 +1287,9 @@ export class HoverProvider {
         }
 
         // Also hover directly on an INTERFACE structure's label token (col 0)
-        const ifaceStruct = tokens.find(t =>
+        const ifaceStruct = tokensOnLine(tokens, position.line).find(t => // #711
             t.type === TokenType.Structure &&
-            t.subType === TokenType.Interface &&
-            t.line === position.line
+            t.subType === TokenType.Interface
         );
         if (ifaceStruct && ifaceStruct.label?.toLowerCase() === word.toLowerCase()) {
             return this.buildInterfaceHover(ifaceStruct, word, document);

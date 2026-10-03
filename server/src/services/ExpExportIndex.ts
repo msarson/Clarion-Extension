@@ -16,13 +16,13 @@ logger.setLevel('error');
  *
  * Location: `<project.name>.exp` through the OWNING project's redirection
  * parser (the real generated reds put `*.exp = .\genFiles\exp` in
- * [Debug]/[Release] — verified on the Direct10 substrate), with the project
+ * [Debug]/[Release] — verified on the real-solution substrate), with the project
  * directory as the vanilla-red fallback (no red → .exp lands at the project
  * root; the parser's projectPath probe usually covers this, the explicit
  * fallback keeps headless/test layouts working).
  *
  * Format (verified against 43 real .exp files, banked on #330):
- *   - EXE apps: `NAME 'AP1' GUI`, no EXPORTS → exports nothing.
+ *   - EXE apps: `NAME 'APP1' GUI`, no EXPORTS → exports nothing.
  *   - DLLs: `LIBRARY 'X' GUI` + EXPORTS, one decorated symbol per line:
  *       PROCNAME@F<argcodes>            → plain procedure  (what we index)
  *       METHOD@F<digits><CLASS><args>   → class method     (digit after @F — excluded)
@@ -50,8 +50,8 @@ const NEGATIVE_TTL_MS = 30_000;
 // after @F is the class-name length prefix of a method export).
 const PROC_EXPORT_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)@F(?![0-9])/;
 // #526 — exported data line: `$NAME @?` (a data DLL's generated globals module,
-// IBSCOGLO.CLW on the real substrate, exports every global by name this way). The
-// label may carry a single-colon prefix (GVF:OWNER).
+// ACMCOGLO.CLW on the real substrate, exports every global by name this way). The
+// label may carry a single-colon prefix (GBL:OWNER).
 const DATA_EXPORT_RE = /^\s*\$([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*)\s+@\?/;
 
 export class ExpExportIndex {
@@ -90,9 +90,9 @@ export class ExpExportIndex {
 
     /** The mtime-validated parse of the project's .exp, or null when it has none. */
     private getEntry(project: ExpProjectLike): ExpCacheEntry | null {
-        // #526 — key on folder AND name: on the real ap1.sln every .cwproj sits in one
+        // #526 — key on folder AND name: on the real app1.sln every .cwproj sits in one
         // folder, so a folder-only key handed the first parsed .exp to all 40 projects
-        // (every project "exported" IBSCommon's data, and the definer walk failed).
+        // (every project "exported" CommonLib's data, and the definer walk failed).
         const key = `${path.normalize(project.path).toLowerCase()}|${project.name.toLowerCase()}`;
         const cached = this.cache.get(key);
         const now = Date.now();

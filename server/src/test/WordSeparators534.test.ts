@@ -4,7 +4,7 @@
  * Those are cursor "word operations", and VS Code drives them from the editor's
  * `editor.wordSeparators` setting, not from the language's `wordPattern` (which
  * covers hover, the definition link's origin range, find-whole-word). The default
- * separators include ':', so `GVF:Owner` double-clicked as `GVF` or `Owner`. An
+ * separators include ':', so `GBL:Owner` double-clicked as `GVF` or `Owner`. An
  * extension can only change that through a language-specific default, so the
  * package contributes one for `[clarion]`: VS Code's default separators minus ':'.
  */

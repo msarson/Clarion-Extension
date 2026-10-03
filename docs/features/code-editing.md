@@ -35,19 +35,19 @@ The Clarion Extension provides powerful code editing tools:
 **Trigger:** `IF`
 
 ```clarion
-IF THEN
+  IF THEN
   
-END
+  END
 ```
 
 **Trigger:** `IFE` (IF with ELSE)
 
 ```clarion
-IF THEN
+  IF THEN
   
-ELSE
+  ELSE
   
-END
+  END
 ```
 
 ---
@@ -56,25 +56,25 @@ END
 **Trigger:** `LOOP`
 
 ```clarion
-LOOP
+  LOOP
   
-END
+  END
 ```
 
 **Trigger:** `LOOPFT` (LOOP with FROM/TO)
 
 ```clarion
-LOOP var = from TO to
+  LOOP var = from TO to
   
-END
+  END
 ```
 
 **Trigger:** `LOOPFILE` (File LOOP)
 
 ```clarion
-LOOP UNTIL ACCESS:FileName.Next()
+  LOOP UNTIL ACCESS:FileName.Next()
   
-END
+  END
 ```
 
 ---
@@ -83,10 +83,10 @@ END
 **Trigger:** `CASE`
 
 ```clarion
-CASE variable
-OF value
+  CASE variable
+  OF value
   
-END
+  END
 ```
 
 ---
@@ -371,8 +371,8 @@ Init      PROCEDURE()  ← Cursor here, press Ctrl+Shift+I
 **Generates in MyClass.clw:**
 ```clarion
 MyClass.Init PROCEDURE
-CODE
-  ! Your code here
+  CODE
+    ! Your code here
 ```
 
 ---
@@ -391,7 +391,7 @@ Process   PROCEDURE(*STRING reference)  ← Generates correct signature
 **Generates:**
 ```clarion
 MyClass.Process PROCEDURE(*STRING reference)
-CODE
+  CODE
   
 ```
 
@@ -452,11 +452,11 @@ Kill      PROCEDURE()
   INCLUDE('MyClass.inc'),ONCE
 
 MyClass.Init PROCEDURE
-CODE
+  CODE
   
 
 MyClass.Kill PROCEDURE
-CODE
+  CODE
   
 ```
 
@@ -552,10 +552,10 @@ Progressively widens the text selection through Clarion's scope hierarchy:
 
 **Example:**
 ```clarion
-IF x > 0 THEN
-  DoSomething()   ! ← Cursor here
-  DoOther()
-END
+  IF x > 0 THEN
+    DoSomething()   ! ← Cursor here
+    DoOther()
+  END
 ```
 - First `Shift+Alt+→`: selects `DoSomething()`
 - Second: selects the line
@@ -576,14 +576,14 @@ Joins `|`-continued lines into a single line:
 
 Before:
 ```clarion
-MyString = 'Hello ' & |
-           'World' & |
-           ' today'
+  MyString = 'Hello ' & |
+             'World' & |
+             ' today'
 ```
 
 After:
 ```clarion
-MyString = 'Hello World today'
+  MyString = 'Hello World today'
 ```
 
 ---
@@ -600,7 +600,7 @@ MyString = 'Hello World today'
 
 **Cursor positioned inside:**
 ```clarion
-MyProc(|)  ← Cursor here after typing (
+  MyProc(|)  ← Cursor here after typing (
 ```
 
 ---

@@ -15,10 +15,10 @@ import { serverSettings } from '../serverSettings';
 /**
  * #330 tier 2 — cross-project FAR for DLL-exported procedures.
  *
- * The defining project (IBSCom) exports Fetch via IBSCOM.EXP (compiler-truth
+ * The defining project (ACMCom) exports Fetch via ACMCOM.EXP (compiler-truth
  * export list, real decorated format). Two consumers (AP, BM) re-declare it
- * in their global MAPs inside MODULE('IBSCOM.DLL') and call it — the exact
- * generated shape verified on the Direct10 substrate. FAR from ANY of the
+ * in their global MAPs inside MODULE('ACMCOM.DLL') and call it — the exact
+ * generated shape verified on the real-solution substrate. FAR from ANY of the
  * positions must return the unified family: impl + defining declaration +
  * each consumer's re-declaration + each consumer's call sites.
  *
@@ -27,7 +27,7 @@ import { serverSettings } from '../serverSettings';
  * fixture builds projects without touching the index).
  *
  * Sentinels:
- *  - LocalOnly is declared/implemented in IBSCom but NOT exported → FAR must
+ *  - LocalOnly is declared/implemented in ACMCom but NOT exported → FAR must
  *    NOT leak into consumers (AP carries a same-named local variable as the
  *    observable decoy).
  *  - Ghost is re-declared in AP against MODULE('VUFT3.DLL') — a third-party
@@ -39,7 +39,7 @@ import { serverSettings } from '../serverSettings';
 const CONSUMER_AP =
     "  PROGRAM\n" +                              // 0
     "  MAP\n" +                                  // 1
-    "    MODULE('IBSCOM.DLL')\n" +               // 2
+    "    MODULE('ACMCOM.DLL')\n" +               // 2
     "Fetch     PROCEDURE(LONG pMode),DLL\n" +    // 3
     "    END\n" +                                // 4
     "    MODULE('VUFT3.DLL')\n" +                // 5
@@ -56,7 +56,7 @@ const CONSUMER_AP =
 const CONSUMER_BM =
     "  PROGRAM\n" +                              // 0
     "  MAP\n" +                                  // 1
-    "    MODULE('IBSCOM.DLL')\n" +               // 2
+    "    MODULE('ACMCOM.DLL')\n" +               // 2
     "Fetch     PROCEDURE(LONG pMode),DLL\n" +    // 3
     "    END\n" +                                // 4
     "  END\n" +                                  // 5
@@ -67,7 +67,7 @@ const CONSUMER_BM =
 const DEFINING_MAIN =
     "  PROGRAM\n" +                              // 0
     "  MAP\n" +                                  // 1
-    "    MODULE('fetch_ibscom.clw')\n" +         // 2
+    "    MODULE('fetch_acmcom.clw')\n" +         // 2
     "Fetch       PROCEDURE(LONG pMode)\n" +      // 3
     "LocalOnly   PROCEDURE()\n" +                // 4  — NOT exported
     "    END\n" +                                // 5
@@ -76,7 +76,7 @@ const DEFINING_MAIN =
     "  RETURN\n";                                // 8
 
 const DEFINING_MEMBER =
-    "  MEMBER('ibscom.clw')\n" +                 // 0
+    "  MEMBER('acmcom.clw')\n" +                 // 0
     "  MAP\n" +                                  // 1
     "  END\n" +                                  // 2
     "Fetch  PROCEDURE(LONG pMode)\n" +           // 3
@@ -88,8 +88,8 @@ const DEFINING_MEMBER =
 
 // Real decorated .exp shape (banked #330 research): procedure = NAME@F<argcodes>
 // (non-digit after @F); method = digit after @F; data = $NAME. LocalOnly absent.
-const IBSCOM_EXP =
-    "  LIBRARY 'IBSCOM' GUI\n" +
+const ACMCOM_EXP =
+    "  LIBRARY 'ACMCOM' GUI\n" +
     "\n" +
     "  EXPORTS\n" +
     "    FETCH@FRl\n" +
@@ -133,33 +133,33 @@ suite('Multi-DLL tier-2 FAR (#330)', () => {
         tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'multidll330t2-'));
         const apDir = path.join(tmpRoot, 'AP');
         const bmDir = path.join(tmpRoot, 'BM');
-        const ibsDir = path.join(tmpRoot, 'IBSCom');
-        for (const d of [apDir, bmDir, ibsDir]) {
+        const acmDir = path.join(tmpRoot, 'ACMCom');
+        for (const d of [apDir, bmDir, acmDir]) {
             fs.mkdirSync(d, { recursive: true });
             fs.writeFileSync(path.join(d, 'Clarion110.red'), '[Common]\n*.clw = .\n*.inc = .\n*.exp = .\n');
         }
 
         fs.writeFileSync(path.join(apDir, 'ap.clw'), CONSUMER_AP);
         fs.writeFileSync(path.join(bmDir, 'bm.clw'), CONSUMER_BM);
-        fs.writeFileSync(path.join(ibsDir, 'ibscom.clw'), DEFINING_MAIN);
-        fs.writeFileSync(path.join(ibsDir, 'fetch_ibscom.clw'), DEFINING_MEMBER);
-        fs.writeFileSync(path.join(ibsDir, 'IBSCom.exp'), IBSCOM_EXP);
+        fs.writeFileSync(path.join(acmDir, 'acmcom.clw'), DEFINING_MAIN);
+        fs.writeFileSync(path.join(acmDir, 'fetch_acmcom.clw'), DEFINING_MEMBER);
+        fs.writeFileSync(path.join(acmDir, 'ACMCom.exp'), ACMCOM_EXP);
         apUri = toUri(path.join(apDir, 'ap.clw'));
-        implUri = toUri(path.join(ibsDir, 'fetch_ibscom.clw'));
+        implUri = toUri(path.join(acmDir, 'fetch_acmcom.clw'));
 
         const pAP = new ClarionProjectServer('AP', 'app', apDir, '{AP-330T2}');
         pAP.sourceFiles.push(new ClarionSourcerFileServer('ap.clw', 'ap.clw', pAP));
-        pAP.projectReferences.push({ name: 'IBSCom', project: 'IBSCom.cwproj' });
+        pAP.projectReferences.push({ name: 'ACMCom', project: 'ACMCom.cwproj' });
 
         const pBM = new ClarionProjectServer('BM', 'app', bmDir, '{BM-330T2}');
         pBM.sourceFiles.push(new ClarionSourcerFileServer('bm.clw', 'bm.clw', pBM));
-        pBM.projectReferences.push({ name: 'IBSCom', project: 'IBSCom.cwproj' });
+        pBM.projectReferences.push({ name: 'ACMCom', project: 'ACMCom.cwproj' });
 
-        const pIBS = new ClarionProjectServer('IBSCom', 'app', ibsDir, '{IBS-330T2}');
-        pIBS.sourceFiles.push(new ClarionSourcerFileServer('ibscom.clw', 'ibscom.clw', pIBS));
-        pIBS.sourceFiles.push(new ClarionSourcerFileServer('fetch_ibscom.clw', 'fetch_ibscom.clw', pIBS));
+        const pACM = new ClarionProjectServer('ACMCom', 'app', acmDir, '{ACM-330T2}');
+        pACM.sourceFiles.push(new ClarionSourcerFileServer('acmcom.clw', 'acmcom.clw', pACM));
+        pACM.sourceFiles.push(new ClarionSourcerFileServer('fetch_acmcom.clw', 'fetch_acmcom.clw', pACM));
 
-        const projects = [pAP, pBM, pIBS];
+        const projects = [pAP, pBM, pACM];
         // Mirror the REAL findProjectForFile semantics (full-path match, then
         // basename fallback across sourceFiles) — the global FAR branch passes
         // a basename, and a prefix-only fake would silently fall through to
@@ -193,8 +193,8 @@ suite('Multi-DLL tier-2 FAR (#330)', () => {
     const UNIFIED = [
         'ap.clw:3', 'ap.clw:11',        // AP re-declaration + call
         'bm.clw:3', 'bm.clw:7',         // BM re-declaration + call
-        'fetch_ibscom.clw:3',           // implementation
-        'ibscom.clw:3',                 // defining MAP declaration
+        'fetch_acmcom.clw:3',           // implementation
+        'acmcom.clw:3',                 // defining MAP declaration
     ].sort();
 
     test('FAR from the implementation label spans defining + both consumers', async () => {
@@ -227,7 +227,7 @@ suite('Multi-DLL tier-2 FAR (#330)', () => {
         const hits = keyed(refs);
         assert.ok(!hits.some(h => h.startsWith('ap.clw') || h.startsWith('bm.clw')),
             `LocalOnly is not in the .exp — consumer files must not appear (AP even has a same-named local); got: ${hits.join(', ')}`);
-        assert.ok(hits.includes('fetch_ibscom.clw:6'), `defining-project hits expected; got: ${hits.join(', ')}`);
+        assert.ok(hits.includes('fetch_acmcom.clw:6'), `defining-project hits expected; got: ${hits.join(', ')}`);
     });
 
     test('sentinel: third-party MODULE(VUFT3.DLL) with no in-solution project stays local', async () => {

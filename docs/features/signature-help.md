@@ -22,7 +22,7 @@ The Clarion Extension provides two main documentation features:
 **Shows parameter information when you type an opening parenthesis:**
 
 ```clarion
-SUB(  ← Type opening parenthesis
+  SUB(  ← Type opening parenthesis
 ```
 
 **Pop-up shows:**
@@ -107,7 +107,7 @@ Parameters:
 **For methods with multiple signatures:**
 
 ```clarion
-MyObj.Process(  ← Multiple overloads available
+  MyObj.Process(  ← Multiple overloads available
 ```
 
 **Shows:**
@@ -238,18 +238,18 @@ Scope: Procedure-local
 **Shows both declaration and implementation:**
 
 ```clarion
-MyProc()  ! ← Hover here
+  MyProc()  ! ← Hover here
 
 Shows:
 ---
-MAP Declaration:
-  MyProc PROCEDURE(STRING param)
-
-Implementation: (first 10 lines)
+  MAP Declaration:
 MyProc PROCEDURE(STRING param)
-CODE
-  x = 10
-  ! ... more lines ...
+
+  Implementation: (first 10 lines)
+MyProc PROCEDURE(STRING param)
+  CODE
+    x = 10
+    ! ... more lines ...
   
 File: MyApp.clw (Line 234)
 ---
@@ -262,9 +262,9 @@ File: MyApp.clw (Line 234)
 **Shows file preview:**
 
 ```clarion
-INCLUDE('MyFile.inc')  ! ← Hover shows first 20 lines
+  INCLUDE('MyFile.inc')  ! ← Hover shows first 20 lines
 
-INCLUDE('MyFile.inc', 'MySection')  ! ← Hover shows only MySection
+  INCLUDE('MyFile.inc', 'MySection')  ! ← Hover shows only MySection
 ```
 
 ---

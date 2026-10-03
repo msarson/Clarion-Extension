@@ -45,3 +45,6 @@ test-programs/ViewJoinTest/map/
 test-programs/ViewJoinTest/*.exe
 
 CLAUDE.local.md
+
+# Local test-corpus paths (a client's private source) — never committed
+scripts/local-corpus.js

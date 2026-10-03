@@ -4,6 +4,7 @@
 
 import { Token, TokenType } from './TokenTypes';
 import LoggerManager from '../logger';
+import { firstTokenAfterLine } from '../utils/TokenLineIndex';
 
 const logger = LoggerManager.getLogger("StructureProcessor");
 logger.setLevel("error");
@@ -46,12 +47,14 @@ export class StructureProcessor {
                 // Find the structure's end line
                 const structureEnd = structure.finishesAt || lines.length - 1;
 
-                // Find all variable tokens between the structure start and end
-                const fieldsInStructure = tokens.filter(t =>
-                    (t.type === TokenType.Variable || t.type === TokenType.Label) &&
-                    t.line > structure.line &&
-                    t.line < structureEnd
-                );
+                // Find all variable tokens between the structure start and end. #711: from the
+                // structure's own position, not the top of the document — filtering every token for
+                // every PRE()'d structure was quadratic in the document's size.
+                const fieldsInStructure: Token[] = [];
+                for (let k = firstTokenAfterLine(tokens, structure.line); k < tokens.length && tokens[k].line < structureEnd; k++) {
+                    const t = tokens[k];
+                    if (t.type === TokenType.Variable || t.type === TokenType.Label) fieldsInStructure.push(t);
+                }
 
                 if (TOKENIZER_TRACE) logger.info(`🔍 [DEBUG] Found ${fieldsInStructure.length} potential fields in structure ${structure.value}`);
 

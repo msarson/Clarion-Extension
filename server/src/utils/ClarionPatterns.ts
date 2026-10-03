@@ -104,13 +104,15 @@ export class ClarionPatterns {
     /**
      * Matches a standalone procedure implementation
      * MyProc PROCEDURE(params) at start of line
-     * 
+     *
+     * A Clarion label must start at column 0 (confirmed against the real compiler:
+     * an indented label desyncs the parser) — no leading whitespace is accepted.
+     *
      * Capture groups:
-     * [1] = Leading whitespace
-     * [2] = Procedure name
-     * [3] = Keyword (PROCEDURE or FUNCTION)
+     * [1] = Procedure name
+     * [2] = Keyword (PROCEDURE or FUNCTION)
      */
-    public static readonly PROCEDURE_IMPLEMENTATION = /^(\s*)(\w+)\s+(PROCEDURE|FUNCTION)/i;
+    public static readonly PROCEDURE_IMPLEMENTATION = /^(\w+)\s+(PROCEDURE|FUNCTION)/i;
     
     /**
      * Matches a standalone procedure/function implementation with parentheses

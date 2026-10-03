@@ -2,7 +2,7 @@
  * #358 (cold residual) — warmMemberParent tokenizes a MEMBER module's parent off the felt path.
  *
  * A MEMBER module's globals (GlobalErrors / thisStartup) are declared deep in its
- * MEMBER('...') parent. On IBSWorking that parent (IBSCommon.clw) is 873 KB / 68k tokens,
+ * MEMBER('...') parent. On WorkingLib that parent (CommonLib.clw) is 873 KB / 68k tokens,
  * so the first cold receiver-type resolution pays ~1.1s just to tokenize it. The startup
  * idle lane now warms it in the background, so no interactive validation lands that cost.
  *

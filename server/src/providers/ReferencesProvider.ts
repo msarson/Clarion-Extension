@@ -22,7 +22,11 @@ interface DllProjectLike {
 }
 import { TokenHelper } from '../utils/TokenHelper';
 import { ChainedPropertyResolver, ChainedMemberInfo } from '../utils/ChainedPropertyResolver';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall, countParametersInDeclaration, getDeclarationLineText } from '../utils/ClassMemberScan';
+import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
+import { extractClassName } from '../utils/ClassNameUtils';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
@@ -32,12 +36,14 @@ import { serverSettings } from '../serverSettings'; // #559
 import { isAttributeKeyword } from '../utils/AttributeKeywords';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { getLocalMapScope, LocalMapScope } from '../utils/LocalMapScopeHelper';
+import { CrossFileResolver } from '../utils/CrossFileResolver';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { buildIncDirsToScan } from './incDirsScope';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
+import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -128,16 +134,18 @@ export class ReferencesProvider {
     private tokenCache: TokenCache;
     private scopeAnalyzer: ScopeAnalyzer;
     private symbolFinder: SymbolFinderService;
-    private memberResolver: ClassMemberResolver;
     private overloadResolver: MethodOverloadResolver;
     private scopeTypeIndex: ScopeTypeIndexService;
+    /** #637 — the member lookup hover, F12 and Ctrl+F12 use for SELF / PARENT. */
+    private memberLocator = new MemberLocatorService();
+    /** #654 — the declaration a member access names, shared with hover, F12 and Ctrl+F12. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, new MethodOverloadResolver());
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
         const solutionManager = SolutionManager.getInstance();
         this.scopeAnalyzer = new ScopeAnalyzer(this.tokenCache, solutionManager);
         this.symbolFinder = new SymbolFinderService(this.tokenCache, this.scopeAnalyzer);
-        this.memberResolver = new ClassMemberResolver();
         this.overloadResolver = new MethodOverloadResolver();
         this.scopeTypeIndex = new ScopeTypeIndexService(this.tokenCache);
     }
@@ -194,7 +202,7 @@ export class ReferencesProvider {
             const includeRefs = this.provideIncludeReferences(document, position);
             if (includeRefs) {
                 this.trace({ route: 'include', word: path.basename(decodeURIComponent(document.uri)) });
-                const deduped = this.dedupeByNormalizedLocation(includeRefs);
+                const deduped = this.restoreOnDiskSpelling(this.dedupeByNormalizedLocation(includeRefs));
                 resultCount = deduped.length;
                 return deduped;
             }
@@ -203,7 +211,7 @@ export class ReferencesProvider {
             // differ from the file-walk casing (CloneScript.clw:196 AND
             // clonescript.clw:196 in the same result set). Same discipline as the
             // #196/#252 rename-edit dedup: the key is the decoded lowercased path.
-            const locations = rawLocations && this.dedupeByNormalizedLocation(rawLocations);
+            const locations = rawLocations && this.restoreOnDiskSpelling(this.dedupeByNormalizedLocation(rawLocations));
             if (!locations || opts?.includeOmitted) {
                 resultCount = locations?.length ?? -1;
                 return locations;
@@ -238,6 +246,31 @@ export class ReferencesProvider {
             out.push(loc);
         }
         return out;
+    }
+
+    /**
+     * #655 — a file reached through the file graph arrives under its lower-cased map key
+     * (`abeip.clw` for ABEIP.CLW). Such a location is renamed to the file's spelling on disk;
+     * one whose path has any capital came from a real spelling and is left as it is, the
+     * cursor document's own URI included.
+     */
+    private restoreOnDiskSpelling(locations: Location[]): Location[] {
+        const fixed = new Map<string, string>();
+        return locations.map(loc => {
+            let uri = fixed.get(loc.uri);
+            if (uri === undefined) {
+                uri = loc.uri;
+                const fsPath = decodeURIComponent(loc.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+                if (/[a-z]/.test(fsPath) && fsPath === fsPath.toLowerCase()) {
+                    const spelled = onDiskSpelling(fsPath);
+                    if (spelled !== fsPath) {
+                        uri = /^file:\/\/\/[A-Za-z]%3A/i.test(loc.uri) ? pathToCanonicalUri(spelled) : fsPathToUri(spelled);
+                    }
+                }
+                fixed.set(loc.uri, uri);
+            }
+            return uri === loc.uri ? loc : { ...loc, uri };
+        });
     }
 
     /** #315 — per-invocation FAR trace fields, merged by pipeline stages. */
@@ -540,12 +573,13 @@ export class ReferencesProvider {
         }
 
         // Plain symbol path
-        const symbolInfo = await this.symbolFinder.findSymbol(word, document, position);
-        if (!symbolInfo) {
+        const foundSymbol = await this.symbolFinder.findSymbol(word, document, position);
+        if (!foundSymbol) {
             // Fallback: check if word is a MAP/MODULE-declared procedure (not a variable)
             this.trace({ route: 'procedure-hunt', word });
             return this.findProcedureReferences(word, document, tokens, context.includeDeclaration, token, undefined, crossProjectDll);
         }
+        const symbolInfo = await this.mapDeclarationOfImplementation(foundSymbol, document, tokens);
 
         const searchWord = symbolInfo.token.value;
         const filesToSearch = this.getFilesToSearch(symbolInfo, document, crossProjectDll);
@@ -917,7 +951,7 @@ export class ReferencesProvider {
             start: { line: position.line, character: 0 },
             end: { line: position.line, character: 10000 }
         });
-        const callArgCount = this.memberResolver.countParametersInCall(cursorLineText, memberName);
+        const callArgCount = countParametersInCall(cursorLineText, memberName);
         logger.info(`📊 Call arg count at cursor: ${callArgCount} for "${memberName}"`);
 
         let declarationFile: string | null = null;
@@ -926,10 +960,18 @@ export class ReferencesProvider {
 
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
+        // #654: the anchor is the declaration hover and F12 name - DottedAccessResolver (#651, #652),
+        // with the argument-type pick when the access is a call.
+        const escapedMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const isCall = new RegExp(`\\b${escapedMember}\\s*\\(`, 'i').test(cursorLineText);
+        const resolveAnchor = () => this.dottedAccess.resolve(beforeDot, memberName, document, position.line, isCall ? callArgCount : undefined);
 
         if (isSelfOrParent) {
-            const tokens = this.tokenCache.getTokens(document);
-            const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
+            // #637 / #654 — each receiver's own class, named the way hover and F12 name it (#626 for
+            // SELF, #648 for PARENT), then the shared member lookup. SELF and PARENT both went
+            // to ClassMemberResolver.findClassMemberInfo, which starts at SELF's class, so
+            // PARENT.x in an override anchored on the override itself.
+            const info = (await resolveAnchor())?.member ?? null;
             if (info) {
                 declarationFile = info.file;
                 declarationLine = info.line;
@@ -957,7 +999,8 @@ export class ReferencesProvider {
                 const implMethod = dotIdx > 0 ? implToken.label.substring(dotIdx + 1).toLowerCase() : '';
                 if (implClass && implMethod === memberName.toLowerCase()) {
                     // Treat exactly like SELF.Member resolution but with a known class name
-                    const info = this.memberResolver.findClassMemberInfo(memberName, document, position.line, tokens, callArgCount);
+                    // #637 — the class the implementation line names, through the shared lookup.
+                    const info = await this.memberLocator.findMemberInClass(implClass, memberName, document, callArgCount, position.line);
                     if (info) {
                         declarationFile = info.file;
                         declarationLine = info.line;
@@ -997,6 +1040,19 @@ export class ReferencesProvider {
                         }
                     }
                     logger.info(`✅ MethodImpl cursor: "${implClass}.${memberName}" → class="${className}", decl=${declarationFile ?? 'unknown'}`);
+                }
+            }
+
+            if (!className) {
+                // #654: the declaration hover and F12 name. (References' own chain walk and Tier 2
+                // typed-variable lookup below read a local `ThisWindow CLASS(Base)` as Base, #642; they
+                // stay as the fallback for what the resolver does not name.)
+                const access = await resolveAnchor();
+                if (access) {
+                    declarationFile = access.member.file;
+                    declarationLine = access.member.line;
+                    className = access.member.className;
+                    logger.info(`✅ ${beforeDot}.${memberName} → class="${className}" at ${declarationFile}:${declarationLine}`);
                 }
             }
 
@@ -1137,10 +1193,10 @@ export class ReferencesProvider {
                 }
             }
             if (!declLineText) {
-                declLineText = ClassMemberResolver.getDeclarationLineText(filterDeclFsPath, filterDeclLine);
+                declLineText = getDeclarationLineText(filterDeclFsPath, filterDeclLine);
             }
             if (declLineText && ProcedureUtils.containsProcedureKeyword(declLineText)) { // #247: PROCEDURE ≡ FUNCTION
-                const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+                const maxArgs = countParametersInDeclaration(declLineText);
                 const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
                 const minArgs = maxArgs - defaultCount;
                 overloadFilter = {
@@ -1194,7 +1250,7 @@ export class ReferencesProvider {
                         if (matched.declarationLine !== overloadFilter.declarationLine) {
                             logger.info(`🎯 [#249] Cursor-call args re-point anchor: decl line ${overloadFilter.declarationLine} → ${matched.declarationLine}`);
                             declarationLine = matched.declarationLine;
-                            const maxArgs = this.memberResolver.countParametersInDeclaration(matched.signature);
+                            const maxArgs = countParametersInDeclaration(matched.signature);
                             const defaultCount = ClarionPatterns.countDefaultParams(matched.signature);
                             overloadFilter = {
                                 minArgs: maxArgs - defaultCount,
@@ -1345,11 +1401,13 @@ export class ReferencesProvider {
             fileVarIndex, globalScope, position.line, variableName.toLowerCase());
         if (!rawType) return null;
 
-        const typeName = ClassMemberResolver.extractClassName(rawType);
+        const typeName = extractClassName(rawType);
         if (!typeName) return null;
 
         logger.info(`Tier2: "${variableName}" has type "${typeName}", looking up member "${memberName}"`);
-        const info = await this.memberResolver.findMemberInNamedStructure(memberName, typeName, document, callArgCount);
+        // #637 — the shared lookup (CLASS, GROUP or QUEUE; per-project copy, #571), which
+        // replaces ClassMemberResolver.findMemberInNamedStructure.
+        const info = await this.memberLocator.findMemberInClass(typeName, memberName, document, callArgCount);
         if (info) return info;
 
         // 0c289e16 Phase B fallback — when StructureDeclarationIndexer can't find the
@@ -1482,7 +1540,7 @@ export class ReferencesProvider {
                 const declLines = cachedText.split(/\r?\n/);
                 getLineText = (line) => declLines[line] ?? '';
             } else {
-                getLineText = (line) => ClassMemberResolver.getDeclarationLineText(declFsPath, line) ?? '';
+                getLineText = (line) => getDeclarationLineText(declFsPath, line) ?? '';
             }
         }
         if (!lookupTokens || lookupTokens.length === 0) return result;
@@ -1619,7 +1677,7 @@ export class ReferencesProvider {
         if (!target) return null;
 
         // The INCLUDE lines naming `target` in one file, found by a TEXT scan — a
-        // tokenize per includer was 240s over ABBROWSE.INC's includers on ap1.sln.
+        // tokenize per includer was 240s over ABBROWSE.INC's includers on app1.sln.
         const base = path.basename(target).toLowerCase();
         const includeLinesFor = (uri: string): Location[] => {
             const text = uri.toLowerCase() === document.uri.toLowerCase()
@@ -2086,7 +2144,7 @@ export class ReferencesProvider {
                 scannedThisRound = true;
                 // #550 — a text scan, not a tokenize: the family only needs `Label CLASS(Parent)`
                 // lines, and a Clarion label always starts in column 1. Tokenizing every
-                // candidate (108 generated modules mentioning the class on ap1.sln) cost 12.7s
+                // candidate (108 generated modules mentioning the class on app1.sln) cost 12.7s
                 // of a 13.7s search; reading them and matching one anchored regex does not.
                 const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(uri) ?? this.readFileTextForUri(uri);
                 if (text === null) continue;
@@ -2637,7 +2695,7 @@ export class ReferencesProvider {
                                     continue; // wrong overload (type-aware check)
                                 }
                             } else {
-                                const implParamCount = this.memberResolver.countParametersInDeclaration(implLineText);
+                                const implParamCount = countParametersInDeclaration(implLineText);
                                 if (implParamCount < overloadFilter.minArgs || implParamCount > overloadFilter.maxArgs) {
                                     continue; // wrong overload (arity-only check)
                                 }
@@ -2662,6 +2720,47 @@ export class ReferencesProvider {
     // ─── Plain symbol helpers ─────────────────────────────────────────────────
 
     /**
+     * A procedure's IMPLEMENTATION label in a MEMBER module resolves as its own
+     * module-scope declaration, and getFilesToSearch widens a module procedure only
+     * through the declaring file's forward MODULE edges and its includers. An
+     * implementation module has neither — the MODULE edge runs from the MAP that
+     * declares it — so FAR from `Target PROCEDURE` answered only that line, while
+     * the MAP line and every call site answered all of them (#602 from the other end).
+     *
+     * Follow the edge back the way Go to Definition does from the same label
+     * (findMapDeclarationInMemberFile) and search from that declaration, which is
+     * then the search FAR runs from the MAP line: #602 widens a PROGRAM MAP to the
+     * program. Anything else is returned unchanged.
+     */
+    private async mapDeclarationOfImplementation(symbolInfo: SymbolInfo, document: TextDocument, tokens: Token[]): Promise<SymbolInfo> {
+        if (symbolInfo.type !== 'PROCEDURE' || symbolInfo.scope.type !== 'module') return symbolInfo;
+        if (symbolInfo.location.uri !== document.uri) return symbolInfo;
+        const name = symbolInfo.token.value.toLowerCase();
+        const impl = tokens.find(t =>
+            t.line === symbolInfo.location.line &&
+            t.subType === TokenType.GlobalProcedure &&
+            (t.label ?? '').toLowerCase() === name);
+        if (!impl) return symbolInfo;
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        if (!memberToken?.referencedFile) return symbolInfo;
+
+        const signature = document.getText({
+            start: { line: impl.line, character: 0 },
+            end: { line: impl.line, character: Number.MAX_VALUE }
+        });
+        const mapDecl = await new CrossFileResolver(this.tokenCache).findMapDeclarationInMemberFile(
+            impl.label!, memberToken.referencedFile, document, signature,
+            getLocalMapScope(document.uri)?.containingProcedure);
+        if (!mapDecl) return symbolInfo;
+
+        logger.test(`[FAR] Implementation label "${impl.label}" → searching from its MAP declaration at ${path.basename(mapDecl.file)}:${mapDecl.line}`);
+        return {
+            ...symbolInfo,
+            location: { uri: mapDecl.location.uri, line: mapDecl.line, character: mapDecl.location.range.start.character },
+        };
+    }
+
+    /**
      * Build an OverloadFilter for the plain-symbol path when the symbol is a
      * procedure/method/global procedure declaration. Captures the cursor's
      * declaration signature so `findReferencesInFile` can use
@@ -2682,11 +2781,11 @@ export class ReferencesProvider {
         }
         if (!declLineText) {
             const declFile = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-            declLineText = ClassMemberResolver.getDeclarationLineText(declFile, symbolInfo.location.line);
+            declLineText = getDeclarationLineText(declFile, symbolInfo.location.line);
         }
         if (!declLineText || !ProcedureUtils.containsProcedureKeyword(declLineText)) return undefined; // #247: PROCEDURE ≡ FUNCTION
 
-        const maxArgs = this.memberResolver.countParametersInDeclaration(declLineText);
+        const maxArgs = countParametersInDeclaration(declLineText);
         const defaultCount = ClarionPatterns.countDefaultParams(declLineText);
         const minArgs = maxArgs - defaultCount;
         const filter: OverloadFilter = {
@@ -2709,7 +2808,7 @@ export class ReferencesProvider {
                 : null;
             const readDeclLine = (line: number): string | null =>
                 sameDocLines ? (sameDocLines[line] ?? null)
-                             : ClassMemberResolver.getDeclarationLineText(declFsPath, line);
+                             : getDeclarationLineText(declFsPath, line);
             const candidates: Array<{ signature: string; declarationLine: number }> = [];
             for (const t of declTokens) {
                 if (!TokenHelper.isProcedureOrFunction(t)) continue;
@@ -2755,7 +2854,7 @@ export class ReferencesProvider {
         if (!declProject) return null;
         // Until the reference index is built (seconds after start) nothing can be pruned,
         // and a family of 34 projects would mean scanning the whole solution (73s cold on
-        // ap1.sln). Stay project-scoped until then, as before #526.
+        // app1.sln). Stay project-scoped until then, as before #526.
         if (!ReferenceCountIndex.getInstance().isBuilt) {
             logger.test(`[FAR] #526: reference index not built yet → project-scoped search for "${name}"`);
             return null;
@@ -3012,7 +3111,7 @@ export class ReferencesProvider {
                 // a PROGRAM's MAP is the FIRST, and every module of that program may reference it.
                 //
                 // Both resolve to `module` scope here, so the narrow rule was applied to both. On
-                // ap1.sln that made PrintForm, declared in DMCommon.clw's MAP, answer 7 references
+                // app1.sln that made RenderDoc, declared in DataUtil.clw's MAP, answer 7 references
                 // from its declaration and 8 from one of its own call sites — the same symbol giving
                 // two answers depending on where it was right-clicked.
                 //
@@ -3158,7 +3257,7 @@ export class ReferencesProvider {
      * #330 tier 2 — resolve the DEFINING project for a MAP declaration.
      * A declaration inside MODULE('x.dll'|'x.lib') maps the library basename
      * to the project whose main source is `<base>.clw` (the #299 pattern —
-     * verified 1:1 against projectReferences on the Direct10 substrate);
+     * verified 1:1 against projectReferences on the real-solution substrate);
      * any other declaration belongs to the project owning the declaring file.
      * Third-party DLLs (no in-solution project) resolve to null.
      */
@@ -3569,8 +3668,8 @@ export class ReferencesProvider {
                     // #600: a colon-qualified name arrives as ONE token or SEVERAL depending on how
                     // long its prefix is. StructurePrefix caps the prefix at eight characters
                     // (`[A-Z][A-Z0-9_]{0,7}`), so an indented `GLO:Init` is a single token whose
-                    // value matches above, while `IBSCommon:Init` — nine — splits into
-                    // Variable(IBSCommon) ':' Function(Init) and matches nothing. The declaration is
+                    // value matches above, while `CommonLib:Init` — nine — splits into
+                    // Variable(CommonLib) ':' Function(Init) and matches nothing. The declaration is
                     // unaffected because a name at column 0 is one Label whatever its length, which
                     // is why the symbol resolved correctly and only its CALL SITES went missing.
                     //

@@ -44,7 +44,7 @@ suite('Routine references #320 — :: names, dedup, scoping', () => {
 
     //                                                         line
     const FIXTURE = [
-        "   MEMBER('ap1.clw')",                             // 0
+        "   MEMBER('app1.clw')",                             // 0
         'ThisWindow.Init PROCEDURE',                        // 1
         'LOC:MyVar  LONG',                                  // 2
         '  CODE',                                           // 3

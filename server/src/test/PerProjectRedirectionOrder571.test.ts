@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { MemberLocatorService } from '../services/MemberLocatorService';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { SolutionManager } from '../solution/solutionManager';
 import { serverSettings } from '../serverSettings';
@@ -165,11 +164,8 @@ defineSuite('Class lookups follow the open document\'s project redirection (#571
         assert.strictEqual(folderOf((await locator.resolveSdiDeclaration('WidgetClass', fx().projA, path.join(fx().projA, 'caller.clw')))?.filePath), 'dir1');
     });
 
-    test('a member of a named structure resolves in the document\'s project copy', async () => {
-        const resolver = new ClassMemberResolver();
-        assert.strictEqual(folderOf((await resolver.findMemberInNamedStructure('TwoOnly', 'WidgetClass', fx().docB))?.file), 'dir2');
-        assert.strictEqual(folderOf((await resolver.findMemberInNamedStructure('OneOnly', 'WidgetClass', fx().docA))?.file), 'dir1');
-    });
+    // #637: 'a member of a named structure' pinned ClassMemberResolver.findMemberInNamedStructure,
+    // retired; References' typed-variable lookup now asks findMemberInClass, pinned just above.
 
     test('interface members come from the copy each project binds to', async () => {
         const locator = new MemberLocatorService();

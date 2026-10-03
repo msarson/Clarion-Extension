@@ -52,7 +52,7 @@ The `test-programs/scope-test-suite` folder contains real Clarion files for test
 1. **No Solution Manager**: The solution isn't being loaded, so redirection parser can't resolve paths
    - Log shows: `⚠️ No solution manager/projects available`
    
-2. **Fallback path fails**: Tries `c:\Development\IBSWorking\genfiles\src\startproc.inc` but file is actually at:
+2. **Fallback path fails**: Tries `c:\Development\WorkingLib\genfiles\src\startproc.inc` but file is actually at:
    - `F:\github\Clarion-Extension\Clarion-Extension\test-programs\scope-test-suite\StartProc.inc`
 
 ## Root Cause
@@ -62,7 +62,7 @@ The ScopeAnalyzer needs access to:
 2. **RedirectionFileParser** with parsed .RED file  
 3. **Correct relative paths** from source file
 
-Currently, in your live environment (c:\Development\IBSWorking\genfiles), the solution manager is null, so file resolution fails.
+Currently, in your live environment (c:\Development\WorkingLib\genfiles), the solution manager is null, so file resolution fails.
 
 ## Next Steps
 
@@ -71,7 +71,7 @@ Currently, in your live environment (c:\Development\IBSWorking\genfiles), the so
    - If not present, solution didn't load
 
 2. **Check .RED file**:
-   - Does `c:\Development\IBSWorking\genfiles\genfiles.red` exist?
+   - Does `c:\Development\WorkingLib\genfiles\genfiles.red` exist?
    - Is it being parsed?
 
 3. **Add better fallback**:
@@ -81,7 +81,7 @@ Currently, in your live environment (c:\Development\IBSWorking\genfiles), the so
 
 ## Testing in Your Environment
 
-Your file: `c:\Development\IBSWorking\genfiles\src\Main_py1.clw`
+Your file: `c:\Development\WorkingLib\genfiles\src\Main_py1.clw`
 
 MAP block should have:
 ```clarion
@@ -93,7 +93,7 @@ MAP block should have:
 ```
 
 Expected file locations:
-- `c:\Development\IBSWorking\genfiles\src\STARTPROC_PY1.INC`
+- `c:\Development\WorkingLib\genfiles\src\STARTPROC_PY1.INC`
 - Or resolved via .RED file
 
 Check logs when hovering over `StartProc` call to see where it's looking for files.

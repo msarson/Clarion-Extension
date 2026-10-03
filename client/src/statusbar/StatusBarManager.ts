@@ -6,6 +6,7 @@ import { buildInitializationStatusText, InitializationStatusPhase } from './Init
 import { buildOperationStatusText, ClarionOperationType } from './OperationStatusText';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager';
 import LoggerManager from '../utils/LoggerManager';
+import { showClarionWorkspaceItems } from './StatusBarVisibility'; // #675
 
 const logger = LoggerManager.getLogger("StatusBarManager");
 logger.setLevel("error");
@@ -27,6 +28,11 @@ function isClarionActiveEditor(): boolean {
     return !!doc && (doc.languageId === 'clarion' || doc.languageId === 'clarion-template');
 }
 
+/** #675 — the workspace items show with a Clarion file focused OR a Clarion solution open. */
+function showWorkspaceItems(): boolean {
+    return showClarionWorkspaceItems({ clarionEditorActive: isClarionActiveEditor(), solutionOpen: !!globalSolutionFile });
+}
+
 /**
  * Status bar items for Clarion extension
  */
@@ -39,6 +45,8 @@ let versionStatusBarItem: StatusBarItem;
 let initializationStatusBarItem: StatusBarItem;
 let operationStatusBarItem: StatusBarItem;
 let operationHideTimer: ReturnType<typeof setTimeout> | undefined;
+// #670 — the operation the item is showing, so clearing build results never hides another one.
+let operationShown: ClarionOperationType | undefined;
 
 // #273 — last-known values so the active-editor visibility refresh can re-show items with the
 // correct content when focus returns to a Clarion document (without re-plumbing their callers).
@@ -72,7 +80,7 @@ function applyInitializationStatusBar(): void {
     const item = ensureInitializationStatusBarItem();
     item.text = initializationState.text;
     item.tooltip = initializationState.tooltip;
-    if (isClarionActiveEditor()) {
+    if (showWorkspaceItems()) {
         item.show();
     } else {
         item.hide();
@@ -124,6 +132,7 @@ export function startOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'running', detail);
     item.tooltip = detail
@@ -137,6 +146,7 @@ export function succeedOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'success', detail);
     item.tooltip = detail
@@ -154,12 +164,18 @@ export function failOperationStatusBar(
     detail?: string
 ): void {
     clearOperationHideTimer();
+    operationShown = operation;
     const item = ensureOperationStatusBarItem();
     item.text = buildOperationStatusText(operation, 'failure', detail);
     item.tooltip = detail
         ? `Clarion ${operation} failed: ${detail}`
         : `Clarion ${operation} failed`;
     item.show();
+}
+
+/** #670 — hide the item only when it is showing a build outcome (Clarion: Clear Build Results). */
+export function hideBuildOperationStatusBar(): void {
+    if (operationShown === 'build') hideOperationStatusBar();
 }
 
 export function hideOperationStatusBar(): void {
@@ -186,7 +202,7 @@ export async function updateConfigurationStatusBar(configuration: string): Promi
     configStatusBarItem.tooltip = `Click to change Clarion configuration (Current: ${configuration})`;
     // #273 — remember the value and only surface it while a Clarion document is active.
     lastConfiguration = configuration;
-    if (isClarionActiveEditor()) {
+    if (showWorkspaceItems()) {
         configStatusBarItem.show();
     } else {
         configStatusBarItem.hide();
@@ -238,7 +254,7 @@ export function updateVersionStatusBar(
     versionStatusBarItem.text = `$(symbol-package) Compile: ${version} (from ${ideDir})`;
     versionStatusBarItem.tooltip = `Compile target: ${version}\nFrom: ${propertiesFile}\nClick to change`;
     // #273 — only surface it while a Clarion document is active (mirrors the TS version indicator).
-    if (isClarionActiveEditor()) {
+    if (showWorkspaceItems()) {
         versionStatusBarItem.show();
     } else {
         versionStatusBarItem.hide();
@@ -270,24 +286,17 @@ export async function updateBuildProjectStatusBar(): Promise<void> {
         return;
     }
 
-    // Check if there's an active editor — and #273, that it is a Clarion document, so the
-    // build action doesn't linger while viewing unrelated files in a Clarion project.
-    const activeEditor = window.activeTextEditor;
-    if (!activeEditor || !isClarionActiveEditor()) {
+    // #675: shown whenever the solution is open. The project comes from the focused Clarion file;
+    // with none in focus (a .cmd, a panel, no editor) it is the whole solution.
+    if (!showWorkspaceItems()) {
         if (buildProjectStatusBarItem) {
             buildProjectStatusBarItem.hide();
         }
         return;
     }
-
-    // Get the file path of the active editor
-    const filePath = activeEditor.document.uri.fsPath;
-    
-    // Get the SolutionCache instance
-    const solutionCache = SolutionCache.getInstance();
-    
-    // Find all projects the file belongs to
-    const projects = solutionCache.findProjectsForFile(filePath);
+    const activeEditor = window.activeTextEditor;
+    const filePath = activeEditor && isClarionActiveEditor() ? activeEditor.document.uri.fsPath : undefined;
+    const projects = filePath ? SolutionCache.getInstance().findProjectsForFile(filePath) : [];
     
     // Create the status bar item if it doesn't exist
     if (!buildProjectStatusBarItem) {
@@ -339,7 +348,7 @@ export function hideBuildProjectStatusBar(): void {
  */
 export function refreshActiveEditorScopedStatusBars(): void {
     if (!window.activeTextEditor) return;
-    const clarion = isClarionActiveEditor();
+    const clarion = showWorkspaceItems(); // #675
 
     applyInitializationStatusBar();
     if (configStatusBarItem) {

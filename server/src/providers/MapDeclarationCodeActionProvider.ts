@@ -69,12 +69,13 @@ export function addEditToChanges(changes: { [uri: string]: TextEdit[] }, fileUri
  * Resolve a bare CLW filename to an absolute path using the redirection parser,
  * falling back to resolving relative to a sibling file's directory.
  *
- * ─── Sibling-dir fallback (cluster site 4 of 4, task 6253f9d5) ─────────────
+ * ─── Sibling-dir fallback (cluster site 3 of 3, task 6253f9d5) ─────────────
  * The `siblingFilePath` fallback at the end of this function is part of a
- * 4-site cluster that documents a load-bearing convention for no-solution-open
+ * 3-site cluster that documents a load-bearing convention for no-solution-open
  * mode + cross-directory siblings outside the project's .red search paths.
- * Move in unison with the cluster-canonical site at `ClassMemberResolver.ts:~1041`
- * + `ImplementationProvider.ts:867` + `MapDeclarationDiagnostics.ts:145`.
+ * Move in unison with the cluster-canonical site in
+ * `ImplementationProvider.findMethodImplementationCrossFile` (ClassMemberResolver's copy went
+ * with it in #637) + `MapDeclarationDiagnostics.ts` (site 2).
  * Phase A audit: `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
  */
 function resolveClwPath(bareOrAbsolute: string, siblingFilePath?: string): string | null {

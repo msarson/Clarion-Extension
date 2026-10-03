@@ -42,7 +42,8 @@ const SOURCE = [
 suite('StructureFieldHover — inline fields of a structure declared with a type argument', () => {
 
     function resolver(): any {
-        // findFieldInTokens uses only the formatter's locationLink on this path.
+        // findFieldInTokens uses only the formatter's locationLink on this path (and, for a
+        // LIKE field only, the variable resolver - #656; this fixture has none).
         const formatter = { locationLink: (uri: string, line: number) => `[${uri}:${line}]` };
         return new StructureFieldResolver(formatter as never, undefined as never, undefined as never) as any;
     }
@@ -50,38 +51,38 @@ suite('StructureFieldHover — inline fields of a structure declared with a type
     const tokens = new ClarionTokenizer(SOURCE).tokenize();
     const uri = 'file:///c:/temp/inline-fields.clw';
 
-    test('an inline field of the in-scope declaration is found', () => {
-        const hover = resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri, 14);
+    test('an inline field of the in-scope declaration is found', async () => {
+        const hover = await resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri, 14);
         assert.ok(hover, 'the inline field declared in the block must resolve');
         const text = JSON.stringify(hover);
         assert.ok(text.includes('CategoryName'), `hover should name the field: ${text}`);
         assert.ok(text.includes('STRING'), `hover should carry the field type: ${text}`);
     });
 
-    test('the second inline field resolves too', () => {
-        const hover = resolver().findFieldInTokens('ItemQ', 'SourceSystem', tokens, uri, 14);
+    test('the second inline field resolves too', async () => {
+        const hover = await resolver().findFieldInTokens('ItemQ', 'SourceSystem', tokens, uri, 14);
         assert.ok(hover, 'SourceSystem must resolve');
     });
 
-    test('scope-aware: the decoy declaration above does not win', () => {
+    test('scope-aware: the decoy declaration above does not win', async () => {
         // Line 10 (CategoryName) is inside the SECOND block. Without atLine the search takes
         // the FIRST `ItemQ` in the file (line 3), whose block is empty, and finds nothing.
-        const withScope = resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri, 14);
-        const withoutScope = resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri);
+        const withScope = await resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri, 14);
+        const withoutScope = await resolver().findFieldInTokens('ItemQ', 'CategoryName', tokens, uri);
         assert.ok(withScope, 'scope-aware lookup finds the field');
         assert.strictEqual(withoutScope, null,
             'first-match-in-file lands on the empty decoy block — this is exactly why atLine exists');
     });
 
-    test('a field that is in NEITHER the block nor the file still returns null', () => {
-        const hover = resolver().findFieldInTokens('ItemQ', 'NoSuchField', tokens, uri, 14);
+    test('a field that is in NEITHER the block nor the file still returns null', async () => {
+        const hover = await resolver().findFieldInTokens('ItemQ', 'NoSuchField', tokens, uri, 14);
         assert.strictEqual(hover, null);
     });
 
-    test('a field belonging to the TYPE (not inline) is not invented by the block search', () => {
+    test('a field belonging to the TYPE (not inline) is not invented by the block search', async () => {
         // `Code` lives in ItemQueueType, in another file — the block search must not claim it;
         // the SDI/type tier answers that one.
-        const hover = resolver().findFieldInTokens('ItemQ', 'Code', tokens, uri, 14);
+        const hover = await resolver().findFieldInTokens('ItemQ', 'Code', tokens, uri, 14);
         assert.strictEqual(hover, null);
     });
 });

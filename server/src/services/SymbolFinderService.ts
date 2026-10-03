@@ -13,6 +13,9 @@
  *     → DefinitionProvider (format as Location)
  */
 
+import { tokensOnLine, findInLineRange } from '../utils/TokenLineIndex';
+import { topLevelLabels } from '../utils/TokenIndexes';
+import { globalScopeIndex } from '../utils/GlobalScopeIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
 import { ClarionDocumentSymbolProvider, ClarionDocumentSymbol } from '../providers/ClarionDocumentSymbolProvider';
@@ -35,6 +38,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from './IncludeIndexDiskCache';
+import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
 const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
@@ -52,7 +56,7 @@ const includeChainIndexCache = new Map<string, ChainIndexEntry>();
 interface SiblingIndexEntry { builtAt: number; fingerprint: string; names: Map<string, string[]>; }
 const siblingLabelIndexCache = new Map<string, SiblingIndexEntry>();
 // #345: the cold build tokenizes the ABC/libsrc universe (17-32s measured on
-// IBSWorking) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
+// WorkingLib) — a 30s TTL EXPIRED MID-PASS and rebuilt inside one validation
 // run. The #340 watcher eviction is the primary invalidation (workspace file
 // changes); the TTL only backstops edits the watcher can't see (libsrc edited
 // outside the workspace), so it can be generous.
@@ -181,6 +185,8 @@ const FILE_MEMBER_DECLARATION_KEYWORDS = new Set(['KEY', 'INDEX']);
  */
 export class SymbolFinderService {
     private symbolProvider: ClarionDocumentSymbolProvider;
+    /** #615: hover's prefix resolver, for the INCLUDE-chain step of findPrefixedField (created on first use). */
+    private chainLocator?: import('./MemberLocatorService').MemberLocatorService;
     
     constructor(
         private tokenCache: TokenCache,
@@ -195,7 +201,7 @@ export class SymbolFinderService {
      */
     public static extractTypeInfo(labelToken: Token, tokens: Token[]): string {
         // 🚀 PERF: build line tokens once — avoids O(n) indexOf + multiple O(n) filter passes
-        const lineTokens = tokens.filter(t => t.line === labelToken.line);
+        const lineTokens = tokensOnLine(tokens, labelToken.line); // #711 — was a walk of every token
         const idx = lineTokens.indexOf(labelToken);
         if (idx + 1 >= lineTokens.length) return 'UNKNOWN';
         const next = lineTokens[idx + 1];
@@ -299,10 +305,12 @@ export class SymbolFinderService {
     ): SymbolInfo | null {
         logger.info(`Finding parameter: "${word}" in scope: ${scopeToken.value}`);
         
-        const content = document.getText();
-        const lines = content.split('\n');
-        const procedureLine = lines[scopeToken.line];
-        
+        // #711 — the one line, not a split of the whole document on every hover.
+        const procedureLine = document.getText({
+            start: { line: scopeToken.line, character: 0 },
+            end: { line: scopeToken.line + 1, character: 0 },
+        }).replace(/\n$/, '');
+
         if (!procedureLine) {
             return null;
         }
@@ -383,13 +391,29 @@ export class SymbolFinderService {
      * Uses ClarionDocumentSymbolProvider to leverage the already-parsed symbol tree.
      * This is more efficient than re-parsing tokens and handles nesting correctly.
      */
+    /**
+     * #711 — the document's symbol tree, built once per token array. It was rebuilt on every hover
+     * that looked up a local (about 100 ms a hover on a 60k-line module, buffer unchanged). The
+     * tree depends only on the tokens, and the token cache returns the same array until the
+     * document changes; a WeakMap lets an edit's discarded array take its tree with it.
+     */
+    private readonly symbolTrees = new WeakMap<Token[], { uri: string; symbols: ReturnType<ClarionDocumentSymbolProvider['provideDocumentSymbols']> }>();
+    private symbolTree(tokens: Token[], document: TextDocument): ReturnType<ClarionDocumentSymbolProvider['provideDocumentSymbols']> {
+        const cached = this.symbolTrees.get(tokens);
+        if (cached && cached.uri === document.uri) return cached.symbols;
+        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri, document);
+        this.symbolTrees.set(tokens, { uri: document.uri, symbols });
+        return symbols;
+    }
+
     findLocalVariable(
         word: string,
         tokens: Token[],
         scopeToken: Token,
         document: TextDocument,
         originalWord?: string,
-        hoverLine?: number
+        hoverLine?: number,
+        hoverCharacter?: number // #656: with it, the fast path needs the cursor ON the label
     ): SymbolInfo | null {
         logger.info(`Finding local variable: "${word}" in scope: ${scopeToken.value} at line ${scopeToken.line}`);
 
@@ -413,16 +437,17 @@ export class SymbolFinderService {
         // (no name collision to mask the miss) got no hover at all.
         if (hoverLine !== undefined) {
             const wordLower = searchText.toLowerCase();
-            const declToken = tokens.find(t =>
-                t.line === hoverLine &&
+            const declToken = tokensOnLine(tokens, hoverLine).find(t => // #711
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                t.value.toLowerCase() === wordLower);
+                t.value.toLowerCase() === wordLower &&
+                // #656: the same name further along the line - `LOC:Flag LIKE(LOC:Flag)` in a
+                // generated queue - names another declaration; only the label is this one.
+                (hoverCharacter === undefined || hoverCharacter <= t.start + t.value.length));
             // Same exclusion the token-fallback further down applies: a MAP/global
             // procedure or method declaration sharing this line is handled by
             // findProcedureDeclaration with the correct scope/type, not here.
-            const isProcDecl = declToken !== undefined && tokens.some(t =>
-                t.line === declToken.line &&
+            const isProcDecl = declToken !== undefined && tokensOnLine(tokens, declToken.line).some(t =>
                 (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                 (t.subType === TokenType.MapProcedure ||
                  t.subType === TokenType.GlobalProcedure ||
@@ -444,7 +469,7 @@ export class SymbolFinderService {
         }
 
         // Get the symbol tree (pass document for better results)
-        const symbols = this.symbolProvider.provideDocumentSymbols(tokens, document.uri, document);
+        const symbols = this.symbolTree(tokens, document);
 
         // Find the procedure/method symbol containing this scope
         const procedureSymbol = this.findProcedureContainingLine(symbols, scopeToken.line);
@@ -474,8 +499,7 @@ export class SymbolFinderService {
         let varSymbolIsControl = false;
         if (rawVarSymbol !== null && bareSearch) {
             const nameLower = searchText.toLowerCase();
-            const lineNameTokens = tokens.filter(t =>
-                t.line === rawVarSymbol.range.start.line &&
+            const lineNameTokens = tokensOnLine(tokens, rawVarSymbol.range.start.line).filter(t => // #711
                 t.value.toLowerCase() === nameLower
             );
             const hasDataLabel = lineNameTokens.some(t =>
@@ -498,8 +522,7 @@ export class SymbolFinderService {
         let varSymbolIsShadowedField = false;
         if (rawVarSymbol !== null && bareSearch && !varSymbolIsControl) {
             const nameLower = searchText.toLowerCase();
-            const matchTok = tokens.find(t =>
-                t.line === rawVarSymbol.range.start.line &&
+            const matchTok = tokensOnLine(tokens, rawVarSymbol.range.start.line).find(t => // #711
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === nameLower);
             if (matchTok && (matchTok.structurePrefix || SymbolFinderService.requiresDotQualification(matchTok))) {
@@ -520,8 +543,7 @@ export class SymbolFinderService {
             const scopeStart = scopeToken.line;
             const scopeEnd = scopeToken.finishesAt ?? Number.MAX_SAFE_INTEGER;
             const wordLower = searchText.toLowerCase();
-            const labelToken = tokens.find(t =>
-                t.line >= scopeStart && t.line <= scopeEnd &&
+            const labelToken = findInLineRange(tokens, scopeStart, scopeEnd, t => // #711 — the scope's lines only
                 t.start === 0 &&
                 (t.type === TokenType.Label || t.type === TokenType.Variable) &&
                 t.value.toLowerCase() === wordLower &&
@@ -531,8 +553,7 @@ export class SymbolFinderService {
             if (labelToken) {
                 // Skip MAP/global procedure declarations — these are handled by
                 // findProcedureDeclaration (step 5) with the correct scope and type.
-                const isProcDecl = tokens.some(t =>
-                    t.line === labelToken.line &&
+                const isProcDecl = tokensOnLine(tokens, labelToken.line).some(t =>
                     (t.type === TokenType.Procedure || t.type === TokenType.Function) &&
                     (t.subType === TokenType.MapProcedure ||
                      t.subType === TokenType.GlobalProcedure ||
@@ -600,7 +621,7 @@ export class SymbolFinderService {
             // scanning every GlobalProcedure (the former broad scan leaked unrelated procedures'
             // locals, so hover disagreed with completion in files with multiple procedures).
             if (scopeToken.subType === TokenType.MethodImplementation) {
-                const declaringProc = new ScopeResolver(tokens).findDeclaringProcedureForMethod(scopeToken);
+                const declaringProc = ScopeResolver.forTokens(tokens).findDeclaringProcedureForMethod(scopeToken); // #711
                 if (declaringProc) {
                     logger.info(`Scope is a Local Derived Method — searching declaring procedure at line ${declaringProc.line} for "${searchText}"`);
 
@@ -824,7 +845,7 @@ export class SymbolFinderService {
         const moduleScopeEndLine = firstProcToken ? firstProcToken.line : Number.MAX_SAFE_INTEGER;
         
         // Find variable in module scope (exclude structure fields which have a parent token)
-        const candidateVars = tokens.filter(t =>
+        const candidateVars = topLevelLabels(tokens, word).filter(t => // #711 — was a walk of every token
             t.type === TokenType.Label &&
             t.start === 0 &&
             t.parent === undefined &&
@@ -843,7 +864,7 @@ export class SymbolFinderService {
         logger.info(`✅ Found module variable: ${moduleVar.value} at line ${moduleVar.line}`);
         
         const typeInfo = SymbolFinderService.extractTypeInfo(moduleVar, tokens);
-        const lineTokens = tokens.filter(t => t.line === moduleVar.line);
+        const lineTokens = tokensOnLine(tokens, moduleVar.line);
         const declaration = lineTokens.map(t => t.value).join(' ');
         
         return {
@@ -1106,9 +1127,9 @@ export class SymbolFinderService {
 
     /**
      * Find a structure field or sub-structure accessed via PRE:Field notation.
-     * e.g. "IBSDataSets:Record" → prefix="IBSDataSets", fieldName="Record"
-     * Finds the structure with structurePrefix="IBSDataSets" and returns scope='field'
-     * so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+     * e.g. "ACMDataSets:Record" → prefix="ACMDataSets", fieldName="Record"
+     * Finds the structure with structurePrefix="ACMDataSets" and returns scope='field'
+     * so FAR only matches ACMDataSets:Record tokens (not bare "Record").
      */
     private async findPrefixedField(word: string, tokens: Token[], document: TextDocument): Promise<SymbolInfo | null> {
         const colonIndex = word.indexOf(':');
@@ -1178,18 +1199,31 @@ export class SymbolFinderService {
             }
         }
 
+        // #615: the INCLUDE chain - this file's, then the MEMBER parent's - through the resolver
+        // hover already uses, so `MatchOption:NoCase` from an INCLUDEd `ITEMIZE(),PRE(MatchOption)`
+        // resolves for F12 too. Before this, F12 fell through to the bare `NoCase` and found nothing.
+        // Loaded at call time: MemberLocatorService imports this module.
+        const { MemberLocatorService } = await import('./MemberLocatorService');
+        this.chainLocator ??= new MemberLocatorService();
+        const inChain = await this.chainLocator.findPrefixFieldTokenInChain(word.substring(0, colonIndex), fieldName, document);
+        if (inChain) {
+            const fromChain = this.findPrefixedFieldInTokens(prefixUpper, fieldName, inChain.tokens, inChain.doc.uri);
+            if (fromChain) return fromChain;
+        }
+
         return null;
     }
 
-    private findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+    /** Public for #656: LikeTypeResolver looks for a PRE field in one given file (no include walk). */
+    findPrefixedFieldInTokens(prefixUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
         const fieldNameUpper = fieldName.toUpperCase();
 
-        // Find structure with matching structurePrefix (e.g. FILE,PRE(IBSDataSets))
+        // Find structure with matching structurePrefix (e.g. FILE,PRE(ACMDataSets))
         const structureToken = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.structurePrefix?.toUpperCase() === prefixUpper
         );
-        if (!structureToken) return null;
+        if (!structureToken) return this.findLabelQualifiedFieldInTokens(prefixUpper, fieldName, tokens, uri);
 
         // Find child token within the structure's range
         const childToken = tokens.find(t => {
@@ -1229,6 +1263,28 @@ export class SymbolFinderService {
             location: { uri, line: targetToken.line, character: targetToken.start },
             declaration: `${structureToken.label ?? structureToken.value} PRE(${prefixUpper})`,
             originalWord: `${prefixUpper}:${fieldName}`,
+            searchWord: resolvedName
+        };
+    }
+
+    /**
+     * #610: `StructureLabel:Member` - the colon form of Field Qualification, for a qualifier
+     * that is no structure's PRE(). Without it the caller fell back to the bare member name
+     * and `Customer:Record` went to whichever FILE's RECORD came first.
+     */
+    private findLabelQualifiedFieldInTokens(labelUpper: string, fieldName: string, tokens: Token[], uri: string): SymbolInfo | null {
+        const hit = findLabelQualifiedMember(tokens, labelUpper, fieldName);
+        if (!hit) return null;
+        const { structure, member } = hit;
+        const resolvedName = member.type === TokenType.Structure ? (member.label ?? fieldName) : member.value;
+        logger.info(`✅ Found Label:Field "${labelUpper}:${fieldName}" — structure "${structure.label}" at line ${member.line} in ${uri}`);
+        return {
+            token: { type: TokenType.Label, value: resolvedName, line: member.line, start: member.start, maxLabelLength: 0 },
+            type: 'field',
+            scope: { token: structure, type: 'field' },
+            location: { uri, line: member.line, character: member.start },
+            declaration: `${structure.label} ${structure.value}`,
+            originalWord: `${structure.label}:${resolvedName}`,
             searchWord: resolvedName
         };
     }
@@ -1376,43 +1432,19 @@ export class SymbolFinderService {
      * this exact decision with F12 instead of running its own scan.
      */
     public findGlobalVariableInCurrentFile(word: string, tokens: Token[], document: TextDocument): SymbolInfo | null {
-        const firstCodeToken = tokens.find(t =>
-            t.type === TokenType.Keyword &&
-            t.value.toUpperCase() === 'CODE'
-        );
-
-        // If no CODE found, look for first PROCEDURE as the boundary
-        const firstProcedure = tokens.find(t =>
-            t.subType === TokenType.Procedure ||
-            t.subType === TokenType.GlobalProcedure
-        );
-
-        // Global scope ends at first CODE, or first PROCEDURE if no CODE found
-        let globalScopeEndLine: number;
-        if (firstCodeToken) {
-            globalScopeEndLine = firstCodeToken.line;
-        } else if (firstProcedure) {
-            globalScopeEndLine = firstProcedure.line;
-        } else {
-            globalScopeEndLine = Number.MAX_SAFE_INTEGER;
-        }
-
-        const globalVar = tokens.find(t =>
-            t.type === TokenType.Label &&
-            t.start === 0 &&
-            t.parent === undefined &&
-            t.line < globalScopeEndLine &&
-            t.value.toLowerCase() === word.toLowerCase()
-        );
+        // Global scope ends at the first CODE, or the first PROCEDURE if there is no CODE.
+        // #711 — the labels before it are indexed once per token array: a miss (the usual answer
+        // for a word declared in another file) walked every token in the document.
+        const globalVar = globalScopeIndex(tokens).plainLabels.get(word.toLowerCase());
 
         if (!globalVar) {
             return null;
         }
 
-        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line} (< ${globalScopeEndLine})`);
+        logger.info(`✅ Found global variable in current file: ${globalVar.value} at line ${globalVar.line}`);
 
         const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
-        const lineTokens = tokens.filter(t => t.line === globalVar.line);
+        const lineTokens = tokensOnLine(tokens, globalVar.line);
         const declaration = lineTokens.map(t => t.value).join(' ');
 
         return {
@@ -1887,10 +1919,18 @@ export class SymbolFinderService {
             const siblingModuleResult = await this.findModuleVariableInSiblingMembers(word, document, position);
             if (siblingModuleResult) return siblingModuleResult;
 
+            // #615: PRE:Field / Label:Member, as the scoped path tries it after the same tiers. A
+            // PROGRAM's own code has no enclosing procedure, so this branch is where it lands -
+            // and without the step `MatchOption:NoCase` there resolved nothing.
+            if (word.indexOf(':') > 0) {
+                const prefixedResult = await this.findPrefixedField(word, tokens, document);
+                if (prefixedResult) return prefixedResult;
+            }
+
             // Try structure field (col-0 Label with a parent Structure token, e.g. queue/group fields in INC)
             const fieldResult = this.findStructureField(word, tokens, position.line, document);
             if (fieldResult) return fieldResult;
-            
+
             return null;
         }
         
@@ -1979,8 +2019,8 @@ export class SymbolFinderService {
         }
         
         // If not found and word has colon, first try to resolve as PRE:Field notation.
-        // e.g. "IBSDataSets:Record" → find structure with structurePrefix="IBSDataSets",
-        // return scope='field' so FAR only matches IBSDataSets:Record tokens (not bare "Record").
+        // e.g. "ACMDataSets:Record" → find structure with structurePrefix="ACMDataSets",
+        // return scope='field' so FAR only matches ACMDataSets:Record tokens (not bare "Record").
         const colonIdx = word.indexOf(':');
         if (colonIdx > 0) {
             const prefixedResult = await this.findPrefixedField(word, tokens, document);
@@ -2079,8 +2119,7 @@ export class SymbolFinderService {
         );
         if (!procToken) return null;
 
-        const labelToken = tokens.find(t =>
-            t.line === procToken.line &&
+        const labelToken = tokensOnLine(tokens, procToken.line).find(t => // #711
             t.start === 0 &&
             t.type === TokenType.Label &&
             t.value.toLowerCase() === wordLower

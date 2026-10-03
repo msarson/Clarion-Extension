@@ -11,6 +11,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { DocumentStructure } from '../DocumentStructure';
 import { ProcedureSignatureUtils } from './ProcedureSignatureUtils';
 import { TokenCache } from '../TokenCache';
+import { procedureNameRange } from './ProcedureNameRange'; // #689
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
@@ -296,10 +297,7 @@ export class CrossFileResolver {
                         if (procedureDecls.length === 1) {
                             const decl = procedureDecls[0];
                             logger.info(`✅ Found MAP declaration at line ${decl.line}`);
-                            const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                                start: { line: decl.line, character: 0 },
-                                end: { line: decl.line, character: decl.value.length }
-                            });
+                            const location = Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(decl, content.split(/\r?\n/)[decl.line])) /* #689 */;
                             return {
                                 token: decl,
                                 file: resolvedPath,
@@ -320,10 +318,7 @@ export class CrossFileResolver {
 
                                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                                     logger.info(`✅ Found matching overload at line ${decl.line}`);
-                                    const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                                        start: { line: decl.line, character: 0 },
-                                        end: { line: decl.line, character: decl.value.length }
-                                    });
+                                    const location = Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(decl, content.split(/\r?\n/)[decl.line])) /* #689 */;
                                     return {
                                         token: decl,
                                         file: resolvedPath,
@@ -337,10 +332,7 @@ export class CrossFileResolver {
                         // Fallback to first declaration
                         const decl = procedureDecls[0];
                         logger.info(`Returning first declaration at line ${decl.line}`);
-                        const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
-                            start: { line: decl.line, character: 0 },
-                            end: { line: decl.line, character: decl.value.length }
-                        });
+                        const location = Location.create(pathToCanonicalUri(resolvedPath), procedureNameRange(decl, content.split(/\r?\n/)[decl.line])) /* #689 */;
                         return {
                             token: decl,
                             file: resolvedPath,
@@ -380,10 +372,10 @@ export class CrossFileResolver {
                     // wrong answer, which is worse than the miss this replaces.
                     const declaringPath = token.sourceFile ?? resolvedPath;
                     logger.info(`✅ Found ${procName} in parent MAP at ${declaringPath}:${token.line}`);
-                    const location = Location.create(`file:///${declaringPath.replace(/\\/g, '/')}`, {
-                        start: { line: token.line, character: 0 },
-                        end: { line: token.line, character: token.value.length }
-                    });
+                    // #689: the canonical URI (#251) and the name's own range.
+                    let lineText: string | undefined;
+                    try { lineText = fs.readFileSync(declaringPath, 'latin1').split(/\r?\n/)[token.line]; } catch { /* range from the token alone */ }
+                    const location = Location.create(pathToCanonicalUri(declaringPath), procedureNameRange(token, lineText));
                     return {
                         token,
                         file: declaringPath,
@@ -472,7 +464,7 @@ export class CrossFileResolver {
 
             if (globalVar) {
                 logger.info(`✅ Found global variable ${variableName} at line ${globalVar.line}`);
-                const location = Location.create(`file:///${resolvedPath.replace(/\\/g, '/')}`, {
+                const location = Location.create(pathToCanonicalUri(resolvedPath), { // #689: canonical URI (#251)
                     start: { line: globalVar.line, character: globalVar.start },
                     end: { line: globalVar.line, character: globalVar.start + globalVar.value.length }
                 });
@@ -588,10 +580,7 @@ export class CrossFileResolver {
                         }
                     }
 
-                    const location = Location.create(pathToCanonicalUri(osDiskPath), { // #251
-                        start: { line: decl.line, character: 0 },
-                        end: { line: decl.line, character: decl.value.length }
-                    });
+                    const location = Location.create(pathToCanonicalUri(osDiskPath), procedureNameRange(decl, content.split(/\r?\n/)[decl.line])) /* #251, #689 */;
                     return { token: decl, file: osDiskPath, line: decl.line, location };
                 }
             }

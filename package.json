@@ -2,7 +2,7 @@
   "name": "clarion-extensions",
   "displayName": "Clarion Extensions",
   "description": "Extension for Clarion Language",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "msarson",
   "repository": {
     "type": "git",
@@ -160,31 +160,14 @@
         "fileLocation": [
           "absolute"
         ],
-        "pattern": [
-          {
-            "regexp": "^\\s*\\d*>?\\s*(.+\\.(?i:clw))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*)\\s+\\[.*\\]$",
-            "file": 1,
-            "line": 2,
-            "column": 3,
-            "severity": 4,
-            "message": 5
-          },
-          {
-            "regexp": "^\\s*(?:MSBUILD|.*)\\s*:\\s+(error|warning)\\s+([A-Z0-9]+):\\s+(.+)\\s+\\[(.+)\\]$",
-            "severity": 1,
-            "code": 2,
-            "message": 3,
-            "file": 4
-          },
-          {
-            "regexp": "^\\s*\\d*>?\\s*(.+)\\((\\d+)\\):\\s+Solution file error\\s+([A-Z0-9]+):\\s+(.+)$",
-            "file": 1,
-            "line": 2,
-            "code": 3,
-            "severity": 1,
-            "message": 4
-          }
-        ]
+        "pattern": {
+          "regexp": "^\\s*(?:\\d+>)?\\s*(\\S.*?\\.(?:[cC][lL][wW]|[iI][nN][cC]|[eE][qQ][uU]?|[iI][nN][tT]))\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s*:\\s*(.*?)(?:\\s+\\[[^\\]]*\\]?)?\\s*$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
       }
     ],
     "keybindings": [
@@ -196,12 +179,12 @@
       {
         "command": "clarion.runWithoutDebugging",
         "key": "ctrl+f5",
-        "when": "clarion.solutionOpen && editorTextFocus"
+        "when": "clarion.solutionOpen && !inDebugMode"
       },
       {
         "command": "clarion.startDebugging",
         "key": "f5",
-        "when": "clarion.solutionOpen && editorTextFocus"
+        "when": "clarion.solutionOpen && !inDebugMode"
       },
       {
         "command": "clarion.quickOpen",
@@ -262,6 +245,12 @@
         "when": "clarion.solutionOpen"
       },
       {
+        "command": "clarion.clearBuildResults",
+        "title": "Clear Build Results",
+        "category": "Clarion",
+        "when": "clarion.solutionOpen"
+      },
+      {
         "command": "clarion.runWithoutDebugging",
         "title": "Run Without Debugging",
         "category": "Clarion",
@@ -276,6 +265,18 @@
       {
         "command": "clarion.setStartupProject",
         "title": "Set as Startup Project",
+        "category": "Clarion",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.unresolvedReferencesReport",
+        "title": "Unresolved File References",
+        "category": "Clarion",
+        "when": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.chooseStartupProject",
+        "title": "Choose Startup Project",
         "category": "Clarion",
         "when": "clarion.solutionOpen"
       },
@@ -572,7 +573,7 @@
       },
       {
         "command": "clarion.setActiveVersion",
-        "title": "Set Active Version",
+        "title": "Set Version",
         "category": "Clarion"
       },
       {
@@ -988,6 +989,12 @@
           "type": "string",
           "default": "",
           "description": "Custom path for the build output log file. If empty, the log file will be created in the solution directory."
+        },
+        "clarion.run.command": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "A command **Run Without Debugging** executes instead of the project's output exe, in a PowerShell terminal, from the project folder. `${exe}` (the output exe), `${projectDir}` and `${args}` (the project's start arguments) are substituted. Example: `& \"${projectDir}\\CopyRun.bat\"`. Leave empty to run the output exe. Debug still starts the exe itself."
         },
         "clarion.build.showInOutputPanel": {
           "type": "boolean",
@@ -1586,6 +1593,23 @@
           "default": "default",
           "description": "How the reservedKeywordLabels check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
+        "clarion.diagnostics.intrinsicRedefinitions.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warns where the compiler warns 'Redefining system intrinsic': SELF or PARENT as a method's parameter or local variable, NULL as the name of a PROCEDURE or method. In that method the new name hides the real SELF or PARENT. Takes effect as soon as it is changed, no reload needed (issue #702)."
+        },
+        "clarion.diagnostics.intrinsicRedefinitions.severity": {
+          "type": "string",
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "default",
+          "description": "How the intrinsicRedefinitions check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
         "clarion.diagnostics.unicodeCharacters.enabled": {
           "type": "boolean",
           "default": true,
@@ -1688,6 +1712,23 @@
           "default": "default",
           "description": "How the missingIncludes check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
         },
+        "clarion.diagnostics.unresolvedFileReferences.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reports an INCLUDE or MEMBER naming a file that cannot be found, which fails the compile. A MODULE name is never reported, since it may name an external library. Takes effect as soon as it is changed, no reload needed (issue #695)."
+        },
+        "clarion.diagnostics.unresolvedFileReferences.severity": {
+          "type": "string",
+          "enum": [
+            "default",
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "default",
+          "description": "How the unresolvedFileReferences check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
         "clarion.diagnostics.missingConstants.enabled": {
           "type": "boolean",
           "default": true,
@@ -1772,6 +1813,11 @@
           ],
           "default": "default",
           "description": "How the interfaceImplementation check is reported. default keeps the check's built-in severity; error, warning, information or hint override it. Takes effect as soon as it is changed, no reload needed (issue #543)."
+        },
+        "clarion.restoredTabDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the problems of every Clarion file in a restored editor tab after a restart, not only the tab in front. Each is checked from disk once the solution has loaded, one at a time. Takes effect after a window reload (issue #696)."
         },
         "clarion.referencesCodeLens.enabled": {
           "type": "boolean",

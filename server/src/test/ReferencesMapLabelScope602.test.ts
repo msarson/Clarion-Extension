@@ -2,18 +2,18 @@
  * #602 — a MAP prototype written at column 0 is resolved as a MODULE VARIABLE, which narrows the
  * reference search to a graph-derived subset of the program instead of the whole program.
  *
- * On ap1.sln, settled, `PrintForm` is declared at `DMCommon.clw:152` inside
- * `MODULE('IBSPRINTFORM.DLL')` and called from four of DMCommon's member modules:
+ * On app1.sln, settled, `RenderDoc` is declared at `DataUtil.clw:152` inside
+ * `MODULE('RENDERLIB.DLL')` and called from four of DataUtil's member modules:
  *
  *     from DECLARATION  Scope="module" -> 70 file(s)  -> 7 refs
  *     from CALL SITE    Scope="global" -> 156 file(s) -> 8 refs
  *
  * The server's own SymbolFinderService trace names the culprit:
  *
- *     🔍 Finding symbol: "PrintForm" at line 152
+ *     🔍 Finding symbol: "RenderDoc" at line 152
  *     No scope found, checking module/global only
- *     Finding module variable: "PrintForm"
- *     ✅ Found module variable: PrintForm at line 152
+ *     Finding module variable: "RenderDoc"
+ *     ✅ Found module variable: RenderDoc at line 152
  *
  * `findModuleVariable` looks for a `Label` at column 0 with no parent, before the first procedure
  * implementation — which is exactly the shape of a MAP prototype written in the explicit-keyword
@@ -67,7 +67,7 @@ suite('FAR on a column-0 MAP prototype (#602)', () => {
             '  RETURN',                                        // 8
         ].join('\r\n'),
         // A member the parent's MAP never mentions, calling both. Mirrors
-        // BrowseDMWorkTicket_DMCommon.clw, whose own procedure is not prototyped in DMCommon's MAP.
+        // BrowseWorkItem_DataUtil.clw, whose own procedure is not prototyped in DataUtil's MAP.
         'member.clw': [
             "  MEMBER('parent.clw')",                          // 0
             'UndeclaredProc PROCEDURE()',                      // 1

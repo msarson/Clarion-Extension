@@ -188,8 +188,12 @@ export class ClarionExtensionCommands {
    * point under non-default install layouts).
    * Cancel from either stage → no state change.
    *
-   * Does NOT touch solution-bound state. The version status-bar refresh fires
-   * inside `setActiveClarionVersion` (B1 entry point) on success.
+   * #677: with a solution open, a pick becomes THAT solution's version - saved to
+   * `solutions[].version` / `propertiesFile` and the solution reloaded (#573,
+   * `applyPickedVersion`). With none open it sets the session's version. The user
+   * default (`clarion.activeVersion`) is only the "Set as default for new solutions"
+   * item. Shown as "Clarion: Set Version"; the id stays clarion.setActiveVersion.
+   * The version status-bar refresh fires inside `setActiveClarionVersion` on success.
    */
   static async setActiveVersionCommand(): Promise<void> {
     try {

@@ -4,7 +4,7 @@ Hand-written, like `ViewJoinTest`, and for the same reason: to record what the *
 actually accepts** for colon-prefixed procedure prototypes, so resolution can be checked against the
 language rather than against assumption.
 
-Verified against **Clarion 10.0.12567** (`F:\DirectSystems\Clarion10`). It compiles and links
+Verified against **Clarion 10.0.12567**. It compiles and links
 cleanly, producing `PrefixedPrototypeTest.exe`.
 
 ## Why it exists

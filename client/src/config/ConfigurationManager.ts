@@ -4,10 +4,13 @@ import { SolutionCache } from '../SolutionCache';
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
-import { writeIdePreferences } from '../solution/ClarionIdePreferences';
+import { pushConfigurationToIde } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
+import { configurationToStore } from '../utils/ConfigurationPrecedence'; // #674
+import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers'; // #674
+import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("ConfigurationManager");
 logger.setLevel("error"); // Production: Only log errors
@@ -44,15 +47,20 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         return;
     }
 
-    const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
+    const picked = await vscodeWindow.showQuickPick(availableConfigs, {
         placeHolder: "Select a configuration",
     });
+    // #674: store the .sln's own entry for the name picked (`Release` -> `Release|Win32`), the form a
+    // solution load stores (#530), so the setting keeps one format whichever action wrote it.
+    const selectedConfig = picked
+        ? configurationToStore(picked, extractConfigurationsFromSolution(fs.readFileSync(globalSolutionFile, 'utf-8')))
+        : undefined;
 
     if (selectedConfig) {
-        logger.info(`✅ User selected configuration: ${selectedConfig}`);
+        logger.info(`✅ User selected configuration: ${picked} (stored as ${selectedConfig})`);
         logger.info(`📊 Current globalSettings.configuration BEFORE update: ${globalSettings.configuration}`);
-        
-        vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig}`);
+
+        vscodeWindow.showInformationMessage(`Configuration set to: ${picked}`);
         
         // Update global settings and save to workspace
         globalSettings.configuration = selectedConfig;
@@ -66,19 +74,15 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         );
         logger.info(`💾 Called setGlobalClarionSelection with config: ${selectedConfig}`);
 
-        // Patch .sln.cache if it already exists so Clarion IDE sees the updated config
-        if (globalSolutionFile) {
-            const existingFull = readActiveConfigFromSlnCache(globalSolutionFile);
-            patchSlnCacheConfig(globalSolutionFile, buildFullConfig(selectedConfig, existingFull));
-        }
-
-        // Sync configuration back to Clarion IDE preferences
+        // Tell the Clarion IDE, so it opens the solution on the same configuration (#664).
+        const [configName, platform] = selectedConfig.split('|');
         if (globalSolutionFile && globalClarionPropertiesFile) {
-            const parts = selectedConfig.split('|');
-            await writeIdePreferences(globalSolutionFile, globalClarionPropertiesFile, {
-                activeConfiguration: parts[0],
-                activePlatform: parts[1] ?? 'Win32'
+            await pushConfigurationToIde(globalSolutionFile, globalClarionPropertiesFile, {
+                activeConfiguration: configName,
+                activePlatform: platform ?? 'Win32'
             });
+        } else if (globalSolutionFile) {
+            patchSlnCacheConfig(globalSolutionFile, buildFullConfig(configName, readActiveConfigFromSlnCache(globalSolutionFile)));
         }
 
         // #563 — status bar, Tools pane and Solution View from the one stored value.

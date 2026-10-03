@@ -37,18 +37,31 @@ export class ProcedureHoverResolver {
 
     /**
      * Resolves hover for a procedure call (e.g., MyProc() or START(MyProc))
+     *
+     * `allowArgumentReference` admits the weak `SORT(Queue, CompareProc)` shape, and is
+     * false for the router's call, which runs ahead of every variable tier. A bare
+     * argument naming an in-scope variable IS that variable — the language resolves it
+     * to the nearest declaration, and a same-named procedure is reachable there only as
+     * `Name()` — so answering with the procedure from that position would shadow the
+     * declaration the compiler picks. HoverProvider passes true from its last tier,
+     * once no variable has claimed the word.
      */
     async resolveProcedureCall(
         word: string,
         document: TextDocument,
         position: Position,
         wordRange: any,
-        line: string
+        line: string,
+        allowArgumentReference = false
     ): Promise<Hover | null> {
         const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
         const isSelfMethodCall = word.toUpperCase().includes('SELF.') && /\w+\.\w+/.test(word);
-        
+
         if (!detection.isProcedure || isSelfMethodCall) {
+            return null;
+        }
+
+        if (detection.isArgumentReference && !allowArgumentReference) {
             return null;
         }
 
@@ -83,7 +96,15 @@ export class ProcedureHoverResolver {
         // scans the current document, so hover at call sites of such procedures was
         // dead. Locate the declaration via the shared walk and resolve the
         // implementation from ITS document — the proven declaration-side path.
-        if (!mapDecl) {
+        //
+        // Skipped for a bare ARGUMENT reference (`SORT(Queue, CompareProc)`): that
+        // shape matches every identifier passed as an argument, so most words
+        // arriving here are ordinary variables with no declaration to find — and
+        // this walk is the expensive one (~89s cold on a large PROGRAM file before
+        // its result is memoized). A callback's prototype is visible to the compiler
+        // from the calling module, which the cheap in-document MAP scan above
+        // already covers.
+        if (!mapDecl && !detection.isArgumentReference) {
             const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens);
             mk('walkIncludes');
             if (hit) {
@@ -182,7 +203,7 @@ export class ProcedureHoverResolver {
             return null;
         }
 
-        const procName = mapProcMatch[2]; // [1] is whitespace, [2] is name, [3] is keyword
+        const procName = mapProcMatch[1]; // [1] is name, [2] is keyword
         const procNameStart = line.indexOf(procName);
         const procNameEnd = procNameStart + procName.length;
         
@@ -230,10 +251,59 @@ export class ProcedureHoverResolver {
                             end: { line: position.line, character: procNameEnd }
                         }
                     };
-                    
+
                     return this.formatter.formatProcedure(procName, memberMapResult.location, implLocation, document, position);
                 }
             }
+
+            // No MAP prototype anywhere (no local entry, no MEMBER-parent match) — the
+            // cursor is still sitting on this procedure's own declaration line, matched
+            // by PROCEDURE_IMPLEMENTATION above. Answer with that instead of falling
+            // through to variable/EQUATE tiers, which can match an unrelated same-named
+            // symbol elsewhere in the solution. A method declared in a CLASS or INTERFACE
+            // body matches the same pattern and is left to the method-declaration tier.
+            const isStandaloneProcedure = tokens.some(t =>
+                t.line === position.line &&
+                TokenHelper.isProcedureOrFunction(t) &&
+                t.subType === TokenType.GlobalProcedure);
+            if (!isStandaloneProcedure) {
+                return null;
+            }
+            const bareImplLocation: Location = {
+                uri: document.uri,
+                range: {
+                    start: { line: position.line, character: procNameStart },
+                    end: { line: position.line, character: procNameEnd }
+                }
+            };
+
+            // #313: the prototype may sit in an INC included inside a MAP (this file's or
+            // the MEMBER parent's), which neither lookup above follows. A bare prototype
+            // counts there as well as one in a MODULE block.
+            const includeHit = await this.mapResolver.findDeclarationInMapIncludes(procName, document, tokens, true);
+            if (includeHit) {
+                const declLineText = includeHit.doc.getText({
+                    start: { line: includeHit.declLine, character: 0 },
+                    end: { line: includeHit.declLine, character: Number.MAX_SAFE_INTEGER }
+                });
+                const includeDecl: Location = {
+                    uri: includeHit.doc.uri,
+                    range: {
+                        start: { line: includeHit.declLine, character: 0 },
+                        end: { line: includeHit.declLine, character: declLineText.length }
+                    }
+                };
+                return this.formatter.formatProcedure(procName, includeDecl, bareImplLocation, document, position);
+            }
+
+            // formatProcedure returns null for a header-only card, which is all it has here.
+            const bareHover = await this.formatter.formatProcedure(procName, null, bareImplLocation, document, position);
+            return bareHover ?? {
+                contents: {
+                    kind: 'markdown',
+                    value: `**${procName}** (Procedure)\n\n⚠️ No MAP prototype found`
+                }
+            };
         } else {
             // Found MAP in current file
             const implLocation: Location = {

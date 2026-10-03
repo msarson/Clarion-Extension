@@ -34,10 +34,10 @@ describe('formatBuildHeader (#531)', () => {
 
     it('says project when a single project is built', () => {
         const [first] = formatBuildHeader({
-            buildTarget: 'Project', targetName: 'IBSCommon', configuration: 'Release',
+            buildTarget: 'Project', targetName: 'CommonLib', configuration: 'Release',
             msBuildPath: 'msbuild.exe', buildArgs: [],
         });
-        assert.ok(/Building project IBSCommon/.test(first), first);
+        assert.ok(/Building project CommonLib/.test(first), first);
         assert.ok(/Release$/.test(first) || /Release\b/.test(first), first);
     });
 

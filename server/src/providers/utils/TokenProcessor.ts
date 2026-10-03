@@ -1,4 +1,5 @@
 import { Token } from "../../ClarionTokenizer";
+import { classNameFromMethodLabel, isMethodImplementationLabel } from '../../utils/EnclosingClassResolver';
 import LoggerManager from "../../logger";
 
 const logger = LoggerManager.getLogger("TokenProcessor");
@@ -53,11 +54,7 @@ export class TokenProcessor {
      * e.g., "StringTheory.Append" -> "StringTheory"
      */
     static extractClassNameFromMethod(methodName: string): string | null {
-        const dotIndex = methodName.indexOf(".");
-        if (dotIndex > 0) {
-            return methodName.substring(0, dotIndex).toUpperCase();
-        }
-        return null;
+        return classNameFromMethodLabel(methodName)?.toUpperCase() ?? null;   // #622
     }
 
     /**
@@ -76,7 +73,7 @@ export class TokenProcessor {
      * Check if a token represents a class method implementation
      */
     static isClassMethodImplementation(token: Token): boolean {
-        return token.value.includes(".");
+        return isMethodImplementationLabel(token.value);   // #622
     }
 
     /**

@@ -9,6 +9,7 @@
  * See GitHub issue #50 for the refactor rationale.
  */
 
+import { tokensWithPrefix, includeTokens } from '../utils/TokenIndexes';
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -19,7 +20,9 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, detectMemberAccess } from '../utils/ClassMemberResolver';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration } from '../utils/ClassMemberScan';
+import { nearestClassLabel } from '../utils/ClassNameUtils';
+import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
 import { SolutionManager } from '../solution/solutionManager';
@@ -28,6 +31,9 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
+import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
+import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAncestry';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -87,24 +93,6 @@ export class MemberLocatorService {
             }
         }
         return null;
-    }
-
-    /**
-     * Finds the declaration location of a variable.
-     * Search order: current file → MEMBER parent (+ its INCLUDE chain) → current INCLUDE chain.
-     * Returns a Location or null.
-     */
-    async findVariableLocation(
-        varName: string,
-        document: TextDocument
-    ): Promise<Location | null> {
-        const tokens = this.tokenCache.getTokens(document);
-        const result = await this.findVariableTokenCrossFile(varName, tokens, document);
-        if (!result) return null;
-        return Location.create(result.doc.uri, {
-            start: { line: result.token.line, character: result.token.start },
-            end: { line: result.token.line, character: result.token.start + result.token.value.length }
-        });
     }
 
     /**
@@ -187,6 +175,31 @@ export class MemberLocatorService {
             start: { line: result.token.line, character: result.token.start },
             end: { line: result.token.line, character: result.token.start + result.token.value.length }
         });
+    }
+
+    /**
+     * #611: the CLASS whose members `receiver.Member` names, for hover and F12 alike - or null
+     * when the receiver is not a CLASS (a GROUP/QUEUE/FILE receiver keeps its field paths).
+     *
+     * A receiver that is itself a CLASS declaration (`ThisWindow CLASS(WinMgr)`) is that class,
+     * so its own overrides are found before the parent's; resolveVariableType answers the parent
+     * there, which F12 used and so skipped every local override. Otherwise the receiver is a
+     * variable, and its declared type counts only if that type is a CLASS.
+     */
+    async resolveReceiverClass(
+        receiver: string,
+        tokens: Token[],
+        document: TextDocument,
+        atLine: number
+    ): Promise<{ className: string; isReference: boolean } | null> {
+        const ownLabel = nearestClassLabel(tokens, receiver, atLine);
+        if (ownLabel) return { className: ownLabel.value, isReference: false };
+
+        const typeInfo = await this.resolveVariableType(receiver, tokens, document, atLine);
+        if (!typeInfo?.isClass) return null;
+        const isClass = nearestClassLabel(tokens, typeInfo.typeName, atLine) !== null
+            || (await this.resolveClassDeclarationInfo(typeInfo.typeName, document))?.structureType === 'CLASS';
+        return isClass ? { className: typeInfo.typeName, isReference: typeInfo.isReference } : null;
     }
 
     /**
@@ -340,11 +353,90 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         document: TextDocument,
-        paramCount?: number
+        paramCount?: number,
+        atLine?: number
+    ): Promise<MemberInfo | null> {
+        const hit = await this.findMemberInClassTiers(className, memberName, document, paramCount, atLine);
+        return this.preferFittingInheritedOverload(hit, memberName, document, paramCount, new Set([className.toLowerCase()]), atLine);
+    }
+
+    /**
+     * #650 — `className` declared as a CLASS in the document (a generated procedure's local
+     * `ThisWindow`; a module may declare it in several procedures): the declaration a member
+     * access at `atLine` belongs to is the nearest above it (#608). Its own body answers, else
+     * its own parent does. Undefined when the document does not declare the class, so those
+     * lookups, and every caller without a line, keep the tiers below.
+     *
+     * Also the fast path for an inherited member of a local class: the tiers below go to the
+     * declaration index first, which holds a `ThisWindow` from nearly every generated file, so
+     * the index could not name the one declaring file and fell through to the INCLUDE and MEMBER
+     * walks - 80-400ms for F12 on `SELF.Request`, where the answer is the parent's own member.
+     */
+    private async findMemberInNearestLocalClass(
+        tokens: Token[],
+        className: string,
+        memberName: string,
+        document: TextDocument,
+        docPath: string,
+        paramCount: number | undefined,
+        atLine: number
+    ): Promise<MemberInfo | null | undefined> {
+        const wanted = className.toLowerCase();
+        const declarations = tokens.filter(t =>
+            t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS' &&
+            t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
+        if (declarations.length === 0) return undefined;
+        const own = [...declarations].reverse().find(t => t.line <= atLine) ?? declarations[0];
+
+        const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
+        if (inBody) return inBody;
+        const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
+        const parent = extractParentName(declLine);
+        return parent ? this.findMemberInClass(parent, memberName, document, paramCount) : null;
+    }
+
+    /**
+     * #611: a class that declares the name but no overload the call fits does not hide an
+     * inherited one that does - `ThisWindow.Run()` on a ThisWindow overriding only
+     * Run(USHORT,BYTE) is the parent's Run(). Climb from the class the hit came from and take
+     * the first fitting overload; when none fits anywhere, keep the closest pick as before.
+     */
+    private async preferFittingInheritedOverload(
+        hit: MemberInfo | null,
+        memberName: string,
+        document: TextDocument,
+        paramCount: number | undefined,
+        visited: Set<string>,
+        atLine?: number
+    ): Promise<MemberInfo | null> {
+        if (!hit?.arityMismatch) return hit;
+        // #650: with a line, the parent of the local declaration the access belongs to (#628).
+        const parent = atLine !== undefined
+            ? await this.resolveParentName(hit.className, document, atLine)
+            : (await this.resolveClassDeclarationInfo(hit.className, document))?.parentName;
+        if (!parent || visited.has(parent.toLowerCase())) return hit;
+        visited.add(parent.toLowerCase());
+        const up = await this.findMemberInClassTiers(parent, memberName, document, paramCount);
+        if (!up) return hit;
+        const fitting = await this.preferFittingInheritedOverload(up, memberName, document, paramCount, visited);
+        return fitting && !fitting.arityMismatch ? fitting : hit;
+    }
+
+    private async findMemberInClassTiers(
+        className: string,
+        memberName: string,
+        document: TextDocument,
+        paramCount?: number,
+        atLine?: number
     ): Promise<MemberInfo | null> {
         this.trace(`findMemberInClass start class="${className}" member="${memberName}" paramCount=${paramCount ?? 'n/a'}`);
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
+
+        if (atLine !== undefined) {
+            const local = await this.findMemberInNearestLocalClass(tokens, className, memberName, document, docPath, paramCount, atLine);
+            if (local !== undefined) return local;
+        }
 
         // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
         // #314: use the tokens already in hand — scanBodyForMember re-loaded the CURRENT
@@ -376,7 +468,7 @@ export class MemberLocatorService {
                 this.trace(`findMemberInClass hit SDI-located body file="${fromSdi.file}" line=${fromSdi.line}`);
                 return fromSdi;
             }
-            const fromAscent = await this.walkParentChain(className, memberName, paramCount, new Set(), document);
+            const fromAscent = await this.walkParentChain(className, memberName, paramCount, document);
             if (fromAscent) {
                 this.trace(`findMemberInClass hit parent chain (SDI-first) file="${fromAscent.file}" line=${fromAscent.line}`);
                 return fromAscent;
@@ -432,7 +524,6 @@ export class MemberLocatorService {
             className,
             memberName,
             paramCount,
-            new Set(),
             document
         );
         if (fromHierarchy) {
@@ -593,19 +684,14 @@ export class MemberLocatorService {
     /**
      * #358: ensure the MEMBER('...') parent of `document` is tokenized and in the TokenCache,
      * OFF the felt path. Resolving a MEMBER module's globals (e.g. GlobalErrors, thisStartup)
-     * walks to their declarations in the parent — on IBSWorking that parent (IBSCommon.clw) is
+     * walks to their declarations in the parent — on WorkingLib that parent (CommonLib.clw) is
      * 873 KB / 68k tokens declaring globals ~9,500 lines deep, so the FIRST cold receiver-type
      * resolution pays ~1.1s just to tokenize it. Warming it on the startup idle lane pays that
      * once, in the background, so no interactive validation lands it. Best-effort: returns true
      * when a parent was resolved (already-cached or freshly loaded).
      */
     public async warmMemberParent(document: TextDocument): Promise<boolean> {
-        const tokens = this.tokenCache.getTokens(document);
-        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
-        if (!memberToken?.referencedFile) return false;
-
-        const parentPath = this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
+        const parentPath = await this.memberParentPath(document);
         if (!parentPath) return false;
 
         // Already tokenized (open in the editor, or warmed by another member sharing this
@@ -615,6 +701,27 @@ export class MemberLocatorService {
 
         await this.loadDocument(parentPath); // reads + tokenizes + caches
         return true;
+    }
+
+    /**
+     * #613: the MEMBER('...') parent of `document`, tokenized - or null for a PROGRAM file or an
+     * unresolvable parent. A generated program declares its global TYPEs (`tqRow QUEUE,TYPE`)
+     * there, and since #483 the structure index deliberately leaves a PROGRAM's data out, so a
+     * lookup that needs one has to read the parent itself.
+     */
+    public async loadMemberParent(document: TextDocument): Promise<{ doc: TextDocument; tokens: Token[]; filePath: string } | null> {
+        const parentPath = await this.memberParentPath(document);
+        if (!parentPath) return null;
+        const loaded = await this.loadDocument(parentPath);
+        return loaded ? { ...loaded, filePath: parentPath } : null;
+    }
+
+    private async memberParentPath(document: TextDocument): Promise<string | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const memberToken = await this.resolveMemberHeaderToken(tokens, path.dirname(docPath), docPath);
+        if (!memberToken?.referencedFile) return null;
+        return this.resolveFilePath(this.normalizeMemberFilename(memberToken.referencedFile), path.dirname(docPath), docPath);
     }
 
     // -------------------------------------------------------------------------
@@ -683,7 +790,7 @@ export class MemberLocatorService {
         // diagnostics pipeline (ReturnValueDiagnostics -> resolveVariableType) while
         // a hover is in flight, and adding yields here let that background work
         // interleave with the hover (NetDebugTrace cold hover 1.06s -> 2.5s on the
-        // ap1.sln rig). With the label pre-filter a miss no longer tokenizes, so the
+        // app1.sln rig). With the label pre-filter a miss no longer tokenizes, so the
         // walk is short enough to run without yielding, exactly as it did before.
         const timeSlice = async (): Promise<void> => { /* no yield — see above */ };
 
@@ -713,7 +820,7 @@ export class MemberLocatorService {
     // declare it, and there is no reason to tokenize it. The tokenize is the
     // expensive part: cold-loading the include universe of an 11K-line generated
     // PROGRAM module cost ~10.5s per NEW undeclared word (`DLL(dll_mode)` in
-    // IBSCommon.clw), all of it in this walk, to return null.
+    // CommonLib.clw), all of it in this walk, to return null.
     //
     // Each reachable file is scanned ONCE per cross-file epoch for its column-0
     // labels and its INCLUDE targets (one regex pass over the text; the text is
@@ -734,9 +841,7 @@ export class MemberLocatorService {
     // ---------------------------------------------------------------------------
 
     private static includeTargetsFromTokens(tokens: Token[]): string[] {
-        return tokens
-            .filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile)
-            .map(t => t.referencedFile!);
+        return includeTokens(tokens).map(t => t.referencedFile!); // #711 — indexed once per token array
     }
 
     /** One pass over raw text: every column-0 label (lower-cased) and every INCLUDE target. */
@@ -964,7 +1069,8 @@ export class MemberLocatorService {
         // structure's own prefix too, even though it's an attribute argument, not a real field.
         // Real fields are always declared on later lines, so this line comparison cleanly excludes
         // that noise without touching the tokenizer's core (widely-depended-on) structure walker.
-        const fieldMatch = tokens.find(t =>
+        const withPrefix = tokensWithPrefix(tokens, prefix); // #711 — was two walks of every token
+        const fieldMatch = withPrefix.find(t =>
             t.isStructureField &&
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             t.value.toUpperCase() === fieldUpper &&
@@ -972,11 +1078,15 @@ export class MemberLocatorService {
         );
         if (fieldMatch) return fieldMatch;
 
-        return tokens.find(t =>
+        const prefixed = withPrefix.find(t =>
             t.structurePrefix?.toUpperCase() === prefixUpper &&
             // Label tokens: t.value is the name; Structure tokens (nested GROUP etc): t.label is the name
             (t.value.toUpperCase() === fieldUpper || t.label?.toUpperCase() === fieldUpper)
         );
+        if (prefixed) return prefixed;
+
+        // #610: no PRE() matches - the colon form of Field Qualification, StructureLabel:Member
+        return findLabelQualifiedMember(tokens, prefix, fieldName)?.member;
     }
 
     private async searchIncludesForPrefixField(
@@ -986,8 +1096,7 @@ export class MemberLocatorService {
         fromDir: string,
         visited: Set<string>
     ): Promise<{ token: Token; tokens: Token[]; doc: TextDocument } | null> {
-        const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
-        for (const inc of includeTokens) {
+        for (const inc of includeTokens(tokens)) { // #711 — indexed once per token array
             const resolvedPath = this.resolveFilePath(inc.referencedFile!, fromDir);
             if (!resolvedPath || visited.has(resolvedPath.toLowerCase())) continue;
             visited.add(resolvedPath.toLowerCase());
@@ -1109,7 +1218,7 @@ export class MemberLocatorService {
             if (token.label?.toLowerCase() !== methodName.toLowerCase()) continue;
 
             const memberLine = docLines[token.line] ?? '';
-            const declParamCount = this.countParamsInDecl(memberLine);
+            const declParamCount = countParametersInDeclaration(memberLine);
             candidates.push({ type: 'PROCEDURE', line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
 
@@ -1272,8 +1381,7 @@ export class MemberLocatorService {
         document: TextDocument,
         inlineAllowed: boolean
     ): Promise<Set<string> | null> {
-        const visited = new Set<string>();
-        return this.collectImplementedInterfaceMethodsRecursive(className, document, inlineAllowed, visited);
+        return this.collectImplementedInterfaceMethodsUpChain(className, document, inlineAllowed);
     }
 
     /**
@@ -1314,40 +1422,28 @@ export class MemberLocatorService {
             if (parts[0].toLowerCase() !== clsLower) continue;
             const methodName = parts[2].toLowerCase();
             const lineText = docLines[t.line] ?? '';
-            const paramCount = this.countParamsInDecl(lineText);
+            const paramCount = countParametersInDeclaration(lineText);
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;
     }
 
-    private async collectImplementedInterfaceMethodsRecursive(
+    private async collectImplementedInterfaceMethodsUpChain(
         className: string,
         document: TextDocument,
-        inlineAllowed: boolean,
-        visited: Set<string>
+        inlineAllowed: boolean
     ): Promise<Set<string> | null> {
-        const key = className.toLowerCase();
-        if (visited.has(key)) return new Set();
-        visited.add(key);
-
-        const info = await this.resolveClassDeclarationInfo(className, document);
-        if (!info) return null;
-
-        const ownImpls = await this.collectImplementedInterfaceMethodsForDeclaration(info, document, inlineAllowed);
-        if (ownImpls === null) return null;
-
-        const merged = new Set(ownImpls);
-        if (info.parentName) {
-            const parentImpls = await this.collectImplementedInterfaceMethodsRecursive(
-                info.parentName,
-                document,
-                inlineAllowed,
-                visited
-            );
-            if (parentImpls === null) return null;
-            for (const entry of parentImpls) {
-                merged.add(entry);
-            }
+        // #624 — same ascent as every other. The reduction here is a union, and the
+        // contract is strict: ANY link that cannot be resolved makes the whole answer
+        // null, so callers skip rather than report a false positive. A cycle is not an
+        // unresolved link — ancestorChain simply stops, contributing nothing, as the
+        // recursive form's visited-check did.
+        const merged = new Set<string>();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info) return null;
+            const ownImpls = await this.collectImplementedInterfaceMethodsForDeclaration(info, document, inlineAllowed);
+            if (ownImpls === null) return null;
+            for (const entry of ownImpls) merged.add(entry);
         }
 
         return merged;
@@ -1441,7 +1537,6 @@ export class MemberLocatorService {
         const lines = text.split(/\r?\n/);
         const classNamePattern = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'i');
         const modulePattern = /,\s*MODULE\s*\(\s*['"]?([^'")\s]+)['"]?\s*\)/i;
-        const parentPattern = /\bCLASS\s*\(\s*([A-Za-z_]\w*)\s*\)/i;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -1451,7 +1546,8 @@ export class MemberLocatorService {
                 filePath,
                 line: i,
                 structureType: 'CLASS',
-                parentName: parentPattern.exec(line)?.[1],
+                parentName: extractParentName(line) ?? undefined,   // #623
+
                 moduleName: modulePattern.exec(line)?.[1],
                 isType: /,\s*TYPE\b/i.test(line),
                 lineContent: line.trim()
@@ -1572,7 +1668,7 @@ export class MemberLocatorService {
             if (!token.label) continue;
             methods.push({
                 name: token.label,
-                paramCount: this.countParamsInDecl(docLines[token.line] ?? '')
+                paramCount: countParametersInDeclaration(docLines[token.line] ?? '')
             });
         }
         return methods;
@@ -1608,19 +1704,19 @@ export class MemberLocatorService {
                 const diskResult =
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'CLASS',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     ) ??
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'GROUP',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     ) ??
                     scanClassBodyForMember(
                         resolvedPath, className, memberName, paramCount, 'QUEUE',
-                        (line) => this.countParamsInDecl(line),
+                        (line) => countParametersInDeclaration(line),
                         (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
                         liveContent
                     );
@@ -1640,35 +1736,36 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        visited: Set<string>,
         document?: TextDocument
     ): Promise<MemberInfo | null> {
-        if (visited.has(className.toLowerCase())) {
-            this.trace(`walkParentChain cycle stop at "${className}"`);
-            return null;
-        }
-        visited.add(className.toLowerCase());
-        this.trace(`walkParentChain class="${className}" member="${memberName}"`);
-
-        let classInfo: StructureDeclarationInfo | null = null;
-        if (document) {
-            classInfo = await this.resolveClassDeclarationInfo(className, document);
-        }
-        if (!classInfo) {
-            await this.ensureIndexBuilt();
-            const classInfos = this.sdi.findFor(className, document?.uri); // #571
-            if (classInfos.length === 0) return null;
-            classInfo = classInfos.find(d => !d.isType) || classInfos[0];
-        }
-        const result = await this.scanBodyForMember(classInfo.filePath, className, memberName, paramCount, classInfo.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
-        if (result) {
-            this.trace(`walkParentChain found "${memberName}" in "${classInfo.filePath}" line=${result.line}`);
-            return result;
-        }
-
-        if (inheritsMembersFromParent(classInfo.structureType) && classInfo.parentName) {
-            this.trace(`walkParentChain ascend "${className}" -> "${classInfo.parentName}"`);
-            return this.walkParentChain(classInfo.parentName, memberName, paramCount, visited, document);
+        // #624 — the ascent, its cycle guard and the TYPE-vs-instance pick come from
+        // ClassAncestry; what stays here is this walk's own reduction (first hit wins)
+        // and its own resolution order (open document before the index).
+        for await (const { name, info } of ancestorChain(className, async n => {
+            let classInfo: StructureDeclarationInfo | null = document
+                ? await this.resolveClassDeclarationInfo(n, document)
+                : null;
+            if (!classInfo) {
+                await this.ensureIndexBuilt();
+                classInfo = pickDeclaration(this.sdi.findFor(n, document?.uri)); // #571
+            }
+            return classInfo;
+        })) {
+            if (!info) {
+                this.trace(`walkParentChain stop at "${name}" (unresolved)`);
+                return null;
+            }
+            this.trace(`walkParentChain class="${name}" member="${memberName}"`);
+            const result = await this.scanBodyForMember(info.filePath, name, memberName, paramCount, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            if (result) {
+                this.trace(`walkParentChain found "${memberName}" in "${info.filePath}" line=${result.line}`);
+                return result;
+            }
+            // A structure that does not inherit its parent's members ends the ascent.
+            if (!inheritsMembersFromParent(info.structureType)) {
+                this.trace(`walkParentChain stop at "${name}" (does not inherit)`);
+                return null;
+            }
         }
         this.trace(`walkParentChain stop at "${className}" (no parent/no hit)`);
         return null;
@@ -1697,25 +1794,12 @@ export class MemberLocatorService {
         const liveContent = this.tokenCache.getDocumentText(uri) ?? undefined;
         return scanClassBodyForMember(
             filePath, className, memberName, paramCount, structureType,
-            (line) => this.countParamsInDecl(line),
+            (line) => countParametersInDeclaration(line),
             (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
             liveContent
         );
     }
 
-    private countParamsInDecl(line: string): number {
-        const match = line.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i); // #247
-        if (!match) return 0;
-        const paramList = match[1].trim();
-        if (!paramList) return 0;
-        let depth = 0, count = 0;
-        for (const char of paramList) {
-            if (char === '(') depth++;
-            else if (char === ')') depth--;
-            else if (char === ',' && depth === 0) count++;
-        }
-        return count + 1;
-    }
 
     /**
      * Token-based replacement for scanClassBodyForAllMembers.
@@ -1794,13 +1878,15 @@ export class MemberLocatorService {
         className: string,
         memberName: string,
         paramCount: number | undefined,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS',
+        declarationLine?: number // #650: this declaration of the label, not the first
     ): MemberInfo | null {
         const classToken = tokens.find(t =>
             t.type === TokenType.Structure &&
             t.value.toUpperCase() === structureType &&
             t.label?.toLowerCase() === className.toLowerCase() &&
-            t.finishesAt !== undefined
+            t.finishesAt !== undefined &&
+            (declarationLine === undefined || t.line === declarationLine)
         );
         if (!classToken || classToken.finishesAt === undefined) return null;
         const classEnd = classToken.finishesAt;
@@ -1821,8 +1907,14 @@ export class MemberLocatorService {
         const docLines = doc.getText().split(/\r?\n/);
         const candidates: OverloadCandidate[] = [];
 
+        let prevLine = -1;
         for (const token of tokens) {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
+            // #607: only a line's first token names a member - a later one is a type,
+            // an attribute or a parameter name inside a method prototype.
+            const firstOnLine = token.line !== prevLine;
+            prevLine = token.line;
+            if (!firstOnLine) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
             if (isInsideNested(token.line)) continue;
@@ -1832,7 +1924,7 @@ export class MemberLocatorService {
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
             if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                declParamCount = this.countParamsInDecl(memberLine);
+                declParamCount = countParametersInDeclaration(memberLine);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
@@ -1842,7 +1934,8 @@ export class MemberLocatorService {
             const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
             // The structure token above was matched BY structureType, so it is the
             // kind actually found here, not an assumption.
-            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType };
+            return { type: bestMatch.type, className, line: bestMatch.line, file: fileUri, signature: bestMatch.signature, structureType,
+                arityMismatch: !overloadAcceptsArgs(bestMatch, paramCount) };
         }
         return null;
     }
@@ -1891,7 +1984,7 @@ export class MemberLocatorService {
 
         // CLASS(TypeName), QUEUE(TypeName), GROUP(TypeName), FILE(TypeName) — the type name
         // may be colon-qualified (GROUP(CFG:SomeType)), exactly as the LIKE(...) case below
-        // already allows, and as ClassMemberResolver.extractClassName allows on the chained
+        // already allows, and as extractClassName allows on the chained
         // path. Without ':' here the whole match fails and the declaration falls through to
         // the bare-keyword branch, which resolves a variable to ITS OWN name as its type.
         const structMatch = typeStr.match(/^(CLASS|QUEUE|GROUP|FILE)\(([\w:]+)\)$/i);
@@ -2084,23 +2177,13 @@ export class MemberLocatorService {
         const ownMembers = await this.findAllMembersInClass(className, document);
 
         // 2. Determine access filter relative to the caller
-        const accessAllowed = this.accessFilter(className, callerClass);
+        const accessAllowed = this.accessFilter(className, callerClass, document);
         const filtered = ownMembers.filter(m => accessAllowed.has(m.access));
 
         // 3. Determine the parent class (if any)
         let parentClassName: string | undefined;
 
-        // Try include chain first, then indexer
-        const classInfo = await this.findClassInfoInDoc(className, document);
-        if (classInfo?.parentClass) {
-            parentClassName = classInfo.parentClass;
-        } else {
-            await this.ensureIndexBuilt();
-            const indexed = this.sdi.findFor(className, document.uri); // #571
-            if (indexed.length > 0) {
-                parentClassName = (indexed.find(d => !d.isType) || indexed[0]).parentName;
-            }
-        }
+        parentClassName = await this.resolveParentName(className, document) ?? undefined;   // #623
 
         if (!parentClassName) return filtered;
 
@@ -2303,18 +2386,110 @@ export class MemberLocatorService {
      * and its include chain (before falling back to the indexer).
      * Returns the info only if found and has a parentClass field worth following.
      */
+    /**
+     * #623 — the parent of `className`, in two tiers: the open document's own text first (it may
+     * hold unsaved edits), then the declaration index, which covers a class declared in an .inc.
+     *
+     * Public because CompletionProvider needs exactly this and had only the first tier, so
+     * `PARENT.` offered nothing whenever the class lived in an .inc. One implementation, so the
+     * two cannot drift again.
+     */
+    public async resolveParentName(className: string, document: TextDocument, atLine?: number): Promise<string | null> {
+        // #628 — a module may declare the same local class label in several procedures (every
+        // generated procedure has its own ThisWindow), so "the parent of ThisWindow" depends on
+        // where the cursor is. Without a line this reads the FIRST matching declaration in the
+        // document, which is the first procedure's. #608 settled that for hover and Go to
+        // Definition; a caller that knows the line gets the same answer here.
+        if (atLine !== undefined) {
+            const label = nearestClassLabel(this.tokenCache.getTokens(document), className, atLine);
+            if (label) {
+                const declLine = document.getText().split(/\r?\n/)[label.line];
+                const parent = declLine ? extractParentName(declLine) : null;
+                if (parent) return parent;
+            }
+        }
+
+        const inOpenDocument = await this.findClassInfoInDoc(className, document);
+        if (inOpenDocument?.parentClass) return inOpenDocument.parentClass;
+
+        await this.ensureIndexBuilt();
+        const indexed = this.sdi.findFor(className, document.uri); // #571
+        if (indexed.length === 0) return null;
+        return (indexed.find(d => !d.isType) || indexed[0]).parentName ?? null;
+    }
+
+    /**
+     * #648 (#609 phase 3) — the class `PARENT` stands for at `atLine`: the parent of the class
+     * whose method encloses the line, named the way `SELF`'s class is (#622) and the way
+     * `PARENT.` completion names its parent (#628, line-aware). Plus the parent's MODULE file
+     * from the declaration index, a hint for the body search.
+     *
+     * Replaces ClassMemberResolver.getParentClassInfo, the separate copy hover, Go to Definition,
+     * Go to Implementation and the chain resolver each asked. The member lookup that follows
+     * belongs to findMemberInClass, which carries #611's overload rule; ClassMemberResolver's
+     * findParentClassMemberInfo did not, so `PARENT.Init()` with no arguments named a parent's
+     * `Init(LONG)` instead of the inherited `Init()` the call runs.
+     */
+    public async resolveParentClassAt(
+        document: TextDocument,
+        atLine: number
+    ): Promise<{ className: string; parentClassName: string; moduleFile?: string } | null> {
+        const className = resolveEnclosingClassName(document, atLine, this.tokenCache.getStructure(document));
+        if (!className) return null;
+        const parentClassName = await this.resolveParentName(className, document, atLine);
+        if (!parentClassName) return null;
+
+        return { className, parentClassName, moduleFile: await this.moduleFileOf(parentClassName, document) };
+    }
+
+    /**
+     * The file a class's MODULE('...') attribute names, from the declaration index (#571: the
+     * copy the document's project binds to) - the body search's best hint, which also yields the
+     * file's real spelling. Undefined when the class has no MODULE attribute or is not indexed.
+     */
+    public async moduleFileOf(className: string, document: TextDocument): Promise<string | undefined> {
+        await this.ensureIndexBuilt();
+        const infos = this.sdi.findFor(className, document.uri);
+        if (infos.length === 0) return undefined;
+        const info = infos.find(d => !d.isType) || infos[0];
+        return info.lineContent.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i)?.[1];
+    }
+
+    /**
+     * #651 / #652 — the class a receiver word names at `line`, read the way every dotted access
+     * reads it: `SELF` is the enclosing method's class (#622), `PARENT` that class's parent
+     * (#648), any other name a CLASS or a variable of a CLASS type (#611 - a local CLASS is
+     * itself, not its parent). `atLine` is the line to hand the member lookup: SELF and an
+     * explicit local CLASS may be a label the module declares in several procedures (#650);
+     * PARENT's class is not. Null when the word names no class.
+     */
+    public async resolveReceiverAt(
+        receiver: string,
+        document: TextDocument,
+        line: number
+    ): Promise<{ kind: 'self' | 'parent' | 'object'; className: string; atLine?: number } | null> {
+        if (!/^[A-Za-z_][\w:]*$/.test(receiver)) return null;
+        if (/^self$/i.test(receiver)) {
+            const className = resolveEnclosingClassName(document, line, this.tokenCache.getStructure(document));
+            return className ? { kind: 'self', className, atLine: line } : null;
+        }
+        if (/^parent$/i.test(receiver)) {
+            const parent = await this.resolveParentClassAt(document, line);
+            return parent ? { kind: 'parent', className: parent.parentClassName } : null;
+        }
+        const cls = await this.resolveReceiverClass(receiver, this.tokenCache.getTokens(document), document, line);
+        return cls ? { kind: 'object', className: cls.className, atLine: line } : null;
+    }
+
     private async findClassInfoInDoc(
         className: string,
         document: TextDocument
     ): Promise<{ parentClass?: string } | null> {
-        // Quick scan: look for "ClassName  CLASS(ParentName)" in the document text
-        const lines = document.getText().split('\n');
-        const pattern = new RegExp(`^${className}\\s+CLASS\\s*\\((\\w+)\\)`, 'i');
-        for (const line of lines) {
-            const m = line.match(pattern);
-            if (m) return { parentClass: m[1] };
-        }
-        return null;
+        // #623: shared with CompletionProvider.resolveParentOf, which was the same function
+        // written out twice. Both read `\w` for the parent name, so a colon-bearing label such as
+        // `MyOwn:Base` matched nothing, and neither escaped the class name before interpolating it.
+        const parentClass = findParentInText(className, document.getText());
+        return parentClass ? { parentClass } : null;
     }
 
     /**
@@ -2323,27 +2498,22 @@ export class MemberLocatorService {
      * - subclass      → public + protected
      * - external      → public only
      */
-    private accessFilter(className: string, callerClass: string | undefined): Set<'public' | 'protected' | 'private'> {
+    private accessFilter(
+        className: string,
+        callerClass: string | undefined,
+        document?: TextDocument
+    ): Set<'public' | 'protected' | 'private'> {
         if (!callerClass) return new Set(['public']);
         if (callerClass.toLowerCase() === className.toLowerCase()) {
             return new Set(['public', 'protected', 'private']);
         }
-        // Check if callerClass is a subclass of className via the indexer
-        const callerInfos = this.sdi.find(callerClass);
-        if (callerInfos.length > 0) {
-            let current = (callerInfos.find(d => !d.isType) || callerInfos[0])?.parentName;
-            const seen = new Set<string>();
-            while (current && !seen.has(current.toLowerCase())) {
-                seen.add(current.toLowerCase());
-                if (current.toLowerCase() === className.toLowerCase()) {
-                    return new Set(['public', 'protected']);
-                }
-                const parentInfos = this.sdi.find(current);
-                current = parentInfos.length > 0
-                    ? (parentInfos.find(d => !d.isType) || parentInfos[0])?.parentName
-                    : undefined;
-            }
-        }
-        return new Set(['public']);
+        // #624 — scope every hop to the asking file's project (#571), as the other five
+        // ascents do. An unscoped find() answers with whichever project index was built
+        // first, so in a solution where two projects declare the same class name the
+        // subclass test was decided against the other project's class and inherited
+        // PROTECTED members were dropped.
+        return isAncestorOf(className, callerClass, name => this.sdi.findFor(name, document?.uri))
+            ? new Set(['public', 'protected'])
+            : new Set(['public']);
     }
 }

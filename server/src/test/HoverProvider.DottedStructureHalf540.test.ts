@@ -76,7 +76,9 @@ const STRUCT_HALF = 1;                       // the `t` of ItemQ
 const DOT = 'ItemQ'.length;                  // on the dot itself
 const FIELD_HALF = 'ItemQ.'.length + 1;      // inside the field name
 
-const isFieldCard = (text: string) => /Field:/.test(text);
+// A field's card: the older "**ItemQ Field:**" form, or (#657/#668) the declaration's card titled
+// with the dotted name, "**ItemQ.CategoryName** — ...". The structure half's card is titled "**ItemQ**".
+const isFieldCard = (text: string) => /Field:/.test(text) || /^\*\*[\w:]+\.[\w:]+\*\* — /.test(text);
 
 suite('Issue #540 — the structure half of a dotted reference hovers as the structure', () => {
 

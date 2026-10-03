@@ -10,7 +10,7 @@ const logger = LoggerManager.getLogger('IncludeIndexDiskCache');
 // #295: persist the #344 include-chain and #345 sibling-label indexes so a warm
 // start reuses the derived declaration maps instead of re-tokenizing / re-reading
 // the entire INCLUDE/MEMBER universe on the prewarm lane (~22.7s measured on
-// IBSWorking). Same mtime-validated disk-cache discipline as SDI (#290), FRG and
+// WorkingLib). Same mtime-validated disk-cache discipline as SDI (#290), FRG and
 // ReferenceCountIndex: a per-key JSON file under the OS temp dir, reused only when
 // a caller-supplied identity signature still matches AND every file that
 // contributed content still carries its recorded mtime. Any drift → cold rebuild.

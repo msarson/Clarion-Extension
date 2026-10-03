@@ -15,8 +15,9 @@ import { validateReturnStatements, validateDiscardedReturnValuesForPlainCalls, v
 import { validateCycleBreakOutsideLoop } from './diagnostics/ControlFlowDiagnostics';
 import { validateUndeclaredVariablesAsync as _validateUndeclaredVariablesAsync } from './diagnostics/UndeclaredVariableDiagnostics';
 import { SymbolFinderService } from '../services/SymbolFinderService';
-import { validateReservedKeywordLabels } from './diagnostics/LabelDiagnostics';
+import { validateReservedKeywordLabels, validateIntrinsicRedefinitions } from './diagnostics/LabelDiagnostics';
 import { validateMissingIncludes, validateMissingConstants } from './diagnostics/MissingIncludeDiagnostics';
+import { validateUnresolvedFileReferences } from './diagnostics/UnresolvedFileReferenceDiagnostics';
 import { validateMissingMapDeclarations, validateMissingImplementations } from './diagnostics/MapDeclarationDiagnostics';
 import { validatePrivateProcedureCalls } from './diagnostics/PrivateProcedureDiagnostics';
 import { validateUnresolvedProcedureCalls as _validateUnresolvedProcedureCalls } from './diagnostics/UnresolvedProcedureCallDiagnostics';
@@ -80,6 +81,7 @@ export class DiagnosticProvider {
             ['discardedReturnPlainCalls', 'discardedReturnValues', () => validateDiscardedReturnValuesForPlainCalls(tokens!, document)],
             ['cycleBreakOutsideLoop', 'cycleBreakOutsideLoop', () => validateCycleBreakOutsideLoop(tokens!, document)],
             ['reservedKeywordLabels', 'reservedKeywordLabels', () => validateReservedKeywordLabels(tokens!, document)],
+            ['intrinsicRedefinitions', 'intrinsicRedefinitions', () => validateIntrinsicRedefinitions(tokens!, document)], // #702
             ['unicodeCharacters', 'unicodeCharacters', () => validateUnicodeCharacters(document)],
             ['attributeApplicability', 'attributeApplicability', () => validateAttributeApplicability(tokens!, document, structure)],
             ['itemizeBlocks', 'itemizeBlocks', () => validateItemizeBlocks(tokens!, document)],
@@ -209,6 +211,21 @@ export class DiagnosticProvider {
     ): Promise<Diagnostic[]> {
         if (!isDiagnosticEnabled('missingIncludes')) return []; // #542
         return applyCheckSeverity('missingIncludes', this.filterOmitted(await validateMissingIncludes(tokens, document), tokens, document)); // #543
+    }
+
+    /**
+     * Async pass: an INCLUDE or MEMBER naming a file that cannot be found (#695), resolved as the
+     * file graph resolves it. Waits for the solution: before its redirection is known every
+     * INCLUDE would look missing.
+     */
+    public static async validateUnresolvedFileReferences(document: TextDocument): Promise<Diagnostic[]> {
+        if (!isDiagnosticEnabled('unresolvedFileReferences')) return [];
+        if (!SolutionManager.getInstance()?.solution?.projects?.length) return [];
+        const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/, '')).replace(/\//g, '\\');
+        const { FileRelationshipGraph } = await import('../FileRelationshipGraph');
+        const graph = FileRelationshipGraph.getInstance();
+        return applyCheckSeverity('unresolvedFileReferences',
+            validateUnresolvedFileReferences(document, filePath, (target, from) => graph.resolveReference(target, from)));
     }
 
     /**

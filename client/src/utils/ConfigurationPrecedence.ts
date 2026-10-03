@@ -49,6 +49,16 @@ export function normalizeConfigurationTo(value: string | null | undefined, avail
 }
 
 /**
+ * #674 — the value Set Configuration stores for the name picked: the .sln's own entry for it
+ * (`Debug|Win32` when the .sln declares full forms), the form a solution load stores (#530), so
+ * the setting has one format whichever action wrote it. The picked name when the .sln declares
+ * no such configuration.
+ */
+export function configurationToStore(picked: string, declaredBySolution: string[]): string {
+    return normalizeConfigurationTo(picked, declaredBySolution) ?? picked;
+}
+
+/**
  * Precedence: an explicit setting, then the IDE's `.sln.cache`, then the history —
  * each only when the solution actually declares it — then the sole configuration
  * when there is just one, else ask.
@@ -78,6 +88,47 @@ export function explicitConfigurationFor(
     const entry = solutions.find(s => (s.solutionFile ?? '').replace(/\//g, '\\').toLowerCase() === key);
     if (entry?.configuration) return entry.configuration;
     return settingValue || null;
+}
+
+/** The IDE's saved configuration for a solution (its preferences file), when it has one. */
+export interface IdeConfiguration {
+    activeConfiguration?: string;
+    activePlatform?: string;
+}
+
+export interface LoadConfiguration {
+    configuration: string;
+    source: 'explicit' | 'ide' | 'current';
+    /** What to write to the IDE's preferences so it opens on `configuration`; null when it already does. */
+    updateIde: { activeConfiguration: string; activePlatform: string } | null;
+}
+
+/**
+ * #664 — the configuration a remembered solution loads with. The user's explicit setting wins,
+ * and the IDE's record is brought in line with it so the Clarion IDE opens on the configuration
+ * chosen here; the IDE's record used to replace the setting on every start. With no explicit
+ * setting the IDE's choice is used, then the configuration already held.
+ */
+export function configurationAtLoad(
+    explicit: string | null | undefined,
+    ide: IdeConfiguration | null,
+    current: string
+): LoadConfiguration {
+    if (explicit) {
+        const [name, platform] = explicit.split('|').map(p => p.trim());
+        const idePlatform = ide?.activePlatform;
+        const sameName = (ide?.activeConfiguration ?? '').toLowerCase() === name.toLowerCase();
+        const samePlatform = !platform || !idePlatform || platform.toLowerCase() === idePlatform.toLowerCase();
+        const updateIde = sameName && samePlatform
+            ? null
+            : { activeConfiguration: name, activePlatform: platform || idePlatform || 'Win32' };
+        return { configuration: explicit, source: 'explicit', updateIde };
+    }
+    if (ide?.activeConfiguration) {
+        const configuration = ide.activePlatform ? `${ide.activeConfiguration}|${ide.activePlatform}` : ide.activeConfiguration;
+        return { configuration, source: 'ide', updateIde: null };
+    }
+    return { configuration: current, source: 'current', updateIde: null };
 }
 
 export type SettingsWriteTarget = 'WorkspaceFolder' | 'Workspace';

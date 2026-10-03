@@ -11,7 +11,7 @@ import { SolutionManager } from '../solution/solutionManager';
 /**
  * #299 — F12 on a MAP declaration inside MODULE('*.dll') must navigate to the
  * cross-project implementation (Mark's repro: InitializeProgram declared in the
- * main app under MODULE('IBSUTILS.DLL'),DLL — implemented in the IBSUtils
+ * main app under MODULE('ACMUTILS.DLL'),DLL — implemented in the ACMUtils
  * project of the same solution; hover degraded gracefully, F12 did nothing).
  *
  * Root cause: findImplementationInModuleFile required redirection to resolve
@@ -33,11 +33,11 @@ suite('MapProcedureResolver — MODULE(*.dll) cross-project implementation (#299
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue299-'));
 
         // The DLL app's main source: its MAP says where InitializeProgram really lives
-        fs.writeFileSync(path.join(tmpDir, 'ibsutils.clw'), [
+        fs.writeFileSync(path.join(tmpDir, 'acmutils.clw'), [
             '  PROGRAM',
             '',
             '  MAP',
-            "    MODULE('IBSUTILS001.CLW')",
+            "    MODULE('ACMUTILS001.CLW')",
             'InitializeProgram      FUNCTION(*iniclass exeIni),BYTE',
             '    END',
             '  END',
@@ -46,8 +46,8 @@ suite('MapProcedureResolver — MODULE(*.dll) cross-project implementation (#299
         ].join('\n'), 'utf8');
 
         // The generated module holding the implementation
-        fs.writeFileSync(path.join(tmpDir, 'ibsutils001.clw'), [
-            "  MEMBER('ibsutils.clw')",
+        fs.writeFileSync(path.join(tmpDir, 'acmutils001.clw'), [
+            "  MEMBER('acmutils.clw')",
             '',
             '  MAP',
             '  END',
@@ -66,11 +66,11 @@ suite('MapProcedureResolver — MODULE(*.dll) cross-project implementation (#299
         };
         const fakeSolution = {
             projects: [{
-                name: 'IBSUtils',
+                name: 'ACMUtils',
                 path: tmpDir,
                 sourceFiles: [
-                    { name: 'ibsutils.clw', relativePath: 'ibsutils.clw' },
-                    { name: 'ibsutils001.clw', relativePath: 'ibsutils001.clw' },
+                    { name: 'acmutils.clw', relativePath: 'acmutils.clw' },
+                    { name: 'acmutils001.clw', relativePath: 'acmutils001.clw' },
                 ],
                 getRedirectionParser: () => fakeRedParser,
             }]
@@ -84,14 +84,14 @@ suite('MapProcedureResolver — MODULE(*.dll) cross-project implementation (#299
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
     });
 
-    test("F12 on the MAP declaration under MODULE('IBSUTILS.DLL') lands on the implementation in ibsutils001.clw", async function () {
+    test("F12 on the MAP declaration under MODULE('ACMUTILS.DLL') lands on the implementation in acmutils001.clw", async function () {
         this.timeout(10000);
 
         const mainCode = [
             '  PROGRAM',                                                        // 0
             '',                                                                  // 1
             '  MAP',                                                             // 2
-            "    MODULE('IBSUTILS.DLL')",                                       // 3
+            "    MODULE('ACMUTILS.DLL')",                                       // 3
             'InitializeProgram      FUNCTION(*iniclass exeIni),BYTE,DLL',       // 4 — F12 here
             '    END',                                                           // 5
             '  END',                                                             // 6
@@ -114,13 +114,13 @@ suite('MapProcedureResolver — MODULE(*.dll) cross-project implementation (#299
         );
 
         assert.ok(result,
-            "expected F12 on InitializeProgram (declared under MODULE('IBSUTILS.DLL')) to resolve the " +
+            "expected F12 on InitializeProgram (declared under MODULE('ACMUTILS.DLL')) to resolve the " +
             'cross-project implementation — the physical DLL does not exist, so the resolver must go ' +
             "via the library's main source, not the binary");
-        assert.ok(result!.uri.toLowerCase().includes('ibsutils001.clw'),
-            `expected the implementation location in ibsutils001.clw; got: ${result!.uri}`);
-        // Implementation line: 'InitializeProgram FUNCTION(...)' at line 4 of ibsutils001.clw
+        assert.ok(result!.uri.toLowerCase().includes('acmutils001.clw'),
+            `expected the implementation location in acmutils001.clw; got: ${result!.uri}`);
+        // Implementation line: 'InitializeProgram FUNCTION(...)' at line 4 of acmutils001.clw
         assert.strictEqual(result!.range.start.line, 4,
-            `expected the implementation line (4) in ibsutils001.clw; got line ${result!.range.start.line}`);
+            `expected the implementation line (4) in acmutils001.clw; got line ${result!.range.start.line}`);
     });
 });

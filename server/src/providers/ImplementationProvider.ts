@@ -9,6 +9,8 @@
  */
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { labelLocation, labelRange } from '../utils/ProcedureNameRange'; // #690
+import { pathToCanonicalUri } from '../utils/UriUtils'; // #690
 import { clarionSourceCandidates } from '../utils/ClarionSourceNaming';
 import { Location, Position, Range } from 'vscode-languageserver-protocol';
 import { CancellationToken } from 'vscode-languageserver';
@@ -24,13 +26,16 @@ import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { ClarionPatterns } from '../utils/ClarionPatterns';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { TokenHelper } from '../utils/TokenHelper';
+import { findEnclosingClassToken } from '../utils/EnclosingClassResolver';
 import LoggerManager from '../logger';
 import { ProcedureCallDetector } from './utils/ProcedureCallDetector';
 import { CrossFileCache } from './hover/CrossFileCache';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { countParametersInCall } from '../utils/ClassMemberScan';
 import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
+import { DefinitionProvider } from './DefinitionProvider';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,9 +49,11 @@ export class ImplementationProvider {
     private crossFileResolver: CrossFileResolver;
     private crossFileCache: CrossFileCache;
     private overloadResolver: MethodOverloadResolver;
-    private memberResolver: ClassMemberResolver;
-    private chainedResolver: ChainedPropertyResolver;
     private memberLocator: MemberLocatorService;
+    /** #654 — the declaration a `receiver.member` names, shared with hover and Go to Definition. */
+    private dottedAccess: DottedAccessResolver;
+    /** Created on first use — only a weak argument reference that names a real procedure needs it. */
+    private definitionProvider?: DefinitionProvider;
 
     constructor() {
         this.tokenCache = TokenCache.getInstance();
@@ -54,9 +61,8 @@ export class ImplementationProvider {
         this.mapResolver = new MapProcedureResolver(this.crossFileCache);
         this.crossFileResolver = new CrossFileResolver(this.tokenCache);
         this.overloadResolver = new MethodOverloadResolver();
-        this.memberResolver = new ClassMemberResolver();
-        this.chainedResolver = new ChainedPropertyResolver();
         this.memberLocator = new MemberLocatorService(this.crossFileCache);
+        this.dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     }
 
     /**
@@ -96,133 +102,13 @@ export class ImplementationProvider {
         //    OR if this is inside a START() call (e.g., "START(ProcName, ...)")
         if (word && wordRange) {
             const detection = ProcedureCallDetector.isProcedureCallOrReference(document, position, wordRange);
-            
+
             if (detection.isProcedure) {
                 logger.info(`Detected procedure ${ProcedureCallDetector.getDetectionMessage(word, detection.isStartCall)}`);
-                
-                // Find the MAP declaration first
-                const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
-                
-                if (mapDecl) {
-                    // Check if MAP declaration is from an INCLUDE file
-                    const mapDeclUri = mapDecl.uri;
-                    const isFromInclude = mapDeclUri !== document.uri;
-                    
-                    let implLocation: Location | null = null;
-                    
-                    if (isFromInclude) {
-                        logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
-                        // Load the INCLUDE file and its tokens using cache
-                        try {
-                            const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
-                            const cached = await this.crossFileCache.getOrLoadDocument(decodedPath);
-                            
-                            if (cached) {
-                                const { document: includeDoc, tokens: includeTokens } = cached;
-                                
-                                // Find implementation using INCLUDE file's document and tokens
-                                const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                                implLocation = await this.mapResolver.findProcedureImplementation(
-                                    word,
-                                    includeTokens,
-                                    includeDoc,
-                                    mapPosition,
-                                    line
-                                );
-                            }
-                        } catch (error) {
-                            logger.info(`Error loading INCLUDE file: ${error}`);
-                        }
-                    } else {
-                        // Now find implementation using the MAP declaration position
-                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
-                        implLocation = await this.mapResolver.findProcedureImplementation(
-                            word,
-                            tokens,
-                            document,
-                            mapPosition, // Use MAP position, not call position
-                            line,
-                            this.tokenCache.getStructure(document) // #258: reuse cached structure
-                        );
-                    }
-                    
-                    // Check if we're already AT the implementation - if so, don't navigate to itself
-                    if (implLocation && 
-                        implLocation.uri === document.uri && 
-                        implLocation.range.start.line === position.line) {
-                        logger.info(`❌ Already at implementation for ${word} - returning null to prevent self-navigation`);
-                        return null;
-                    }
-                    
-                    if (implLocation) {
-                        logger.info(`✅ Found procedure implementation for call: ${word}`);
-                        return implLocation;
-                    }
-                }
-                
-                // If no MAP declaration found in current file, check if this file has MEMBER
-                // and search the parent file
-                logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
-                const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-                
-                if (memberToken?.referencedFile) {
-                    logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
-
-                    const localScope = getLocalMapScope(document.uri);
-                    // Use CrossFileResolver to find MAP declaration in parent file
-                    const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
-                        word,
-                        memberToken.referencedFile,
-                        document,
-                        line,
-                        localScope?.containingProcedure
-                    );
-
-                    if (memberResult) {
-                        logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
-
-                        // Now find implementation from the parent MAP declaration using cache
-                        try {
-                            const parentPath = memberResult.file;
-                            const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
-
-                            if (cached) {
-                                const { document: parentDoc, tokens: parentTokens } = cached;
-
-                                const mapPosition: Position = { line: memberResult.line, character: 0 };
-                                const implLocation = await this.mapResolver.findProcedureImplementation(
-                                    word,
-                                    parentTokens,
-                                    parentDoc,
-                                    mapPosition,
-                                    line
-                                );
-
-                                if (implLocation) {
-                                    logger.info(`✅ Found implementation via parent MAP: ${word}`);
-                                    return implLocation;
-                                }
-                            }
-                        } catch (error) {
-                            logger.info(`Error loading parent file: ${error}`);
-                        }
-                    }
-                }
-
-                // #313: the declaration may live in an INC included INSIDE a MAP (the
-                // WinEvent pattern — include('winevent.inc') in the current file's or the
-                // MEMBER parent's MAP, with module('winevent.clw') blocks in the INC).
-                // findMapDeclaration scans current-document tokens only, and
-                // findMapDeclarationInMemberFile searches the parent's MAP only for
-                // MODULE('<current file>') blocks — neither reaches those declarations,
-                // while go-to-DEFINITION does (its own walk follows the includes). Locate
-                // the declaration by walking MAP includes from both start files, then hand
-                // its own document+position to findProcedureImplementation — the exact path
-                // that already works when the cursor is physically on the declaration.
-                const viaMapInclude = await this.findImplementationViaMapIncludes(word, document, tokens);
-                if (viaMapInclude) {
-                    logger.info(`✅ Found implementation via MAP-include MODULE declaration: ${word}`);
-                    return viaMapInclude;
+                const procedureTarget = await this.resolveProcedureReferenceImplementation(
+                    word, document, position, line, tokens, detection.isArgumentReference);
+                if (procedureTarget) {
+                    return procedureTarget.location;
                 }
             }
         }
@@ -279,6 +165,213 @@ export class ImplementationProvider {
 
         logger.info(`No implementation found at this position`);
         return null;
+    }
+
+    /**
+     * Ctrl+F12 for a procedure call or reference: the implementation of the procedure the
+     * word names.
+     *
+     * Returns `{ location }` when it has taken responsibility for the word — including
+     * `{ location: null }` for "already on the implementation, nowhere to go", which must
+     * not fall through — and `null` when it has not, so provideImplementation continues to
+     * its routine, MAP-declaration and method paths.
+     *
+     * `isArgumentReference` marks the weak `SORT(Queue, CompareProc)` shape, which every
+     * bare identifier passed as an argument matches. It carries the same two obligations
+     * here as on hover and F12:
+     *
+     *   1. It must not outrank a declaration in scope. With a local `Helper LONG` in view,
+     *      `MESSAGE(Helper)` IS that local, and a variable has no implementation. This
+     *      provider has no variable tier of its own to rank behind, so it takes Go to
+     *      Definition's answer — see `definitionNamesProcedure` — which makes the two agree
+     *      by construction instead of re-deciding what can shadow.
+     *   2. It must not start the exhaustive #313 include walk, since most words reaching it
+     *      are ordinary variables with nothing to find. Hover already skips the walk for
+     *      this shape; now all three surfaces resolve it through the same cheap tiers.
+     *
+     * When the ranking declines, the result is `null` — a fall-through — so the word is
+     * answered exactly as it was before the argument shape existed.
+     */
+    private async resolveProcedureReferenceImplementation(
+        word: string,
+        document: TextDocument,
+        position: Position,
+        line: string,
+        tokens: Token[],
+        isArgumentReference: boolean
+    ): Promise<{ location: Location | null } | null> {
+        // Find the MAP declaration first
+        const mapDecl = this.mapResolver.findMapDeclaration(word, tokens, document, line);
+
+        if (mapDecl) {
+            // Check if MAP declaration is from an INCLUDE file
+            const mapDeclUri = mapDecl.uri;
+            const isFromInclude = mapDeclUri !== document.uri;
+
+            let implLocation: Location | null = null;
+
+            if (isFromInclude) {
+                logger.info(`MAP declaration is from INCLUDE file: ${mapDeclUri}`);
+                // Load the INCLUDE file and its tokens using cache
+                try {
+                    const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
+                    const cached = await this.crossFileCache.getOrLoadDocument(decodedPath);
+
+                    if (cached) {
+                        const { document: includeDoc, tokens: includeTokens } = cached;
+
+                        // Find implementation using INCLUDE file's document and tokens
+                        const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                        implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            includeTokens,
+                            includeDoc,
+                            mapPosition,
+                            line
+                        );
+                    }
+                } catch (error) {
+                    logger.info(`Error loading INCLUDE file: ${error}`);
+                }
+            } else {
+                // Now find implementation using the MAP declaration position
+                const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
+                implLocation = await this.mapResolver.findProcedureImplementation(
+                    word,
+                    tokens,
+                    document,
+                    mapPosition, // Use MAP position, not call position
+                    line,
+                    this.tokenCache.getStructure(document) // #258: reuse cached structure
+                );
+            }
+
+            // Check if we're already AT the implementation - if so, don't navigate to itself
+            if (implLocation &&
+                implLocation.uri === document.uri &&
+                implLocation.range.start.line === position.line) {
+                logger.info(`❌ Already at implementation for ${word} - returning null to prevent self-navigation`);
+                return { location: null };
+            }
+
+            if (implLocation) {
+                if (isArgumentReference && !(await this.definitionNamesProcedure(document, position, [mapDecl, implLocation]))) {
+                    logger.info(`⏭️ ${word} is claimed by a declaration in scope — not a procedure reference here`);
+                    return null;
+                }
+                logger.info(`✅ Found procedure implementation for call: ${word}`);
+                return { location: implLocation };
+            }
+        }
+
+        // If no MAP declaration found in current file, check if this file has MEMBER
+        // and search the parent file
+        logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
+        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+
+        if (memberToken?.referencedFile) {
+            logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
+
+            const localScope = getLocalMapScope(document.uri);
+            // Use CrossFileResolver to find MAP declaration in parent file
+            const memberResult = await this.crossFileResolver.findMapDeclarationInMemberFile(
+                word,
+                memberToken.referencedFile,
+                document,
+                line,
+                localScope?.containingProcedure
+            );
+
+            if (memberResult) {
+                logger.info(`✅ Found MAP declaration in parent file at line ${memberResult.line}`);
+
+                // Now find implementation from the parent MAP declaration using cache
+                try {
+                    const parentPath = memberResult.file;
+                    const cached = await this.crossFileCache.getOrLoadDocument(parentPath);
+
+                    if (cached) {
+                        const { document: parentDoc, tokens: parentTokens } = cached;
+
+                        const mapPosition: Position = { line: memberResult.line, character: 0 };
+                        const implLocation = await this.mapResolver.findProcedureImplementation(
+                            word,
+                            parentTokens,
+                            parentDoc,
+                            mapPosition,
+                            line
+                        );
+
+                        if (implLocation) {
+                            if (isArgumentReference &&
+                                !(await this.definitionNamesProcedure(document, position, [memberResult.location, implLocation]))) {
+                                logger.info(`⏭️ ${word} is claimed by a declaration in scope — not a procedure reference here`);
+                                return null;
+                            }
+                            logger.info(`✅ Found implementation via parent MAP: ${word}`);
+                            return { location: implLocation };
+                        }
+                    }
+                } catch (error) {
+                    logger.info(`Error loading parent file: ${error}`);
+                }
+            }
+        }
+
+        // #313: the declaration may live in an INC included INSIDE a MAP (the
+        // WinEvent pattern — include('winevent.inc') in the current file's or the
+        // MEMBER parent's MAP, with module('winevent.clw') blocks in the INC).
+        // findMapDeclaration scans current-document tokens only, and
+        // findMapDeclarationInMemberFile searches the parent's MAP only for
+        // MODULE('<current file>') blocks — neither reaches those declarations,
+        // while go-to-DEFINITION does (its own walk follows the includes). Locate
+        // the declaration by walking MAP includes from both start files, then hand
+        // its own document+position to findProcedureImplementation — the exact path
+        // that already works when the cursor is physically on the declaration.
+        //
+        // Not for the weak argument shape: see obligation 2 above.
+        if (!isArgumentReference) {
+            const viaMapInclude = await this.findImplementationViaMapIncludes(word, document, tokens);
+            if (viaMapInclude) {
+                logger.info(`✅ Found implementation via MAP-include MODULE declaration: ${word}`);
+                return { location: viaMapInclude };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * True when Go to Definition resolves the word at `position` to one of `procedureSites` —
+     * the procedure's MAP declaration or its implementation — rather than to some other
+     * declaration that shadows it.
+     *
+     * Called only for the weak argument shape, and only once a procedure of that name has
+     * actually been found, so an ordinary variable argument never pays for it. Either site
+     * counts, because F12 may reach the procedure through its declaration-side tier or
+     * through a label tier that lands on the implementation.
+     */
+    private async definitionNamesProcedure(
+        document: TextDocument,
+        position: Position,
+        procedureSites: Location[]
+    ): Promise<boolean> {
+        if (!this.definitionProvider) {
+            this.definitionProvider = new DefinitionProvider();
+        }
+        const definition = await this.definitionProvider.provideDefinition(document, position);
+        const targets = (Array.isArray(definition) ? definition : definition ? [definition] : []) as any[];
+        const siteKey = (uri: string, line: number) => {
+            let path = uri.replace(/^file:\/*/i, '');
+            try { path = decodeURIComponent(path); } catch { /* keep as is */ }
+            return `${path.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase()}#${line}`;
+        };
+        const sites = new Set(procedureSites.map(s => siteKey(s.uri, s.range.start.line)));
+        return targets.some(t => {
+            const uri: string | undefined = t.uri ?? t.targetUri;
+            const range = t.range ?? t.targetSelectionRange ?? t.targetRange;
+            return !!uri && !!range && sites.has(siteKey(uri, range.start.line));
+        });
     }
 
     /**
@@ -379,221 +472,56 @@ export class ImplementationProvider {
     /**
      * Find method implementation (class methods or method calls)
      */
-    /**
-     * #125 — when a typed-variable dot-access call→impl lookup targets an
-     * overloaded method, classify the call's args and pick the matching
-     * overload before falling through to paramCount-only `resolveDotAccess`.
-     * Returns the picked decl as a ClassMemberInfo-shape for downstream
-     * `findImplementationCrossFile` lookup; returns null to signal
-     * "fall through to existing paramCount-only path" when:
-     *   - the variable type can't be resolved to a class,
-     *   - the classifier can't find the call's `(...)`,
-     *   - fewer than 2 candidates locally,
-     *   - `matchedAll=true` (un-disambiguatable).
-     */
-    private async tryArgClassifyResolve(
-        document: TextDocument,
-        callInfo: { objectName: string; methodName: string; paramCount: number },
-        callLine: number
-    ): Promise<{ type: string; className: string; line: number; file: string; signature: string } | null> {
-        const tokens = this.tokenCache.getTokens(document);
-        // #274 — pass the scope line so a procedure-local / parameter receiver resolves (mirrors
-        // the hover/definition callers, which supply position.line).
-        const varTypeInfo = await this.memberLocator.resolveVariableType(callInfo.objectName, tokens, document, callLine);
-        if (!varTypeInfo?.isClass) return null;
-        const className = varTypeInfo.typeName;
-
-        // #274 — delegate to the single enriched choke point. This method previously inlined
-        // classify + findOverload but SKIPPED the ArgumentTypeResolver enrichment, so a typed
-        // argument (e.g. a WINDOW instance passed to INIMgr.Fetch('Main', Window)) never
-        // type-resolved on the implementation path → matchedAll → the caller fell to the
-        // paramCount-only lookup and landed on the wrong overload / the declaration. Definition
-        // and hover already went through resolveOverloadDeclByArgs; this converges impl with them.
-        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-            className, callInfo.methodName, document, tokens, callLine);
-        if (!picked) return null;
-        return { type: 'PROCEDURE', className, line: picked.line, file: picked.file, signature: picked.signature };
-    }
-
     private async findMethodImplementation(
         document: TextDocument,
         position: Position,
         line: string,
         token?: CancellationToken
     ): Promise<Location | null> {
-        // Pattern 1b: Chained access like SELF.Order.MainKey or PARENT.Foo.Bar
-        // Must be checked BEFORE Pattern 1 because Pattern 1's regex matches the last
-        // X.Y( pair in a chain (e.g. RangeList.Init() from SELF.Order.RangeList.Init())
-        // and returns before reaching this block.
+        // #654 — a member access, `receiver.member` or a chain of them (`SELF.a.b`, `obj.a.b`), names
+        // its declaration through DottedAccessResolver: the one call hover and Go to Definition make
+        // (#651, #652), so Ctrl+F12 opens the body of the declaration F12 goes to and cannot pick
+        // another. It replaces the two chain branches and the PARENT, SELF and typed-variable
+        // branches, which each named the class, tried the argument-type pick and asked for the member
+        // in turn - and so each carried its own copy of the fixes #627, #642, #643, #645 and #650.
         {
             const dotBeforeIndex = line.lastIndexOf('.', position.character - 1);
-            if (dotBeforeIndex > 0) {
-                const rawBeforeDot = line.substring(0, dotBeforeIndex).trim();
-                const beforeDot = ChainedPropertyResolver.extractChain(rawBeforeDot);
-                if (/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
-                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch) {
-                        const memberName = methodMatch[1];
-                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                        const paramCount = hasParens
-                            ? this.memberResolver.countParametersInCall(line, memberName)
-                            : 0;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained Ctrl+F12: "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            // #182 — arg-classification overlay: re-point at the matching
-                            // overload's declaration so both the returned decl and the impl
-                            // lookup target the arg-matched overload, not the paramCount one.
-                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
-                            const declInfo = picked
-                                ? { ...chainedInfo, line: picked.line, file: picked.file }
-                                : chainedInfo;
-                            // For methods, try to find the implementation; for properties just return declaration
-                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
-                                const implLoc = await this.findMethodImplementationCrossFile(
-                                    declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file, token
+            if (dotBeforeIndex > 0 && !/\s/.test(line.charAt(dotBeforeIndex + 1))) {
+                const afterDot = line.substring(dotBeforeIndex + 1);
+                const memberMatch = afterDot.match(/^([\w:]+)/);
+                // #639: only the member name itself - the receiver, SELF / PARENT or an argument is
+                // another word, with no implementation of this member.
+                if (memberMatch && this.isCursorOnMemberAfterDot(line, dotBeforeIndex, memberMatch[1], position)) {
+                    const memberName = memberMatch[1];
+                    const beforeDot = ChainedPropertyResolver.extractChain(line.substring(0, dotBeforeIndex).trim());
+                    const receiver = beforeDot.includes('.') ? beforeDot.trim() : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+                    const hasParens = /^\s*\(/.test(afterDot.substring(memberName.length));
+                    const paramCount = hasParens ? countParametersInCall(line, memberName) : undefined;
+                    if (receiver) {
+                        const access = await this.dottedAccess.resolve(receiver, memberName, document, position.line, paramCount);
+                        if (access) {
+                            const member = access.member;
+                            if (ProcedureUtils.containsProcedureKeyword(member.type)) { // #247
+                                const body = await this.findMethodImplementationCrossFile(
+                                    member.className, memberName, document, paramCount ?? 0,
+                                    await this.memberLocator.moduleFileOf(member.className, document) ?? null, // the MODULE hint
+                                    access.pickedSignature ?? member.signature ?? line, // #643
+                                    member.file, token, member.line                     // #650
                                 );
-                                if (implLoc) return implLoc;
+                                if (body) {
+                                    logger.info(`✅ ${receiver}.${memberName} → body of ${member.className}.${memberName}`);
+                                    return body;
+                                }
                             }
-                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
+                            // A property, or a method whose body is not in source: its declaration.
+                            return labelLocation(member.file, member.line, memberName); // #690
                         }
+                        // Nothing names it. PARENT has nowhere else to look; another receiver keeps the
+                        // last resort it had, a body of that name in this file.
+                        if (/^parent$/i.test(receiver)) return null;
+                        return this.findMethodImplementationInFile(document, memberName, paramCount ?? 0);
                     }
                 }
-
-                // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
-                if (!/^\s*(self|parent)\b/i.test(beforeDot) && beforeDot.includes('.')) {
-                    const afterDot = line.substring(dotBeforeIndex + 1).trim();
-                    const methodMatch = afterDot.match(/^([\w:]+)/);
-                    if (methodMatch) {
-                        const memberName = methodMatch[1];
-                        const hasParens = afterDot.includes('(') || line.substring(position.character).trimStart().startsWith('(');
-                        const paramCount = hasParens
-                            ? this.memberResolver.countParametersInCall(line, memberName)
-                            : 0;
-                        const chainedInfo = await this.chainedResolver.resolve(beforeDot, memberName, document, position, paramCount);
-                        if (chainedInfo) {
-                            logger.info(`✅ Chained Ctrl+F12 (var chain): "${memberName}" → impl lookup at ${chainedInfo.file}:${chainedInfo.line}`);
-                            // #182 — arg-classification overlay (var-chain variant).
-                            const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                                chainedInfo.className, memberName, document, this.tokenCache.getTokens(document), position.line);
-                            const declInfo = picked
-                                ? { ...chainedInfo, line: picked.line, file: picked.file }
-                                : chainedInfo;
-                            if (ProcedureUtils.startsWithProcedureKeyword(declInfo.type)) { // #247: PROCEDURE ≡ FUNCTION
-                                const implLoc = await this.findMethodImplementationCrossFile(
-                                    declInfo.className, memberName, document, paramCount, null,
-                                    picked?.signature ?? line, declInfo.file, token
-                                );
-                                if (implLoc) return implLoc;
-                            }
-                            return Location.create(declInfo.file, Range.create(declInfo.line, 0, declInfo.line, 0));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pattern 1: Method call like SELF.MethodName() or PARENT.MethodName() or object.MethodName()
-        // Also handles no-paren calls: FuzzyMatcher.Init (Clarion allows no-param methods without ())
-        const methodCallMatch = line.match(/(\w+)\.(\w+)\s*\(?/gi);
-        if (methodCallMatch) {
-            const callInfo = this.extractMethodCall(line, position);
-            if (callInfo) {
-                logger.info(`Found method call: ${callInfo.objectName}.${callInfo.methodName} with ${callInfo.paramCount} params`);
-
-                // PARENT.Method() — find the parent class and search for its implementation
-                if (callInfo.objectName.toUpperCase() === 'PARENT') {
-                    const tokens = this.tokenCache.getTokens(document);
-                    const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
-                    if (parentInfo) {
-                        logger.info(`PARENT.${callInfo.methodName} → searching for ${parentInfo.parentClassName}.${callInfo.methodName} implementation`);
-                        // #182 — arg-classification overlay: pick the matching overload by
-                        // argument type and target its implementation via the matched decl
-                        // signature, instead of the paramCount-only call line.
-                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                            parentInfo.parentClassName, callInfo.methodName, document, tokens, position.line);
-                        const impl = await this.findMethodImplementationCrossFile(
-                            parentInfo.parentClassName,
-                            callInfo.methodName,
-                            document,
-                            callInfo.paramCount,
-                            parentInfo.moduleFile ?? null,
-                            picked?.signature ?? line,
-                            undefined,
-                            token
-                        );
-                        if (impl) return impl;
-                    }
-                    return null;
-                }
-
-                // SELF.Method() — resolve via class member lookup then cross-file search
-                if (callInfo.objectName.toUpperCase() === 'SELF') {
-                    const selfTokens = this.tokenCache.getTokens(document);
-                    const memberInfo = this.memberResolver.findClassMemberInfo(
-                        callInfo.methodName, document, position.line, selfTokens, callInfo.paramCount
-                    );
-                    if (memberInfo && ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
-                        // #182 — arg-classification overlay (symmetric with PARENT/Definition).
-                        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                            memberInfo.className, callInfo.methodName, document, selfTokens, position.line);
-                        const impl = await this.findMethodImplementationCrossFile(
-                            memberInfo.className,
-                            callInfo.methodName,
-                            document,
-                            callInfo.paramCount,
-                            null,
-                            picked?.signature ?? line,
-                            memberInfo.file,
-                            token
-                        );
-                        if (impl) return impl;
-                    }
-                    return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
-                }
-
-                // Typed variable: st.GetValue() where st is declared as "st StringTheory"
-                {
-                    // #125 — arg-classify overlay for typed-var dot-access call→impl resolution.
-                    const argClassifyInfo = await this.tryArgClassifyResolve(document, callInfo, position.line);
-                    if (argClassifyInfo) {
-                        if (ProcedureUtils.containsProcedureKeyword(argClassifyInfo.type)) { // #247
-                            // #274 — signature-aware cross-file impl lookup, mirroring the SELF/PARENT
-                            // paths: the picked overload's signature disambiguates the body, and the
-                            // declaration file (the `.inc`) lets the redirection find the sibling `.clw`
-                            // (e.g. ABUTIL.INC → ABUTIL.CLW) so impl lands on the method body, not the decl.
-                            const impl = await this.findMethodImplementationCrossFile(
-                                argClassifyInfo.className, callInfo.methodName, document, callInfo.paramCount,
-                                null, argClassifyInfo.signature, argClassifyInfo.file, token
-                            );
-                            if (impl) {
-                                logger.info(`✅ Arg-classify resolved typed-var impl "${callInfo.methodName}" in "${argClassifyInfo.className}"`);
-                                return impl;
-                            }
-                        }
-                        return Location.create(argClassifyInfo.file, Range.create(argClassifyInfo.line, 0, argClassifyInfo.line, 0));
-                    }
-                    const memberInfo = await this.memberLocator.resolveDotAccess(
-                        callInfo.objectName, callInfo.methodName, document, callInfo.paramCount
-                    );
-                    if (memberInfo) {
-                        if (ProcedureUtils.containsProcedureKeyword(memberInfo.type)) { // #247
-                            const impl = await this.memberResolver.findImplementationCrossFile(
-                                memberInfo.className, callInfo.methodName, memberInfo, document, token
-                            );
-                            if (impl) {
-                                logger.info(`✅ Found typed variable impl "${callInfo.methodName}" in "${memberInfo.className}"`);
-                                return impl;
-                            }
-                        }
-                        return Location.create(memberInfo.file, Range.create(memberInfo.line, 0, memberInfo.line, 0));
-                    }
-                }
-
-                return this.findMethodImplementationInFile(document, callInfo.methodName, callInfo.paramCount);
             }
         }
 
@@ -680,43 +608,14 @@ export class ImplementationProvider {
     }
 
     /**
-     * Extract method call information from line
+     * #639 — true when the cursor is on the member named right after the dot at `dotIndex`, the
+     * word the chained branches resolve. Otherwise the cursor is on some other word further
+     * along the line (`SELF.Q.Field = CHOOSE(...)` with the cursor on CHOOSE).
      */
-    private extractMethodCall(
-        line: string,
-        position: Position
-    ): { objectName: string; methodName: string; paramCount: number } | null {
-        // First try with parens: Object.Method(...) or Object.Method()
-        const regex = /(\w+)\.(\w+)\s*\((.*?)\)/gi;
-        let match: RegExpExecArray | null;
-
-        while ((match = regex.exec(line)) !== null) {
-            const callStart = match.index;
-            const callEnd = match.index + match[0].length;
-
-            if (position.character >= callStart && position.character <= callEnd) {
-                const objectName = match[1];
-                const methodName = match[2];
-                const paramList = match[3].trim();
-                const paramCount = paramList === '' ? 0 : paramList.split(',').length;
-
-                return { objectName, methodName, paramCount };
-            }
-        }
-
-        // Fallback: no-paren dotted call — Object.Method (Clarion allows calling
-        // no-parameter methods without parentheses)
-        const noParenRegex = /(\w+)\.(\w+)(?!\s*\()/gi;
-        while ((match = noParenRegex.exec(line)) !== null) {
-            const callStart = match.index;
-            const callEnd = match.index + match[0].length;
-
-            if (position.character >= callStart && position.character <= callEnd) {
-                return { objectName: match[1], methodName: match[2], paramCount: 0 };
-            }
-        }
-
-        return null;
+    private isCursorOnMemberAfterDot(line: string, dotIndex: number, memberName: string, position: Position): boolean {
+        const after = line.substring(dotIndex + 1);
+        const start = dotIndex + 1 + (after.length - after.trimStart().length);
+        return position.character >= start && position.character <= start + memberName.length;
     }
 
     /**
@@ -727,7 +626,8 @@ export class ImplementationProvider {
         methodName: string,
         paramCount?: number,
         declarationSignature?: string,
-        className?: string
+        className?: string,
+        declarationLine?: number
     ): Location | null {
         const text = document.getText();
         const lines = text.split(/\r?\n/);
@@ -750,7 +650,7 @@ export class ImplementationProvider {
         }
 
         // Collect all matching candidates
-        const candidates: { lineNum: number; signature: string }[] = [];
+        let candidates: { lineNum: number; signature: string }[] = [];
 
         for (let i = 0; i < lines.length; i++) {
             if (mapBlocks.some(block => i >= block.start && i <= block.end)) continue;
@@ -766,6 +666,14 @@ export class ImplementationProvider {
         }
 
         if (candidates.length === 0) return null;
+
+        // #650: a module may declare the same local class in several procedures, each with its
+        // own `ThisWindow.Init` body after it. With the declaration in this document, a body
+        // after that declaration is this class's; the first in the file may be another's.
+        if (declarationLine !== undefined) {
+            const after = candidates.filter(c => c.lineNum > declarationLine);
+            if (after.length > 0) candidates = after;
+        }
 
         let bestIdx = 0;
         if (candidates.length > 1) {
@@ -784,41 +692,15 @@ export class ImplementationProvider {
 
         const best = candidates[bestIdx];
         logger.info(`✅ Found method implementation at line ${best.lineNum}`);
-        return Location.create(
-            document.uri,
-            {
-                start: { line: best.lineNum, character: 0 },
-                end: { line: best.lineNum, character: lines[best.lineNum].length }
-            }
-        );
+        // #690: the body's label, as every other path selects it.
+        return Location.create(document.uri, labelRange(best.lineNum, /^\S*/.exec(lines[best.lineNum])![0]));
     }
 
     /**
      * Find the CLASS token for a method at the given line
      */
     private findClassTokenForMethod(tokens: Token[], methodLine: number): Token | null {
-        // Search backwards from the method line to find the CLASS token
-        for (let i = tokens.length - 1; i >= 0; i--) {
-            const token = tokens[i];
-
-            // Stop if we've gone past the method line
-            if (token.line > methodLine) {
-                continue;
-            }
-
-            // Look for CLASS structure
-            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Use the tokenizer's own nesting-aware finishesAt (stack-based, END-marker
-                // driven — not indentation) instead of hand-scanning for a column-0 END.
-                // A local/anonymous CLASS declared inside a procedure's DATA section is
-                // closed by an indented END, which a column-0 scan would skip right past.
-                if (token.finishesAt === undefined || methodLine <= token.finishesAt) {
-                    return token;  // Return the CLASS token itself
-                }
-            }
-        }
-
-        return null;
+        return findEnclosingClassToken(tokens, methodLine);   // #622
     }
 
     /**
@@ -845,12 +727,16 @@ export class ImplementationProvider {
         moduleFile?: string | null,
         declarationSignature?: string,
         declarationFile?: string,
-        token?: CancellationToken
+        token?: CancellationToken,
+        declarationLine?: number // #650: the declaration's line, when it is in currentDocument
     ): Promise<Location | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
         
         // First, search in current file (filtered by className to avoid matching wrong class)
-        const localImpl = this.findMethodImplementationInFile(currentDocument, methodName, paramCount, declarationSignature, className);
+        const declaredHere = declarationLine !== undefined && !!declarationFile &&
+            decodeURIComponent(declarationFile).toLowerCase() === decodeURIComponent(currentDocument.uri).toLowerCase();
+        const localImpl = this.findMethodImplementationInFile(
+            currentDocument, methodName, paramCount, declarationSignature, className, declaredHere ? declarationLine : undefined);
         if (localImpl) {
             return localImpl;
         }
@@ -1025,13 +911,13 @@ export class ImplementationProvider {
                 }
             }
 
-            // ─── Sibling-dir fallback (cluster site 2 of 4, task 6253f9d5) ─────
+            // ─── Sibling-dir fallback (cluster site 1 of 3, the canonical one since #637) ─────
             // No solution / redirection failed — fall back to same directory as
             // declaration. Load-bearing for no-solution-open mode + cross-directory
-            // siblings outside the project's .red search paths. Move in unison with
-            // the cluster-canonical site at `ClassMemberResolver.ts:~1041` and the
-            // two companions in `MapDeclarationDiagnostics.ts:145` +
-            // `MapDeclarationCodeActionProvider.ts:resolveClwPath`. Phase A audit:
+            // siblings outside the project's .red search paths. The canonical copy lived
+            // in ClassMemberResolver until #637; move in unison with the two companions
+            // in `MapDeclarationDiagnostics.ts` + `MapDeclarationCodeActionProvider.ts:resolveClwPath`.
+            // Pinned by ImplementationProvider.FindImplementationCrossFile.test.ts (Scenario 2). Phase A audit:
             // `docs/audits/classmemberresolver-sibling-dir-investigation-6253f9d5.md`.
             const declDir = path.dirname(declFilePath);
             const directPath = path.join(declDir, implFileName);
@@ -1058,7 +944,7 @@ export class ImplementationProvider {
         paramCount?: number,
         declarationSignature?: string
     ): Location | null {
-        const fileUri = `file:///${fullPath.replace(/\\/g, '/')}`;
+        const fileUri = pathToCanonicalUri(fullPath); // #690: canonical (#251)
 
         // Fast path: use cached tokens + DocumentStructure index to find MethodImplementation candidates.
         // Two-part label only (ClassName.MethodName) to avoid false positives with 3-part interface
@@ -1076,7 +962,7 @@ export class ImplementationProvider {
                 // Single match — return immediately without disk read
                 const tok = tokenCandidates[0];
                 logger.info(`✅ Found implementation (token cache) in ${fullPath} at line ${tok.line}`);
-                return Location.create(fileUri, { start: { line: tok.line, character: 0 }, end: { line: tok.line, character: 0 } });
+                return Location.create(fileUri, labelRange(tok.line, tok.label ?? '')); // #690
             }
 
             if (tokenCandidates.length > 1 && paramCount !== undefined && !declarationSignature) {
@@ -1144,13 +1030,8 @@ export class ImplementationProvider {
 
             const best = candidates[bestIdx];
             logger.info(`✅ Found implementation in ${fullPath} at line ${best.lineNum}`);
-            return Location.create(
-                fileUri,
-                {
-                    start: { line: best.lineNum, character: 0 },
-                    end: { line: best.lineNum, character: lines[best.lineNum].length }
-                }
-            );
+            // #690: the body's label, as every other path selects it.
+            return Location.create(fileUri, labelRange(best.lineNum, /^\S*/.exec(lines[best.lineNum])![0]));
         } catch (error) {
             logger.error(`Error reading file ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
         }

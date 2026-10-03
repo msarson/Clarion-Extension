@@ -16,8 +16,11 @@
 const NAIVE_WORD = /[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*/g;
 const STRING_LITERAL = /'(?:[^']|'')*'/g;
 
+// A literal is blanked to spaces of its own length, not to one space: the agreement sweep samples
+// cursor columns from the stripped line, and a shorter line put every later column on another
+// word (#647).
 function stripNonCode(line) {
-    line = line.replace(STRING_LITERAL, ' ');
+    line = line.replace(STRING_LITERAL, s => ' '.repeat(s.length));
     const bang = line.indexOf('!');
     return bang === -1 ? line : line.substring(0, bang);
 }

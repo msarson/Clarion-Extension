@@ -57,47 +57,47 @@ us | USHORT |
 
 **IF**
 ```clarion
-IF THEN
+  IF THEN
 
-END
+  END
 ```
 **IFE**
 ```clarion
-IF THEN
+  IF THEN
 
-ELSE
+  ELSE
 
-END
+  END
 ```
 **MAP**
 ```clarion
-MAP
+  MAP
 
-END
+  END
 ```
 **MODULE**
 ```clarion
-MODULE
+  MODULE
 
-END
+  END
 ```
 **LOOP**
 ```clarion
-LOOP
+  LOOP
 
-END
+  END
 ```
 **LOOPFT**
 ```clarion
-LOOP {var} = {From} to {To}
+  LOOP {var} = {From} to {To}
 
-END
+  END
 ```
 **LOOPFILE**
 ```clarion
-LOOP UNTIL ACCESS:{FileName}.Next()
+  LOOP UNTIL ACCESS:{FileName}.Next()
 
-END
+  END
 ```
 **ACCESS**
 ```clarion

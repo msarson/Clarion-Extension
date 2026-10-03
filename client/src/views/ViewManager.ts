@@ -235,6 +235,13 @@ export function registerSolutionToolbar(context: ExtensionContext): void {
             { webviewOptions: { retainContextWhenHidden: true } }
         )
     );
+    // #681 — the pane shows these settings, so it follows their changes.
+    context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('clarion.build.preserveLogFile') || e.affectsConfiguration('clarion.run.command')
+            || e.affectsConfiguration('clarion.startupProject')) {
+            provider.update();
+        }
+    }));
     logger.info("✅ Solution toolbar registered");
 }
 

@@ -57,7 +57,7 @@ export const CLARION_STRUCTURAL_WORDS = new Set([
 ]);
 
 // #525 — a Clarion label may carry a prefix joined by a single colon (GLO:Name,
-// GVF:Owner, CUS:Name). The scan records the joined name AND each segment: FAR on
+// GBL:Owner, CUS:Name). The scan records the joined name AND each segment: FAR on
 // a prefixed global asks for the whole name, field lookups ask for the bare field
 // name with the prefix applied separately. A double colon (Menu::MENUBAR1, a
 // routine label) is not a prefix and ends the match.

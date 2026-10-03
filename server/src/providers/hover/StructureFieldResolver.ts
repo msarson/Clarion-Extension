@@ -3,19 +3,29 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType, ClarionTokenizer } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
-import { HoverFormatter } from './HoverFormatter';
+import { HoverFormatter, typeLabel } from './HoverFormatter';
 import { MethodHoverResolver } from './MethodHoverResolver';
 import { VariableHoverResolver } from './VariableHoverResolver';
 import { ChainedPropertyResolver } from '../../utils/ChainedPropertyResolver';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
+import { DottedAccessResolver } from '../../services/DottedAccessResolver';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { SolutionManager } from '../../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../../utils/RedirectionResolution';
 import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { MemberOwnerKind } from '../../utils/ClassMemberScan'; // #668
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
+
+/** #668 — a field's declaration: its document and tokens, the label token, and the structure that owns it. */
+interface FieldDeclaration {
+    doc: TextDocument;
+    tokens: Token[];
+    token: Token;
+    owner: Token;
+}
 
 const logger = LoggerManager.getLogger("StructureFieldResolver");
 logger.setLevel("error");
@@ -25,9 +35,10 @@ logger.setLevel("error");
  */
 export class StructureFieldResolver {
     private tokenCache = TokenCache.getInstance();
-    private chainedResolver = new ChainedPropertyResolver();
     private memberLocator = new MemberLocatorService();
     private overloadResolver = new MethodOverloadResolver();
+    /** #651 — the declaration a single-level `receiver.member` names, shared with Go to Definition. */
+    private dottedAccess = new DottedAccessResolver(this.memberLocator, this.overloadResolver);
     
     constructor(
         private formatter: HoverFormatter,
@@ -64,7 +75,7 @@ export class StructureFieldResolver {
                 const structureInfo = this.variableResolver.findLocalVariableInfo(word, tokens, currentScope, document, word);
                 if (structureInfo) {
                     logger.info(`✅ Found structure info for ${word}`);
-                    return this.formatter.formatVariable(word, structureInfo, currentScope, document);
+                    return this.formatter.formatVariable(word, await this.variableResolver.withLike(structureInfo, document.uri, document), currentScope, document);
                 } else {
                     logger.info(`❌ Could not find structure info for ${word}`);
                 }
@@ -139,49 +150,49 @@ export class StructureFieldResolver {
         const isSelfMember = /\bself$/i.test(beforeDot);
         const isParentMember = /\bparent$/i.test(beforeDot);
         const isPureChain = /^[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/i.test(beforeDot.trim());
-        const isSelfOrParentChain = isPureChain && /^\s*(self|parent)\b/i.test(beforeDot);
         logger.info(`resolveFieldAccess: Checking if beforeDot ends with 'self': "${beforeDot}" matches \\bself$ = ${isSelfMember}`);
         
-        // This is a member access (hovering over the field after the dot)
-        if (isSelfMember) {
-            // self.member - class member
-            // If it's a method call, count parameters
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                logger.info(`Method call detected with ${paramCount} parameters`);
+        // #651 / #652 — a single-level receiver (SELF, PARENT, or a name that is a CLASS or a
+        // variable of a CLASS type) or a chain of them (`SELF.a.b`, `obj.a.b`).
+        // DottedAccessResolver names the declaration, the same call Go to Definition makes, so the
+        // two cannot disagree about it; the card is built from that declaration. SELF, PARENT and
+        // a chain that name nothing answer nothing, as before. Any other single-level receiver
+        // the resolver does not cover (a GROUP/QUEUE/FILE, an interface reference) falls through
+        // to the structure-field paths below.
+        if (!beforeDot.includes('.') || isPureChain) {
+            const receiver = beforeDot.includes('.') ? beforeDot.trim()
+                : isSelfMember ? 'SELF' : isParentMember ? 'PARENT' : beforeDot.match(/([\w:]+)\s*$/)?.[1];
+            if (receiver) {
+                const paramCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
+                const access = await this.dottedAccess.resolve(receiver, fieldName, document, position.line, paramCount);
+                if (access) {
+                    // #652 / #488: a GROUP / QUEUE field shows the one card a field has everywhere -
+                    // at its declaration, in PRE form and in dot form - not the member card.
+                    // #668: the member's own declaration settles it when the resolver did not say:
+                    // a chain into a nested GROUP (`Mine.Inner.Flag`) comes back as a member of the
+                    // outer type with no structure kind, and belongs to the nested GROUP.
+                    const declaration = this.fieldDeclaration(access.member, fieldName, document);
+                    const isField = declaration !== null ||
+                        ((access.member.structureType === 'GROUP' || access.member.structureType === 'QUEUE') &&
+                         !/\b(PROCEDURE|FUNCTION)\b/i.test(access.member.type));
+                    if (isField) {
+                        const fieldHover = await this.fieldCard(declaration?.owner.label ?? access.member.className, fieldName,
+                            document, position, access.receiverKind === 'chain', declaration ?? undefined);
+                        if (fieldHover) return fieldHover;
+                    }
+                    // A chain into a structure declared elsewhere keeps the member card (#652), but a
+                    // GROUP / QUEUE member is never a "Class Property" (StructuredTypeMemberLabel).
+                    const ownerKind = declaration?.owner.value.toUpperCase();
+                    const labelled = !access.member.structureType && (ownerKind === 'GROUP' || ownerKind === 'QUEUE')
+                        ? { ...access, member: { ...access.member, structureType: ownerKind as MemberOwnerKind } }
+                        : access;
+                    return await this.methodResolver.formatDottedMember(fieldName, labelled, document, paramCount);
+                }
+                if (isSelfMember || isParentMember || beforeDot.includes('.')) return null;
             }
-            
-            return await this.methodResolver.resolveMethodCall(fieldName, document, position, line, paramCount);
-        } else if (isParentMember) {
-            // parent.member - inherited class member
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                logger.info(`PARENT method call detected with ${paramCount} parameters`);
-            }
-            return await this.methodResolver.resolveParentMethodCall(fieldName, document, position, line, paramCount);
-        } else if (isSelfOrParentChain && beforeDot.includes('.')) {
-            // Chained access: SELF.Order.MainKey or PARENT.Foo.Bar
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-            }
-            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
-            if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
-            }
-        } else if (isPureChain && beforeDot.includes('.')) {
-            // Multi-segment variable chain: variable.property.method (e.g., thisStartup.Settings.PutGlobalSetting)
-            let paramCount: number | undefined;
-            if (hasParentheses) {
-                paramCount = countParametersInCall(line, fieldName) ?? undefined;
-            }
-            const chainedInfo = await this.chainedResolver.resolve(beforeDot, fieldName, document, position, paramCount);
-            if (chainedInfo) {
-                return this.methodResolver.resolveChainedMethodCall(fieldName, chainedInfo, document, paramCount, position);
-            }
-        } else {
+        }
+
+        if (!beforeDot.includes('.')) {
             // variable.member - structure field access (e.g., MyGroup.MyVar)
             // or typed class variable access (e.g., st.GetValue() where st is StringTheory)
             const structureNameMatch = beforeDot.match(/([\w:]+)\s*$/);
@@ -190,6 +201,11 @@ export class StructureFieldResolver {
                 logger.info(`Detected structure field access: ${structureName}.${word}`);
                 
                 const tokens = this.tokenCache.getTokens(document);
+                const callParamCount = hasParentheses ? (countParametersInCall(line, fieldName) ?? undefined) : undefined;
+
+                // (#611: a CLASS receiver's member - the receiver's own class, then its ancestors,
+                // by argument count - is answered above by DottedAccessResolver, #651.)
+
                 const structure = this.tokenCache.getStructure(document); // 🚀 PERFORMANCE: Get cached structure
                 const currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line); // 🚀 PERFORMANCE: O(log n) vs O(n)
                 if (currentScope) {
@@ -198,7 +214,7 @@ export class StructureFieldResolver {
                     const variableInfo = this.variableResolver.findLocalVariableInfo(fieldName, tokens, currentScope, document, fullReference);
                     if (variableInfo) {
                         logger.info(`✅ Found structure field info for ${fullReference}`);
-                        return this.formatter.formatVariable(fullReference, variableInfo, currentScope, document);
+                        return this.formatter.formatVariable(fullReference, await this.variableResolver.withLike(variableInfo, document.uri, document), currentScope, document);
                     }
 
                     // A structure declared with a type argument may ALSO add its own inline
@@ -206,7 +222,7 @@ export class StructureFieldResolver {
                     // type's has BOTH sets. The inline ones exist only in THIS declaration
                     // block, so the type-based lookup below can never reach them — it
                     // resolves SomeType and correctly reports that an inline field isn't in it.
-                    const inlineField = this.findFieldInTokens(structureName, fieldName, tokens, document.uri, position.line);
+                    const inlineField = await this.findFieldInTokens(structureName, fieldName, tokens, document.uri, position.line, document);
                     if (inlineField) {
                         logger.info(`✅ Found inline field "${fieldName}" in structure "${structureName}"`);
                         return inlineField;
@@ -221,34 +237,10 @@ export class StructureFieldResolver {
                 if (varTypeInfo) {
                     const { typeName: varType, isClass, isReference } = varTypeInfo;
                     logger.info(`✅ Variable "${structureName}" has type "${varType}" (isClass=${isClass}, isReference=${isReference}), looking up member "${fieldName}"`);
-                    let paramCount: number | undefined;
-                    if (hasParentheses) {
-                        paramCount = countParametersInCall(line, fieldName) ?? undefined;
-                    }
-                    // Try interface lookup first for reference variables (&InterfaceName)
-                    if (isReference) {
-                        const ifaceInfo = await this.memberLocator.findMemberInInterface(varType, fieldName, document, paramCount);
-                        if (ifaceInfo) {
-                            logger.info(`✅ Found interface method "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount, position);
-                        }
-                    }
-                    if (isClass) {
-                        // #125 — arg-classify overlay for typed-var dot-access call hovers.
-                        // Pick the matching overload before falling through to paramCount-only.
-                        if (hasParentheses) {
-                            const picked = await this.tryArgClassifyResolve(tokens, document, varType, fieldName, position.line);
-                            if (picked) {
-                                logger.info(`✅ Arg-classify resolved typed-var hover "${fieldName}" in "${varType}" to line ${picked.line}`);
-                                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
-                            }
-                        }
-                        // CLASS member resolver (methods, properties)
-                        const memberInfo = await this.memberLocator.findMemberInClass(varType, fieldName, document, paramCount);
-                        if (memberInfo) {
-                            logger.info(`✅ Found member "${fieldName}" in "${varType}"`);
-                            return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);
-                        }
+                    if (isClass || isReference) {
+                        const classHover = await this.memberHoverInClass(varType, isReference, fieldName,
+                            hasParentheses && isClass, callParamCount, tokens, document, position, isClass);
+                        if (classHover) return classHover;
                     }
                     // QUEUE/GROUP/FILE structure field (type defined in INCLUDE files)
                     const fieldHover = await this.resolveStructureTypeFieldHover(varType, fieldName, document);
@@ -259,6 +251,133 @@ export class StructureFieldResolver {
         
         return null;
     }
+    /**
+     * #652 — the card for field `fieldName` of structure `owner`: the one its dot form `Owner.Field`
+     * has always had (#488's variable card, else the type-field card). A single-level access gets it
+     * wherever the structure is declared, as before. A chain gets it only for a structure this
+     * document declares (`FDB5.Q.Field`, which showed nothing until #652): a chain through a class
+     * member to a QUEUE TYPE in an include keeps the member card ("Queue Field · Type", as
+     * StructuredTypeMemberLabel pins), and gets null here.
+     */
+    private async fieldCard(
+        owner: string, fieldName: string, document: TextDocument, position: Position, onlyIfDeclaredHere: boolean,
+        declaration?: FieldDeclaration // #668: where the field is declared, when the resolver said
+    ): Promise<Hover | null> {
+        const tokens = this.tokenCache.getTokens(document);
+        if (onlyIfDeclaredHere) {
+            const ownerLower = owner.toLowerCase();
+            if (!tokens.some(t => t.type === TokenType.Structure && t.label?.toLowerCase() === ownerLower)) return null;
+        }
+        const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(document), position.line);
+        if (scope) {
+            const reference = `${owner}.${fieldName}`;
+            const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference)
+                // #657: the dotted name is not in the outline for every structure (a QUEUE's fields,
+                // its own or its type's), so read the field from its declaration line in this
+                // document, as a hover on that line does - the one card #488 asks for.
+                ?? this.fieldInfoAtDeclaration(owner, fieldName, tokens, scope, document);
+            if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, document.uri, document), scope, document);
+        }
+        // #668: a structure whose type is declared in another file (`Rows QUEUE(RowType)` with
+        // RowType in the program file) - the card that file's declaration line gives.
+        if (declaration && declaration.doc.uri !== document.uri) {
+            const card = await this.cardAtDeclaration(`${owner}.${fieldName}`, fieldName, declaration);
+            if (card) return card;
+        }
+        return this.resolveStructureTypeFieldHover(owner, fieldName, document);
+    }
+
+    /**
+     * #668 — the member's declaration, when it is a field: a column-0 label on the member's line
+     * whose parent is a GROUP / QUEUE / FILE / RECORD. Read from the token cache only (the
+     * resolver has just tokenized that file); a file not in the cache is not loaded here (#662).
+     */
+    private fieldDeclaration(member: { file?: string; line?: number }, fieldName: string, document: TextDocument): FieldDeclaration | null {
+        if (!member.file || member.line === undefined) return null;
+        let doc: TextDocument | null = null;
+        let tokens: Token[] | null = null;
+        if (member.file.toLowerCase() === document.uri.toLowerCase()) {
+            doc = document;
+            tokens = this.tokenCache.getTokens(document);
+        } else {
+            tokens = this.tokenCache.getTokensByUriCaseInsensitive(member.file);
+            const text = this.tokenCache.getDocumentTextByUriCaseInsensitive(member.file);
+            if (tokens && text !== null) doc = TextDocument.create(member.file, 'clarion', 1, text);
+        }
+        if (!doc || !tokens) return null;
+        const fieldLower = fieldName.toLowerCase();
+        const token = tokens.find(t =>
+            t.line === member.line && t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === fieldLower);
+        const owner = token?.parent;
+        if (!token || !owner || owner.type !== TokenType.Structure || !owner.label ||
+            !/^(GROUP|QUEUE|FILE|RECORD)$/i.test(owner.value)) return null;
+        return { doc, tokens, token, owner };
+    }
+
+    /** #668 — the card a hover on the field's declaration line gives, titled `Owner.Field`. */
+    private async cardAtDeclaration(reference: string, fieldName: string, d: FieldDeclaration): Promise<Hover | null> {
+        const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(d.doc), d.token.line);
+        if (scope) {
+            const info = this.variableResolver.findLocalVariableInfo(fieldName, d.tokens, scope, d.doc, undefined, d.token.line);
+            if (info) return this.formatter.formatVariable(reference, await this.variableResolver.withLike(info, d.doc.uri, d.doc), scope, d.doc);
+        }
+        return this.variableResolver.findStructureFieldDeclarationHover(fieldName, d.tokens, d.doc, d.token.line, reference);
+    }
+
+    /** #657 — field `fieldName` read at its declaration in structure `owner`, when this document declares it. */
+    private fieldInfoAtDeclaration(
+        owner: string, fieldName: string, tokens: Token[], scope: Token, document: TextDocument
+    ): { type: string; line: number } | null {
+        const ownerLower = owner.toLowerCase();
+        const fieldLower = fieldName.toLowerCase();
+        const declaration = tokens.find(t =>
+            t.start === 0 &&
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.value.toLowerCase() === fieldLower &&
+            t.parent?.label?.toLowerCase() === ownerLower);
+        if (!declaration) return null;
+        return this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, undefined, declaration.line);
+    }
+
+    /**
+     * The member `fieldName` of class (or interface) `className`: an interface method first when
+     * the receiver is a reference, then the overload the call's argument types pick (#125), then
+     * findMemberInClass - which respects the argument count up the parent chain (#611).
+     */
+    private async memberHoverInClass(
+        className: string,
+        isReference: boolean,
+        fieldName: string,
+        classifyArgs: boolean,
+        paramCount: number | undefined,
+        tokens: Token[],
+        document: TextDocument,
+        position: Position,
+        searchClass = true
+    ): Promise<Hover | null> {
+        if (isReference) {
+            const ifaceInfo = await this.memberLocator.findMemberInInterface(className, fieldName, document, paramCount);
+            if (ifaceInfo) {
+                logger.info(`✅ Found interface method "${fieldName}" in "${className}"`);
+                return await this.methodResolver.resolveChainedMethodCall(fieldName, ifaceInfo, document, paramCount, position);
+            }
+        }
+        if (!searchClass) return null;
+        if (classifyArgs) {
+            const picked = await this.tryArgClassifyResolve(tokens, document, className, fieldName, position.line);
+            if (picked) {
+                logger.info(`✅ Arg-classify resolved hover "${fieldName}" in "${className}" to line ${picked.line}`);
+                return await this.methodResolver.resolveChainedMethodCall(fieldName, picked, document, paramCount, position);
+            }
+        }
+        const memberInfo = await this.memberLocator.findMemberInClass(className, fieldName, document, paramCount, position.line); // #650
+        if (!memberInfo) return null;
+        logger.info(`✅ Found member "${fieldName}" in "${className}"`);
+        return await this.methodResolver.resolveChainedMethodCall(fieldName, memberInfo, document, paramCount, position);
+    }
+
     /**
      * #125 — when a typed-variable dot-access hover targets an overloaded method,
      * classify the call's args and pick the matching overload so the hover shows
@@ -294,7 +413,7 @@ export class StructureFieldResolver {
     public async resolveStructureTypeFieldHover(typeName: string, fieldName: string, document: TextDocument): Promise<Hover | null> {
         // First: check the current document's own tokens (handles same-file GROUP,TYPE definitions)
         const currentTokens = this.tokenCache.getTokens(document);
-        const fromCurrentDoc = this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri);
+        const fromCurrentDoc = await this.findFieldInTokens(typeName, fieldName, currentTokens, document.uri, undefined, document);
         if (fromCurrentDoc) return fromCurrentDoc;
 
         const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
@@ -308,12 +427,23 @@ export class StructureFieldResolver {
         // would bind (`.\` before the shared paths).
         const sdiHit = await this.memberLocator.resolveSdiDeclaration(typeName, path.dirname(filePath), filePath); // #571
         if (sdiHit) {
-            const fromSdi = this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri);
+            const fromSdi = await this.findFieldInTokens(typeName, fieldName, sdiHit.tokens, sdiHit.doc.uri, undefined, sdiHit.doc);
             if (fromSdi) return fromSdi;
         }
 
         const result = await this.findFieldInTypeIncludes(typeName, fieldName, filePath, new Set());
         if (result) return result;
+
+        // #613: the MEMBER parent and its INCLUDE chain. A generated program declares its global
+        // TYPEs in the PROGRAM file, which the structure index leaves out of its data (#483), so
+        // `UvFieldQ.AltIDToolTip` on a `UvFieldQ QUEUE(tqRwField)` found nothing on hover.
+        const parent = await this.memberLocator.loadMemberParent(document);
+        if (parent) {
+            const fromParent = await this.findFieldInTokens(typeName, fieldName, parent.tokens, parent.doc.uri, undefined, parent.doc);
+            if (fromParent) return fromParent;
+            const fromParentIncludes = await this.findFieldInTypeIncludes(typeName, fieldName, parent.filePath, new Set([filePath.toLowerCase()]));
+            if (fromParentIncludes) return fromParentIncludes;
+        }
 
         // Fallback: check equates.clw
         const equatesPath = SolutionManager.getInstance()?.getEquatesPath();
@@ -327,7 +457,7 @@ export class StructureFieldResolver {
      * Searches an already-tokenized token array for a field inside a named GROUP/QUEUE/FILE type.
      * Used to resolve same-file type definitions without a disk read.
      */
-    private findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number): Hover | null {
+    private async findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number, sourceDoc?: TextDocument): Promise<Hover | null> {
         const matchesName = (t: Token) =>
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
             t.start === 0 &&
@@ -363,12 +493,23 @@ export class StructureFieldResolver {
         );
         if (!fieldToken) return null;
 
+        return this.fieldTypeCard(typeName, fieldName, tokens, fieldToken, sourceUri, sourceDoc);
+    }
+
+    /**
+     * The card for a field of a GROUP/QUEUE/FILE type reached as `Owner.Field`: its type (#656: a
+     * `LIKE(name)` field as written and as resolved) and its declaration line from the source,
+     * as the declaration card shows it, not rebuilt from tokens.
+     */
+    private async fieldTypeCard(typeName: string, fieldName: string, tokens: Token[], fieldToken: Token, sourceUri: string, sourceDoc?: TextDocument): Promise<Hover> {
         const lineTokens = tokens.filter(t => t.line === fieldToken.line);
-        const declaration = lineTokens.map(t => t.value).join('  ').trim();
         const typeToken = lineTokens.find(t => t.start > fieldToken.start);
         const fieldType = typeToken?.value ?? 'UNKNOWN';
+        const like = fieldType.toUpperCase() === 'LIKE' ? await this.variableResolver.likeFor(sourceUri, fieldToken.line, sourceDoc) : null;
+        const declaration = this.sourceLine(sourceUri, fieldToken.line)?.trim()
+            ?? lineTokens.map(t => t.value).join('  ').trim();
         const markdown = [
-            `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
+            `**${typeName} Field:** \`${fieldName}\` — ${typeLabel(fieldType, like ?? undefined)}`,
             ``,
             `\`\`\`clarion`,
             declaration,
@@ -378,6 +519,19 @@ export class StructureFieldResolver {
         return { contents: { kind: 'markdown', value: markdown } };
     }
 
+    /** A line of a document: the editor's buffer when it is open, else the file on disk. */
+    private sourceLine(uri: string, line: number): string | undefined {
+        let text = this.tokenCache.getDocumentText(uri) ?? undefined;
+        if (text === undefined) {
+            try {
+                text = fs.readFileSync(decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'), 'utf8');
+            } catch {
+                return undefined;
+            }
+        }
+        return text.split(/\r?\n/)[line];
+    }
+
     /**
      * Resolves hover for a bare type name (e.g., hovering on "UnzipOptionsType" in LIKE(UnzipOptionsType)).
      * Finds the structure declaration in INCLUDE files and shows the type definition.
@@ -385,7 +539,7 @@ export class StructureFieldResolver {
     async resolveTypeNameHover(typeName: string, document: TextDocument): Promise<Hover | null> {
         // #361 — GATE the include walk on the SDI. findTypeDeclarationInIncludes
         // does a recursive fs.readFileSync + tokenize of EVERY reachable INCLUDE;
-        // on IBSCommon.clw a hover over a word that isn't a type (NetDebugTrace,
+        // on CommonLib.clw a hover over a word that isn't a type (NetDebugTrace,
         // dll_mode, a word inside a string) walked the whole ABC/NetTalk/libsrc
         // universe synchronously — a 38s frozen editor. The SDI already indexes
         // every declared type across the redirection search paths, which is a
@@ -408,11 +562,7 @@ export class StructureFieldResolver {
             // First search the equates.clw tokens directly
             const equatesTokens = solutionManager!.getEquatesTokens();
             if (equatesTokens && equatesTokens.length > 0) {
-                const labelToken = equatesTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(equatesTokens, typeName);
                 if (labelToken) {
                     const lineTokens = equatesTokens.filter(t => t.line === labelToken.line);
                     const structToken = lineTokens.find(t => t.type === TokenType.Structure);
@@ -485,11 +635,7 @@ export class StructureFieldResolver {
             }
 
             if (incTokens && incTokens.length > 0) {
-                const labelToken = incTokens.find(t =>
-                    (t.type === TokenType.Label || t.type === TokenType.Variable) &&
-                    t.start === 0 &&
-                    t.value.toLowerCase() === typeName.toLowerCase()
-                );
+                const labelToken = TokenHelper.findTypeDeclarationLabel(incTokens, typeName);
                 if (labelToken) {
                     // Find the structure keyword to show the declaration line
                     const labelIdx = incTokens.indexOf(labelToken);
@@ -601,19 +747,7 @@ export class StructureFieldResolver {
                     );
                     if (fieldToken) {
                         logger.info(`✅ Found field "${fieldName}" in type "${typeName}" at ${resolvedPath}:${fieldToken.line}`);
-                        const lineTokens = incTokens.filter(t => t.line === fieldToken.line);
-                        const declaration = lineTokens.map(t => t.value).join('  ').trim();
-                        const typeToken = lineTokens.find(t => t.start > fieldToken.start);
-                        const fieldType = typeToken?.value ?? 'UNKNOWN';
-                        const markdown = [
-                            `**${typeName} Field:** \`${fieldName}\` — \`${fieldType}\``,
-                            ``,
-                            `\`\`\`clarion`,
-                            declaration,
-                            `\`\`\``,
-                            this.formatter.locationLink(resolvedPath, fieldToken.line)
-                        ].join('\n');
-                        return { contents: { kind: 'markdown', value: markdown } };
+                        return this.fieldTypeCard(typeName, fieldName, incTokens, fieldToken, uri);
                     }
                 }
             }

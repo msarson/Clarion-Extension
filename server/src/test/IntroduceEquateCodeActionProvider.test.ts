@@ -33,7 +33,7 @@ function args(actions: ReturnType<IntroduceEquateCodeActionProvider['provideCode
     assert.strictEqual(actions.length, 1, 'expected one Introduce EQUATE action');
     const a = actions[0].command!.arguments!;
     return {
-        literal: a[1] as { line: number; startChar: number; endChar: number },
+        literal: a[1] as { line: number; startChar: number; endChar: number; endLine?: number },
         value: a[2] as string,
         scopes: a[3] as EquateScope[]
     };
@@ -198,4 +198,149 @@ suite('#281 cross-file Global from a MEMBER', () => {
             assert.strictEqual(global.insertLine, 5, 'global data inserts before the PROGRAM CODE (after the MAP)');
         });
     }
+});
+
+/**
+ * #709 — a literal in a scope's DATA (above its CODE) got its EQUATE inserted just before CODE,
+ * below the use; an EQUATE must be declared before it is used in data, so the build failed
+ * ("Unknown identifier"). It now goes before the declaration that contains the literal — the
+ * outermost structure spanning it (a whole WINDOW), or the first line of a `|`-continued one.
+ */
+suite('#709 Introduce EQUATE places the EQUATE above a use in data', () => {
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+    });
+
+    const scope = (scopes: EquateScope[], label: string) => scopes.find(s => s.label.startsWith(label))!;
+
+    test('bug-pin: a FORMAT string inside a WINDOW in procedure data → before the WINDOW', () => {
+        const src = [
+            '  PROGRAM',                                                   // 0
+            '  MAP',                                                       // 1
+            'MainWindow PROCEDURE',                                        // 2
+            '  END',                                                       // 3
+            '  CODE',                                                      // 4
+            'MainWindow PROCEDURE',                                        // 5
+            'Total      LONG',                                             // 6
+            "Window WINDOW('Invoicing'),AT(,,660,344),SYSTEM",             // 7
+            '       LIST,AT(8,8,640,200),USE(?List),FROM(Q), |',           // 8
+            "             FORMAT('56R(2)|M~Invoice~C(0)@n_9@')",           // 9
+            '     END',                                                    // 10
+            '  CODE',                                                      // 11
+            '  OPEN(Window)',                                              // 12
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq709-window.clw', 9, 22));
+        assert.strictEqual(scope(scopes, 'This procedure').insertLine, 7, 'before the WINDOW, not before CODE (11)');
+    });
+
+    test('bug-pin: a literal on a continuation line of a simple declaration → before its first line', () => {
+        const src = [
+            '  PROGRAM',                        // 0
+            '  MAP',                            // 1
+            'P PROCEDURE',                      // 2
+            '  END',                            // 3
+            '  CODE',                           // 4
+            'P PROCEDURE',                      // 5
+            'Msg   STRING(40), |',              // 6
+            "      NAME('MessageText')",        // 7
+            '  CODE',                           // 8
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq709-cont.clw', 7, 14));
+        assert.strictEqual(scope(scopes, 'This procedure').insertLine, 6);
+    });
+
+    test('bug-pin: a literal in a PROGRAM\'s global data → Global goes before that declaration', () => {
+        const src = [
+            '  PROGRAM',                        // 0
+            '  MAP',                            // 1
+            '  END',                            // 2
+            "Title  STRING('Invoicing')",       // 3
+            '  CODE',                           // 4
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq709-global.clw', 3, 18));
+        assert.strictEqual(scope(scopes, 'Global').insertLine, 3);
+    });
+
+    test('bug-pin: a literal in a MEMBER file\'s module data → This module goes before that declaration', () => {
+        const src = [
+            '  MEMBER()',                       // 0
+            '  MAP',                            // 1
+            '  END',                            // 2
+            "Prefix  STRING('INV-')",           // 3
+            'P PROCEDURE',                      // 4
+            '  CODE',                           // 5
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq709-module.clw', 3, 19));
+        assert.strictEqual(scope(scopes, 'This module').insertLine, 3);
+    });
+
+    test('control: a literal in CODE still goes just before CODE', () => {
+        const src = [
+            '  PROGRAM', '  MAP', 'P PROCEDURE', '  END', '  CODE',
+            'P PROCEDURE',                      // 5
+            'Count LONG',                       // 6
+            '  CODE',                           // 7
+            '  Count = 42',                     // 8
+        ].join('\n');
+        const { scopes } = args(invoke(src, 'file:///eq709-code.clw', 8, 11));
+        assert.strictEqual(scope(scopes, 'This procedure').insertLine, 7);
+    });
+});
+
+/**
+ * #710 — a string built from literals joined with `&` across `|` lines lost all but the literal
+ * under the cursor. The EQUATE now takes the whole chain verbatim and the whole chain is replaced
+ * (compiler-verified: an EQUATE of concatenated string constants builds, `|` lines included). The
+ * chain is only string literals and `&`, so it stops at anything else.
+ */
+suite('#710 Introduce EQUATE takes the whole concatenated string', () => {
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+    });
+
+    const SRC = [
+        '  PROGRAM',                             // 0
+        '  MAP',                                 // 1
+        '  END',                                 // 2
+        'S  STRING(80)',                         // 3
+        '  CODE',                                // 4
+        "  S = 'some string' & |",               // 5
+        "      'Some more string' & |",          // 6
+        "      'even more string'",              // 7
+    ].join('\n');
+    const CHAIN = "'some string' & |\n      'Some more string' & |\n      'even more string'";
+
+    test('bug-pin: on the middle literal, the EQUATE value is the whole chain and the range covers it', () => {
+        const { value, literal } = args(invoke(SRC, 'file:///eq710-mid.clw', 6, 10));
+        assert.strictEqual(value, CHAIN);
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 7, endChar: 24 });
+    });
+
+    test('bug-pin: on the first or the last literal, the same whole chain', () => {
+        assert.strictEqual(args(invoke(SRC, 'file:///eq710-first.clw', 5, 9)).value, CHAIN);
+        assert.strictEqual(args(invoke(SRC, 'file:///eq710-last.clw', 7, 10)).value, CHAIN);
+    });
+
+    test('a chain on one line', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', '  CODE', "  S = 'a' & 'b' & 'c'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-oneline.clw', 5, 13));
+        assert.strictEqual(value, "'a' & 'b' & 'c'");
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 5, endChar: 21 });
+    });
+
+    test('the chain stops at anything that is not a literal: the meaning is unchanged', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', 'V  STRING(10)', '  CODE', "  S = 'a' & V & 'b'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-var.clw', 6, 8));
+        assert.strictEqual(value, "'a'");
+        assert.deepStrictEqual(literal, { line: 6, startChar: 6, endLine: 6, endChar: 9 });
+    });
+
+    test('a lone literal is unchanged', () => {
+        const src = ['  PROGRAM', '  MAP', '  END', 'S  STRING(40)', '  CODE', "  S = 'only'"].join('\n');
+        const { value, literal } = args(invoke(src, 'file:///eq710-lone.clw', 5, 9));
+        assert.strictEqual(value, "'only'");
+        assert.deepStrictEqual(literal, { line: 5, startChar: 6, endLine: 5, endChar: 12 });
+    });
 });

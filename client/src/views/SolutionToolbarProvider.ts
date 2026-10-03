@@ -5,6 +5,9 @@ import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFa
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
+import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clarionVersionRow } from './ToolsPaneRows'; // #681, #683
+import { lastBuildLog } from '../utils/LastBuildLog'; // #681
+import { toolbarIcons } from './ToolbarIcons'; // #682
 
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
@@ -87,17 +90,49 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                     vscode.commands.executeCommand('clarion.startDebugging', true);
                     break;
                 case 'setActiveVersion':
-                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point.
+                    // #132 / dd87633f B3 — Clarion Tools pane picker entry point; since #683 the Clarion row.
                     vscode.commands.executeCommand('clarion.setActiveVersion');
                     break;
                 case 'setConfiguration':
                     // #530 — the Config row in the summary table.
                     vscode.commands.executeCommand('clarion.setConfiguration');
                     break;
+                // #681 — the settings rows.
+                case 'buildLogMenu':
+                    void this.showBuildLogMenu();
+                    break;
+                case 'chooseStartupProject':
+                    vscode.commands.executeCommand('clarion.chooseStartupProject');
+                    break;
+                case 'openRunCommandSetting':
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.run.command');
+                    break;
+                case 'unresolvedReport':
+                    vscode.commands.executeCommand('clarion.unresolvedReferencesReport'); // #687
+                    break;
+                case 'openBuildSettings':
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.build');
+                    break;
             }
         });
 
         logger.info("✅ Solution toolbar webview resolved");
+    }
+
+    /** #681 — the Build log row: open the last kept log, or turn keeping on or off. */
+    private async showBuildLogMenu(): Promise<void> {
+        const settings = vscode.workspace.getConfiguration('clarion.build');
+        const keep = settings.get<boolean>('preserveLogFile', false);
+        const log = lastBuildLog();
+        const picked = await vscode.window.showQuickPick(buildLogMenu(keep, !!log), { placeHolder: 'Build log' });
+        if (!picked) return;
+        if (picked.action === 'open' && log) {
+            await vscode.window.showTextDocument(vscode.Uri.file(log), { preview: true });
+            return;
+        }
+        const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+        await settings.update('preserveLogFile', picked.action === 'keep', target);
+        this.update();
     }
 
     /**
@@ -114,8 +149,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
      * onmessage`. Hypothesis was load-bearing.
      *
      * #141 Q9 directive #2 — `solutionLoaded` field gates toolbar Build/Run/
-     * Debug button visibility in the webview. "Open in IDE" + "Set Active
-     * Version" buttons remain visible regardless (meaningful in both modes).
+     * Debug button visibility in the webview. "Open in IDE" stays visible
+     * regardless, as does the Clarion row that sets the version (#683).
      */
     public update(): void {
         if (this._view) {
@@ -145,7 +180,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         const defaultVersion = vscode.workspace.getConfiguration('clarion').get<string>('activeVersion', '');
         // #535 — a name the selected ClarionProperties.xml no longer registers says so.
         const versionLabel = versionRowLabel(effectiveVersion, defaultVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
-        rows.push({ label: 'Clarion', value: versionLabel });
+        rows.push(clarionVersionRow(versionLabel, !!globalSolutionFile)); // #683 — clickable; replaced the toolbar gear
 
         // #479 — the compile-target name stopped being a unique identifier once a
         // ClarionProperties.xml could live outside %APPDATA% (see #471): two
@@ -177,16 +212,21 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         if (solutionInfo) {
             rows.push({ label: 'Projects', value: String(solutionInfo.projects.length) });
 
-            const startupGuid = vscode.workspace.getConfiguration('clarion').get<string>('startupProject');
-            if (startupGuid) {
-                const startup = solutionInfo.projects.find(p =>
+            // #681 — always shown with projects, and clickable: Run and Debug start it (#666).
+            if (solutionInfo.projects.length > 0) {
+                const startupGuid = vscode.workspace.getConfiguration('clarion').get<string>('startupProject');
+                const startup = startupGuid ? solutionInfo.projects.find(p =>
                     p.guid.replace(/[{}]/g, '').toLowerCase() === startupGuid.replace(/[{}]/g, '').toLowerCase()
-                );
-                if (startup) {
-                    rows.push({ label: 'Startup', value: startup.name });
-                }
+                ) : undefined;
+                rows.push(startupRow(startup?.name));
             }
         }
+
+        // #681 — the settings that change what Build and Run do.
+        const runRow = runCommandRow(vscode.workspace.getConfiguration('clarion').get<string>('run.command', ''));
+        if (runRow) rows.push(runRow);
+        rows.push(buildLogRow(vscode.workspace.getConfiguration('clarion.build').get<boolean>('preserveLogFile', false), lastBuildLog()));
+        rows.push(settingsRow());
 
         if (this._graphStatus) {
             if (this._graphStatus.status === 'building') {
@@ -205,7 +245,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 const missing = unresolved > 0
                     ? `, ⚠️ ${unresolved}${total ? ` of ${total}` : ''} unresolved`
                     : '';
-                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}` });
+                // #687 — clickable: the unresolved file references report.
+                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}`, command: 'unresolvedReport', title: 'Show the file references that do not resolve' });
             }
         }
 
@@ -254,28 +295,35 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   }
   tr.clickable { cursor: pointer; }
   tr.clickable:hover td { text-decoration: underline; }
+  /* #682 — a narrow side bar wraps the toolbar; buttons keep their size and are never cut off. */
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 2px;
   }
   button {
+    flex: none;
+    white-space: nowrap;
+    width: 24px;
+    height: 22px;
     background: none;
     border: none;
     cursor: pointer;
-    padding: 3px 5px;
+    padding: 0;
     border-radius: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    color: var(--vscode-foreground);
+    color: var(--vscode-icon-foreground, var(--vscode-foreground));
   }
+  button svg { display: block; }
   button:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
   }
   button img { width: 16px; height: 16px; }
   .sep {
+    flex: none;
     width: 1px;
     height: 16px;
     background: var(--vscode-widget-border, rgba(128,128,128,0.3));
@@ -308,14 +356,12 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
   <div class="toolbar">
     <button title="Open Solution in Clarion IDE" data-cmd="openInClarionIDE"><img src="${iconUri}" /></button>
     <div class="sep" data-solution-only${initialHiddenAttr}></div>
-    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;</button>
+    <button title="Build solution" data-cmd="build" data-solution-only${initialHiddenAttr}>${toolbarIcons.build}</button>
     <div class="sep" data-solution-only${initialHiddenAttr}></div>
-    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>▶&#xFE0E;</button>
-    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;▶&#xFE0E;</button>
-    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>🐛&#xFE0E;</button>
-    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>🔨&#xFE0E;🐛&#xFE0E;</button>
-    <div class="sep"></div>
-    <button title="Set Active Clarion Version" data-cmd="setActiveVersion">⚙&#xFE0E;</button>
+    <button title="Run (Ctrl+F5)" data-cmd="run" data-solution-only${initialHiddenAttr}>${toolbarIcons.run}</button>
+    <button title="Build &amp; Run" data-cmd="buildAndRun" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndRun}</button>
+    <button title="Debug (F5)" data-cmd="startDebugging" data-solution-only${initialHiddenAttr}>${toolbarIcons.debug}</button>
+    <button title="Build &amp; Debug" data-cmd="buildAndDebug" data-solution-only${initialHiddenAttr}>${toolbarIcons.buildAndDebug}</button>
   </div>
   <div class="hsep"></div>
   <table><tbody>${summaryHtml}</tbody></table>
@@ -341,7 +387,7 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
     // #141 Q9 directive #2 — toolbar gating helper. Solution-only elements
     // (marked with data-solution-only) hide when no solution is open.
-    // "Open in IDE" and "Set Active Version" buttons are NOT marked because
+    // "Open in IDE" and "Set Version" buttons are NOT marked because
     // they're meaningful in both modes.
     function applySolutionLoaded(loaded) {
       document.querySelectorAll('[data-solution-only]').forEach(function(el) {

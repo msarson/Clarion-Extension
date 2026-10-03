@@ -4,7 +4,7 @@ import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { ArgClassification } from './CallSiteArgumentClassifier';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { ChainedPropertyResolver } from './ChainedPropertyResolver';
-import { ClassMemberResolver } from './ClassMemberResolver';
+import { extractClassName } from './ClassNameUtils';
 import { ScopeTypeIndexService } from '../services/ScopeTypeIndexService';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
 import { TokenCache } from '../TokenCache';
@@ -110,7 +110,7 @@ export class ArgumentTypeResolver {
             // #272 — but an inline structure-kind reference (`&WINDOW`, `&QUEUE`) has no named
             // type and extractClassName drops it as a primitive; fall back to the kind itself so
             // `OPEN(SELF.MyWindow, …)` where `MyWindow &WINDOW` can match the `WINDOW` overload.
-            typeName = ClassMemberResolver.extractClassName(memberInfo.type)
+            typeName = extractClassName(memberInfo.type)
                 ?? this.inlineStructureKind(memberInfo.type);
         } else if (/^&?[\w:]+$/.test(text)) {
             // #274 — a structure INSTANCE declared inline in THIS file (`Window WINDOW('Caption')`,

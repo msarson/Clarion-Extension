@@ -137,10 +137,10 @@ When opening a solution for the first time, you'll configure:
 
 **What:** which installed Clarion the solution is edited and built with.
 
-The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "DirectSystems", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
+The extension reads `ClarionProperties.xml` — the file the Clarion IDE itself writes, normally under `%APPDATA%\SoftVelocity\Clarion\<major>\` — and lists every version registered there, by the name you gave it in the IDE ("Clarion 11.1", "Clarion 10 Dev", …). Everything else follows from that pick: the `bin` folder used to build, the redirection (`.red`) file used to resolve includes, and the libsrc search paths.
 
 **Set or change it:**
-- `Ctrl+Shift+P` → **Clarion: Set Active Version**
+- `Ctrl+Shift+P` → **Clarion: Set Version**
 - Or click the version in the status bar
 
 If only one version is registered you are still asked which properties file to use, because a machine can have more than one.
@@ -260,7 +260,7 @@ When that is detected, the extension says which settings are shadowed and offers
 #### "ClarionCl.exe not found"
 
 **Fix:**
-1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"** and pick the version this solution builds with
+1. `Ctrl+Shift+P` → **"Clarion: Set Version"** and pick the version this solution builds with
 2. If it is missing from the list, it is no longer registered in `ClarionProperties.xml` — re-register it in the Clarion IDE, or browse to another properties file
 3. Try building again
 
@@ -321,7 +321,7 @@ Supported as the compiler supports them: `[Common]` plus name-matched sections, 
 Redirection comes from the selected **Clarion version** — its `ClarionProperties.xml` names the redirection file (e.g. `Clarion110.red`), and the extension parses it (including per-configuration sections and included `.red` files) exactly as the Clarion IDE does.
 
 **Set the version:**
-1. `Ctrl+Shift+P` → **"Clarion: Set Active Version"**
+1. `Ctrl+Shift+P` → **"Clarion: Set Version"**
 2. Pick the installed version — the extension reads its `ClarionProperties.xml`
 
 **A configuration kept outside `%APPDATA%`:** installation discovery scans `%APPDATA%\SoftVelocity\Clarion`, which is where the IDE writes its settings — but a `ClarionProperties.xml` can live anywhere, for example in a checked-out tree that carries its own IDE settings and is opened with `/ConfigDir=`. For that case:
@@ -365,7 +365,7 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 **Access via `Ctrl+Shift+P`:**
 
 - **Clarion: Open Solution...** - the main entry point: detected solutions, browse, or recents
-- **Clarion: Set Active Version** - pick the installed Clarion this solution uses
+- **Clarion: Set Version** - pick the installed Clarion this solution uses
 - **Clarion: Set Configuration** - change Debug/Release
 - **Clarion: Generate Application** - generate an app's source
 - **Clarion: Show Extension Status** - health check
@@ -373,6 +373,31 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 - **Clarion: Set Log Level** - raise logging while reproducing a problem
 
 The full list is in the **[Commands Reference](../reference/commands.md)**.
+
+---
+
+## The Actions Panel
+
+The **Actions** panel at the top of the **Clarion Tools** sidebar has a toolbar and a summary of the open solution.
+
+**Toolbar:** Open in the Clarion IDE, Build, Run, Build and Run, Debug, Build and Debug. It wraps to a second line in a narrow sidebar.
+
+**Rows** (a row with a command behind it is clickable):
+
+| Row | Shows | Click |
+|---|---|---|
+| Clarion | The Clarion version in use | Set the version (for this solution when one is open) |
+| Solution | The open solution | — |
+| Config | The build configuration | Change it |
+| Projects | How many projects the solution has | — |
+| Startup | The project Run and Debug start | Choose another (also **Clarion: Choose Startup Project**) |
+| Run | *Only when `clarion.run.command` is set* | Open that setting |
+| Build log | Whether the build log is kept | Open the last log, or keep / stop keeping it |
+| Settings | — | Open the Clarion build settings |
+| Graph | The file graph: files, edges, build time, and a ⚠️ count when project sources cannot be found | Open the **Unresolved File References** report |
+| Config dir | *Only when a non-default ClarionProperties file is active* | — |
+
+The Graph row follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
 
 ---
 

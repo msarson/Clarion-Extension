@@ -36,7 +36,7 @@ const { ClarionTokenizer, TokenType } = require(path.join(OUT, 'ClarionTokenizer
 const { ReferenceCountIndex } = require(path.join(OUT, 'services', 'ReferenceCountIndex.js'));
 
 const args = process.argv.slice(2);
-const corpusRoot = args.find(a => !a.startsWith('--')) || 'F:/DirectSystems/AppDev';
+const corpusRoot = args.find(a => !a.startsWith('--')) || require('path').dirname(require('../corpus-config').required('solution'));
 const topN = Number((args.find(a => a.startsWith('--top=')) || '--top=40').split('=')[1]);
 const jsonOut = (args.find(a => a.startsWith('--json=')) || '').split('=')[1];
 

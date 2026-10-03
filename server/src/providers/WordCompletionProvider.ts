@@ -16,6 +16,7 @@ import { DataTypeService } from '../utils/DataTypeService';
 import { ControlService } from '../utils/ControlService';
 import { AttributeService } from '../utils/AttributeService';
 import { DirectiveService } from '../utils/DirectiveService';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
@@ -30,6 +31,18 @@ interface ProgramGlobalSymbol {
     detail?: string;
     documentation?: string;
     typeText?: string;
+}
+
+/** One data-section INCLUDE of the PROGRAM, with the token array its globals were read from. */
+interface ProgramIncludeTokens {
+    uri: string;
+    tokens: Token[];
+}
+
+/** #565 — the recorded PROGRAM globals, and the INCLUDEs whose tokens they depend on. */
+interface ProgramGlobals {
+    symbols: ProgramGlobalSymbol[];
+    includes: ProgramIncludeTokens[];
 }
 logger.setLevel("error");
 
@@ -565,7 +578,7 @@ export class WordCompletionProvider {
         // Issue #233 (Rule 4): resolve a Local Derived Method's declaring procedure
         // deterministically (the procedure whose LOCAL data declared its class) rather than
         // guessing the owner by token range.
-        const resolver = new ScopeResolver(tokens);
+        const resolver = ScopeResolver.forTokens(tokens); // #711
 
         if (containingRoutine) {
             // Routine-local data section
@@ -760,12 +773,7 @@ export class WordCompletionProvider {
         const graph = FileRelationshipGraph.getInstance();
         graph.ensureNoSolutionGraphForDocument(document);
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-        const programPathRaw = (graph.isBuilt
-            ? graph.getProgramFile(currentPath)
-            : undefined) ?? this.getProgramFileFromTokens(tokens);
-        const programPath = programPathRaw
-            ? (path.isAbsolute(programPathRaw) ? programPathRaw : path.join(path.dirname(currentPath), programPathRaw))
-            : undefined;
+        const programPath = this.resolveProgramPath(tokens, currentPath, graph);
 
         if (!programPath) return;
 
@@ -775,10 +783,13 @@ export class WordCompletionProvider {
         const programTokens = result.tokens;
         // #565 — the PROGRAM's global labels and prefixed fields depend only on its tokens, and
         // the token array is replaced when the file changes: replay a recorded list instead of
-        // walking a large PROGRAM again on every keystroke.
+        // walking a large PROGRAM again on every keystroke. The list now also carries the
+        // globals of the PROGRAM's data-section INCLUDEs, so it is only reusable while each of
+        // those files still has the token array it was recorded from.
         const cachedGlobals = WordCompletionProvider.programGlobalsByTokens.get(programTokens);
-        if (cachedGlobals) {
-            for (const g of cachedGlobals) add(g.label, g.kind, g.detail, g.documentation, g.typeText);
+        if (cachedGlobals && cachedGlobals.includes.every(inc =>
+            this.tokenCache.getTokensByUriCaseInsensitive(inc.uri) === inc.tokens)) {
+            for (const g of cachedGlobals.symbols) add(g.label, g.kind, g.detail, g.documentation, g.typeText);
             return;
         }
         const recorded: ProgramGlobalSymbol[] = [];
@@ -786,11 +797,40 @@ export class WordCompletionProvider {
             recorded.push({ label, kind, detail, documentation, typeText });
             add(label, kind, detail, documentation, typeText);
         };
+
+        this.collectFileDataGlobals(programTokens, false, record);
+
+        // A global declared in a header the PROGRAM INCLUDEs in its data section is as visible
+        // to a MEMBER module as one declared in the PROGRAM itself, but that header is never
+        // inlined into the PROGRAM's token stream (only MAP-nested INCLUDEs are). Follow those
+        // INCLUDEs ONE level deep. Their EQUATEs are left out: a system header such as
+        // EQUATES.CLW holds thousands, and project-wide EQUATEs already have their own
+        // prefix-gated, capped tier (collectProjectEquates).
+        const includes: ProgramIncludeTokens[] = [];
+        for (const fileName of this.findDataSectionIncludes(programTokens)) {
+            const incPath = resolveViaProjectRedirection(fileName, programPath)
+                ?? path.join(path.dirname(programPath), fileName);
+            const inc = this.getTokensForFile(incPath);
+            if (!inc || inc.tokens.length === 0) continue;
+            includes.push({ uri: inc.doc.uri, tokens: inc.tokens });
+            this.collectFileDataGlobals(inc.tokens, true, record);
+        }
+        WordCompletionProvider.programGlobalsByTokens.set(programTokens, { symbols: recorded, includes });
+    }
+
+    /** Column-0 global labels and PRE-qualified fields of one file's data section. */
+    private collectFileDataGlobals(
+        tokens: Token[],
+        skipEquates: boolean,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
+    ): void {
         const procDeclLines = new Set<number>();
-        for (const t of programTokens) {
+        const equateLines = new Set<number>();
+        for (const t of tokens) {
             if (TokenHelper.isProcedureOrFunction(t) || t.subType === TokenType.Routine) {
                 procDeclLines.add(t.line);
             }
+            if (skipEquates && t.value.toUpperCase() === 'EQUATE') equateLines.add(t.line);
         }
 
         const isLabel = (t: Token) =>
@@ -798,15 +838,82 @@ export class WordCompletionProvider {
             t.start === 0 &&
             !t.isStructureField &&
             (!t.parent || t.parent.type !== TokenType.Structure) &&
-            !procDeclLines.has(t.line);
+            !procDeclLines.has(t.line) &&
+            !equateLines.has(t.line);
 
-        this.collectGlobalLabels(programTokens, procDeclLines, isLabel, record);
-        this.collectGlobalPrefixedFields(programTokens, record);
-        WordCompletionProvider.programGlobalsByTokens.set(programTokens, recorded);
+        this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
+        this.collectGlobalPrefixedFields(tokens, add);
+    }
+
+    /**
+     * File names of the INCLUDEs in a file's global data section: before the first procedure,
+     * and not inside a MAP (MAP INCLUDEs are procedure prototypes, collected by
+     * collectProcedures through ScopeAnalyzer.getMapTokensWithIncludes).
+     */
+    private findDataSectionIncludes(tokens: Token[]): string[] {
+        const firstProcLine = tokens.find(t =>
+            TokenHelper.isProcedureOrFunction(t) &&
+            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)
+        )?.line ?? Number.MAX_SAFE_INTEGER;
+        const mapRanges = tokens
+            .filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === 'MAP')
+            .map(t => ({ start: t.line, end: t.finishesAt ?? t.line }));
+
+        const names: string[] = [];
+        const seen = new Set<string>();
+        for (const t of tokens) {
+            if (t.line >= firstProcLine || !t.referencedFile) continue;
+            if (t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (mapRanges.some(r => t.line >= r.start && t.line <= r.end)) continue;
+            const key = t.referencedFile.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            names.push(t.referencedFile);
+        }
+        return names;
+    }
+
+    private static readonly MAX_SHIM_HOPS = 3;
+
+    /**
+     * The PROGRAM a MEMBER module belongs to, following a MEMBER-via-INCLUDE shim
+     * (`INCLUDE('member.clw')` as the first statement, the shim holding the MEMBER).
+     *
+     * The graph records the MEMBER edge on the shim, not on the modules that include it, and
+     * the module's own tokens carry no MEMBER, so without following the shim a shim-headed
+     * module found no PROGRAM at all and got none of its globals. Same rule as the hover and
+     * definition paths (SymbolFinderService / MemberLocatorService.resolveMemberHeaderToken):
+     * only the first statement is consulted, redirection first, bounded hops.
+     */
+    private resolveProgramPath(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= WordCompletionProvider.MAX_SHIM_HOPS; hop++) {
+            const raw = (graph.isBuilt ? graph.getProgramFile(filePath) : undefined)
+                ?? this.getProgramFileFromTokens(tokens);
+            if (raw) {
+                if (path.isAbsolute(raw)) return raw;
+                const name = TokenHelper.normalizeMemberFilename(raw);
+                return resolveViaProjectRedirection(name, filePath) ?? path.join(path.dirname(filePath), name);
+            }
+
+            const shim = TokenHelper.findShimIncludeToken(tokens);
+            if (!shim?.referencedFile) return undefined;
+            const relative = path.join(path.dirname(filePath), shim.referencedFile);
+            const shimPath = resolveViaProjectRedirection(shim.referencedFile, filePath)
+                ?? (fs.existsSync(relative) ? relative : undefined);
+            if (!shimPath || visited.has(shimPath.toLowerCase())) return undefined;
+            visited.add(shimPath.toLowerCase());
+
+            const shimFile = this.getTokensForFile(shimPath);
+            if (!shimFile) return undefined;
+            tokens = shimFile.tokens;
+            filePath = shimPath;
+        }
+        return undefined;
     }
 
     /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
-    private static readonly programGlobalsByTokens = new WeakMap<Token[], ProgramGlobalSymbol[]>();
+    private static readonly programGlobalsByTokens = new WeakMap<Token[], ProgramGlobals>();
 
 
     /** Collect Label tokens in a procedure's data section (between PROCEDURE line and CODE). */

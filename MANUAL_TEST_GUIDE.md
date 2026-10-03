@@ -3,7 +3,7 @@
 ## Quick Start
 1. **Compile**: `npm run compile` ✅ (Already done)
 2. **Launch Extension Host**: Press `F5` in VS Code
-3. **Open Test File**: `test-programs/scope-test-suite/UpdatePYAccount_IBSCommon.clw`
+3. **Open Test File**: `test-programs/scope-test-suite/UpdateAccount_CommonLib.clw`
 
 ## What to Verify
 
@@ -19,7 +19,7 @@ Both should inherit the color of their parent structure.
 | Lines | Structure | Expected Behavior |
 |-------|-----------|-------------------|
 | 30-34 | `GROUP` ... `END` | GROUP and END should be same color |
-| 35-37 | `VIEW(IBSDPC)` ... `END` | VIEW and END should be same color |
+| 35-37 | `VIEW(ACMDPC)` ... `END` | VIEW and END should be same color |
 | 38-41 | `VIEW(BMBankAccount)` ... `END` | VIEW and END should be same color |
 | 42-46 | `QUEUE` ... `END` | QUEUE and END should be same color |
 | 47-52 | `QUEUE` ... `END` | QUEUE and END should be same color |

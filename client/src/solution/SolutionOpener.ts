@@ -1,6 +1,6 @@
 import { commands, Uri, window, ExtensionContext, workspace, window as vscodeWindow } from 'vscode';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
-import { targetForKey } from '../utils/SolutionSettingsScope'; // #563
+import { clearSolutionSetting } from '../utils/SolutionSettingsScope'; // #563, #663
 import { globalClarionPropertiesFile, globalClarionVersion, globalSettings, globalSolutionFile, setGlobalClarionSelection, ClarionSolutionSettings, getClarionConfigTarget, ensureActiveClarionVersion, SOLUTION_EXPLICITLY_CLOSED_KEY } from '../globals';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands';
 import { extractConfigurationsFromSolution } from '../utils/ExtensionHelpers';
@@ -13,7 +13,8 @@ import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { shouldMarkExplicitlyClosed, SolutionCloseReason } from '../utils/SolutionFallbackPolicy';
 import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache } from '../utils/SlnCacheUtils';
-import { chooseConfiguration, explicitConfigurationFor } from '../utils/ConfigurationPrecedence';
+import { chooseConfiguration, explicitConfigurationFor, configurationAtLoad } from '../utils/ConfigurationPrecedence';
+import { readIdePreferences, pushConfigurationToIde } from './ClarionIdePreferences'; // #664
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -415,6 +416,17 @@ export async function openClarionSolution(
         // ✅ Step 4: Save final selections to workspace settings
         await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
+
+        // #664 — the Clarion IDE opens the solution on the configuration settled here.
+        if (globalClarionPropertiesFile && globalSettings.configuration) {
+            const { updateIde } = configurationAtLoad(
+                globalSettings.configuration,
+                await readIdePreferences(solutionFilePath, globalClarionPropertiesFile),
+                globalSettings.configuration);
+            if (updateIde) {
+                await pushConfigurationToIde(solutionFilePath, globalClarionPropertiesFile, updateIde);
+            }
+        }
         
         // ✅ Add to global solution history (with full settings so cross-folder restore works)
         const folderPath = path.dirname(solutionFilePath);
@@ -467,8 +479,8 @@ export async function closeClarionSolution(
 
             // Clear the current solution setting. #563: in the scope it lives in — clearing only the
             // folder copy left a workspace-file currentSolution that reopened the solution on reload.
-            const clarionSettings = SettingsStorageManager.clarionSettings();
-            await clarionSettings.update("currentSolution", "", targetForKey(clarionSettings, "currentSolution"));
+            // #663: in every scope that sets it, for the same reason.
+            await clearSolutionSetting(SettingsStorageManager.clarionSettings(), "currentSolution");
             logger.info("✅ Cleared current solution setting");
         }
 

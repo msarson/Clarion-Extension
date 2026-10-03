@@ -40,7 +40,7 @@ function hoverText(hover: unknown): string {
     return typeof contents === 'string' ? contents : (contents.value ?? '');
 }
 
-// The exact shape from IBSCommon.clw:227 — a MODULE prototype in the global MAP
+// The exact shape from CommonLib.clw:227 — a MODULE prototype in the global MAP
 // (no enclosing scope), DLL(dll_mode) attribute, nothing named dll_mode anywhere.
 const PROGRAM_WITH_DLL_MODE =
     "  PROGRAM\n" +

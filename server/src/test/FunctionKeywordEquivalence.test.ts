@@ -2,7 +2,8 @@ import * as assert from 'assert';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
-import { ClassMemberResolver } from '../utils/ClassMemberResolver';
+import { MemberLocatorService } from '../services/MemberLocatorService';
+import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { setServerInitialized } from '../serverState';
 
 /**
@@ -34,13 +35,11 @@ function seedCache(document: TextDocument): void {
 suite('FUNCTION keyword equivalence (#247)', () => {
 
     let referencesProvider: ReferencesProvider;
-    let memberResolver: ClassMemberResolver;
 
     setup(() => {
         setServerInitialized(true);
         TokenCache.getInstance().clearAllTokens();
         referencesProvider = new ReferencesProvider();
-        memberResolver = new ClassMemberResolver();
     });
 
     // ─── (1) FAR plain-symbol overload filter must engage for FUNCTION decls ───
@@ -141,13 +140,16 @@ suite('FUNCTION keyword equivalence (#247)', () => {
         );
     });
 
-    // ─── (3) ClassMemberResolver arity resolution for FUNCTION-declared overloads ───
+    // ─── (3) SELF member arity resolution for FUNCTION-declared overloads ───
     // Pre-fix: scanClassBodyForMember / findClassMemberInfo only count parameters
     // when the type string starts with PROCEDURE → every FUNCTION candidate gets
     // paramCount 0 → selectBestMemberOverload ignores the caller's arg count and
     // returns the first-declared overload.
+    // #637: asked through the route hover, F12 and Ctrl+F12 take for SELF since #626 -
+    // resolveEnclosingClassName, then MemberLocatorService.findMemberInClass - now that
+    // ClassMemberResolver.findClassMemberInfo is gone.
 
-    test('findClassMemberInfo picks the FUNCTION overload matching the call arg count', () => {
+    test('the SELF member lookup picks the FUNCTION overload matching the call arg count', async () => {
         const code = [
             '  MEMBER',                                               // line 0
             'Basket         CLASS,TYPE',                              // line 1
@@ -165,12 +167,14 @@ suite('FUNCTION keyword equivalence (#247)', () => {
         ].join('\n');
 
         const doc = createDocument(code, 'file:///t247-member-arity.clw');
-        const tokens = TokenCache.getInstance().getTokens(doc);
+        TokenCache.getInstance().getTokens(doc);
 
         // Resolve SELF.AddItem(pName, 1) — 2 args — from inside the 1-param impl (line 8).
-        const info = memberResolver.findClassMemberInfo('AddItem', doc, 8, tokens, 2);
+        const selfClass = resolveEnclosingClassName(doc, 8, TokenCache.getInstance().getStructure(doc));
+        assert.strictEqual(selfClass, 'Basket', 'SELF is Basket inside Basket.AddItem');
+        const info = await new MemberLocatorService().findMemberInClass(selfClass!, 'AddItem', doc, 2);
 
-        assert.ok(info, 'findClassMemberInfo should resolve the FUNCTION-declared method');
+        assert.ok(info, 'the SELF member lookup should resolve the FUNCTION-declared method');
         assert.strictEqual(
             info!.line, 3,
             `expected the 2-param overload decl (line 3), got line ${info!.line} — ` +

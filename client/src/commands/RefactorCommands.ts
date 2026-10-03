@@ -140,7 +140,7 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
         'clarion.introduceEquate',
         async (
             uriString: string,
-            literal: { line: number; startChar: number; endChar: number },
+            literal: { line: number; startChar: number; endChar: number; endLine?: number },
             value: string,
             scopes: Array<{ label: string; insertLine: number; uri?: string }>
         ) => {
@@ -179,9 +179,10 @@ export function registerRefactorCommands(context: ExtensionContext): Disposable[
 
             const edit = new WorkspaceEdit();
             edit.insert(insertUri, new Position(scope.insertLine, 0), formatEquateDeclaration(name, value) + eol);
+            // #710 — a `&` chain of literals spans lines: replace all of it.
             edit.replace(
                 sourceUri,
-                new Range(literal.line, literal.startChar, literal.line, literal.endChar),
+                new Range(literal.line, literal.startChar, literal.endLine ?? literal.line, literal.endChar),
                 name.trim()
             );
             await workspace.applyEdit(edit);

@@ -185,8 +185,8 @@ suite('ReferencesProvider.ClassMethodScopeExpansion (3be2b68d)', () => {
      * generated window declares its own `BRW1`, so family-wide scanning
      * textually matches OTHER procedures' unrelated instances.
      *
-     * Mark's IBSWorking repro: lens on `BRW1.SetQueueRecord PROCEDURE` in
-     * SelectJobNumber_IBSCommon.clw → is_local_class=true, files=262
+     * Mark's WorkingLib repro: lens on `BRW1.SetQueueRecord PROCEDURE` in
+     * SelectRecord_CommonLib.clw → is_local_class=true, files=262
      * (frg-family), results=114 phantom refs, 11.6s.
      *
      * Pre-fix: isLocalClass widens to getLocalClassSearchFiles for ALL

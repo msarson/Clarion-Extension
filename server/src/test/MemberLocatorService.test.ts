@@ -20,7 +20,7 @@ import {
     scanClassBodyForMember,
     selectBestMemberOverload,
     OverloadCandidate,
-} from '../utils/ClassMemberResolver';
+} from '../utils/ClassMemberScan';
 import { setServerInitialized } from '../serverState';
 
 // ---------------------------------------------------------------------------

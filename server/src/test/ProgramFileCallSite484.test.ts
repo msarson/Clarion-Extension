@@ -1,17 +1,17 @@
 /**
  * #484 — first hover / F12 / FAR on a call site INSIDE a PROGRAM file took ~1s
- * (definition 1.7s, references 2.6s on ap1.clw). Three separate costs, each
+ * (definition 1.7s, references 2.6s on app1.clw). Three separate costs, each
  * pinned here:
  *
  *  1. MapProcedureResolver expanded the MAP's INCLUDEs — tokenising every header
- *     the MAP pulls in (ap1's MAP INCLUDEs `CTSQW10.CLW`, 5,992 lines) — to find
+ *     the MAP pulls in (app1's MAP INCLUDEs `CTSQW10.CLW`, 5,992 lines) — to find
  *     a prototype and its MODULE block that are BOTH in the document's own
  *     tokens. Direct tokens first; the include expansion only when the name is
  *     not declared in the document.
  *
  *  2. The file-relationship graph created MODULE edges to BINARIES:
  *     `MODULE('vuFT3.dll')` resolved through the `*.dll` redirection rule to the
- *     real DLL (39 such edges on ap1.sln), so FAR's file set for a module-scoped
+ *     real DLL (39 such edges on app1.sln), so FAR's file set for a module-scoped
  *     procedure included a DLL, and the closed-file token cache read it as text
  *     and tokenised 20,917 garbage tokens in 2.5s. A MODULE naming a library is a
  *     link dependency, not a source relationship (Language Reference, MODULE:

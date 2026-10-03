@@ -4,13 +4,15 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { ClarionProjectInfo } from 'common/types';
 import { getLanguageClient } from '../LanguageClientManager';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
-import { buildSolutionOrProject } from '../buildTasks';
+import { buildSolutionOrProject, sharedBuildCollection } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { updateSolutionToolbar } from '../views/ViewManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
 import LoggerManager from '../utils/LoggerManager';
+import { chooseRunProject } from '../utils/RunTargetChooser'; // #666
+import { runTerminalPlan, RunTerminals } from '../utils/RunTerminal'; // #676, #684
 
 const logger = LoggerManager.getLogger("RunCommands");
 logger.setLevel("error");
@@ -24,6 +26,86 @@ interface ProjectOutputInfo {
     startProgram?: string;
     startWorkingDirectory?: string;
     startArguments?: string;
+}
+
+/**
+ * #666 — the project Run Without Debugging and Debug start: the startup project, else the only
+ * project, else the open file's project, else the user's pick (see chooseRunProject). An open
+ * file is needed only when the solution has several projects and no startup project, and even
+ * then a pick replaces the old refusal.
+ */
+async function resolveRunProject(verb: 'run' | 'debug'): Promise<ClarionProjectInfo | undefined> {
+    const solutionInfo = SolutionCache.getInstance().getSolutionInfo();
+    if (!solutionInfo) {
+        window.showWarningMessage("No solution is currently loaded.");
+        return undefined;
+    }
+
+    const target = await chooseRunProject({
+        projects: solutionInfo.projects,
+        startupGuid: workspace.getConfiguration('clarion').get<string>('startupProject') || undefined,
+        activeFile: window.activeTextEditor?.document.uri.fsPath,
+        projectsContaining: file => projectsContainingFile(solutionInfo.projects, file),
+        isRunnable: isRunnableProject,
+    });
+
+    if (target.kind === 'error') {
+        window.showWarningMessage(target.message);
+        return undefined;
+    }
+    if (target.kind === 'project') {
+        logger.info(`🎯 Project to ${verb}: ${target.project.name} (from ${target.source})`);
+        return target.project;
+    }
+    const picked = await window.showQuickPick(
+        target.projects.map(p => ({ label: p.name, description: p.path, project: p })),
+        { placeHolder: `Select a project to ${verb}` }
+    );
+    return picked?.project;
+}
+
+/**
+ * #666 — a project Run and Debug can start: it builds a program (Exe/WinExe), or it is a library
+ * whose project names a StartProgram to host it (the rule Set as Startup Project applies). A
+ * project file that cannot be found counts as runnable here, so the caller's own check reports it.
+ */
+function isRunnableProject(project: ClarionProjectInfo): boolean {
+    let cwprojPath: string | undefined;
+    if (project.filename) {
+        cwprojPath = path.join(project.path, project.filename);
+    } else if (fs.existsSync(project.path) && fs.statSync(project.path).isDirectory()) {
+        const cwprojFile = fs.readdirSync(project.path).find(f => f.toLowerCase().endsWith('.cwproj'));
+        cwprojPath = cwprojFile ? path.join(project.path, cwprojFile) : undefined;
+    }
+    if (!cwprojPath || !fs.existsSync(cwprojPath)) {
+        return true;
+    }
+    return extractProjectOutputInfo(cwprojPath) !== undefined;
+}
+
+/** The projects whose file lists (from the language server) include `file`. */
+async function projectsContainingFile(projects: ClarionProjectInfo[], file: string): Promise<ClarionProjectInfo[]> {
+    const client = getLanguageClient();
+    if (!client) {
+        return [];
+    }
+    const wanted = path.normalize(file).toLowerCase();
+    const found: ClarionProjectInfo[] = [];
+    for (const proj of projects) {
+        try {
+            const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', { projectGuid: proj.guid });
+            const inProject = response?.files?.some(f => {
+                const fp = f.absolutePath || (f.relativePath ? path.resolve(proj.path, f.relativePath) : undefined);
+                return !!fp && path.normalize(fp).toLowerCase() === wanted;
+            });
+            if (inProject) {
+                found.push(proj);
+            }
+        } catch {
+            // A project whose files cannot be listed is skipped.
+        }
+    }
+    return found;
 }
 
 /**
@@ -174,18 +256,24 @@ async function findExecutable(outputInfo: ProjectOutputInfo): Promise<string | u
     return undefined;
 }
 
+// #684 — one Run terminal per program; registerRunCommands forgets the ones the user closes.
+const runTerminals = new RunTerminals<Terminal>();
+
 /**
  * Runs an executable in a VS Code terminal
  * @param exePath - Path to the executable
  */
-function runExecutable(exePath: string, workingDir?: string, args?: string): void {
-    const exeName = path.basename(exePath);
-    const cwd = workingDir ?? path.dirname(exePath);
-    const terminal: Terminal = window.createTerminal({ name: `Run: ${exeName}`, cwd });
+function runExecutable(exePath: string, workingDir?: string, args?: string, projectDir?: string): void {
+    // #676: a PowerShell terminal whatever the default profile is - the line uses PowerShell's &
+    // call operator (so arguments like /debug are not misparsed), which cmd and Git Bash reject.
+    // #679: clarion.run.command, when set, is sent instead of the exe.
+    const command = workspace.getConfiguration('clarion').get<string>('run.command', '');
+    const plan = runTerminalPlan(exePath, workingDir, args,
+        command.trim() ? { command, projectDir: projectDir ?? path.dirname(exePath) } : undefined);
+    const terminal: Terminal = runTerminals.open(exePath,
+        () => window.createTerminal({ name: plan.name, cwd: plan.cwd, shellPath: plan.shellPath }));
     terminal.show();
-    // Use & call operator so PowerShell doesn't misparse arguments like /debug as division
-    const cmd = args?.trim() ? `& "${exePath}" ${args.trim()}` : `& "${exePath}"`;
-    terminal.sendText(cmd);
+    terminal.sendText(plan.command);
 }
 
 /**
@@ -242,6 +330,7 @@ function launchDebugger(debuggerPath: string, exePath: string, projectDir: strin
  */
 export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataProvider): Disposable[] {
     return [
+        window.onDidCloseTerminal(t => runTerminals.closed(t)), // #684
         commands.registerCommand('clarion.setStartupProject', async (node) => {
             logger.info("📌 Setting startup project...");
             
@@ -333,6 +422,33 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             updateSolutionToolbar();
         }),
         
+        // #681 — the Clarion Tools pane's Startup row: pick from the projects Run can start.
+        commands.registerCommand('clarion.chooseStartupProject', async () => {
+            const solutionInfo = SolutionCache.getInstance().getSolutionInfo();
+            if (!solutionInfo) {
+                window.showWarningMessage("No solution is currently loaded.");
+                return;
+            }
+            const runnable = solutionInfo.projects.filter(isRunnableProject);
+            if (runnable.length === 0) {
+                window.showWarningMessage("No project in this solution builds a program to start.");
+                return;
+            }
+            const current = (workspace.getConfiguration('clarion').get<string>('startupProject') ?? '').replace(/[{}]/g, '').toLowerCase();
+            const picked = await window.showQuickPick(
+                runnable.map(p => ({
+                    label: p.name,
+                    description: p.guid.replace(/[{}]/g, '').toLowerCase() === current ? 'current' : undefined,
+                    detail: p.path,
+                    project: p,
+                })),
+                { placeHolder: 'Select the startup project' }
+            );
+            if (picked) {
+                await commands.executeCommand('clarion.setStartupProject', { data: picked.project });
+            }
+        }),
+
         commands.registerCommand('clarion.clearStartupProject', async () => {
             logger.info("🗑️ Clearing startup project...");
             
@@ -352,181 +468,9 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
         commands.registerCommand('clarion.runWithoutDebugging', async (buildFirst?: boolean) => {
             logger.info("🚀 Running current project without debugging...");
             
-            const activeEditor = window.activeTextEditor;
-            if (!activeEditor) {
-                window.showWarningMessage("No active file. Please open a file to run its project.");
-                return;
-            }
-            
-            const filePath = activeEditor.document.uri.fsPath;
-            logger.info(`📄 Current file path: ${filePath}`);
-            
-            const solutionCache = SolutionCache.getInstance();
-            
-            // Check if solution is loaded
-            if (!solutionCache.getSolutionInfo()) {
-                window.showWarningMessage("No solution is currently loaded.");
-                return;
-            }
-            
-            logger.info(`🔍 Searching for startup project or current file's project...`);
-            
-            const solutionInfo = solutionCache.getSolutionInfo();
-            if (!solutionInfo) {
-                window.showWarningMessage("No solution is currently loaded.");
-                return;
-            }
-            
-            // Check for startup project in workspace settings
-            const workspaceConfig = workspace.getConfiguration('clarion');
-            const startupProjectGuid = workspaceConfig.get<string>('startupProject');
-            
-            let selectedProject: ClarionProjectInfo | undefined;
-            let currentFileProject: ClarionProjectInfo | undefined; // Track project containing current file
-            
-            if (startupProjectGuid) {
-                // Find the startup project
-                selectedProject = solutionInfo.projects.find(p => 
-                    p.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase()
-                );
-                
-                if (selectedProject) {
-                    logger.info(`✅ Using startup project: ${selectedProject.name}`);
-                    
-                    // Also find which project contains the current file
-                    logger.info(`🔍 Detecting project containing current file...`);
-                    const client = getLanguageClient();
-                    if (client) {
-                        for (const proj of solutionInfo.projects) {
-                            try {
-                                const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                                    projectGuid: proj.guid
-                                });
-                                
-                                if (response && response.files) {
-                                    const fileInProject = response.files.find(f => {
-                                        let filePath = f.absolutePath;
-                                        if (!filePath && f.relativePath) {
-                                            filePath = path.resolve(proj.path, f.relativePath);
-                                        }
-                                        if (filePath) {
-                                            return path.normalize(filePath).toLowerCase() === path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
-                                        }
-                                        return false;
-                                    });
-                                    
-                                    if (fileInProject) {
-                                        currentFileProject = proj;
-                                        logger.info(`✅ Current file belongs to: ${proj.name}`);
-                                        break;
-                                    }
-                                }
-                            } catch (error) {
-                                // Silently continue
-                            }
-                        }
-                    }
-                } else {
-                    logger.warn(`⚠️ Startup project GUID ${startupProjectGuid} not found in solution`);
-                    window.showWarningMessage("Configured startup project not found. Please set a valid startup project.");
-                    return;
-                }
-            } else {
-                logger.info(`📋 No startup project configured, detecting from current file...`);
-                logger.info(`📋 Solution has ${solutionInfo.projects.length} projects:`);
-                
-                // Get the language client to fetch project files
-                const client = getLanguageClient();
-                if (!client) {
-                    window.showErrorMessage("Language client not available. Please wait for the extension to fully load.");
-                    return;
-                }
-                
-                // Find the project containing this file by checking server data
-                let projects: ClarionProjectInfo[] = [];
-                
-                for (const proj of solutionInfo.projects) {
-                    try {
-                        logger.info(`  Project: ${proj.name}, path: ${proj.path}`);
-                        
-                        // Request project files from the server
-                        const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', {
-                            projectGuid: proj.guid
-                        });
-                        
-                        if (response && response.files) {
-                            logger.info(`  - ${proj.name} (${response.files.length} files)`);
-                            
-                            // Check if this file is in the project
-                            const fileInProject = response.files.find(f => {
-                                // Log the file data for debugging
-                                logger.info(`    File data: name=${f.name}, relativePath=${f.relativePath}, absolutePath=${f.absolutePath}`);
-                                
-                                let filePath = f.absolutePath;
-                                if (!filePath && f.relativePath) {
-                                    // proj.path is actually a directory, not a file path
-                                    // Resolve the file relative to that directory
-                                    filePath = path.resolve(proj.path, f.relativePath);
-                                    logger.info(`    Resolved path: ${filePath} (exists: ${fs.existsSync(filePath)})`);
-                                }
-                                
-                                if (filePath) {
-                                    const normalized = path.normalize(filePath).toLowerCase();
-                                    const targetNormalized = path.normalize(activeEditor.document.uri.fsPath).toLowerCase();
-                                    logger.info(`    Comparing: ${normalized} === ${targetNormalized}`);
-                                    return normalized === targetNormalized;
-                                }
-                                return false;
-                            });
-                            
-                            if (fileInProject) {
-                                logger.info(`    ✅ Found file in project!`);
-                                projects.push(proj);
-                            } else {
-                                logger.info(`    ❌ File not found in this project`);
-                            }
-                        }
-                    } catch (error) {
-                        logger.error(`Error getting files for project ${proj.name}: ${error instanceof Error ? error.message : String(error)}`);
-                    }
-                }
-                
-                logger.info(`📊 Checking ${projects.length} total matching projects`);
-                
-                if (projects.length === 0) {
-                    logger.warn(`❌ No projects matched the current file`);
-                    window.showWarningMessage("Current file does not belong to any project in the solution.");
-                    return;
-                }
-                
-                logger.info(`✅ Found file in ${projects.length} project(s): ${projects.map(p => p.name).join(', ')}`);
-                
-                // Continue with the matched projects
-                selectedProject = projects[0];
-                logger.info(`🎯 Selected project: ${selectedProject.name}`);
-                
-                // If multiple projects contain the file, let user choose
-                if (projects.length > 1) {
-                    logger.info(`Multiple projects found, showing picker...`);
-                    const projectNames = projects.map(p => p.name);
-                    const selectedName = await window.showQuickPick(projectNames, {
-                        placeHolder: "Select a project to run"
-                    });
-                    
-                    if (!selectedName) {
-                        logger.info(`User cancelled project selection`);
-                        return;
-                    }
-                    
-                    selectedProject = projects.find(p => p.name === selectedName)!;
-                    logger.info(`User selected: ${selectedProject.name}`);
-                }
-            }
-            
-            // At this point, selectedProject should be defined
+            // #666 — the startup project, else the only project, else the open file's, else a pick.
+            const selectedProject = await resolveRunProject('run');
             if (!selectedProject) {
-                logger.error(`❌ No project selected`);
-                window.showErrorMessage("No project could be determined.");
                 return;
             }
             
@@ -595,13 +539,16 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before running...`);
-                const { languages } = await import('vscode');
-                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-run-build"), undefined, true);
+                await buildSolutionOrProject("Project", selectedProject, sharedBuildCollection("clarion-run-build"), undefined, true); // #670
             }
 
             logger.info(`🔍 Looking for executable...`);
 
-            const exePath = await findExecutable(outputInfo);
+            const found = await findExecutable(outputInfo);
+            // #679: with clarion.run.command set, that command decides what runs, so the exe need not
+            // be where it was compiled; ${exe} then names where it would be.
+            const customRun = workspace.getConfiguration('clarion').get<string>('run.command', '').trim() !== '';
+            const exePath = found ?? (customRun ? path.join(outputInfo.projectDir, `${outputInfo.outputName}.exe`) : undefined);
 
             if (!exePath) {
                 window.showErrorMessage(`Executable not found for project "${selectedProject.name}". Build the project first.`);
@@ -613,7 +560,8 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             runExecutable(exePath,
                 outputInfo.startWorkingDirectory ? path.resolve(outputInfo.projectDir, outputInfo.startWorkingDirectory) : undefined,
-                outputInfo.startArguments);
+                outputInfo.startArguments,
+                outputInfo.projectDir);
             
             logger.info(`✅ Command completed successfully`);
         }),
@@ -646,57 +594,10 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
                 }
             }
 
-            const activeEditor = window.activeTextEditor;
-            if (!activeEditor) {
-                window.showWarningMessage("No active file. Please open a file to debug its project.");
+            // #666 — chosen the same way as Run Without Debugging.
+            const selectedProject = await resolveRunProject('debug');
+            if (!selectedProject) {
                 return;
-            }
-
-            const solutionCache = SolutionCache.getInstance();
-            const solutionInfo = solutionCache.getSolutionInfo();
-            if (!solutionInfo) {
-                window.showWarningMessage("No solution is currently loaded.");
-                return;
-            }
-
-            // Reuse startup project / current file logic (same as runWithoutDebugging)
-            const workspaceConfig = workspace.getConfiguration('clarion');
-            const startupProjectGuid = workspaceConfig.get<string>('startupProject');
-            let selectedProject: ClarionProjectInfo | undefined;
-
-            if (startupProjectGuid) {
-                selectedProject = solutionInfo.projects.find(p =>
-                    p.guid.replace(/[{}]/g, '').toLowerCase() === startupProjectGuid.replace(/[{}]/g, '').toLowerCase()
-                );
-                if (!selectedProject) {
-                    window.showWarningMessage("Configured startup project not found. Please set a valid startup project.");
-                    return;
-                }
-            } else {
-                const client = getLanguageClient();
-                if (!client) {
-                    window.showErrorMessage("Language client not available. Please wait for the extension to fully load.");
-                    return;
-                }
-
-                const filePath = activeEditor.document.uri.fsPath;
-                for (const proj of solutionInfo.projects) {
-                    try {
-                        const response = await client.sendRequest<{ files: any[] }>('clarion/getProjectFiles', { projectGuid: proj.guid });
-                        if (response?.files) {
-                            const found = response.files.find(f => {
-                                const fp = f.absolutePath || (f.relativePath ? path.resolve(proj.path, f.relativePath) : undefined);
-                                return fp && path.normalize(fp).toLowerCase() === path.normalize(filePath).toLowerCase();
-                            });
-                            if (found) { selectedProject = proj; break; }
-                        }
-                    } catch { /* continue */ }
-                }
-
-                if (!selectedProject) {
-                    window.showWarningMessage("Current file does not belong to any project in the solution.");
-                    return;
-                }
             }
 
             // Offer to build the startup project before launching the debugger
@@ -718,8 +619,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
 
             if (shouldBuild) {
                 logger.info(`🔨 Building project '${selectedProject.name}' before debugging...`);
-                const { languages } = await import('vscode');
-                await buildSolutionOrProject("Project", selectedProject, languages.createDiagnosticCollection("clarion-debug-build"), undefined, true);
+                await buildSolutionOrProject("Project", selectedProject, sharedBuildCollection("clarion-debug-build"), undefined, true); // #670
             }
 
             // Resolve cwproj

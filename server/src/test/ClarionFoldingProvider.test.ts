@@ -383,7 +383,7 @@ ThisWindow.Kill PROCEDURE()
 
         test('Should fold WINDOW with continuation character on first line', () => {
             const code = `Window               WINDOW('Enter Your Password'),AT(,,388,339),FONT('Segoe UI',8,,FONT:regular),DOUBLE,CENTER, |
-  ICON('ibsmenu.ico'),GRAY,IMM,MASK,SYSTEM
+  ICON('acmmenu.ico'),GRAY,IMM,MASK,SYSTEM
                         SHEET,AT(3,2,383,305),USE(?SHEET1),WIZARD
                           TAB('Tab1'),USE(?TAB1)
                             GROUP,AT(-1,-1,387,165),USE(?GROUP1),HIDE,TRN

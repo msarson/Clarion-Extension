@@ -25,9 +25,17 @@ export class OmitCompileDetector {
      * @returns true if the line is omitted/compiled out
      */
     public static isLineOmitted(line: number, tokens: Token[], document: TextDocument): boolean {
-        const blocks = this.findDirectiveBlocks(tokens, document);
-        return this.isLineOmittedWithBlocks(line, blocks);
+        // #711 — every hover asks; finding the blocks walks every token and every line. They depend
+        // only on the tokens and the text, so they are found once per (token array, text).
+        const text = document.getText();
+        let memo = this.blocksMemo.get(tokens);
+        if (!memo || memo.text !== text) {
+            memo = { text, blocks: this.findDirectiveBlocks(tokens, document) };
+            this.blocksMemo.set(tokens, memo);
+        }
+        return this.isLineOmittedWithBlocks(line, memo.blocks);
     }
+    private static blocksMemo = new WeakMap<Token[], { text: string; blocks: DirectiveBlock[] }>();
     
     /**
      * Check if a line is inside an OMIT or COMPILE block using pre-computed blocks

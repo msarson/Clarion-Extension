@@ -9,6 +9,7 @@ import { WindowDescriptor, WindowDescriptorParser } from './tokenizer/WindowDesc
 import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptorParser';
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
+import { firstTokenAfterLine } from './utils/TokenLineIndex';
 
 /**
  * The two structure keywords that can open a block inside a MAP body. Matched
@@ -797,34 +798,36 @@ export class DocumentStructure {
             t.type === TokenType.ConditionalContinuation && isBranchKeyword(t.value)
         );
 
-        for (const container of containers) {
-            // Always reset — process() may run more than once on the same DS.
-            container.branches = undefined;
+        // Always reset — process() may run more than once on the same DS.
+        for (const container of containers) container.branches = undefined;
 
-            if (container.finishesAt === undefined) continue;
-
-            // Inner CASE/IF blocks fully contained inside this one. Their
-            // ConditionalContinuation tokens are owned by the inner block.
-            const inner = containers.filter(c =>
-                c !== container &&
-                c.finishesAt !== undefined &&
-                c.line > container.line &&
-                c.finishesAt < container.finishesAt!
-            );
-
-            const branchTokens: Token[] = [];
-            for (const t of allBranchTokens) {
-                if (t.line <= container.line || t.line >= container.finishesAt) continue;
-
-                // Skip if inside a nested CASE/IF — that pass owns it.
-                const inNested = inner.some(n =>
-                    t.line > n.line && t.line < n.finishesAt!
+        // #711 — each branch keyword goes to every container around it (line < t.line < finishesAt)
+        // that has no INNER container around it too (one starting on a later line and ending
+        // earlier — that block owns it). One walk in line order keeps the containers open at each
+        // keyword, so a keyword checks only the few blocks enclosing it; comparing every container
+        // with every other and with every keyword in the document was quadratic.
+        const byStart = containers
+            .filter(c => c.finishesAt !== undefined)
+            .sort((a, b) => a.line - b.line);
+        const owned = new Map<Token, Token[]>();
+        let open: Token[] = [];
+        let next = 0;
+        for (const t of allBranchTokens) {
+            while (next < byStart.length && byStart[next].line < t.line) open.push(byStart[next++]);
+            if (open.some(c => c.finishesAt! <= t.line)) open = open.filter(c => c.finishesAt! > t.line);
+            for (const container of open) {
+                const inNested = open.some(n =>
+                    n !== container && n.line > container.line && n.finishesAt! < container.finishesAt!
                 );
                 if (inNested) continue;
-
-                branchTokens.push(t);
+                const list = owned.get(container);
+                if (list) list.push(t); else owned.set(container, [t]);
             }
+        }
 
+        for (const container of containers) {
+            if (container.finishesAt === undefined) continue;
+            const branchTokens = owned.get(container) ?? [];
             if (branchTokens.length === 0) continue;
             // Sort by source position (line then column) to be deterministic.
             branchTokens.sort((a, b) =>
@@ -945,6 +948,7 @@ export class DocumentStructure {
     private linkUsesPass(): void {
         this.fieldEquateIndex.clear();
         this.fieldEquatesByStructure.clear();
+        this.structuresByPrefix = undefined; // #711 — rebuilt from this pass's tokens
 
         // Container structures whose direct FieldEquateLabel descendants we map per-structure.
         const containerKeywords = ['WINDOW', 'APPLICATION', 'REPORT', 'TOOLBAR', 'MENUBAR'];
@@ -965,8 +969,9 @@ export class DocumentStructure {
             for (const c of containers) {
                 if (c.finishesAt === undefined) continue;
                 const perName = new Map<string, Token>();
-                for (const token of this.tokens) {
-                    if (token.line <= c.line) continue;
+                // #711: start at the container, not the top of the document (quadratic per WINDOW).
+                for (let k = firstTokenAfterLine(this.tokens, c.line); k < this.tokens.length; k++) {
+                    const token = this.tokens[k];
                     if (token.line >= c.finishesAt) break;
                     if (token.type !== TokenType.FieldEquateLabel) continue;
                     const key = token.value.toUpperCase();
@@ -1050,18 +1055,26 @@ export class DocumentStructure {
         const fieldName = prefixToken.value.slice(colonIdx + 1).toUpperCase();
         if (!prefix || !fieldName) return undefined;
 
-        for (const token of this.tokens) {
-            if (
-                token.type === TokenType.Structure &&
-                token.structurePrefix?.toUpperCase() === prefix &&
-                token.children
-            ) {
-                const hit = token.children.find(c => c.value.toUpperCase() === fieldName);
-                if (hit) return hit;
+        // #711: the structures for each prefix, in document order, built once per pass — scanning
+        // every token for every USE(PRE:Field) was quadratic in the document's size.
+        if (!this.structuresByPrefix) {
+            this.structuresByPrefix = new Map();
+            for (const token of this.tokens) {
+                if (token.type !== TokenType.Structure || !token.structurePrefix || !token.children) continue;
+                const key = token.structurePrefix.toUpperCase();
+                const list = this.structuresByPrefix.get(key);
+                if (list) list.push(token); else this.structuresByPrefix.set(key, [token]);
             }
+        }
+        for (const token of this.structuresByPrefix.get(prefix) ?? []) {
+            const hit = token.children!.find(c => c.value.toUpperCase() === fieldName);
+            if (hit) return hit;
         }
         return undefined;
     }
+
+    /** #711 — structures by PRE() prefix for resolveStructurePrefixTarget; reset by linkUsesPass. */
+    private structuresByPrefix: Map<string, Token[]> | undefined;
 
     /**
      * Walk the token list once and populate procedureIndex + routineIndex by uppercase label.
@@ -2031,30 +2044,21 @@ export class DocumentStructure {
             return;
         }
         
-        // ✅ Check if this period is part of a continued statement (line with | before this line)
-        // If the previous line has a line continuation, this period is a statement terminator, not a structure terminator
-        if (token.value === '.') {
-            const prevLine = this.tokensByLine.get(token.line - 1) || [];
-            let lastTokenOnPrevLine: Token | undefined;
-            for (let i = prevLine.length - 1; i >= 0; i--) {
-                const t = prevLine[i];
-                if (t.type !== TokenType.Comment) {
-                    lastTokenOnPrevLine = t;
-                    break;
-                }
-            }
-            
-            if (lastTokenOnPrevLine) {
-                const hasContinuation = lastTokenOnPrevLine.type === TokenType.LineContinuation || 
-                                       lastTokenOnPrevLine.value === '|';
-                if (hasContinuation) {
-                    // This period ends a continued statement, not a structure
-                    if (DOCSTRUCT_TRACE) logger.info(`🔚 Period at Line ${token.line} ends continued statement from Line ${token.line - 1} (not popping stack)`);
-                    return;
-                }
-            }
-        }
-        
+        // A period reached on the tail of a `|`-continued statement used to return here without
+        // popping, on the premise that it "ends a continued statement, not a structure". Clarion
+        // has no statement-terminating period: a standalone `.` is the END equivalent and nothing
+        // else, whether or not the statement it follows was split across lines. Bailing left the
+        // structure open, so the next END popped IT and its parent was reported unterminated —
+        //
+        //     IF hr = 0
+        //       RETURN SELF.Run(a, b, |
+        //         c, d).
+        //     END
+        //
+        // where the `.` closes the inner IF and the END closes the outer one. Line continuation is
+        // the tokenizer's concern; by the time a `.` arrives here typed as an EndStatement, the
+        // decision that it IS a terminator has already been made.
+
         // Look ahead to find the next non-comment token. #188 — use the caller's
         // loop index instead of this.tokens.indexOf(token) (O(T) per END → O(1)).
         const currentIndex = index;

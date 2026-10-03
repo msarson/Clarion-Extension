@@ -15,11 +15,11 @@ import { serverSettings } from '../serverSettings';
 /**
  * #330 tier 1 — multi-DLL procedure navigation, request-time hops.
  *
- * Fixture mirrors the real generated shape verified on Direct10 substrate
- * (F:\TestApps\Direct10Meta): the CONSUMER app re-declares an imported
- * procedure in its global MAP inside MODULE('IBSCOM.DLL') with the DLL
+ * Fixture mirrors the real generated shape verified on real-solution substrate
+ * the CONSUMER app re-declares an imported
+ * procedure in its global MAP inside MODULE('ACMCOM.DLL') with the DLL
  * attribute; the DEFINING project declares it in its own global MAP inside
- * MODULE('fetch_ibscom.clw') and implements it in that member module. The
+ * MODULE('fetch_acmcom.clw') and implements it in that member module. The
  * consumer's cwproj carries a ProjectReference to the defining project
  * (verified 1:1 with the MODULE('x.dll') set on the real app).
  *
@@ -35,7 +35,7 @@ import { serverSettings } from '../serverSettings';
 const CONSUMER_SOURCE =
     "  PROGRAM\n" +                              // 0
     "  MAP\n" +                                  // 1
-    "    MODULE('IBSCOM.DLL')\n" +               // 2
+    "    MODULE('ACMCOM.DLL')\n" +               // 2
     "Fetch     PROCEDURE(LONG pMode),DLL\n" +    // 3
     "    END\n" +                                // 4
     "  END\n" +                                  // 5
@@ -46,7 +46,7 @@ const CONSUMER_SOURCE =
 const DEFINING_MAIN =
     "  PROGRAM\n" +                              // 0
     "  MAP\n" +                                  // 1
-    "    MODULE('fetch_ibscom.clw')\n" +         // 2
+    "    MODULE('fetch_acmcom.clw')\n" +         // 2
     "Fetch       PROCEDURE(LONG pMode)\n" +      // 3
     "    END\n" +                                // 4
     "  END\n" +                                  // 5
@@ -54,7 +54,7 @@ const DEFINING_MAIN =
     "  RETURN\n";                                // 7
 
 const DEFINING_MEMBER =
-    "  MEMBER('ibscom.clw')\n" +                 // 0
+    "  MEMBER('acmcom.clw')\n" +                 // 0
     "  MAP\n" +                                  // 1
     "  END\n" +                                  // 2
     "Fetch  PROCEDURE(LONG pMode)\n" +           // 3
@@ -63,7 +63,7 @@ const DEFINING_MEMBER =
 
 const CONSUMER_CALL_LINE = 7;
 const CONSUMER_REDECL_LINE = 3;
-const IMPL_LINE = 3; // in fetch_ibscom.clw
+const IMPL_LINE = 3; // in fetch_acmcom.clw
 
 function toUri(fsPath: string): string {
     return 'file:///' + fsPath.replace(/\\/g, '/').replace(/^([a-zA-Z]):/, (_m, d) => d + '%3A');
@@ -102,28 +102,28 @@ suite('Multi-DLL tier-1 navigation (#330)', () => {
 
         tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'multidll-330-'));
         const apDir = path.join(tmpRoot, 'AP');
-        const ibsDir = path.join(tmpRoot, 'IBSCom');
+        const acmDir = path.join(tmpRoot, 'ACMCom');
         fs.mkdirSync(apDir, { recursive: true });
-        fs.mkdirSync(ibsDir, { recursive: true });
-        for (const d of [apDir, ibsDir]) {
+        fs.mkdirSync(acmDir, { recursive: true });
+        for (const d of [apDir, acmDir]) {
             fs.writeFileSync(path.join(d, 'Clarion110.red'), '[Common]\n*.clw = .\n*.inc = .\n');
         }
 
         const consumerFile = path.join(apDir, 'ap.clw');
         fs.writeFileSync(consumerFile, CONSUMER_SOURCE);
-        fs.writeFileSync(path.join(ibsDir, 'ibscom.clw'), DEFINING_MAIN);
-        fs.writeFileSync(path.join(ibsDir, 'fetch_ibscom.clw'), DEFINING_MEMBER);
+        fs.writeFileSync(path.join(acmDir, 'acmcom.clw'), DEFINING_MAIN);
+        fs.writeFileSync(path.join(acmDir, 'fetch_acmcom.clw'), DEFINING_MEMBER);
         consumerUri = toUri(consumerFile);
 
         const pAP = new ClarionProjectServer('AP', 'app', apDir, '{AP-330}');
         pAP.sourceFiles.push(new ClarionSourcerFileServer('ap.clw', 'ap.clw', pAP));
-        pAP.projectReferences.push({ name: 'IBSCom', project: 'IBSCom.cwproj' });
+        pAP.projectReferences.push({ name: 'ACMCom', project: 'ACMCom.cwproj' });
 
-        const pIBS = new ClarionProjectServer('IBSCom', 'app', ibsDir, '{IBS-330}');
-        pIBS.sourceFiles.push(new ClarionSourcerFileServer('ibscom.clw', 'ibscom.clw', pIBS));
-        pIBS.sourceFiles.push(new ClarionSourcerFileServer('fetch_ibscom.clw', 'fetch_ibscom.clw', pIBS));
+        const pACM = new ClarionProjectServer('ACMCom', 'app', acmDir, '{ACM-330}');
+        pACM.sourceFiles.push(new ClarionSourcerFileServer('acmcom.clw', 'acmcom.clw', pACM));
+        pACM.sourceFiles.push(new ClarionSourcerFileServer('fetch_acmcom.clw', 'fetch_acmcom.clw', pACM));
 
-        const projects = [pAP, pIBS];
+        const projects = [pAP, pACM];
         const fakeSm = {
             solution: { projects },
             findProjectForFile: (fp: string) => {
@@ -162,7 +162,7 @@ suite('Multi-DLL tier-1 navigation (#330)', () => {
         const loc = firstLocation(result);
 
         assert.ok(loc, 'Ctrl+F12 from the call site must resolve cross-DLL');
-        assert.strictEqual(uriBasename(loc!.uri), 'fetch_ibscom.clw',
+        assert.strictEqual(uriBasename(loc!.uri), 'fetch_acmcom.clw',
             `implementation must land in the defining member module, got ${loc ? loc.uri : 'null'}`);
         assert.strictEqual(loc!.range.start.line, IMPL_LINE,
             `expected the implementation at line ${IMPL_LINE}, got ${loc!.range.start.line}`);
@@ -175,7 +175,7 @@ suite('Multi-DLL tier-1 navigation (#330)', () => {
         const loc = firstLocation(result);
 
         assert.ok(loc, 'Ctrl+F12 on the re-declaration must resolve cross-DLL');
-        assert.strictEqual(uriBasename(loc!.uri), 'fetch_ibscom.clw',
+        assert.strictEqual(uriBasename(loc!.uri), 'fetch_acmcom.clw',
             `implementation must land in the defining member module, got ${loc ? loc.uri : 'null'}`);
         assert.strictEqual(loc!.range.start.line, IMPL_LINE,
             `expected the implementation at line ${IMPL_LINE}, got ${loc!.range.start.line}`);
@@ -189,12 +189,12 @@ suite('Multi-DLL tier-1 navigation (#330)', () => {
 
         assert.ok(loc, 'F12 on the re-declaration must resolve');
         const base = uriBasename(loc!.uri);
-        assert.ok(base === 'fetch_ibscom.clw' || base === 'ibscom.clw',
+        assert.ok(base === 'fetch_acmcom.clw' || base === 'acmcom.clw',
             `F12 on the ,DLL re-declaration should land in the defining project (impl or its MAP declaration), got ${loc!.uri}:${loc!.range.start.line}`);
     });
 
     test('implementation on a third-party DLL re-declaration (no project) returns null without error', async () => {
-        const thirdPartySource = CONSUMER_SOURCE.replace("MODULE('IBSCOM.DLL')", "MODULE('vuFT3.dll')");
+        const thirdPartySource = CONSUMER_SOURCE.replace("MODULE('ACMCOM.DLL')", "MODULE('vuFT3.dll')");
         const thirdUri = toUri(path.join(tmpRoot, 'AP', 'ap3.clw'));
         fs.writeFileSync(path.join(tmpRoot, 'AP', 'ap3.clw'), thirdPartySource);
         const doc = TextDocument.create(thirdUri, 'clarion', 1, thirdPartySource);
@@ -203,9 +203,9 @@ suite('Multi-DLL tier-1 navigation (#330)', () => {
             doc, cursorOn(thirdPartySource, CONSUMER_CALL_LINE, 'Fetch', 2));
         const loc = firstLocation(result);
         // No project owns vuFT3 — a graceful null (or a local-decl answer) is
-        // acceptable; landing in IBSCom's module would be a WRONG hop.
+        // acceptable; landing in ACMCom's module would be a WRONG hop.
         if (loc) {
-            assert.notStrictEqual(uriBasename(loc.uri), 'fetch_ibscom.clw',
+            assert.notStrictEqual(uriBasename(loc.uri), 'fetch_acmcom.clw',
                 'third-party DLL must not mis-hop into an unrelated project');
         }
     });

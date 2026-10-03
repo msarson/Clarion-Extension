@@ -427,7 +427,7 @@ export function validateExecuteStructures(tokens: Token[], document: TextDocumen
 // #345 phase 4 — the validator runs SYNC on every validation pass (open /
 // change / sdiReady / crossFileUpdate: 4 passes at startup) and its FROM
 // resolution re-tokenized the MEMBER parent each time (4.3s × 4 measured on
-// IBSWorking). Result memo: same doc version + same cross-file epoch → same
+// WorkingLib). Result memo: same doc version + same cross-file epoch → same
 // diagnostics. The #340 watcher bumps the epoch on any workspace change.
 // NB: content is part of the identity (the #340/#344 lesson — same uri+version
 // with different text must never serve a stale result; test fixtures and

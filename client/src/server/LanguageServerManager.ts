@@ -1,4 +1,4 @@
-import { workspace, window as vscodeWindow, ExtensionContext, commands } from 'vscode';
+import { workspace, window as vscodeWindow, ExtensionContext, languages } from 'vscode';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, ErrorAction, CloseAction } from 'vscode-languageclient/node';
 import { globalSettings, globalSolutionFile } from '../globals';
@@ -79,6 +79,12 @@ export async function startLanguageServer(
             // the 2s no-solution fallback timer by 0ms on Mark's VM).
             configuredSolutionFile: SettingsStorageManager.clarionSettings().get<string>('currentSolution', '') // #563
                 || workspace.getConfiguration('clarion').get<string>('solutionFile', '')
+        },
+        // #696 — pull diagnostics for restored tabs VS Code has not instantiated (only the tab in
+        // front is, until clicked). The document selector's `**/*.ext` patterns match them by URI;
+        // the server checks them from disk once the solution has loaded.
+        diagnosticPullOptions: {
+            onTabs: workspace.getConfiguration('clarion').get<boolean>('restoredTabDiagnostics', true),
         },
         synchronize: {
             fileEvents: [
@@ -171,21 +177,27 @@ export async function startLanguageServer(
             }
         });
 
-        // Re-invoke the doc-link provider per visible Clarion editor on
-        // solution-ready. Uses `vscode.executeDocumentLinkProvider` so the
-        // refresh runs without touching document content — no dirty-flag flip.
-        // Audit trail for the framing pivot (away from LSP capability backport)
-        // lives in GH #160.
-        client.onNotification('clarion/refreshDocumentLinks', async () => {
-            logger.info(`🔗 Received clarion/refreshDocumentLinks; re-invoking document-link provider on visible editors`);
-            for (const editor of vscodeWindow.visibleTextEditors) {
-                if (editor.document.languageId === 'clarion') {
-                    try {
-                        await commands.executeCommand('vscode.executeDocumentLinkProvider', editor.document.uri);
-                    } catch (err) {
-                        logger.warn(`⚠️ doc-link refresh failed for ${editor.document.uri.toString()}: ${err instanceof Error ? err.message : String(err)}`);
-                    }
-                }
+        // Make the editor re-ask for document links once the server says they are ready
+        // (the server sends this after the file graph the links come from is built — #620).
+        //
+        // #620: this used to call `vscode.executeDocumentLinkProvider` (GH #160). That command
+        // runs the providers and returns the links to ITS CALLER; it does not touch what the
+        // editor has painted, so the links were computed and dropped on the floor. There is no
+        // provider-side change event to raise either — `DocumentLinkProvider` has only
+        // provideDocumentLinks/resolveDocumentLink, and LSP has no workspace/documentLink/refresh
+        // (that was the original #160 finding).
+        //
+        // What the editor does watch is the set of registered link providers. Registering one
+        // and disposing it changes that set, which is what makes VS Code recompute links for
+        // the visible editors and ask our real (LSP) provider again.
+        client.onNotification('clarion/refreshDocumentLinks', () => {
+            const clarionEditors = vscodeWindow.visibleTextEditors.filter(e => e.document.languageId === 'clarion');
+            if (clarionEditors.length === 0) return;
+            logger.info(`🔗 Received clarion/refreshDocumentLinks; nudging the link provider registry for ${clarionEditors.length} visible Clarion editor(s)`);
+            try {
+                languages.registerDocumentLinkProvider({ language: 'clarion' }, { provideDocumentLinks: () => [] }).dispose();
+            } catch (err) {
+                logger.warn(`⚠️ doc-link refresh failed: ${err instanceof Error ? err.message : String(err)}`);
             }
         });
 

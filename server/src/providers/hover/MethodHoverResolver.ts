@@ -1,10 +1,12 @@
 import { Hover, Position } from 'vscode-languageserver-protocol';
+import { findEnclosingClassToken } from '../../utils/EnclosingClassResolver';
+import { MemberLocatorService } from '../../services/MemberLocatorService';
+import type { DottedMember } from '../../services/DottedAccessResolver';
 import { clarionSourceCandidates } from '../../utils/ClarionSourceNaming';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
-import { ClassMemberResolver } from '../../utils/ClassMemberResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { ClarionPatterns } from '../../utils/ClarionPatterns';
 import { SolutionManager } from '../../solution/solutionManager';
@@ -13,8 +15,9 @@ import { resolveFileInNoSolutionMode } from '../../solution/findFileNoSolution';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { ProcedureUtils } from '../../utils/ProcedureUtils';
 import LoggerManager from '../../logger';
-import { SymbolFinderService } from '../../services/SymbolFinderService';
-import { StructureDeclarationIndexer } from '../../utils/StructureDeclarationIndexer';
+import { StructureDeclarationIndexer, scanSourceForDeclarations } from '../../utils/StructureDeclarationIndexer';
+import { pickDeclaration } from '../../utils/ClassAncestry';
+import { ClassDeclarationSite } from '../../utils/SelfParentClassResolver';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -38,16 +41,15 @@ const IMPL_SWEEP_BUDGET_MS = 500;
 export class MethodHoverResolver {
     private tokenCache = TokenCache.getInstance();
     private overloadResolver: MethodOverloadResolver;
-    private memberResolver: ClassMemberResolver;
     private formatter: HoverFormatter;
+    /** #626 — the engine the explicit-receiver hover path already uses. */
+    private memberLocator = new MemberLocatorService();
 
     constructor(
         overloadResolver: MethodOverloadResolver,
-        memberResolver: ClassMemberResolver,
         formatter: HoverFormatter
     ) {
         this.overloadResolver = overloadResolver;
-        this.memberResolver = memberResolver;
         this.formatter = formatter;
     }
 
@@ -83,29 +85,9 @@ export class MethodHoverResolver {
         const methodEnd = methodStart + methodName.length;
         
         if (position.character >= classStart && position.character <= classEnd) {
-            // Cursor is on the class prefix — show the class declaration, not the method
-            const tokens = this.tokenCache.getTokens(document);
-            const classToken = tokens.find(t =>
-                t.start === 0 &&
-                t.value.toLowerCase() === className.toLowerCase()
-            );
-            if (classToken) {
-                const typeStr = SymbolFinderService.extractTypeInfo(classToken, tokens);
-                const lineTokens = tokens.filter(t => t.line === classToken.line);
-                const declaration = lineTokens.map(t => t.value).join(' ');
-                const markdown = [
-                    `**${className}** — \`${typeStr}\``,
-                    ``,
-                    `🔷 Class declaration`,
-                    ``,
-                    '```clarion',
-                    declaration,
-                    '```',
-                    this.formatter.locationLink(document.uri, classToken.line)
-                ];
-                return { contents: { kind: 'markdown', value: markdown.join('\n') } };
-            }
-            return null;
+            // Cursor is on the class prefix — the question is where the CLASS is declared.
+            // Deliberately nothing about this method: hovering the method name answers that.
+            return this.resolveClassDeclarationHover(className, document, position.line);
         }
 
         if (position.character >= methodStart && position.character <= methodEnd) {
@@ -284,164 +266,40 @@ export class MethodHoverResolver {
     }
 
     /**
-     * Resolves hover for a method call (e.g., self.MethodName())
+     * #651 — the card for a single-level member access (`SELF.x`, `PARENT.x`, `obj.x`) whose
+     * declaration DottedAccessResolver has already named: for a method, its body found the way
+     * every hover body link is found (the picked overload's prototype, #643; a body after the
+     * declaration when it is in this document, #650), else the member card. The tail the SELF,
+     * PARENT and explicit-receiver hovers each carried a copy of.
      */
-    async resolveMethodCall(
+    async formatDottedMember(
         fieldName: string,
+        access: DottedMember,
         document: TextDocument,
-        position: Position,
-        line: string,
         paramCount?: number
     ): Promise<Hover | null> {
-        const tokens = this.tokenCache.getTokens(document);
-        let memberInfo = this.memberResolver.findClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
-
-        if (!memberInfo) {
-            logger.info(`❌ findClassMemberInfo returned null for ${fieldName} in SELF context`);
-            return null;
-        }
-
-        // #182 — arg-classification overlay (symmetric with Goto Definition's SELF
-        // branch): when the SELF call has overloaded candidates differing by arg
-        // type, classify the call's args and re-point memberInfo at the matching
-        // overload before the paramCount-only result is shown.
-        const matchedSignature = await this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
-
-        // Check if this is a method (not a property)
+        const started = Date.now();
+        const memberInfo = access.member;
         const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
-
+        let hover: Hover | null = null;
         if (isMethod) {
-            const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
-
             const implLocation = await this.findMethodImplementationCrossFile(
                 memberInfo.className,
                 fieldName,
                 document,
                 paramCount,
-                implModuleFile,
-                matchedSignature
+                this.resolveModuleFile(memberInfo.className, memberInfo.file),
+                access.pickedSignature ?? memberInfo.signature,
+                { file: memberInfo.file, line: memberInfo.line }
             );
-
-            if (implLocation) {
-                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
-            }
+            if (implLocation) hover = this.formatter.formatMethodCall(fieldName, memberInfo, implLocation, document);
         }
-
-        return this.formatter.formatClassMember(fieldName, memberInfo);
-    }
-
-    /**
-     * #182 — shared arg-classification overlay for SELF / PARENT / chained method
-     * hovers. When the call has overloaded candidates that differ by argument
-     * type, classify the call's args and MUTATE `memberInfo.line`/`.file` to point
-     * at the matching overload's declaration (so the hover shows the right
-     * signature). Returns the matched declaration signature for arg-aware
-     * implementation lookup, or undefined when no disambiguation applied (falls
-     * through to the existing paramCount-only behaviour).
-     */
-    private async applyArgClassifyOverlay(
-        memberInfo: { type: string; className: string; line: number; file: string },
-        fieldName: string,
-        document: TextDocument,
-        tokens: Token[],
-        position: Position,
-        paramCount?: number
-    ): Promise<string | undefined> {
-        if (paramCount === undefined) return undefined; // no-paren access — nothing to classify
-        const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-            memberInfo.className, fieldName, document, tokens, position.line);
-        if (!picked) return undefined;
-        memberInfo.line = picked.line;
-        memberInfo.file = picked.file;
-        logger.info(`✅ #182 arg-classify re-pointed ${memberInfo.className}.${fieldName} hover to line ${picked.line}`);
-        return picked.signature;
-    }
-
-    /**
-     * Resolves hover for a PARENT.MethodName() call— looks up the method starting
-     * from the parent class of the current scope's class.
-     */
-    async resolveParentMethodCall(
-        fieldName: string,
-        document: TextDocument,
-        position: Position,
-        line: string,
-        paramCount?: number
-    ): Promise<Hover | null> {
-        const phaseStart = Date.now();
-        let resolveMs = 0;
-        let overlayMs = 0;
-        const emitPhases = (implMs: number) => {
-            const total = Date.now() - phaseStart;
-            if (total >= 250) {
-                perfLogger.perf("PARENT method hover slow", {
-                    total_ms: total,
-                    resolve_member_ms: resolveMs,
-                    overlay_ms: overlayMs,
-                    impl_hunt_ms: implMs,
-                    member: fieldName,
-                    uri: document.uri
-                });
-            }
-        };
-
-        const tokens = this.tokenCache.getTokens(document);
-        const t0 = Date.now();
-        let memberInfo = await this.memberResolver.findParentClassMemberInfo(fieldName, document, position.line, tokens, paramCount);
-        resolveMs = Date.now() - t0;
-        let matchedSignature: string | undefined;
-
-        if (!memberInfo) {
-            // #182 — the paramCount-only findParentClassMemberInfo misses same-arity
-            // overloads (and in-memory / cross-file cases). Fall back to resolving the
-            // parent class directly and arg-classifying — symmetric with Goto
-            // Definition's PARENT branch, whose overlay is the actual working path.
-            const tf = Date.now();
-            const parentInfo = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
-            if (parentInfo?.parentClassName && paramCount !== undefined) {
-                const picked = await this.overloadResolver.resolveOverloadDeclByArgs(
-                    parentInfo.parentClassName, fieldName, document, tokens, position.line);
-                if (picked) {
-                    memberInfo = { type: 'PROCEDURE', className: parentInfo.parentClassName, line: picked.line, file: picked.file };
-                    matchedSignature = picked.signature;
-                }
-            }
-            resolveMs += Date.now() - tf;
-            if (!memberInfo) {
-                logger.info(`❌ PARENT resolution returned null for ${fieldName}`);
-                emitPhases(0);
-                return null;
-            }
-        } else {
-            // #182 — arg-classification overlay (symmetric with Goto Definition's PARENT branch).
-            const tOv = Date.now();
-            matchedSignature = await this.applyArgClassifyOverlay(memberInfo, fieldName, document, tokens, position, paramCount);
-            overlayMs = Date.now() - tOv;
+        hover = hover ?? this.formatter.formatClassMember(fieldName, memberInfo);
+        const total = Date.now() - started;
+        if (total >= 250) {
+            perfLogger.perf("Member hover slow", { total_ms: total, receiver: access.receiverKind, member: fieldName, uri: document.uri });
         }
-
-        const isMethod = memberInfo.type.toUpperCase().includes('PROCEDURE') || memberInfo.type.toUpperCase().includes('FUNCTION');
-
-        if (isMethod) {
-            const implModuleFile = this.resolveModuleFile(memberInfo.className, memberInfo.file);
-
-            const tImpl = Date.now();
-            const implLocation = await this.findMethodImplementationCrossFile(
-                memberInfo.className,
-                fieldName,
-                document,
-                paramCount,
-                implModuleFile,
-                matchedSignature
-            );
-            emitPhases(Date.now() - tImpl);
-            if (implLocation) {
-                return this.formatter.formatMethodCall(fieldName, memberInfo, implLocation);
-            }
-        } else {
-            emitPhases(0);
-        }
-
-        return this.formatter.formatClassMember(fieldName, memberInfo);
+        return hover;
     }
 
     /**
@@ -456,8 +314,8 @@ export class MethodHoverResolver {
         paramCount?: number,
         position?: Position
     ): Promise<Hover | null> {
-        // #182 — arg-classification overlay for chained calls (symmetric with the
-        // SELF/PARENT branches). When the resolved final class has overloaded
+        // #182 — arg-classification overlay, for the typed-variable and interface hover that reach
+        // this without DottedAccessResolver's pick (#654). When the resolved final class has overloaded
         // candidates differing by arg type, re-point chainedInfo at the matching
         // overload's declaration before resolving its implementation. Idempotent
         // for callers that already arg-classified (re-picks the same overload).
@@ -475,12 +333,20 @@ export class MethodHoverResolver {
                          chainedInfo.type.toUpperCase().includes('FUNCTION');
 
         if (isMethod) {
-            const implLoc = await this.memberResolver.findImplementationCrossFile(
-                chainedInfo.className, fieldName, chainedInfo, document
+            // #640 — the same body search as the SELF and PARENT hovers, which reads the open
+            // document; ClassMemberResolver.findImplementationCrossFile read the file from disk.
+            // #643 — handed the declaration's own prototype, so it picks that overload's body.
+            const declared = await this.memberLocator.findMemberInClass(chainedInfo.className, fieldName, document, paramCount);
+            const implLocation = await this.findMethodImplementationCrossFile(
+                chainedInfo.className,
+                fieldName,
+                document,
+                paramCount,
+                this.resolveModuleFile(chainedInfo.className, chainedInfo.file),
+                declared?.signature
             );
-            if (implLoc) {
-                const implLocationStr = `${implLoc.uri}:${implLoc.range.start.line}`;
-                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocationStr);
+            if (implLocation) {
+                return this.formatter.formatMethodCall(fieldName, chainedInfo, implLocation, document);
             }
         }
 
@@ -526,31 +392,122 @@ export class MethodHoverResolver {
     }
 
     /**
-     * Find the CLASS token for a method declaration
+     * Where `className` is DECLARED, as a hover. Says nothing about the method whose
+     * prefix was hovered — that is what hovering the method name is for.
+     *
+     * Three places can declare it, and the order matters:
+     *   1. A procedure-local CLASS (#233 Rule 4). Its label sits at column 0 like any Clarion
+     *      label — only its END is indented — so what distinguishes it is the procedure it
+     *      belongs to, and one module may declare the same name in several procedures. Only
+     *      the `declaringProcedureLine` binding picks the right one; a search by name cannot.
+     *   2. Module level in THIS document — a generated app declares `ThisWindow CLASS(...)`
+     *      in the same .clw that implements it. Scanned with the indexer's own scanner, so
+     *      "is this really a CLASS declaration" is decided identically, and over the live
+     *      text so unsaved edits count. A declaration here outranks the index: another file
+     *      may declare the same name.
+     *   3. Another file, via the cross-file index — the library shape (declared in .inc,
+     *      implemented in .clw). The index does not scan implementation .clw modules, which
+     *      is why (2) cannot be folded into it.
+     *
+     * Previously this searched the current document for the first column-0 token matching
+     * the class name. In a generated app that is the real `ThisWindow CLASS(...)` line, so
+     * it looked correct; for a library class, whose declaration is in another file entirely,
+     * it matched the first METHOD IMPLEMENTATION prefix and reported an unrelated method as
+     * the "class declaration".
      */
-    private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {
-        // Search backwards from the method line to find the CLASS token
-        for (let i = tokens.length - 1; i >= 0; i--) {
-            const token = tokens[i];
+    private resolveClassDeclarationHover(className: string, document: TextDocument, implLine: number): Hover | null {
+        const target = className.toLowerCase();
+        const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        // One scan serves tiers 1 and 2: tier 2 looks up by NAME, tier 1 by the LINE it has
+        // already picked, which is how it reads the parent off the right one of two same-named
+        // local classes.
+        const declared = scanSourceForDeclarations(document.getText(), docPath)
+            .filter(d => d.structureType === 'CLASS');
 
-            // Stop if we've gone past the method line
-            if (token.line > methodLine) {
-                continue;
-            }
-
-            // Look for CLASS structure
-            if (token.type === TokenType.Structure && token.value.toUpperCase() === 'CLASS') {
-                // Use the tokenizer's own nesting-aware finishesAt (stack-based, END-marker
-                // driven — not indentation) instead of hand-scanning for a column-0 END.
-                // A local/anonymous CLASS declared inside a procedure's DATA section is
-                // closed by an indented END, which a column-0 scan would skip right past.
-                if (token.finishesAt === undefined || methodLine <= token.finishesAt) {
-                    return token;
-                }
+        // 1. Procedure-local class.
+        const tokens = this.tokenCache.getTokens(document);
+        const implToken = tokens.find(t =>
+            t.line === implLine && t.subType === TokenType.MethodImplementation);
+        if (implToken && implToken.declaringProcedureLine !== undefined) {
+            const owner = tokens.find(t =>
+                t.line === implToken.declaringProcedureLine && t.localClassTokens);
+            const localClass = owner?.localClassTokens?.find(c => c.label?.toLowerCase() === target);
+            if (localClass) {
+                logger.info(`✅ ${className} is procedure-local, declared at line ${localClass.line}`);
+                const onLine = declared.find(d => d.line === localClass.line);
+                return this.buildClassDeclarationHover({
+                    className, uri: document.uri, line: localClass.line,
+                    parentName: onLine?.parentName, isType: onLine?.isType ?? false
+                });
             }
         }
 
-        return null;
+        // 2. Module level in this document.
+        const here = declared.find(d => d.name.toLowerCase() === target);
+        if (here) {
+            logger.info(`✅ ${className} is declared in this file at line ${here.line}`);
+            return this.buildClassDeclarationHover({
+                className: here.name, uri: document.uri, line: here.line,
+                parentName: here.parentName, isType: here.isType
+            });
+        }
+
+        // 3. Another file.
+        const indexed = pickDeclaration(
+            StructureDeclarationIndexer.getInstance()
+                .findFor(className, docPath)
+                .filter(d => d.structureType === 'CLASS'));
+        if (indexed) {
+            logger.info(`✅ ${className} is declared in ${indexed.filePath}:${indexed.line}`);
+            return this.buildClassDeclarationHover({
+                className: indexed.name, uri: indexed.filePath, line: indexed.line,
+                parentName: indexed.parentName, isType: indexed.isType
+            });
+        }
+
+        logger.info(`❌ No CLASS declaration found for ${className}`);
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [`**${className}**`, ``, `🔷 Class declaration`, ``, `⚠️ *Declaration not found*`].join('\n')
+            }
+        };
+    }
+
+    /**
+     * The card for a resolved CLASS declaration: what it is, where it is, and what it
+     * extends (#634).
+     *
+     * What a class derives from is the fact this hover is usually opened to find — in a
+     * generated app, `CLASS(WindowManager)` against `CLASS(ReportManager)` is what says
+     * which framework behaviour you are looking at. It is rendered in the shape #606
+     * already established for the bare SELF/PARENT card (`HoverProvider.buildSelfParentHover`),
+     * so the two ways of asking "which class is this?" answer in one voice rather than two.
+     *
+     * A parentless class renders no `Extends` line at all, rather than an empty one.
+     */
+    private buildClassDeclarationHover(site: ClassDeclarationSite): Hover {
+        const typeLabel = site.isType ? 'CLASS, TYPE' : 'CLASS';
+        const parentLine = site.parentName ? `\n⬆️ Extends: \`${site.parentName}\`` : '';
+        return {
+            contents: {
+                kind: 'markdown',
+                value: [
+                    `**${site.className}** — ${typeLabel}`,
+                    ``,
+                    `🔷 Class declaration`,
+                    ``,
+                    `${this.formatter.locationLink(site.uri, site.line)}${parentLine}`
+                ].join('\n')
+            }
+        };
+    }
+
+    /**
+     * Find the CLASS token for a method declaration
+     */
+    private findClassTokenForMethodDeclaration(tokens: Token[], methodLine: number): Token | null {
+        return findEnclosingClassToken(tokens, methodLine);   // #622
     }
 
     /**
@@ -595,14 +552,21 @@ export class MethodHoverResolver {
         currentDocument: TextDocument,
         paramCount?: number,
         moduleFile?: string | null,
-        declarationSignature?: string
+        declarationSignature?: string,
+        declaration?: { file: string; line: number } // #650: where the member is declared
     ): Promise<string | null> {
         logger.info(`Searching for ${className}.${methodName} implementation cross-file`);
 
         // FIRST: Search the current file (local implementation)
         const currentPath = decodeURIComponent(currentDocument.uri.replace('file:///', '')).replace(/\//g, '\\');
         logger.info(`Searching current file first: ${currentPath}`);
-        const localImplLine = this.searchFileForImplementation(currentPath, className, methodName, paramCount, declarationSignature);
+        const declaredHere = !!declaration &&
+            decodeURIComponent(declaration.file).toLowerCase() === decodeURIComponent(currentDocument.uri).toLowerCase();
+        // #640 — the open document's text, not the file on disk: a body typed since the last
+        // save, or in a file never saved, is only in the buffer.
+        const localImplLine = this.searchFileForImplementation(
+            currentPath, className, methodName, paramCount, declarationSignature, currentDocument.getText(),
+            declaredHere ? declaration!.line : undefined);
         if (localImplLine !== null) {
             const fileUri = `file:///${currentPath.replace(/\\/g, '/')}`;
             logger.info(`✅ Found implementation in current file at line ${localImplLine}`);
@@ -746,14 +710,16 @@ export class MethodHoverResolver {
         className: string,
         methodName: string,
         paramCount?: number,
-        declarationSignature?: string
+        declarationSignature?: string,
+        text?: string, // #640: the open document's text, when searching the file being edited
+        declarationLine?: number // #650: the member's declaration line, when it is in this file
     ): number | null {
         try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            const content = text ?? fs.readFileSync(filePath, 'utf8');
             const lines = content.split(/\r?\n/);
 
             // Search for method implementation: ClassName.MethodName PROCEDURE
-            const candidates: { lineNum: number; implParamCount: number; signature: string }[] = [];
+            let candidates: { lineNum: number; implParamCount: number; signature: string }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const implMatch = line.match(ClarionPatterns.METHOD_IMPLEMENTATION);
@@ -768,6 +734,12 @@ export class MethodHoverResolver {
             }
 
             if (candidates.length === 0) return null;
+            // #650: the same local class declared in several procedures has a body after each
+            // declaration; with the declaration in this file, a body after it is its own.
+            if (declarationLine !== undefined) {
+                const after = candidates.filter(c => c.lineNum > declarationLine);
+                if (after.length > 0) candidates = after;
+            }
             if (candidates.length === 1) {
                 logger.info(`✅ Found implementation in ${filePath} at line ${candidates[0].lineNum}`);
                 return candidates[0].lineNum;
@@ -811,75 +783,4 @@ export class MethodHoverResolver {
         return null;
     }
 
-    /**
-     * Get a preview of a method implementation
-     */
-    private async getMethodImplementationPreview(location: string): Promise<{ line: number; preview: string } | null> {
-        // Parse the location string
-        const parts = location.split(':');
-        const lineNumber = parseInt(parts[parts.length - 1]);
-        const filePath = parts.slice(0, -1).join(':').replace('file:///', '').replace(/\//g, '\\');
-        
-        try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            const lines = content.split(/\r?\n/);
-            
-            // Try to get the implementation token to find finishesAt
-            const fileUri = `file:///${filePath.replace(/\\/g, '/')}`;
-            const document = TextDocument.create(fileUri, 'clarion', 1, content);
-            const tokens = this.tokenCache.getTokens(document);
-            
-            // Find the procedure/method token at this line
-            const implToken = tokens.find(t => 
-                t.line === lineNumber &&
-                (t.subType === TokenType.MethodImplementation || 
-                 t.subType === TokenType.Procedure ||
-                 t.subType === TokenType.GlobalProcedure)
-            );
-            
-            let endLine: number;
-            const maxPreviewLines = 15;
-            
-            if (implToken && implToken.finishesAt !== undefined) {
-                // Use finishesAt to know exactly where the procedure ends
-                endLine = Math.min(implToken.finishesAt + 1, lineNumber + maxPreviewLines);
-                logger.info(`Using finishesAt=${implToken.finishesAt} for preview (${endLine - lineNumber} lines)`);
-            } else {
-                // Fallback: Find next procedure/routine or use max lines
-                endLine = lineNumber + maxPreviewLines;
-                for (let i = lineNumber + 1; i < Math.min(lines.length, lineNumber + 50); i++) {
-                    const line = lines[i];
-                    if (ClarionPatterns.HAS_PROCEDURE_KEYWORD.test(line)) {
-                        endLine = i;
-                        logger.info(`Found next procedure/routine at line ${i}, stopping before it`);
-                        break;
-                    }
-                }
-                endLine = Math.min(endLine, lines.length);
-            }
-            
-            // If the implementation is short, show it all
-            const totalLines = endLine - lineNumber;
-            if (totalLines <= maxPreviewLines) {
-                logger.info(`Short implementation (${totalLines} lines) - showing full preview`);
-                const previewLines = lines.slice(lineNumber, endLine);
-                return {
-                    line: lineNumber,
-                    preview: previewLines.join('\n')
-                };
-            } else {
-                // Show first part with ellipsis
-                logger.info(`Long implementation (${totalLines} lines) - showing first ${maxPreviewLines} lines`);
-                const previewLines = lines.slice(lineNumber, lineNumber + maxPreviewLines);
-                previewLines.push('  ! ...');
-                return {
-                    line: lineNumber,
-                    preview: previewLines.join('\n')
-                };
-            }
-        } catch (error) {
-            logger.error(`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
-            return null;
-        }
-    }
 }

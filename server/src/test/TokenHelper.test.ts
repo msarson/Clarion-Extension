@@ -413,7 +413,7 @@ END`;
     // resolver chain on string contents (12.5s cold walk, #373).
     suite('isPositionInString (#373 — embedded literals)', () => {
 
-        // The exact #361/#373 repro line shape from IBSCommon.clw
+        // The exact #361/#373 repro line shape from CommonLib.clw
         const reproLine = "    if ~command ('/netnolog') and (command ('/nettalklog') or command ('/neterrors'))";
 
         test('word inside a literal swallowed by a composite token → true', () => {

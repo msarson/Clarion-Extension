@@ -1,4 +1,5 @@
 import { DocumentSymbol, SymbolKind } from 'vscode-languageserver-types';
+import { classNameFromMethodLabel, isMethodImplementationLabel } from '../../utils/EnclosingClassResolver';
 import { Token, TokenType } from '../../ClarionTokenizer.js';
 import { SymbolBuilder } from './SymbolBuilder';
 import { ClarionDocumentSymbol } from '../ClarionDocumentSymbolProvider';
@@ -62,16 +63,17 @@ export class ProcedureProcessor {
      * Check if a procedure is a class method implementation
      */
     static isClassMethodImplementation(procedureName: string): boolean {
-        return procedureName.includes('.');
+        return isMethodImplementationLabel(procedureName);   // #622
     }
 
     /**
-     * Extract class name from a method implementation name
+     * Extract class name from a method implementation name (upper-cased — callers compare
+     * case-insensitively against upper-cased keys).
      */
     static extractClassName(methodName: string): string | null {
-        const dotIndex = methodName.indexOf('.');
-        if (dotIndex === -1) return null;
-        return methodName.substring(0, dotIndex).toUpperCase();
+        // #622: one of three copies of this split. The shared helper requires the dot PAST
+        // position 0, so a pathological ".Foo" now yields null rather than an empty string.
+        return classNameFromMethodLabel(methodName)?.toUpperCase() ?? null;
     }
 
     /**

@@ -10,6 +10,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { TokenHelper } from './TokenHelper';
 import { ClarionDocumentSymbolProvider } from '../providers/ClarionDocumentSymbolProvider';
 import LoggerManager from '../logger';
+import { findLabelQualifiedMember } from './LabelQualifiedMember';
 
 const logger = LoggerManager.getLogger("SymbolDefinitionResolver");
 logger.setLevel("error");
@@ -37,6 +38,21 @@ export class SymbolDefinitionResolver {
             searchWord = word.substring(colonIndex + 1);
             hasPrefix = true;
             logger.info(`Detected prefixed label reference: ${word}, searching for field: ${searchWord}`);
+
+            // #610: StructureLabel:Member (colon form of Field Qualification) names exactly one
+            // declaration. Matching the bare member name instead let `Second:Record` bind to
+            // whichever FILE's RECORD came first.
+            // A label spelled exactly like the whole word (`Loc:Count LONG`) still wins.
+            const wholeLabel = tokens.some(t => t.type === TokenType.Label && t.start === 0 && t.value.toLowerCase() === word.toLowerCase());
+            const qualified = wholeLabel ? null : findLabelQualifiedMember(tokens, word.substring(0, colonIndex), searchWord);
+            if (qualified) {
+                const m = qualified.member;
+                const name = m.type === TokenType.Structure ? (m.label ?? searchWord) : m.value;
+                return [Location.create(document.uri, {
+                    start: { line: m.line, character: 0 },
+                    end: { line: m.line, character: name.length }
+                })];
+            }
         } else if (dotIndex > 0) {
             // Extract the field name after the dot
             searchWord = word.substring(dotIndex + 1);

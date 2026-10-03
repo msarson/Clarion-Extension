@@ -11,7 +11,7 @@ import { setServerInitialized } from '../serverState';
  * ScrollSort:AllowAlpha → 'ScrollSort'). The fragments can never resolve, so
  * every validation exhausted all cross-file tiers per ghost — and the first
  * one paid the include-chain cold build (SCROLLSORT=22,966ms on Mark's
- * IBSWorking after each restart).
+ * WorkingLib after each restart).
  *
  * Pinned with a spy SymbolFinder: fragments must never reach findSymbol;
  * genuine unknown names still must.
@@ -74,7 +74,7 @@ suite('UndeclaredVariableDiagnostics — colon-split fragments (#351)', () => {
     test('#351 REGRESSION GUARD — fused prefixed compounds (JCA:StartedDate) never false-positive', async () => {
         // Fused compounds tokenize as a single non-Variable token — they were
         // never augment candidates (that's why they never appeared in the
-        // IBSWorking unresolved lists) and must stay diagnostic-silent.
+        // WorkingLib unresolved lists) and must stay diagnostic-silent.
         const code = [
             'TestProc PROCEDURE()',
             '  CODE',

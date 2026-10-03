@@ -25,9 +25,9 @@ The Clarion Extension provides real-time diagnostics:
 **Detects missing END statements:**
 
 ```clarion
-IF x = 1 THEN
-  DoSomething()
-  ! ❌ Error: Missing END
+  IF x = 1 THEN
+    DoSomething()
+    ! ❌ Error: Missing END
 ```
 
 **Structures checked:**
@@ -54,9 +54,9 @@ Expected END statement
 **Detects wrong termination keywords:**
 
 ```clarion
-IF x = 1 THEN
-  DoSomething()
-UNTIL   ! ❌ Error: Expected END, got UNTIL
+  IF x = 1 THEN
+    DoSomething()
+  UNTIL   ! ❌ Error: Expected END, got UNTIL
 ```
 
 ---
@@ -69,9 +69,9 @@ UNTIL   ! ❌ Error: Expected END, got UNTIL
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  x = 10
-  ! ❌ Warning: Missing RETURN statement
+  CODE
+    x = 10
+    ! ❌ Warning: Missing RETURN statement
 ```
 
 **Note:** Not required for ROUTINE blocks.
@@ -84,13 +84,13 @@ CODE
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  IF condition
-    RETURN  ! ✅ OK
-  ELSE
-    x = 10
-    ! ❌ Warning: Missing RETURN in ELSE branch
-  END
+  CODE
+    IF condition
+      RETURN  ! ✅ OK
+    ELSE
+      x = 10
+      ! ❌ Warning: Missing RETURN in ELSE branch
+    END
 ```
 
 ---
@@ -145,22 +145,22 @@ Field      LONG
 **Only OF/OROF allowed in CASE:**
 
 ```clarion
-CASE x
-  OF 1
-    DoSomething()
-  ELSE         ! ❌ Error: ELSE not allowed in CASE (use OROF)
-    DoOther()
-END
+  CASE x
+    OF 1
+      DoSomething()
+    ELSE         ! ❌ Error: ELSE not allowed in CASE (use OROF)
+      DoOther()
+  END
 ```
 
 **Should be:**
 ```clarion
-CASE x
-  OF 1
-    DoSomething()
-  OROF 2 TO 10  ! ✅ OK
-    DoOther()
-END
+  CASE x
+    OF 1
+      DoSomething()
+    OROF 2 TO 10  ! ✅ OK
+      DoOther()
+  END
 ```
 
 ---
@@ -170,19 +170,19 @@ END
 **Only BEGIN allowed in EXECUTE:**
 
 ```clarion
-EXECUTE choice
-  OF 1
-    DoSomething()  ! ❌ Error: Use BEGIN instead of OF in EXECUTE
-END
+  EXECUTE choice
+    OF 1
+      DoSomething()  ! ❌ Error: Use BEGIN instead of OF in EXECUTE
+  END
 ```
 
 **Should be:**
 ```clarion
-EXECUTE choice
-  BEGIN
-    DoSomething()  ! ✅ OK
+  EXECUTE choice
+    BEGIN
+      DoSomething()  ! ✅ OK
+    END
   END
-END
 ```
 
 ---
@@ -194,15 +194,15 @@ END
 **Detects missing OMIT terminator:**
 
 ```clarion
-OMIT('DEBUG')
-  DebugCode()
-  ! ❌ Error: Missing OMIT terminator
+  OMIT('DEBUG')
+    DebugCode()
+    ! ❌ Error: Missing OMIT terminator
 ```
 
 **Should be:**
 ```clarion
-OMIT('DEBUG')
-  DebugCode()
+  OMIT('DEBUG')
+    DebugCode()
 !   ! ✅ OK
 ```
 
@@ -213,9 +213,9 @@ OMIT('DEBUG')
 **Detects missing COMPILE terminator:**
 
 ```clarion
-COMPILE('DEBUG')
-  DebugCode()
-  ! ❌ Error: Missing COMPILE terminator
+  COMPILE('DEBUG')
+    DebugCode()
+    ! ❌ Error: Missing COMPILE terminator
 ```
 
 #### Compiled-Out Code Is Skipped
@@ -232,6 +232,21 @@ Code inside an **unconditional `OMIT`** block isn't part of the active build, so
 LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a label
 ```
 
+The list is the compiler's, not the help's ([test-programs/ReservedWordsTest](../../test-programs/ReservedWordsTest/README.md), Clarion 10 and 12): 44 words that cannot be a label anywhere, a GROUP field or CLASS method included, and can name only the last parameter of a prototype. CODE, DATA, NULL and THROW are not reserved; TRY, CATCH and FINALLY are. Words such as WINDOW, CLASS, QUEUE, SELF and PARENT, which the help says may not name a PROCEDURE, build there, so they are not reported. A reserved word that starts a statement (`OF 1`, `END`) may stand in column 1 and is not reported.
+
+### Redefined SELF, PARENT or NULL
+
+**Warns where the compiler warns "Redefining system intrinsic"** — and the redefinition is real: the new name hides the intrinsic for the rest of that method.
+
+```clarion
+Shape.Fill PROCEDURE
+Self     LONG             ! ⚠️ Redefining system intrinsic: SELF
+  CODE
+  SELF.Draw(1)            ! the compiler: Field not found: DRAW
+```
+
+Reported, exactly as the compiler does (Clarion 10 and 12): SELF or PARENT as a **method's** parameter (on the implementation's header) or local variable (a ROUTINE's DATA inside a method too), and NULL as the name of a PROCEDURE or method (on its MAP prototype or CLASS member). An ordinary procedure's `Self` parameter or local, and a global PROCEDURE named `Self`, draw nothing. Setting: `clarion.diagnostics.intrinsicRedefinitions`.
+
 ---
 
 ### Discarded Return Values
@@ -239,15 +254,15 @@ LOOP LONG  ! ❌ Error: 'LOOP' is a reserved keyword and cannot be used as a lab
 **Warns when a procedure or method with a return type is called as a statement and the result is discarded:**
 
 ```clarion
-MAP
-  GetCount(), LONG
-END
+  MAP
+    GetCount(), LONG
+  END
 
-CODE
-  GetCount()        ! ⚠️ Warning: Return value of GetCount() is discarded
-  x = GetCount()    ! ✅ OK
-  obj.Calc()        ! ⚠️ Warning — method calls on typed variables are checked too
-  SELF.Calc()       ! ⚠️ Warning — SELF./PARENT. call sites are checked (v1.0)
+  CODE
+    GetCount()        ! ⚠️ Warning: Return value of GetCount() is discarded
+    x = GetCount()    ! ✅ OK
+    obj.Calc()        ! ⚠️ Warning — method calls on typed variables are checked too
+    SELF.Calc()       ! ⚠️ Warning — SELF./PARENT. call sites are checked (v1.0)
 ```
 
 **What stays quiet:**
@@ -261,13 +276,13 @@ CODE
 **Flags a literal passed to a parameter that requires an addressable variable:**
 
 ```clarion
-MAP
-  UpdateIt(*LONG counter)
-END
+  MAP
+    UpdateIt(*LONG counter)
+  END
 
-CODE
-  UpdateIt(5)     ! ⚠️ Warning: a literal has no address and can't bind to *LONG
-  UpdateIt(myVar) ! ✅ OK
+  CODE
+    UpdateIt(5)     ! ⚠️ Warning: a literal has no address and can't bind to *LONG
+    UpdateIt(myVar) ! ✅ OK
 ```
 
 Applies to `*TYPE` reference parameters and complex types (`QUEUE`/`GROUP`/`FILE`/`VIEW`/`RECORD`/`CLASS` — by-reference even without the `*`). Conservative: only fires when the call resolves to a single unambiguous same-file MAP signature.
@@ -326,7 +341,7 @@ Comments are left alone, and a line reports once rather than once per character 
 
 ```clarion
 MyProc PROCEDURE
-CODE
+  CODE
   BREAK    ! ❌ Error: BREAK must be inside a LOOP or ACCEPT block
   CYCLE    ! ❌ Error: CYCLE must be inside a LOOP or ACCEPT block
 ```
@@ -372,6 +387,30 @@ The diagnostic clears immediately once the constants are added (the extension wa
 
 ---
 
+### INCLUDE or MEMBER File Not Found
+
+**Detects an `INCLUDE` or `MEMBER` naming a file that cannot be found**, found the same way the compiler finds it (through the redirection file):
+
+```clarion
+  MEMBER('OrderSys')              ! ❌ Error: The program file 'OrderSys' named by MEMBER cannot be found.
+  INCLUDE('Missing.inc'),ONCE     ! ❌ Error: The file 'Missing.inc' named by INCLUDE cannot be found.
+```
+
+Both fail the compile. The compiler opens a MEMBER module's program file itself, so a missing one is an error even when the module uses nothing global.
+
+**Never reported:**
+- A `MODULE('…')` name — in a MAP or on a CLASS it may name an external library by any identifier, with no source file behind it
+- A bare `MEMBER()`, which names no program
+- Anything inside an `OMIT` or `COMPILE` block
+
+It is checked once the solution has loaded; until the redirection is known every INCLUDE would look missing. Turn it off or change its level with `clarion.diagnostics.unresolvedFileReferences.enabled` / `.severity`.
+
+**Whole solution at once:** **Clarion: Unresolved File References** (or a click on the Graph row in the Clarion Tools pane) lists every INCLUDE and MEMBER that does not resolve, in files you have open or not, with the file and line. MODULE names without a source file and references inside OMIT/COMPILE are listed separately, as they are not necessarily problems. Each row opens the reference.
+
+> Not the same as the **Missing INCLUDE Diagnostic** above, which reports a *type* used without its `.inc` included; this one reports an INCLUDE or MEMBER whose *file* is missing.
+
+---
+
 ## Viewing Diagnostics
 
 ### In-Editor Indicators
@@ -404,6 +443,10 @@ The diagnostic clears immediately once the constants are added (the extension wa
 - Click any problem in list
 - Editor jumps to that line
 - Squiggle highlighted
+
+**After a restart:** VS Code restores your editor tabs but only loads the file in the tab in front. The extension checks the others too, from disk, once the solution has loaded — one at a time, so the tab you are looking at comes first — and their problems appear without clicking each tab. Turn this off with `clarion.restoredTabDiagnostics` (takes effect after a reload).
+
+**Build errors** from **Build** land in the same panel, on the file and line the compiler names (a compile error that names a file but no line lands on that file's first line). **Clarion: Clear Build Results** removes them; they are also cleared when another build task starts.
 
 ---
 
@@ -507,13 +550,13 @@ The full list of check ids, their defaults and what each one reports is in the *
 
 ```clarion
 MyProc PROCEDURE
-CODE
-  IF condition
-    RETURN
-  END
+  CODE
+    IF condition
+      RETURN
+    END
   
-  x = 10      ! ← Dimmed (unreachable after RETURN)
-  RETURN
+    x = 10      ! ← Dimmed (unreachable after RETURN)
+    RETURN
 ```
 
 **Detected patterns:**
@@ -588,7 +631,9 @@ CODE
 
 1. Check `clarion.diagnostics.enabled` is `true`
 2. Verify file extension is `.clw`, `.inc`, or `.equ`
-3. Reload window: `Ctrl+Shift+P` → "Developer: Reload Window"
+3. Cross-file checks (missing INCLUDE, MAP declarations, file not found, …) wait for the solution to load; right after startup only the same-file checks may be showing
+4. A restored tab you have not clicked shows problems only with `clarion.restoredTabDiagnostics` on (the default)
+5. Reload window: `Ctrl+Shift+P` → "Developer: Reload Window"
 
 ---
 

@@ -15,7 +15,7 @@ suite('MAP Token Type Investigation', () => {
     });
 
     test('MAP in MEMBER file should be Structure type', () => {
-        const memberCode = `   MEMBER('py1.clw')
+        const memberCode = `   MEMBER('app1.clw')
 
    MAP
      INCLUDE('MAIN_PY1.INC'),ONCE
@@ -117,7 +117,7 @@ CODE
     });
 
     test('MAP with heavy indentation (like real file)', () => {
-        const memberCode = `   MEMBER('py1.clw')
+        const memberCode = `   MEMBER('app1.clw')
 
                      MAP
                        INCLUDE('MAIN_PY1.INC'),ONCE        !Local module procedure declarations
@@ -172,7 +172,7 @@ CODE
     });
 
     test('Compare MEMBER vs PROGRAM MAP tokenization', () => {
-        const memberCode = `   MEMBER('py1.clw')
+        const memberCode = `   MEMBER('app1.clw')
    MAP
    END
 `;

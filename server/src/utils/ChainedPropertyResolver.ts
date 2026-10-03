@@ -1,16 +1,17 @@
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { ClassMemberResolver } from './ClassMemberResolver';
+import { extractClassName } from './ClassNameUtils';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
+import { resolveEnclosingClassName } from './EnclosingClassResolver';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ChainedPropertyResolver");
 logger.setLevel("error");
 
-/** Same shape as the internal MemberInfo type in ClassMemberResolver */
+/** Same shape as MemberInfo in ClassMemberScan */
 export interface ChainedMemberInfo {
     type: string;
     className: string;
@@ -38,7 +39,6 @@ const BARE_STRUCTURE_RE = /^(GROUP|QUEUE|RECORD)\s*(,.*)?$/i;
  */
 export class ChainedPropertyResolver {
     private tokenCache = TokenCache.getInstance();
-    private memberResolver = new ClassMemberResolver();
     private memberLocator = new MemberLocatorService();
 
     /**
@@ -144,10 +144,9 @@ export class ChainedPropertyResolver {
      * Resolves the chain `beforeDot` to the class that owns the FINAL member —
      * i.e. steps 1-2 of {@link resolve} without the final member lookup.
      *
-     * Exposed so the DefinitionProvider chained branch can apply the #125
-     * argument-classification overload overlay against the resolved final class
-     * (symmetric with the SELF/PARENT/typed-var branches), which the
-     * paramCount-only final lookup in step 3 cannot do (#131).
+     * Exposed for the callers that need the chain's final class rather than a member of it: the
+     * argument-type classifier and Go to Definition's fallback for a chain
+     * DottedAccessResolver does not name (#654; the resolver itself calls resolveFinalOwner).
      *
      * @returns the final class name, or null if the chain is unresolvable.
      */
@@ -178,15 +177,21 @@ export class ChainedPropertyResolver {
 
         const root = segments[0].toUpperCase();
 
-        // Step 1: resolve the initial class from the root segment
+        // Step 1: the root's class, read as a single-level receiver is (#652): SELF / PARENT / a
+        // CLASS or a variable of a CLASS type, with the line to hand the first lookup (#650). A
+        // root that is no class - a variable of a GROUP or QUEUE type - still takes its declared
+        // type. Reading every root through resolveVariableType took a local CLASS for its parent
+        // (#642) and SELF in the second of two same-named local classes for the first (#650).
         let currentClassName: string | null;
-        if (root === 'SELF') {
-            currentClassName = this.resolveCurrentClassName(document, position, tokens);
-        } else if (root === 'PARENT') {
-            currentClassName = await this.resolveParentClassName(document, position, tokens);
+        let rootLine: number | undefined;
+        const receiver = await this.memberLocator.resolveReceiverAt(segments[0], document, position.line);
+        if (receiver) {
+            currentClassName = receiver.className;
+            rootLine = receiver.atLine;
+        } else if (root === 'SELF' || root === 'PARENT') {
+            currentClassName = null;
         } else {
-            // Non-SELF/PARENT root: resolve the variable's declared type
-            const typeInfo = await this.memberLocator.resolveVariableType(segments[0], tokens, document);
+            const typeInfo = await this.memberLocator.resolveVariableType(segments[0], tokens, document, position.line);
             if (!typeInfo) {
                 logger.info(`ChainedPropertyResolver: root "${segments[0]}" not found as class variable`);
                 return null;
@@ -216,7 +221,8 @@ export class ChainedPropertyResolver {
             logger.info(`ChainedPropertyResolver: resolving segment "${segmentName}" in "${ownerLabel}"`);
 
             const memberInfo: ChainedMemberInfo | null = owner.kind === 'class'
-                ? await this.memberLocator.findMemberInClass(owner.name, segmentName, document)
+                // #650: the root's own class may be a label declared in several procedures.
+                ? await this.memberLocator.findMemberInClass(owner.name, segmentName, document, undefined, depth === 0 ? rootLine : undefined)
                 : await this.findFieldInInlineStructure(owner, segmentName);
 
             if (!memberInfo) {
@@ -233,7 +239,7 @@ export class ChainedPropertyResolver {
                 continue;
             }
 
-            const nextClass = ClassMemberResolver.extractClassName(memberInfo.type);
+            const nextClass = extractClassName(memberInfo.type);
             if (!nextClass) {
                 logger.info(`ChainedPropertyResolver: type "${memberInfo.type}" of "${segmentName}" is not navigable`);
                 return null;
@@ -248,28 +254,10 @@ export class ChainedPropertyResolver {
 
     /** Extracts the class name the current scope belongs to (for SELF resolution). Public for CompletionProvider. */
     public resolveCurrentClassName(document: TextDocument, position: Position, tokens: Token[]): string | null {
-        const structure = this.tokenCache.getStructure(document);
-        let currentScope = TokenHelper.getInnermostScopeAtLine(structure, position.line);
-        if (!currentScope) return null;
-
-        if (currentScope.subType !== undefined) {
-            const parentScope = TokenHelper.getParentScopeOfRoutine(structure, currentScope);
-            if (parentScope) currentScope = parentScope;
-        }
-
-        if (currentScope.value.includes('.')) {
-            return currentScope.value.split('.')[0];
-        }
-
-        const lines = document.getText().split('\n');
-        const scopeLine = lines[currentScope.line];
-        const m = scopeLine.match(/^([\w:]+)\.([\w:]+)\s+(?:PROCEDURE|FUNCTION)/i); // #247
-        return m ? m[1] : null;
-    }
-
-    /** Resolves the parent class name for PARENT resolution. */
-    private async resolveParentClassName(document: TextDocument, position: Position, tokens: Token[]): Promise<string | null> {
-        const info = await this.memberResolver.getParentClassInfo(document, position.line, tokens);
-        return info?.parentClassName ?? null;
+        // #622: was one of six copies of this walk. Two of its own quirks went with it — it hopped
+        // out of the scope on ANY subType rather than only a ROUTINE, and its line pattern was
+        // 2-part, so a `Class.Interface.Method` implementation resolved to nothing here while the
+        // copy in ClassMemberResolver handled it.
+        return resolveEnclosingClassName(document, position.line, this.tokenCache.getStructure(document));
     }
 }

@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.4**.
+Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.6**.
 
 Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the editor and Solution View, or the keyboard shortcuts listed below. In the palette every command is grouped under the **`Clarion:`** category, so typing `clarion` lists all of them — the tables below give the underlying command IDs rather than the palette labels. Settings are documented separately in **[Settings Reference](settings.md)**.
 
@@ -58,6 +58,8 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.startDebugging` | `F5` — launch the startup project under the Clarion debugger |
 | `clarion.runWithoutDebugging` | `Ctrl+F5` — run the startup project |
 | `clarion.setStartupProject` / `clarion.clearStartupProject` | Choose which project `F5`/`Ctrl+F5` targets |
+| `clarion.chooseStartupProject` | **Choose Startup Project** — pick the startup project from a list (also the Startup row in the Clarion Tools pane) |
+| `clarion.clearBuildResults` | **Clear Build Results** — remove the errors and warnings of the extension's last build from Problems. They are also cleared when another build task starts, so they never look current for a build they do not describe |
 
 ## Application (APP) Commands
 
@@ -113,6 +115,7 @@ Available in the Solution View for solutions with `.app` files under version con
 |---|---|
 | `clarion.setLogLevel` | Pick how much the extension logs (`error` … `debug`) for the run of a problem, without editing settings |
 | `clarion.debugSolutionHistory` | Inspect the recent-solutions memory |
+| `clarion.unresolvedReferencesReport` | **Unresolved File References** — a report of every INCLUDE and MEMBER in the solution whose file cannot be found, with MODULE names that have no source file and references inside OMIT/COMPILE listed separately. Each row opens the reference. Also a click on the Graph row in the Clarion Tools pane |
 | `clarion.debug.showFileRelationshipGraph` | Dump the MODULE/INCLUDE/MEMBER file graph (support/debug) |
 | `clarion.debug.showServerVersion` | Report the language server build actually running — the first thing to check when a fix appears not to have landed |
 

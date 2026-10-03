@@ -14,7 +14,7 @@ import { serverSettings } from '../serverSettings';
 /**
  * #300 — false "'thisStartup' is not declared in this file" for a global class
  * instance declared in the MEMBER parent (`thisStartup ctStartup,External,DLL(dll_mode)`
- * in IBSUtils.clw) that hover resolves fine.
+ * in ACMUtils.clw) that hover resolves fine.
  *
  * Root cause: SymbolFinderService.findGlobalVariableInParentFile resolved the
  * MEMBER target SAME-DIR ONLY (`path.resolve(currentFileDir, parentFile)`).

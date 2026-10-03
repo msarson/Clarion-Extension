@@ -1,5 +1,5 @@
 // Headless LSP perf driver — drives the Clarion language server over Node IPC
-// against the real DirectSystems test solution, mirroring the VS Code client's
+// against the locally configured real test solution, mirroring the VS Code client's
 // startup sequence (initialize → initialized → clarion/updatePaths →
 // solutionReady → didOpen → timed requests). Server perf channels are enabled,
 // so every *.Perf line (HoverProvider.Perf, StartupPerf, EventLoop lag, …)
@@ -8,18 +8,19 @@
 // First used to close #361 (hover freeze) with cold/warm evidence; reuse it for
 // any measure-the-logs perf issue instead of the build-VSIX→VM-retest loop.
 //
-// Test substrate (copied real solution + matching Clarion install):
-//   F:\DirectSystems\AppDev\ap1.sln   — 40 projects / 3,016 sources (the VM perf solution)
-//   F:\DirectSystems\Clarion10        — Clarion 10.0.12567; registered as the
-//                                       "DirectSystems" version in ClarionProperties.xml
+// Test substrate: a real solution copied to this machine, plus the matching Clarion install.
+// It is a client's PRIVATE source — its paths live in the gitignored scripts/local-corpus.js
+// (or the CLARION_TEST_* environment variables), never in this file, a commit or an issue.
+// See CLAUDE.local.md.
 //
 // Usage (run `npm run compile` first — drives out/server/src/server.js):
-//   node scripts/perf/lsp-driver.js                 # warm run against ap1.sln
+//   node scripts/perf/lsp-driver.js                 # warm run against the configured solution
 //   node scripts/perf/lsp-driver.js --cold          # wipe %TEMP% clarion-extension-* caches first
-//   node scripts/perf/lsp-driver.js --sln=F:\DirectSystems\AppDev\IBS.sln
-//   node scripts/perf/lsp-driver.js --file=F:\...\SomeOther.clw
+//   node scripts/perf/lsp-driver.js --sln=...\Other.sln
+//   node scripts/perf/lsp-driver.js --file=...\SomeOther.clw
 //   node scripts/perf/lsp-driver.js --sln=... --file=... --links   # print document links for the file (#470 hypothesis)
 //   node scripts/perf/lsp-driver.js --file=... --refs=LINE:COL       # time find-all-references at a 1-based position (#526)
+//   node scripts/perf/lsp-driver.js --link-refresh                   # assert document links reach the editor on startup (#620); exit 0 = all pass
 'use strict';
 const { fork } = require('child_process');
 const fs = require('fs');
@@ -29,11 +30,13 @@ const path = require('path');
 // --- config -----------------------------------------------------------------
 const REPO = path.resolve(__dirname, '..', '..');
 const SERVER = path.join(REPO, 'out', 'server', 'src', 'server.js');
-const APPDEV = 'F:\\DirectSystems\\AppDev';
-const CLARION_ROOT = 'F:\\DirectSystems\\Clarion10';
+const corpus = require('../corpus-config');
 const arg = (name) => { const a = process.argv.find(x => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : undefined; };
-const SLN = arg('sln') ?? path.join(APPDEV, 'ap1.sln');
-const TARGET = arg('file') ?? path.join(APPDEV, 'genfiles', 'src', 'IBSCommon.clw');
+const SLN = arg('sln') ?? corpus.required('solution');
+const APPDEV = path.dirname(SLN);
+const CLARION_ROOT = corpus.required('clarionRoot');
+const CLARION_VERSION = corpus.required('clarionVersion');
+const TARGET = arg('file') ?? corpus.required('bigFile');
 const COLD = process.argv.includes('--cold');
 // #460: assert the clarion/diagnosticsStatus ordering instead of timing hovers.
 const DIAG_STATUS = process.argv.includes('--diag-status');
@@ -53,9 +56,18 @@ const TOGGLE_UNRESOLVED = process.argv.includes('--toggle-unresolved');
 const PROGRESS = process.argv.includes('--progress');
 // #545 — declare pull-diagnostics support; the server then answers textDocument/diagnostic
 // and must NOT push. --pull runs the pull sequence after the settle window.
-const PULL = process.argv.includes('--pull');
+const PULL = process.argv.includes('--pull') || process.argv.includes('--restored-tab'); // #696 needs pull too
+// #620 — assert the document-link refresh ordering. The client only re-asks for links
+// when it receives clarion/refreshDocumentLinks, and DocumentLinkProvider can only answer
+// once the file graph is built, so the refresh MUST come after the build.
+const LINK_REFRESH = process.argv.includes('--link-refresh');
+// #696 — a restored tab VS Code has not instantiated is pulled by URI with no didOpen; the server
+// must answer with the full diagnostics read from disk. Self-checking, exit 0 = all pass.
+const RESTORED_TAB = process.argv.includes('--restored-tab');
 let refreshRequests = 0;
 const progressEvents = [];
+// #620 — ordered timeline of the two events whose relative order is the bug.
+const linkEvents = [];
 
 if (!fs.existsSync(SERVER)) { console.error(`Server build missing: ${SERVER} — run \`npm run compile\` first.`); process.exit(1); }
 if (!fs.existsSync(TARGET)) { console.error(`Target file missing: ${TARGET}`); process.exit(1); }
@@ -79,12 +91,30 @@ const notificationWaiters = [];
 const lastNotification = new Map();
 const child = fork(SERVER, ['--node-ipc'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], execArgv: [] });
 const errLog = fs.createWriteStream(STDERR_LOG);
+// #661 — the worst event-loop block the server reported: per 5s window while it runs, and a
+// final line at shutdown (lifetime_max_blocked_ms) so a run shorter than one window still has one.
+const eventLoop = { worstWindowMs: null, lifetimeMs: null };
 child.stderr.on('data', d => {
   errLog.write(d);
   for (const line of d.toString().split('\n')) {
     if (/Hover slow|EventLoop|max_blocked|Perf/i.test(line)) console.log('  [server] ' + line.trim());
+    if (/EventLoop lag/.test(line)) {
+      const w = /max_blocked_ms=(\d+)/.exec(line);
+      if (w) eventLoop.worstWindowMs = Math.max(eventLoop.worstWindowMs ?? 0, Number(w[1]));
+      const l = /lifetime_max_blocked_ms=(\d+)/.exec(line);
+      if (l) eventLoop.lifetimeMs = Number(l[1]);
+    }
   }
 });
+
+/** #661 — after shutdown: the worst block over the server's life, or say plainly it was not reported. */
+async function reportEventLoop() {
+  for (let i = 0; i < 20 && eventLoop.lifetimeMs === null; i++) await new Promise(r => setTimeout(r, 100));
+  const worst = Math.max(eventLoop.lifetimeMs ?? 0, eventLoop.worstWindowMs ?? 0);
+  console.log(eventLoop.lifetimeMs === null && eventLoop.worstWindowMs === null
+    ? 'max_blocked_ms: not reported (server did not log an EventLoop line)'
+    : `max_blocked_ms over the server's life: ${worst}`);
+}
 child.stdout.on('data', d => errLog.write(d));
 
 child.on('message', (msg) => {
@@ -106,11 +136,16 @@ child.on('message', (msg) => {
       if (PROGRESS) console.log(`  [progress ${String(msg.params.token).slice(0, 8)}] ${msg.params.value.kind}${msg.params.value.title ? ' ' + msg.params.value.title : ''}${msg.params.value.message ? ' — ' + msg.params.value.message : ''}${msg.params.value.percentage !== undefined ? ' ' + msg.params.value.percentage + '%' : ''}`);
     }
     if (msg.method === 'textDocument/publishDiagnostics') {
-      diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length });
+      // #619 — `version` is optional in LSP 3.15; record what arrived (undefined included)
+      // so the --diag-status run can assert every publish carries the version it is for.
+      diagEvents.push({ t: Date.now(), kind: 'publish', uri: msg.params.uri, count: (msg.params.diagnostics || []).length, version: msg.params.version });
       lastDiagnostics[msg.params.uri] = msg.params.diagnostics || [];
     } else if (msg.method === 'clarion/diagnosticsStatus') {
       diagEvents.push({ t: Date.now(), kind: 'status', uri: msg.params.uri, state: msg.params.state, version: msg.params.version });
     }
+    // #620
+    if (msg.method === 'clarion/refreshDocumentLinks') linkEvents.push({ t: Date.now(), kind: 'refresh' });
+    if (msg.method === 'clarion/graphStatus' && msg.params && msg.params.status === 'built') linkEvents.push({ t: Date.now(), kind: 'graphBuilt' });
     lastNotification.set(msg.method, msg.params);
     for (let i = notificationWaiters.length - 1; i >= 0; i--) {
       const w = notificationWaiters[i];
@@ -169,7 +204,7 @@ function sendUpdatePaths() {
     projectPaths: [path.dirname(SLN)],
     solutionFilePath: SLN,
     configuration: 'Debug',
-    clarionVersion: 'DirectSystems',
+    clarionVersion: CLARION_VERSION,
     redirectionFile: 'Clarion100.red',
     macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
     libsrcPaths: [
@@ -243,9 +278,131 @@ async function runDiagStatusCheck(t0) {
     record('post-ready scenario', false, `fixture not found: ${fileC}`);
   }
 
+  // #619 — every publish must carry the document version it was computed for, so a plain
+  // LSP client can drop a publish for a buffer it has already changed. The custom
+  // clarion/diagnosticsStatus notification only helps a client that knows about it.
+  const publishes = diagEvents.filter(e => e.kind === 'publish');
+  const versionless = publishes.filter(e => e.version === undefined);
+  record('every publishDiagnostics carries a version', publishes.length > 0 && versionless.length === 0,
+    `${publishes.length - versionless.length}/${publishes.length} carry one`);
+  // The version published must be the one the matching status reports, not a later buffer's.
+  const mismatched = publishes.filter(e => {
+    if (e.version === undefined) return false;
+    const statuses = diagEvents.filter(s => s.kind === 'status' && s.uri === e.uri).map(s => s.version);
+    return statuses.length > 0 && !statuses.includes(e.version);
+  });
+  record('the published version is one the status pass reports', mismatched.length === 0,
+    `${mismatched.length} publish(es) with no matching status version`);
+
   const failed = results.filter(r => !r.pass);
   console.log(`\n== diagnosticsStatus assertions: ${results.length - failed.length}/${results.length} passed ==`);
   try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
+}
+
+// #620 — assert that document links actually reach the editor on a normal startup.
+// The editor restores an open .clw before the solution finishes loading, asks once for
+// links, caches whatever it gets, and only asks again when told to. So the refresh has
+// to arrive AFTER the file graph is built, not before.
+async function runLinkRefreshCheck(t0) {
+  const results = [];
+  const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
+
+  // A file that is a graph node AND carries quoted filenames to link.
+  const linkTarget = arg('file') ?? corpus.required('linkFile');
+  if (!fs.existsSync(linkTarget)) {
+    record('link fixture present', false, `not found: ${linkTarget}`);
+    setTimeout(() => { child.kill(); process.exit(1); }, 100);
+    return;
+  }
+  const text = fs.readFileSync(linkTarget, 'utf8');
+  const uri = toUri(linkTarget);
+  const directiveLines = text.split(/\r?\n/).filter(l => /\b(INCLUDE|MODULE|LINK)\s*\(\s*'/i.test(l)).length;
+  record('fixture carries linkable filenames', directiveLines > 0, `${directiveLines} line(s)`);
+
+  // Open before the solution is announced — what VS Code does with a restored editor.
+  notify('textDocument/didOpen', { textDocument: { uri, languageId: 'clarion', version: 1, text } });
+  console.log(`[${Date.now() - t0}ms] opened ${path.basename(linkTarget)} (pre-updatePaths)`);
+
+  sendUpdatePaths();
+  console.log(`[${Date.now() - t0}ms] updatePaths sent — waiting for solutionReady…`);
+  await waitNotification('clarion/solutionReady');
+  console.log(`[${Date.now() - t0}ms] solutionReady`);
+
+  // The first ask, exactly as the editor makes it.
+  const early = await request('textDocument/documentLink', { textDocument: { uri } }, 120000);
+  console.log(`[${Date.now() - t0}ms] documentLink #1 → ${(early ?? []).length} link(s)`);
+
+  let gs = lastNotification.get('clarion/graphStatus');
+  while (!gs || gs.status !== 'built') gs = await waitNotification('clarion/graphStatus', 300000);
+  const builtAt = Date.now();
+  console.log(`[${builtAt - t0}ms] graph built`);
+
+  // Generous window for a post-build refresh to arrive.
+  await new Promise(r => setTimeout(r, 10000));
+
+  const refreshesAfterBuild = linkEvents.filter(e => e.kind === 'refresh' && e.t >= builtAt).length;
+  const allRefreshes = linkEvents.filter(e => e.kind === 'refresh');
+  record('a link refresh is sent after the graph is built', refreshesAfterBuild > 0,
+    `${allRefreshes.length} refresh(es) total, ${refreshesAfterBuild} after build`);
+
+  // What the editor would now hold, had it been told to re-ask.
+  const late = await request('textDocument/documentLink', { textDocument: { uri } }, 120000);
+  console.log(`[${Date.now() - t0}ms] documentLink #2 → ${(late ?? []).length} link(s)`);
+  record('the provider answers with links once the graph is built', (late ?? []).length > 0,
+    `${(late ?? []).length} link(s)`);
+
+  const failed = results.filter(r => !r.pass);
+  console.log(`\n== document-link refresh assertions: ${results.length - failed.length}/${results.length} passed ==`);
+  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
+}
+
+// #696 — a restored tab the editor has not instantiated. The client (onTabs) pulls it by URI at
+// startup, before the solution is announced, and never re-pulls it on a refresh (the refresh loop
+// walks instantiated documents only), so the one answer must be the whole answer.
+async function runRestoredTabCheck(t0) {
+  const results = [];
+  const record = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`); };
+
+  // A MEMBER naming a missing program (#695's error, cross-file, so only the full pass reports it)
+  // and an ANSI byte in a string (a UTF-8 read would make #629 report a wrongly decoded file).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'restored-tab-696-'));
+  const file = path.join(dir, 'RestoredTab696.clw');
+  fs.writeFileSync(file, Buffer.from("  MEMBER('NoSuchProg_696')\r\nDelim STRING('A³B')\r\n  MAP\r\n  END\r\n", 'latin1'));
+  const uri = toUri(file);
+
+  const pull = request('textDocument/diagnostic', { textDocument: { uri } }, 300000);
+  console.log(`[${Date.now() - t0}ms] pulled ${path.basename(file)} by URI, no didOpen`);
+  sendUpdatePaths();
+  const report = await pull;
+  const messages = (report.items || []).map(d => d.message);
+  console.log(`[${Date.now() - t0}ms] answered: ${JSON.stringify(messages)}`);
+  record('the unopened tab is answered with its cross-file error', messages.some(m => /NoSuchProg_696/.test(m) && /cannot be found/.test(m)));
+  record('an ANSI file read from disk is not reported as wrongly decoded', !messages.some(m => /UTF-8|decod|encoding/i.test(m)));
+
+  // Opening it afterwards takes over through the normal path.
+  // The open path answers in two steps (sync, then the cross-file pass, then a refresh the
+  // client re-pulls on), so ask once this version's pass is complete (#460).
+  const openComplete = (async () => {
+    for (;;) {
+      const s = await waitNotification('clarion/diagnosticsStatus', 120000);
+      if (s && s.uri === uri && s.version === 1 && s.state === 'complete') return;
+    }
+  })();
+  notify('textDocument/didOpen', { textDocument: { uri, languageId: 'clarion', version: 1, text: fs.readFileSync(file, 'latin1') } });
+  await openComplete;
+  const opened = await request('textDocument/diagnostic', { textDocument: { uri } }, 120000);
+  record('once opened, the open document is what is checked', (opened.items || []).some(d => /NoSuchProg_696/.test(d.message)));
+
+  // A pull for a file that is not there is answered empty, not held.
+  const gone = await request('textDocument/diagnostic', { textDocument: { uri: toUri(path.join(dir, 'Gone696.clw')) } }, 30000);
+  record('a missing file is answered empty', (gone.items || []).length === 0);
+
+  const failed = results.filter(r => !r.pass);
+  console.log(`\n== restored-tab assertions: ${results.length - failed.length}/${results.length} passed ==`);
+  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  fs.rmSync(dir, { recursive: true, force: true });
   setTimeout(() => { child.kill(); process.exit(failed.length ? 1 : 0); }, 1000);
 }
 
@@ -259,7 +416,7 @@ async function runDiagStatusCheck(t0) {
   await request('initialize', {
     processId: process.pid,
     rootUri: toUri(APPDEV),
-    workspaceFolders: [{ uri: toUri(APPDEV), name: 'AppDev' }],
+    workspaceFolders: [{ uri: toUri(APPDEV), name: path.basename(APPDEV) }],
     capabilities: {
       textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] }, ...(PULL ? { diagnostic: { dynamicRegistration: false } } : {}) },
       workspace: { configuration: true, ...(PULL ? { diagnostics: { refreshSupport: true } } : {}) },
@@ -272,6 +429,8 @@ async function runDiagStatusCheck(t0) {
   console.log(`[${Date.now() - t0}ms] initialized`);
 
   if (DIAG_STATUS) { await runDiagStatusCheck(t0); return; }
+  if (LINK_REFRESH) { await runLinkRefreshCheck(t0); return; }
+  if (RESTORED_TAB) { await runRestoredTabCheck(t0); return; }
 
   // Mirrors the real client's payload — SolutionInitializer.ts (clarion/updatePaths sender)
   notify('clarion/updatePaths', {
@@ -279,7 +438,7 @@ async function runDiagStatusCheck(t0) {
     projectPaths: [path.dirname(SLN)],
     solutionFilePath: SLN,
     configuration: 'Debug',
-    clarionVersion: 'DirectSystems',
+    clarionVersion: CLARION_VERSION,
     redirectionFile: 'Clarion100.red',
     macros: { root: CLARION_ROOT, reddir: path.join(CLARION_ROOT, 'bin') },
     libsrcPaths: [
@@ -512,6 +671,8 @@ async function runDiagStatusCheck(t0) {
   console.log(`worst hover: ${Math.max(...results, 0)}ms`);
   console.log(`server perf log: ${STDERR_LOG}`);
 
-  try { await request('shutdown', null, 10000); notify('exit'); } catch { }
+  try { await request('shutdown', null, 10000); } catch { }
+  await reportEventLoop();
+  try { notify('exit'); } catch { }
   setTimeout(() => { child.kill(); process.exit(0); }, 1500);
 })().catch(e => { console.error('DRIVER FAILED:', e.message); child.kill(); process.exit(1); });

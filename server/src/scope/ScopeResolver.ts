@@ -22,13 +22,33 @@ export class ScopeResolver {
     private readonly isProgram: boolean;
     private readonly isMember: boolean;
     private readonly firstProcLine: number;
+    // #711 — the procedure and routine tokens, in document order, so the per-query containment
+    // searches walk these instead of every token in the document.
+    private readonly procTokens: Token[] = [];
+    private readonly routineTokens: Token[] = [];
+
+    /**
+     * #711 — one resolver per token array. Hover, F12 and completion built a new one per call, each
+     * a walk of every token. A cached token array is never mutated after it is handed out (an edit
+     * builds a new array); the length check catches one that grew anyway.
+     */
+    private static readonly shared = new WeakMap<Token[], { length: number; resolver: ScopeResolver }>();
+    static forTokens(tokens: Token[]): ScopeResolver {
+        const hit = ScopeResolver.shared.get(tokens);
+        if (hit && hit.length === tokens.length) return hit.resolver;
+        const resolver = new ScopeResolver(tokens);
+        ScopeResolver.shared.set(tokens, { length: tokens.length, resolver });
+        return resolver;
+    }
 
     constructor(private readonly tokens: Token[]) {
         let firstProc = Number.MAX_SAFE_INTEGER;
         let sawProgram = false;
         let sawMember = false;
         for (const t of tokens) {
+            if (t.subType === TokenType.Routine) this.routineTokens.push(t);
             if (this.isProcedureToken(t)) {
+                this.procTokens.push(t);
                 this.procLineToToken.set(t.line, t);
                 if (t.line < firstProc) firstProc = t.line;
             }
@@ -62,8 +82,7 @@ export class ScopeResolver {
      */
     private findContainingProcedure(line: number): Token | undefined {
         let best: Token | undefined;
-        for (const t of this.tokens) {
-            if (!this.isProcedureToken(t)) continue;
+        for (const t of this.procTokens) {
             if (t.line <= line && line <= this.codeEnd(t)) {
                 if (!best || t.line > best.line) best = t;
             }
@@ -74,8 +93,7 @@ export class ScopeResolver {
     /** Innermost ROUTINE (by structural body) containing `line`. */
     private findContainingRoutine(line: number): Token | undefined {
         let best: Token | undefined;
-        for (const t of this.tokens) {
-            if (t.subType !== TokenType.Routine) continue;
+        for (const t of this.routineTokens) {
             const end = t.finishesAt ?? Number.MAX_SAFE_INTEGER;
             if (t.line <= line && line <= end) {
                 if (!best || t.line > best.line) best = t;
@@ -192,8 +210,7 @@ export class ScopeResolver {
      */
     private findContainingProcedureByStructure(line: number): Token | undefined {
         let best: Token | undefined;
-        for (const t of this.tokens) {
-            if (!this.isProcedureToken(t)) continue;
+        for (const t of this.procTokens) {
             const end = t.finishesAt ?? Number.MAX_SAFE_INTEGER;
             if (t.line <= line && line <= end) {
                 if (!best || t.line > best.line) best = t;

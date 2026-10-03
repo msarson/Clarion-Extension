@@ -1,5 +1,7 @@
 import * as path from 'path';
-import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window } from 'vscode';
+import { commands, ExtensionContext, TreeView, workspace, Disposable, languages, DiagnosticCollection, window, tasks } from 'vscode';
+import { buildResults } from './buildTasks'; // #670
+import { shouldClearForTask } from './utils/BuildResults'; // #670
 import { LanguageClient } from 'vscode-languageclient/node';
 
 import { SolutionTreeDataProvider } from './SolutionTreeDataProvider';
@@ -15,6 +17,7 @@ import { SolutionCloseReason } from './utils/SolutionFallbackPolicy';
 import { registerNavigationCommands } from './commands/NavigationCommands';
 import { registerBuildCommands } from './commands/BuildCommands';
 import { registerRunCommands } from './commands/RunCommands';
+import { registerReportCommands } from './commands/ReportCommands'; // #687
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands, registerNoFolderSolutionCommands } from './commands/SolutionCommands';
 import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
@@ -55,8 +58,19 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const activationStartTime = Date.now();
     const disposables: Disposable[] = [];
     const isRefreshingRef = { value: false };
-    const diagnosticCollection = languages.createDiagnosticCollection("clarion");
+    const diagnosticCollection = buildResults.register(languages.createDiagnosticCollection("clarion")); // #670
     context.subscriptions.push(diagnosticCollection);
+
+    // #670 — the extension's build results describe ITS last build. When another build task starts
+    // (the user's own Ctrl+Shift+B task or script), clear them rather than leave them looking current;
+    // Clarion: Clear Build Results does the same on demand.
+    context.subscriptions.push(
+        commands.registerCommand('clarion.clearBuildResults', () => buildResults.clear()),
+        tasks.onDidStartTask(e => {
+            const t = e.execution.task;
+            if (shouldClearForTask({ name: t.name, source: t.source, groupId: t.group?.id })) buildResults.clear();
+        })
+    );
 
     // Route all client-side logger output to the Output window
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");
@@ -299,6 +313,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         ...registerNavigationCommands(treeView, solutionTreeDataProvider),
         ...registerBuildCommands(diagnosticCollection, solutionTreeDataProvider),
         ...registerRunCommands(solutionTreeDataProvider),
+        ...registerReportCommands(), // #687
         ...registerSolutionManagementCommands(context, client, initializeSolution, createSolutionTreeView),
         ...registerTreeCommands(solutionTreeDataProvider)
     );

@@ -6,15 +6,42 @@
  * to get project information and build the solution or individual projects.
  */
 
-import { workspace, window, tasks, Task, ShellExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection, OutputChannel } from "vscode";
+import { workspace, window, tasks, Task, ProcessExecution, TaskScope, TaskProcessEndEvent, TaskRevealKind, TaskPanelKind, TextEditor, Diagnostic, DiagnosticSeverity, Range, languages, Uri, DiagnosticCollection, OutputChannel } from "vscode";
 import { describeConfiguration, formatBuildHeader } from "./utils/ClarionBuildArgs";
+import { BuildResults } from "./utils/BuildResults"; // #670
+import { hideBuildOperationStatusBar } from "./statusbar/StatusBarManager"; // #670
 
 // #531 — one persistent "Clarion Build" channel: the header of every build lands
 // here first, and the MSBuild log is appended after it when the panel option is on.
 let buildOutputChannel: OutputChannel | undefined;
+
+// #670 — every collection a build writes Problems to, registered so Clarion: Clear Build Results
+// and another build task starting can clear them all. Created once per name and reused: a new
+// collection per build (as the Run/Debug pre-builds and MSBuild errors had) is never cleared.
+export const buildResults = new BuildResults(hideBuildOperationStatusBar);
+const sharedCollections = new Map<string, DiagnosticCollection>();
+export function sharedBuildCollection(name: string): DiagnosticCollection {
+    let c = sharedCollections.get(name);
+    if (!c) {
+        c = buildResults.register(languages.createDiagnosticCollection(name));
+        sharedCollections.set(name, c);
+    }
+    return c;
+}
 function getBuildOutputChannel(): OutputChannel {
     if (!buildOutputChannel) buildOutputChannel = window.createOutputChannel("Clarion Build");
     return buildOutputChannel;
+}
+
+/**
+ * #531 / #671 — say what is being built, in which configuration, and the exact MSBuild command
+ * line (ClarionBinPath, ConfigDir), where the user can see it: the task terminal is hidden by
+ * default. Every build writes it, a single project and each project of a solution build.
+ */
+function writeBuildHeader(p: { buildTarget: "Solution" | "Project"; targetName: string; configuration: string; msBuildPath: string; buildArgs: string[] }): void {
+    const buildOut = getBuildOutputChannel();
+    for (const line of formatBuildHeader(p)) buildOut.appendLine(line);
+    buildOut.show(true);
 }
 import { globalSolutionFile, globalSettings, globalClarionPropertiesFile } from "./globals";
 import * as path from "path";
@@ -27,6 +54,8 @@ import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
 import { buildConfigDirArg } from "./utils/ClarionBuildArgs";
+import { recordBuildLog } from "./utils/LastBuildLog"; // #681
+import { updateSolutionToolbar } from "./views/ViewManager"; // #681
 
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
@@ -66,7 +95,7 @@ export async function runClarionBuild(
     }
 
     // ✅ Ensure we have a diagnostic collection for this extension
-    const diagCollection = diagnosticCollection || languages.createDiagnosticCollection("clarion");
+    const diagCollection = diagnosticCollection || sharedBuildCollection("clarion");
 
     // If building full solution, use dependency-aware build
     if (buildConfig.buildTarget === "Solution") {
@@ -343,12 +372,12 @@ export function prepareBuildParameters(buildConfig: {
         "/t:build",
         `/property:Configuration=${configPart}`,
         `/property:clarion_Sections=${configPart}`,
-        `/property:ClarionBinPath="${clarionBinPath}"`,
+        `/property:ClarionBinPath=${clarionBinPath}`,
         "/property:NoDependency=true",
         "/verbosity:normal",
         "/nologo",
         "/fileLogger",
-        `/fileLoggerParameters:LogFile="${buildLogPath}"`
+        `/fileLoggerParameters:LogFile=${buildLogPath}`
     ];
     
     // Add platform property if we have one.
@@ -390,21 +419,21 @@ export function prepareBuildParameters(buildConfig: {
     logger.info(`🔹 Clarion bin path: ${clarionBinPath}`);
 
     if (buildConfig.buildTarget === "Solution") {
-        buildArgs.push(`/property:SolutionDir="${path.dirname(globalSolutionFile)}"`);
+        buildArgs.push(`/property:SolutionDir=${path.dirname(globalSolutionFile)}`);
         logger.info(`🔹 Solution directory: ${path.dirname(globalSolutionFile)}`);
 
         // Explicitly specify the solution file to build
-        buildArgs.push(`"${globalSolutionFile}"`);
+        buildArgs.push(globalSolutionFile);
         logger.info(`🔹 Solution file: ${path.basename(globalSolutionFile)}`);
     } else if (buildConfig.buildTarget === "Project") {
         // selectedProjectPath is already the project directory
-        buildArgs.push(`/property:ProjectPath="${buildConfig.selectedProjectPath}"`);
+        buildArgs.push(`/property:ProjectPath=${buildConfig.selectedProjectPath}`);
         logger.info(`🔹 Project directory: ${buildConfig.selectedProjectPath}`);
 
         // Explicitly specify the project file to build
         const projectFile = buildConfig.projectObject?.filename || `${buildConfig.projectObject?.name}.cwproj`;
         const projectFilePath = path.join(buildConfig.selectedProjectPath, projectFile);
-        buildArgs.push(`"${projectFilePath}"`);
+        buildArgs.push(projectFilePath);
         logger.info(`🔹 Project file: ${projectFile}`);
     }
 
@@ -438,26 +467,19 @@ export async function executeBuildTask(params: {
     diagnosticCollection: DiagnosticCollection;   // ✅ add
 }): Promise<void> {
     const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, configuration, diagnosticCollection } = params;
-    // #531 — say what is being built, in which configuration, and the exact MSBuild
-    // command line, where the user can see it (the task terminal is hidden by default).
-    const buildOut = getBuildOutputChannel();
-    for (const line of formatBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs })) buildOut.appendLine(line);
-    buildOut.show(true);
+    writeBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs }); // #531
 
     logger.info(`🔄 Executing build task for ${buildTarget === "Solution" ? "solution" : "project"}: ${targetName}`);
     logger.info(`🔹 Working directory: ${solutionDir}`);
     logger.info(`🔹 MSBuild path: ${msBuildPath}`);
     logger.info(`🔹 Build log path: ${buildLogPath}`);
 
-    // Create the shell execution
-    // Use ShellExecution with command and args to properly handle quoting
+    // #708 — MSBuild is started directly, with no shell: each argument reaches it as one
+    // argument, a path with a space included. Through a shell, the arguments' own quotes were
+    // lost and `...hand code` split into two (MSB1008: Only one project can be specified).
     logger.info(`✅ Executing build task: ${msBuildPath} ${buildArgs.join(' ')}`);
-    
-    const execution = new ShellExecution(
-        msBuildPath,
-        buildArgs,
-        { cwd: solutionDir }
-    );
+
+    const execution = new ProcessExecution(msBuildPath, buildArgs, { cwd: solutionDir });
 
     // Create the task
     const task = createBuildTask(execution);
@@ -502,20 +524,22 @@ export async function executeBuildTask(params: {
 /**
  * Creates the build task
  */
-function createBuildTask(execution: ShellExecution): Task {
+function createBuildTask(execution: ProcessExecution): Task {
     const task = new Task(
         { type: "shell" },
         TaskScope.Workspace,
         "Clarion Build",
         "msbuild",
         execution,
-        "clarionBuildMatcher"
+        // #667: no problem matcher. processBuildErrors reads the build log and reports these
+        // errors itself; $clarionBuildMatcher is for users' own build tasks.
+        []
     );
 
     // ✅ Set the actual command explicitly
     task.definition = {
         type: "shell",
-        command: execution.commandLine
+        command: execution.process
     };
 
     // Get the user's preference for revealing output
@@ -570,10 +594,9 @@ function processTaskCompletion(
                 window.showInformationMessage(successMessage);
                 succeedOperationStatusBar("build", successMessage.replace(/^✅\s*/, ""));
             } else {
+                // #708 — no log means MSBuild failed before compiling: point at the terminal.
                 const failureMessage =
-                    buildTarget === "Solution"
-                        ? `❌ Build Failed (Solution: ${targetName}, ${describeConfiguration(configuration)}) - see the Clarion Build output`
-                        : `❌ Build Failed (Project: ${targetName}, ${describeConfiguration(configuration)}) - see the Clarion Build output`;
+                    `❌ Build Failed (${buildTarget}: ${targetName}, ${describeConfiguration(configuration)}): MSBuild wrote no build log, so no errors could be read. See the Clarion Build terminal (set clarion.build.revealOutput to show it)`;
                 window.showErrorMessage(failureMessage);
                 failOperationStatusBar("build", failureMessage.replace(/^❌\s*/, ""));
             }
@@ -662,6 +685,8 @@ function processTaskCompletion(
             });
         } else {
             logger.info(`Preserved build log at: ${buildLogPath}`);
+            recordBuildLog(buildLogPath); // #681 — the Clarion Tools pane opens it
+            updateSolutionToolbar();
             window.showInformationMessage(`Build log saved at: ${buildLogPath}`);
         }
     });
@@ -747,7 +772,7 @@ export async function buildSolutionWithDependencyOrder(
                 buildParams.buildLogPath = perProjectLog;
                 const logArgIdx = buildParams.buildArgs.findIndex(a => a.startsWith('/fileLoggerParameters:'));
                 if (logArgIdx !== -1) {
-                    buildParams.buildArgs[logArgIdx] = `/fileLoggerParameters:LogFile="${perProjectLog}"`;
+                    buildParams.buildArgs[logArgIdx] = `/fileLoggerParameters:LogFile=${perProjectLog}`;
                 }
 
                 await executeBuildTaskSync({ ...buildParams, diagnosticCollection });
@@ -804,15 +829,17 @@ async function executeBuildTaskSync(params: {
     buildLogPath: string;
     buildTarget: "Solution" | "Project";
     targetName: string;
+    configuration: string; // #671
     diagnosticCollection: DiagnosticCollection;
 }): Promise<void> {
-    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, diagnosticCollection } = params;
+    const { solutionDir, msBuildPath, buildArgs, buildLogPath, buildTarget, targetName, configuration, diagnosticCollection } = params;
+    writeBuildHeader({ buildTarget, targetName, configuration, msBuildPath, buildArgs }); // #671: each project of a solution build
 
     return new Promise((resolve, reject) => {
-        const commandLine = `${msBuildPath} ${buildArgs.join(' ')}`;
-        logger.info(`Executing: ${commandLine}`);
-        
-        const execution = new ShellExecution(commandLine, { cwd: solutionDir });
+        logger.info(`Executing: ${msBuildPath} ${buildArgs.join(' ')}`);
+
+        // #708 — no shell (see executeBuildTask).
+        const execution = new ProcessExecution(msBuildPath, buildArgs, { cwd: solutionDir });
         const task = createBuildTask(execution);
 
         let taskExecution: any;
@@ -827,7 +854,9 @@ async function executeBuildTaskSync(params: {
                         if (event.exitCode === 0) {
                             resolve();
                         } else {
-                            reject(new Error(`Build failed with exit code ${event.exitCode}`));
+                            // #708 — MSBuild failed before compiling (a bad switch, a missing file), so there
+                            // are no compile errors to show: say where to look instead of a bare exit code.
+                            reject(new Error(`MSBuild wrote no build log (exit code ${event.exitCode}); see the Clarion Build terminal`));
                         }
                         return;
                     }
@@ -854,6 +883,9 @@ async function executeBuildTaskSync(params: {
                     const preserveLogFile = workspace.getConfiguration("clarion.build").get<boolean>("preserveLogFile", false);
                     if (!preserveLogFile) {
                         fs.unlink(buildLogPath, () => {});
+                    } else {
+                        recordBuildLog(buildLogPath); // #681
+                        updateSolutionToolbar();
                     }
                 });
             }
@@ -940,7 +972,7 @@ export async function buildSolutionOrProject(
  */
 function processGeneralMSBuildErrors(output: string): boolean {
     const diagnostics: { [key: string]: Diagnostic[] } = {};
-    const diagnosticCollection = languages.createDiagnosticCollection("msbuild-errors");
+    const diagnosticCollection = sharedBuildCollection("msbuild-errors"); // #670: one, registered
 
     // Clear previous diagnostics
     diagnosticCollection.clear();

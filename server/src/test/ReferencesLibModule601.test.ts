@@ -6,7 +6,7 @@
  * a static library, or a module with no extension at all:
  *
  *     MODULE('ViewWizard.lib')
- *       vwLstMove(LONG,LONG),BYTE,PROC
+ *       vwCommonOp(LONG,LONG),BYTE,PROC
  *     END
  *     MODULE('ReportWizard')
  *       UrPost(LONG),LONG
@@ -17,7 +17,7 @@
  * question is whether the search set then collapses to the declaring file, leaving calls in the
  * program's own MEMBER modules unfound.
  *
- * On ap1.sln this could not be answered: each of the 79 programs declaring `vwLstMove` calls it from
+ * On app1.sln this could not be answered: each of the 79 programs declaring `vwCommonOp` calls it from
  * nowhere, so a single-file answer is correct there and proves nothing. That is the same corpus blind
  * spot #597 and #599 both hit — the shape we need is absent from everything we own. Hence a fixture.
  *
@@ -53,7 +53,7 @@ suite('FAR for a procedure declared in MODULE(x.lib) (#601)', () => {
             '  PROGRAM',                              // 0
             '  MAP',                                  // 1
             "    MODULE('ViewWizard.lib')",           // 2
-            '      vwLstMove(LONG,LONG),BYTE,PROC',   // 3  static library
+            '      vwCommonOp(LONG,LONG),BYTE,PROC',   // 3  static library
             '    END',                                // 4
             "    MODULE('ReportWizard')",             // 5
             '      UrPost(LONG),LONG',                // 6  no extension at all
@@ -71,20 +71,20 @@ suite('FAR for a procedure declared in MODULE(x.lib) (#601)', () => {
             "  MEMBER('parent.clw')",                 // 0
             'DoThing PROCEDURE()',                    // 1
             '  CODE',                                 // 2
-            '  vwLstMove(1,2)',                       // 3  call into the .lib import
+            '  vwCommonOp(1,2)',                       // 3  call into the .lib import
             '  UrPost(7)',                            // 4  call into the extensionless import
             '  RETURN',                               // 5
         ].join('\r\n'),
         // A SECOND program declaring the same library import, with its own member calling it. This
         // is what makes the suite discriminating: in a two-file fixture "reaches the right member"
-        // and "searches everything" are indistinguishable. On ap1.sln this is the real shape —
-        // vwLstMove is declared independently in 79 programs, each resolving its own calls — so a
+        // and "searches everything" are indistinguishable. On app1.sln this is the real shape —
+        // vwCommonOp is declared independently in 79 programs, each resolving its own calls — so a
         // result that crossed into another program's member would be wrong, not generous.
         'other.clw': [
             '  PROGRAM',                              // 0
             '  MAP',                                  // 1
             "    MODULE('ViewWizard.lib')",           // 2
-            '      vwLstMove(LONG,LONG),BYTE,PROC',   // 3  the SAME name, a different declaration
+            '      vwCommonOp(LONG,LONG),BYTE,PROC',   // 3  the SAME name, a different declaration
             '    END',                                // 4
             "    MODULE('othermember.clw')",          // 5
             '      OtherThing PROCEDURE()',           // 6
@@ -98,7 +98,7 @@ suite('FAR for a procedure declared in MODULE(x.lib) (#601)', () => {
             "  MEMBER('other.clw')",                  // 0
             'OtherThing PROCEDURE()',                 // 1
             '  CODE',                                 // 2
-            '  vwLstMove(9,9)',                       // 3  belongs to other.clw's declaration
+            '  vwCommonOp(9,9)',                       // 3  belongs to other.clw's declaration
             '  RETURN',                               // 4
         ].join('\r\n'),
     };
@@ -123,8 +123,8 @@ suite('FAR for a procedure declared in MODULE(x.lib) (#601)', () => {
         }
         // TWO projects, because a Clarion project builds ONE program. Putting both PROGRAMs in one
         // project would be a configuration that cannot exist, and it is what the solution looks like
-        // that decides whether another program's member is in scope — on ap1.sln the 79 programs
-        // declaring vwLstMove are 79 separate projects.
+        // that decides whether another program's member is in scope — on app1.sln the 79 programs
+        // declaring vwCommonOp are 79 separate projects.
         const projectA = new ClarionProjectServer('parent', 'app', dir, '{LIB-601-A}');
         for (const rel of ['parent.clw', 'member.clw']) projectA.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, projectA));
         const projectB = new ClarionProjectServer('other', 'app', dir, '{LIB-601-B}');
@@ -196,8 +196,8 @@ suite('FAR for a procedure declared in MODULE(x.lib) (#601)', () => {
     test('but NOT another program\'s member — this is what makes the suite discriminating', async () => {
         // othermember.clw calls the same NAME, resolving against other.clw's own declaration of it.
         // Returning it would be wrong rather than generous: a library import is per-program, which
-        // is exactly why FAR on ap1.sln correctly answers "one" for a program that declares
-        // vwLstMove and never calls it. Without this assertion the three above would pass in a
+        // is exactly why FAR on app1.sln correctly answers "one" for a program that declares
+        // vwCommonOp and never calls it. Without this assertion the three above would pass in a
         // fixture small enough that searching everything looks like searching correctly.
         const refs = keyed(await far('parent.clw', 3, 8));
         assert.ok(!refs.some(r => r.startsWith('othermember.clw:')),

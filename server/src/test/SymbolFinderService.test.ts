@@ -340,7 +340,7 @@ MyProc PROCEDURE()
         // that does not have a PRE attribute." The generated browse queue has
         // no PRE() and its field LABELS textually contain 'JCA:...' — an
         // unqualified JCA:StartedDate must bind to the FILE,PRE(JCA) field,
-        // never the queue field (Mark's IBSWorking, follow-on from #349).
+        // never the queue field (Mark's WorkingLib, follow-on from #349).
 
         test('BUG PIN #350 — unqualified JCA:StartedDate binds to the FILE field, not the shadowing queue compound label', async () => {
             const fixture = buildMultiFileFixture({

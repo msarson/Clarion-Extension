@@ -46,7 +46,7 @@ suite('Language word pattern joins colon-prefixed labels (#534)', () => {
     });
 
     test('a prefixed variable is one word', () => {
-        assert.strictEqual(wordAt("  GVF:Owner = 'x'", 6), 'GVF:Owner');
+        assert.strictEqual(wordAt("  GBL:Owner = 'x'", 6), 'GBL:Owner');
         assert.strictEqual(wordAt('  CUS:Name = CUS:Name', 16), 'CUS:Name');
     });
 
