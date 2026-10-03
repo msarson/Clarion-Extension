@@ -121,7 +121,11 @@ jobs:
             const updated = content.replace('## Recent Versions\n\n', '## Recent Versions\n\n' + stub);
             fs.writeFileSync('CHANGELOG.md', updated);
           "
-          git add package.json package-lock.json CHANGELOG.md
+          # The settings and commands references carry the version they document, and a test
+          # (#699) holds them to package.json's - bump them with it, or the new branch, and
+          # every PR against it, starts red (1.0.7 did, #714).
+          sed -i 's/\(generated from the extension manifest for \*\*v\)[0-9][0-9.]*\(\*\*\)/\1${{ inputs.next_version }}\2/' docs/reference/settings.md docs/reference/commands.md
+          git add package.json package-lock.json CHANGELOG.md docs/reference/settings.md docs/reference/commands.md
           git commit -m "chore: Bump version to ${{ inputs.next_version }} and add changelog stub"
           git push origin version-${{ inputs.next_version }}
 
