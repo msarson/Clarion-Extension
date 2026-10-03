@@ -89,18 +89,19 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.5 (2026-09-18)
+### 1.0.6 (2026-10-03)
 
-Eight changes, most of them names the extension could not resolve in a real generated application. Each came from someone running it over their own code rather than from a test case.
+Ninety-five changes. Most make the navigation features agree with each other on what a name is; the rest are about building and running a solution, and about speed on very large modules.
 
-- Find All References answers the same way wherever it is asked: at a procedure declared in a program’s MAP it now lists the uses in every module of that program, not only the modules the MAP itself names.
-- Names written the way generated applications write them resolve: a prefix that runs past eight characters, such as the `CommonLib:Init` call every linked DLL gets, and a prefixed prototype indented inside a MAP rather than at column 0.
-- Procedures prototyped in an include file are found again — a MAP that pulls its prototypes in with `INCLUDE('file.inc','PROTOTYPES')` records them as declarations, using only the section the INCLUDE names, as the compiler does.
-- Whitespace around the member-access dot is read the way the compiler reads it: `Receiver   .Method(42)` is a method call, while a space *after* the dot ends the statement and hover no longer describes it as a member access.
-- Completion offers ROUTINE labels, and after `DO` offers only those; hovering a routine names the procedure it belongs to.
-- Reported by Bill Atchison, with contributions from [@geircodes](https://github.com/geircodes).
+- Hover, Go to Definition, Go to Implementation, Find All References, Rename, completion and signature help read `SELF.x`, `PARENT.x`, `obj.Method()` and chains such as `SELF.Part.Get()` through one resolver, so they land on the same member — including a procedure's own local class, inherited overloads, and colon-named objects such as `Relate:Customer.Open()`.
+- Hovering `SELF` or `PARENT` shows the class it stands for; Go to Definition and Go to Implementation select the name they land on, and Go to Implementation and hover find a method body you have not saved yet.
+- New diagnostics: an INCLUDE or MEMBER whose file cannot be found is an error, a redefined `SELF`, `PARENT` or `NULL` is reported as the compiler reports it, and every restored tab gets its problems after a restart. A report lists the file references that do not resolve.
+- Build and Run follow the configuration actually in force: the Clarion Tools pane shows the build log, run command, startup project and build settings; Run takes a custom command and no longer needs a file open; a solution in a folder with a space in its name builds.
+- Hover stays fast in very large generated modules: a few milliseconds with nothing changed, and well under a second straight after an edit, where a 60,000-line module could take many seconds.
+- Introduce EQUATE puts the EQUATE above its first use in data, and takes the whole of a string built from several literals.
+- Contributions from [@geircodes](https://github.com/geircodes), with reports from Bill Atchison.
 
-**Earlier:** 1.0.4 (2026-09-17) was a release about what a real solution runs into — which Clarion version and settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows rather than the way generated code looks — and made editing large modules markedly quicker; 1.0.3 (2026-09-13) made generated code read correctly, from the MAP shapes an app generator emits to the FILE, VIEW and KEY structures underneath, and removed the last second-long cold starts. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.5 (2026-09-18) resolved names the extension could not in a real generated application — a prefix past eight characters, a prototype an INCLUDE carries into a MAP, the scope a program's MAP actually has — and settled what the compiler does with whitespace around the member-access dot; 1.0.4 (2026-09-17) was a release about what a real solution runs into — which Clarion version and settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows — and made editing large modules markedly quicker. [Full changelog](CHANGELOG.md).
 
 ---
 
