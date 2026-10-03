@@ -128,21 +128,56 @@ export class ClarionTokenizer {
     maxLabelWidth: number = 0;
     private _documentStructure: DocumentStructure | null = null;
     private skipStructureProcessing: boolean;
+    /** #715 — whether the first line is read as inside a CODE section: the one piece of state
+     *  tokenizing carries from line to line, so a span tokenized on its own starts as a full pass would. */
+    private initialInCodeSection: boolean;
     
     // 🚀 PERF: Cache analyzed procedures to avoid re-scanning in incremental updates
     private static analyzedProcedures = new Map<string, Set<number>>();  // uri -> Set of procedure line numbers
 
-    constructor(text: string, tabSize: number = 2, skipStructureProcessing: boolean = false) {  // ✅ Default to 2 if not provided
+    constructor(text: string, tabSize: number = 2, skipStructureProcessing: boolean = false, initialInCodeSection: boolean = false) {  // ✅ Default to 2 if not provided
         this.text = text;
         this.tokens = [];
         this.lines = [];
         this.tabSize = tabSize;  // ✅ Store the provided or default value
         this.skipStructureProcessing = skipStructureProcessing;
+        this.initialInCodeSection = initialInCodeSection;
         
         // 🚀 PERFORMANCE: Initialize compiled patterns once
         PatternMatcher.initializePatterns();
     }
 
+
+    /**
+     * Whether `line` puts the tokenizer inside a CODE section (true), outside one (false), or
+     * leaves it as it was (undefined). Structures are declarations outside CODE and execution
+     * structures inside it.
+     */
+    static codeSectionSetBy(line: string): boolean | undefined {
+        // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
+        if (/^\s*code\s*(!.*)?$/i.test(line)) return true;
+        if (/^\s*(DATA|ROUTINE)\b/i.test(line)) return false; // DATA/ROUTINE sections can have structures
+        if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
+            // Strip string literals and comments before checking — "function" inside a string
+            // like Trace('...function pointers...') must not reset inCodeSection.
+            // Use negative lookbehind to avoid matching qualified identifiers like token:function.
+            const stripped = line.replace(/'([^']|'')*'/g, '').replace(/!.*$/, '');
+            if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(stripped)) return false; // declarations before CODE can have structures
+        }
+        return undefined;
+    }
+
+    /**
+     * #715 — whether a full pass is inside a CODE section when it reaches line `index`: set by the
+     * nearest line above that sets it, else outside.
+     */
+    static codeSectionAt(index: number, lineAt: (i: number) => string): boolean {
+        for (let i = index - 1; i >= 0; i--) {
+            const sets = ClarionTokenizer.codeSectionSetBy(lineAt(i));
+            if (sets !== undefined) return sets;
+        }
+        return false;
+    }
 
     /** ✅ Public method to tokenize text */
     public tokenize(): Token[] {
@@ -264,7 +299,7 @@ export class ClarionTokenizer {
         }
         
         // 🚀 PERF: Track CODE context to skip Structure patterns in execution sections
-        let inCodeSection = false;
+        let inCodeSection = this.initialInCodeSection;
         let tokensOnCurrentLine = 0;
         
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
@@ -284,20 +319,8 @@ export class ClarionTokenizer {
             }
             
             // 🚀 PERF: Check if this line enters CODE section (structures are declarations, not execution)
-            // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
-            if (line.match(/^\s*code\s*(!.*)?$/i)) {
-                inCodeSection = true;
-            } else if (line.match(/^\s*(DATA|ROUTINE)\b/i)) {
-                inCodeSection = false; // DATA/ROUTINE sections can have structures
-            } else if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
-                // Strip string literals and comments before checking — "function" inside a string
-                // like Trace('...function pointers...') must not reset inCodeSection.
-                // Use negative lookbehind to avoid matching qualified identifiers like token:function.
-                const stripped = line.replace(/'([^']|'')*'/g, '').replace(/!.*$/, '');
-                if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(stripped)) {
-                    inCodeSection = false; // PROCEDURE/FUNCTION declarations sections can have structures (before CODE)
-                }
-            }
+            const sets = ClarionTokenizer.codeSectionSetBy(line);
+            if (sets !== undefined) inCodeSection = sets;
 
             // #579 — most lines hold no implicit-variable suffix at all; skip the per-position check there.
             const lineMayHoldImplicit = line.includes('#') || line.includes('$') || line.includes('"');

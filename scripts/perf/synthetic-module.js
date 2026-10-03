@@ -167,7 +167,7 @@ function fieldBlock(r, b) {
     if (b % 7 === 3) lines.push(`  Rpt:Caption = 'Field ' & |`, `                '${n}' & |`, `                ' caption'`);
     if (b % 11 === 5) lines.push(`  CASE Rpt:Kind`, `  OF KIND:Number`, `    Loc:Count += 1`, `  OF KIND:Text`, `    Loc:Count += 2`, `  END`);
     if (b % 13 === 8) lines.push(`  LOOP Loc:Index = 1 TO 3`, `    Loc:Total += Loc:Index`, `  END`);
-    if (b % 29 === 17) lines.push(`  OMIT('***')`, `  Rpt:Name = 'retired ${n}'`, `  ***`);
+    if (b % 9 === 4) lines.push(`  OMIT('***')`, `  Rpt:Name = 'retired ${n}'`, `  ***`);
     return lines;
 }
 function giantProcedure(targetLines) {

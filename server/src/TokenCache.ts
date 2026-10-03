@@ -536,26 +536,84 @@ export class TokenCache {
             /\b(IF|CASE|LOOP|CLASS|MAP|GROUP|QUEUE|RECORD|FILE|INTERFACE|MODULE|EXECUTE|BEGIN|ACCEPT|ROUTINE|PROCEDURE|FUNCTION|CODE|END)\b/i.test(line) ||
             /(^|\s)\.\s*(!|$)/.test(line); // a standalone period: a dot after whitespace or in column 0, then a comment or the end
         const oldLine = (l: number) => cached.lineTokens.get(l)?.lineText ?? '';
+        // #715 step 1: an OMIT/COMPILE block, its terminator, and a `|` continuation are
+        // re-tokenized from scratch whenever an edit touches one.
+        const terminators = this.omitTerminators(cached);
+        // A line that moves the tokenizer into or out of a CODE section (CODE, DATA, ROUTINE,
+        // PROCEDURE) changes how every line after it is read.
+        const special = (line: string) => {
+            const code = TokenCache.codePart(line);
+            return /\b(OMIT|COMPILE)\s*\(/i.test(code) || code.includes('|') ||
+                ClarionTokenizer.codeSectionSetBy(line) !== undefined ||
+                (terminators.length > 0 && terminators.some(t => line.includes(t)));
+        };
+        // The line above ends with a continuation, so the edited line is part of its statement.
+        const continued = (l: number) => l > 0 && TokenCache.codePart(oldLine(l - 1)).trimEnd().endsWith('|');
         const touchesStructure = (fromEnd: boolean) => {
             const edited = TokenCache.editedLines(cached.documentText, text, document, cached.lineTokens.size, fromEnd);
             if (!edited) return false;
+            if (edited.first > 0 && continued(edited.first)) return true; // the edited line continues the one above
             const newLines = TokenCache.lineSlice(document, text, edited.first, edited.newLast);
             if (edited.delta === 0) {
                 // Same line count: only the lines whose text differs were edited. Edits in
                 // several places between two requests (typing in a burst) make one wide span.
+                // A line whose structure is unchanged (a comment typed after END, a condition
+                // edited in an IF) changes no structure.
                 for (let i = 0; i < newLines.length; i++) {
                     const before = oldLine(edited.first + i);
-                    if (newLines[i] !== before && (structural(newLines[i]) || structural(before))) return true;
+                    if (newLines[i] === before) continue;
+                    if (special(newLines[i]) || special(before)) return true;
+                    if (edited.first + i > 0 && continued(edited.first + i)) return true;
+                    if (TokenCache.structureSignature(newLines[i]) !== TokenCache.structureSignature(before)) return true;
                 }
                 return false;
             }
-            for (let l = edited.first; l <= edited.oldLast; l++) if (structural(oldLine(l))) return true;
-            for (const line of newLines) if (structural(line)) return true;
+            for (let l = edited.first; l <= edited.oldLast; l++) if (structural(oldLine(l)) || special(oldLine(l))) return true;
+            for (const line of newLines) if (structural(line) || special(line)) return true;
             return false;
         };
         // Either reading of the edit is a true account of it, so if one leaves every
         // structural line as it was, no structure changed.
         return touchesStructure(false) && touchesStructure(true);
+    }
+
+    /** A line's code: string literals blanked ('' escapes kept inside), the comment removed. */
+    static codePart(line: string): string {
+        return line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length)).replace(/!.*$/, '');
+    }
+
+    /**
+     * #715 step 1 — what on a line can open or close a structure: whether it starts in column 0
+     * (a label, or a keyword read as one), the structure keywords in order, and the periods that
+     * can terminate one (not a decimal point, not member access). Two versions of a line with the
+     * same signature open and close the same structures.
+     */
+    static structureSignature(line: string): string {
+        const code = TokenCache.codePart(line);
+        const keywords = code.match(/\b(IF|CASE|LOOP|CLASS|MAP|GROUP|QUEUE|RECORD|FILE|INTERFACE|MODULE|EXECUTE|BEGIN|ACCEPT|ROUTINE|PROCEDURE|FUNCTION|CODE|DATA|END|OF|OROF|ELSE|ELSIF|WHILE|UNTIL|TIMES|TO|BY|THEN|WINDOW|REPORT|VIEW|JOIN|OPTION|SHEET|TAB|MENU|MENUBAR|TOOLBAR|DETAIL|HEADER|FOOTER|FORM|ITEMIZE|OLE|STRUCT)\b/gi) ?? [];
+        let periods = 0;
+        for (let i = 0; i < code.length; i++) {
+            if (code[i] !== '.') continue;
+            const prev = code[i - 1] ?? ' ', next = code[i + 1] ?? ' ';
+            if (/[0-9]/.test(prev) && /[0-9]/.test(next)) continue; // 1.5
+            if (/[A-Za-z_0-9:]/.test(next)) continue;               // Obj.Member
+            periods++;
+        }
+        return `${/^\S/.test(code) ? 'L' : 'I'}|${keywords.join(' ').toUpperCase()}|${periods}`;
+    }
+
+    /** The terminator strings of the document's OMIT and COMPILE blocks. */
+    private omitTerminatorMemo = new WeakMap<CachedTokenData, string[]>();
+    private omitTerminators(cached: CachedTokenData): string[] {
+        let found = this.omitTerminatorMemo.get(cached);
+        if (!found) {
+            found = [];
+            for (const m of cached.documentText.matchAll(/\b(?:OMIT|COMPILE)\s*\(\s*'((?:[^']|'')+)'/gi)) {
+                if (!found.includes(m[1])) found.push(m[1]);
+            }
+            this.omitTerminatorMemo.set(cached, found);
+        }
+        return found;
     }
 
     /** Lines `first..last` of the document, without line ends: one slice, not a getText per line. */
@@ -601,101 +659,6 @@ export class TokenCache {
     }
 
     /**
-     * 🚀 PERFORMANCE: Expand changed lines to include dependencies
-     * Multi-line structures and continuations need surrounding lines re-tokenized
-     */
-    private expandToDependencies(changedLines: Set<number>, cached: CachedTokenData, totalLines: number): Set<number> {
-        const expanded = new Set(changedLines);
-        
-        // CRITICAL: If a PROCEDURE/CLASS/MAP/INTERFACE line changes, we need to re-tokenize
-        // everything inside it because child structures depend on parent context
-        for (const lineNum of changedLines) {
-            const lineData = cached.lineTokens.get(lineNum);
-            if (lineData) {
-                const lineUpper = lineData.lineText.toUpperCase();
-                // Check if this line contains a structure keyword (#247: PROCEDURE ≡ FUNCTION)
-                if (lineUpper.includes('PROCEDURE') || lineUpper.includes('FUNCTION') ||
-                    lineUpper.includes('CLASS') ||
-                    lineUpper.includes('MAP') || lineUpper.includes('INTERFACE') ||
-                    lineUpper.includes('MODULE')) {
-                    // Find all tokens that are children of this structure
-                    // Re-tokenize from this line to the end of the structure
-                    for (const token of cached.tokens) {
-                        if (token.line === lineNum && token.finishesAt && token.finishesAt > lineNum) {
-                            // This is a multi-line structure starting on the changed line
-                            // Re-tokenize everything from here to finishesAt
-                            for (let line = lineNum; line <= token.finishesAt && line < totalLines; line++) {
-                                expanded.add(line);
-                            }
-                            break;
-                        }
-                    }
-                    
-                    // If we didn't find a finishesAt, be conservative and re-tokenize
-                    // from this line to the next PROCEDURE/class-level keyword
-                    let foundEnd = false;
-                    for (let line = lineNum + 1; line < totalLines && line < lineNum + 100; line++) {
-                        const nextLineData = cached.lineTokens.get(line);
-                        if (nextLineData) {
-                            const nextUpper = nextLineData.lineText.trim().toUpperCase();
-                            // Stop at next procedure/class or at column 0 keywords that end structures (#247)
-                            if (nextUpper.startsWith('PROCEDURE ') || nextUpper.startsWith('FUNCTION ') ||
-                                nextUpper.startsWith('CLASS ') ||
-                                (nextUpper === 'END' && nextLineData.lineText.trim() === 'END')) {
-                                foundEnd = true;
-                                break;
-                            }
-                        }
-                        expanded.add(line);
-                    }
-                }
-            }
-        }
-        
-        // Add lines that are part of multi-line structures
-        for (const token of cached.tokens) {
-            // If this token spans multiple lines and any of those lines changed
-            if (token.finishesAt && token.finishesAt > token.line) {
-                let affected = false;
-                for (let line = token.line; line <= token.finishesAt; line++) {
-                    if (changedLines.has(line)) {
-                        affected = true;
-                        break;
-                    }
-                }
-                
-                if (affected) {
-                    // Re-tokenize entire structure
-                    for (let line = token.line; line <= token.finishesAt; line++) {
-                        expanded.add(line);
-                    }
-                }
-            }
-        }
-        
-        // Add line continuations (lines ending with |)
-        for (const lineNum of changedLines) {
-            // Check previous line for continuation
-            if (lineNum > 0) {
-                const prevLineData = cached.lineTokens.get(lineNum - 1);
-                if (prevLineData && prevLineData.lineText.trim().endsWith('|')) {
-                    expanded.add(lineNum - 1);
-                }
-            }
-            
-            // Check current and next lines
-            const currentLineData = cached.lineTokens.get(lineNum);
-            if (currentLineData && currentLineData.lineText.trim().endsWith('|')) {
-                if (lineNum + 1 < totalLines) {
-                    expanded.add(lineNum + 1);
-                }
-            }
-        }
-        
-        return expanded;
-    }
-
-    /**
      * 🚀 PERFORMANCE: Incrementally re-tokenize only changed lines
      */
     private incrementalTokenize(document: TextDocument, cached: CachedTokenData, newText: string): Token[] | null {
@@ -737,30 +700,25 @@ export class TokenCache {
             }
             for (let l = first; l <= oldLast; l++) changedLines.add(l);
         }
-        const expanded = this.expandToDependencies(changedLines, cached, oldLineCount);
-
-        // Each line widened to a span the tokenizer can read on its own. A `|` continuation
-        // joins lines into one statement, and the tokenizer carries state from line to line,
-        // so a span starts on its procedure's own line and ends before the next one, where a
-        // full tokenize is in the same state: started inside a procedure, `  ACCEPT` before
-        // `  MAP` read as `CCEPT` (found by comparing with a full tokenize over random edits).
-        const continues = (l: number) => lineText(l).trimEnd().endsWith('|');
-        const opensProcedure = (l: number) => /^[A-Za-z_][\w:.]*\s+(PROCEDURE|FUNCTION)\b/i.test(lineText(l));
+        // The spans to re-tokenize: the edited lines themselves. Tokenizing reads one line at a
+        // time, and the only state it carries between lines is whether it is inside a CODE
+        // section, which each span is started with (below). #715: spans were widened to the
+        // enclosing structures and then to the whole procedure, which in a module that is one
+        // giant procedure (a generated report designer) was the module, so every edit there
+        // fell back to a full tokenize. The structure itself is re-derived by process() below.
         const spans: Array<[number, number]> = [];
-        for (const l of [...expanded].sort((a, b) => a - b)) {
+        for (const l of [...changedLines].sort((a, b) => a - b)) {
             const last = spans[spans.length - 1];
-            if (last && l <= last[1]) continue;
-            let lo = l, hi = l;
-            while (lo > 0 && continues(lo - 1)) lo--;
-            while (hi < oldLineCount - 1 && continues(hi)) hi++;
-            while (lo > 0 && !opensProcedure(lo)) lo--;
-            while (hi < oldLineCount - 1 && !opensProcedure(hi + 1)) hi++;
-            if (last && lo <= last[1] + 1) last[1] = Math.max(last[1], hi);
-            else spans.push([lo, hi]);
+            if (last && l <= last[1] + 1) last[1] = Math.max(last[1], l);
+            else spans.push([l, l]);
         }
         // Lines added or removed: one span from the first to the last, after which every
         // line moves by `delta`.
         if (delta !== 0 && spans.length > 1) spans.splice(0, spans.length, [spans[0][0], spans[spans.length - 1][1]]);
+        // Lines before `first` are the same in the old and new text, so read them from the cache.
+        const newLineAt = (i: number) => i < first
+            ? lineText(i)
+            : document.getText({ start: { line: i, character: 0 }, end: { line: i, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, '');
         const expandTime = performance.now() - expandStart;
         const retokenizedCount = spans.reduce((n, [lo, hi]) => n + Math.max(0, hi + delta - lo + 1), 0);
 
@@ -789,7 +747,8 @@ export class TokenCache {
                 }));
             }
             const tokenizeStart = performance.now();
-            const tokens = lines.length > 0 ? new ClarionTokenizer(lines.join('\n'), 2, true).tokenize() : [];
+            const inCode = ClarionTokenizer.codeSectionAt(lo, newLineAt);
+            const tokens = lines.length > 0 ? new ClarionTokenizer(lines.join('\n'), 2, true, inCode).tokenize() : [];
             tokenizeTime += performance.now() - tokenizeStart;
             for (const token of tokens) {
                 token.line += lo;
