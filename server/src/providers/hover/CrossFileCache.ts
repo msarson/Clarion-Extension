@@ -4,6 +4,7 @@ import { TokenCache } from '../../TokenCache';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
+import { pathToCanonicalUri } from '../../utils/UriUtils';
 
 const logger = LoggerManager.getLogger("CrossFileCache");
 logger.setLevel("error");
@@ -48,7 +49,19 @@ export class CrossFileCache {
      */
     async getOrLoadDocument(filePath: string): Promise<{ document: TextDocument; tokens: Token[] } | null> {
         const normalizedPath = path.normalize(filePath);
-        
+
+        // #715 — a file the token cache holds (an open buffer, edited or not) is answered
+        // from it, as moduleSourceDocument does since #711. Read from disk instead, an
+        // edited module's saved text was tokenized under its own uri and replaced the
+        // buffer's tokens, so the next request re-tokenized the buffer in full: a hover on
+        // a procedure call took 2-5 s after each edit of a 60k-line module.
+        const uri = pathToCanonicalUri(normalizedPath);
+        const liveText = this.tokenCache.getDocumentText(uri);
+        const liveTokens = liveText !== null ? this.tokenCache.getTokensByUri(uri) : null;
+        if (liveText !== null && liveTokens) {
+            return { document: TextDocument.create(uri, 'clarion', 1, liveText), tokens: liveTokens };
+        }
+
         // Check if file exists
         if (!fs.existsSync(normalizedPath)) {
             logger.warn(`File not found: ${normalizedPath}`);

@@ -246,8 +246,9 @@ export class DocumentStructure {
             }
         }
         
-        // 🚀 PERFORMANCE: Build parent relationship index
-        this.buildParentIndex();
+        // The parent index is built on first read (parents()), or by process(). #715: it
+        // was built here and then cleared and rebuilt by process(), which nearly every
+        // caller runs next - two passes over every token on each re-tokenize.
 
         const indexTime = performance.now() - perfStart;
         logger.perf('Built indexes', {
@@ -255,9 +256,16 @@ export class DocumentStructure {
             'tokens': this.tokens.length,
             'labels': this.labelIndex.size,
             'lines': this.tokensByLine.size,
-            'struct_types': this.structuresByType.size,
-            'parent_relationships': this.parentIndex.size
+            'struct_types': this.structuresByType.size
         });
+    }
+
+    private parentIndexBuilt = false;
+
+    /** The parent index, built from the tokens' current state if nothing has built it yet. */
+    private parents(): Map<Token, Token> {
+        if (!this.parentIndexBuilt) this.buildParentIndex();
+        return this.parentIndex;
     }
 
     /**
@@ -265,6 +273,7 @@ export class DocumentStructure {
      * This eliminates the need for O(n) scans to find parent structures
      */
     private buildParentIndex(): void {
+        this.parentIndexBuilt = true;
         const structureStack: Token[] = [];
         
         for (const token of this.tokens) {
@@ -320,7 +329,7 @@ export class DocumentStructure {
      * @returns The parent token or undefined if at top level
      */
     public getParent(token: Token): Token | undefined {
-        return this.parentIndex.get(token);
+        return this.parents().get(token);
     }
 
     /**
@@ -411,7 +420,7 @@ export class DocumentStructure {
         // Walk from the seed's parent upward. We deliberately start one level
         // above the seed so a structure-keyword token on its own opening line
         // resolves to the OUTER chain rather than to itself.
-        let cursor: Token | undefined = this.parentIndex.get(seed);
+        let cursor: Token | undefined = this.parents().get(seed);
         while (cursor) {
             if (cursor.type === TokenType.Structure) {
                 if (
@@ -424,7 +433,7 @@ export class DocumentStructure {
             } else if (!scope && this.isScopeToken(cursor)) {
                 scope = cursor;
             }
-            cursor = this.parentIndex.get(cursor);
+            cursor = this.parents().get(cursor);
         }
 
         return this.buildStructureContext(chain, scope);
@@ -1154,7 +1163,7 @@ export class DocumentStructure {
 
             // Walk ancestors looking for the nearest ITEMIZE with a PRE prefix.
             let pre: string | undefined;
-            let cursor: Token | undefined = this.parentIndex.get(t);
+            let cursor: Token | undefined = this.parents().get(t);
             while (cursor) {
                 if (
                     cursor.type === TokenType.Structure &&
@@ -1164,7 +1173,7 @@ export class DocumentStructure {
                     pre = cursor.structurePrefix;
                     break;
                 }
-                cursor = this.parentIndex.get(cursor);
+                cursor = this.parents().get(cursor);
             }
 
             if (pre) {

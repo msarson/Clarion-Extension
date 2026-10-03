@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Performance
 
 - **A hover just after an edit no longer waits a second or more behind the re-check of a large module.** The check for indistinguishable prototypes took time that grew with the square of the module's size, and ran after every edit; on a 60,000-line generated module it took over a second, and now takes about 10 ms. [#715](https://github.com/msarson/Clarion-Extension/issues/715)
+- **Pressing Enter in a large module no longer makes the next hover re-read the whole file, and a hover on a procedure call after an edit no longer takes seconds.** An edit that added or removed a line, or touched several places at once, threw away the module's parsed form; and the procedure hover read the module from disk, so the edited buffer had to be parsed again from scratch. Both now re-read only the procedures the edit touched. [#715](https://github.com/msarson/Clarion-Extension/issues/715)
 
 ---
 

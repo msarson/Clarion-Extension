@@ -9,7 +9,7 @@
  *
  *   node scripts/perf/hover-bench.js [--sizes=10000,30000,60000] [--n=40] [--edits=15] [--bursts=8]
  *                                    [--server=<path to server.js>] [--clarion=<install root>] [--json=out.json]
- *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged]
+ *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged] [--log=<file>]
  *
  * --detail prints each unchanged hover in order and by word kind (a slow kind vs a slow first hover).
  * --ranged sends each edit as a one-character ranged didChange (a space typed at the end of a line
@@ -33,6 +33,7 @@ const EDITS = Number(arg('edits', 15));
 const BURSTS = Number(arg('bursts', 8));
 const CLARION = arg('clarion', process.env.CLARION_ROOT || 'C:\\Clarion\\Clarion12-12.0.14204');
 const CPU_PROF = arg('cpu-prof', '');
+const LOG = arg('log', ''); // #715: append the server's log messages here, with the performance channel on
 
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => d.toLowerCase() + '%3A');
 
@@ -65,6 +66,7 @@ function startServer() {
                 // server -> client request: configuration gets defaults, everything else null
                 send({ id: msg.id, result: msg.method === 'workspace/configuration' ? (msg.params.items || []).map(() => null) : null });
             } else {
+                if (LOG && msg.method === 'window/logMessage') fs.appendFileSync(LOG, msg.params.message + '\n');
                 for (let i = waiters.length - 1; i >= 0; i--) if (waiters[i].method === msg.method && waiters[i].test(msg.params)) waiters.splice(i, 1)[0].resolve(msg.params);
             }
         }
@@ -111,6 +113,7 @@ async function benchSize(size) {
     await s.request('initialize', {
         processId: process.pid, rootUri: toUri(dir), workspaceFolders: [{ uri: toUri(dir), name: 'synth' }],
         capabilities: { textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] } }, workspace: { configuration: true } },
+        ...(LOG ? { initializationOptions: { settings: { log: { performance: { enabled: true } } } } } : {}),
     });
     s.notify('initialized', {});
     const ready = s.waitFor('clarion/solutionReady');
@@ -155,6 +158,7 @@ async function benchSize(size) {
 
     const edited = [];
     for (let k = 0; k < EDITS; k++) { change(); edited.push(await hover(pos[(k * 7) % pos.length])); }
+    if (process.argv.includes('--detail')) console.log('  edited in order:', edited.map(x => Math.round(x)).join(' '));
 
     const burst = [];
     for (let k = 0; k < BURSTS; k++) { for (let j = 0; j < 5; j++) change(); burst.push(await hover(pos[(k * 11) % pos.length])); }

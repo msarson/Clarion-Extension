@@ -1459,67 +1459,6 @@ connection.onCodeLensResolve(async (lens) => {
 
 
 
-/**
- * 🔍 Detect if a document edit may affect structure lifecycle
- * Structure-affecting edits require full re-tokenization to maintain correctness
- * 
- * An edit is structure-affecting if it involves:
- * - Structure keywords: IF, CASE, LOOP, CLASS, MAP, GROUP, QUEUE, RECORD, etc.
- * - Structure terminators: END, standalone dot (.)
- * - CODE keyword (starts executable section)
- * - Structural indentation changes (column 0 keywords)
- * 
- * @param document Current document state
- * @returns true if edit may affect structure lifecycle, false otherwise
- */
-function isStructureAffectingEdit(document: TextDocument): boolean {
-    // Get current document text
-    const text = document.getText();
-    
-    // 🚀 PERF: Get cached text to detect what changed
-    // If no cache exists, this is first edit - let incremental handle it
-    // #260: use the public accessor (the private-map reach would silently miss
-    // now that cache keys are canonicalized).
-    const cachedText = tokenCache.getDocumentText(document.uri);
-    if (!cachedText) {
-        return false; // No baseline to compare, incremental will handle
-    }
-
-    // 🚀 PERF: Quick length check - if document length changed significantly, likely structural
-    const lengthDiff = Math.abs(text.length - cachedText.length);
-    if (lengthDiff > 50) {
-        return true; // Large changes likely affect structure
-    }
-
-    // 🔍 CORRECTNESS: Detect changed lines by comparing text
-    const newLines = text.split(/\r?\n/);
-    const oldLines = cachedText.split(/\r?\n/);
-    
-    // Check each changed line for structure-affecting keywords
-    const maxLines = Math.max(newLines.length, oldLines.length);
-    for (let i = 0; i < maxLines; i++) {
-        const newLine = newLines[i] || '';
-        const oldLine = oldLines[i] || '';
-        
-        if (newLine !== oldLine) {
-            // Line changed - check if it contains structure-affecting content
-            const combinedLine = (newLine + ' ' + oldLine).toUpperCase();
-            
-            // Check for structure keywords
-            if (/\b(IF|CASE|LOOP|CLASS|MAP|GROUP|QUEUE|RECORD|FILE|INTERFACE|MODULE|EXECUTE|BEGIN|ACCEPT|ROUTINE|CODE|END)\b/.test(combinedLine)) {
-                return true;
-            }
-            
-            // Check for standalone dot (period not part of number/member access)
-            // Pattern: whitespace followed by dot followed by whitespace/comment/EOL
-            if (/\s+\.\s*(!|$)/.test(newLine) || /\s+\.\s*(!|$)/.test(oldLine)) {
-                return true;
-            }
-        }
-    }
-    
-    return false; // No structure-affecting changes detected
-}
 
 // ✅ Handle Content Changes (Recompute Tokens)
 /**
@@ -1728,7 +1667,7 @@ documents.onDidChangeContent(event => {
         // 🔍 CORRECTNESS: Check if this edit affects structure lifecycle
         // If so, clear token cache to force full re-tokenization
         // Otherwise, let incremental tokenization optimize performance
-        const isStructureAffecting = isStructureAffectingEdit(document);
+        const isStructureAffecting = tokenCache.isStructureAffectingEdit(document);
         if (isStructureAffecting) {
             logger.info(`🔄 Structure-affecting edit detected, clearing token cache for: ${uri}`);
             tokenCache.clearTokens(uri);
