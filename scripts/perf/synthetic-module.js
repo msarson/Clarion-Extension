@@ -143,21 +143,122 @@ function syntheticModuleLines(procedures) {
     return module;
 }
 
-/** The MEMBER module's text, about `targetLines` lines long (CRLF), with no files written. */
-function syntheticModuleText(targetLines) {
+/**
+ * #715 — the other generated shape: one procedure that is nearly the whole module (a report
+ * or export designer: a few hundred lines of data and window, then thousands of field blocks
+ * spread over ROUTINEs), followed by a few ordinary procedures. Per-procedure work is
+ * whole-module work here. Made up; no third-party source.
+ */
+const SMALL_AFTER_GIANT = 12;
+function fieldBlock(r, b) {
+    const n = `R${r}F${b}`;
+    const lines = [
+        `  Rpt:Name = '${n}'`,
+        `  Rpt:Kind = ${b % 3 === 0 ? 'KIND:Number' : 'KIND:Text'}`,
+        `  Rpt:Value &= NEW(CSTRING(128))`,
+        `  IF Rpt:Kind = KIND:Number`,
+        `    Rpt:Value = FORMAT(Loc:Amount + ${b}, @n12.2)`,
+        `  ELSE`,
+        `    Rpt:Value = CLIP(Loc:Name) & '${n}'`,
+        `  END`,
+        `  DO SendField`,
+        `  DISPOSE(Rpt:Value)`,
+    ];
+    if (b % 7 === 3) lines.push(`  Rpt:Caption = 'Field ' & |`, `                '${n}' & |`, `                ' caption'`);
+    if (b % 11 === 5) lines.push(`  CASE Rpt:Kind`, `  OF KIND:Number`, `    Loc:Count += 1`, `  OF KIND:Text`, `    Loc:Count += 2`, `  END`);
+    if (b % 13 === 8) lines.push(`  LOOP Loc:Index = 1 TO 3`, `    Loc:Total += Loc:Index`, `  END`);
+    if (b % 29 === 17) lines.push(`  OMIT('***')`, `  Rpt:Name = 'retired ${n}'`, `  ***`);
+    return lines;
+}
+function giantProcedure(targetLines) {
+    const head = [
+        'Designer             PROCEDURE',
+        '',
+        'Rpt:Name             STRING(255)',
+        'Rpt:Value            &CSTRING',
+        'Rpt:Caption          STRING(255)',
+        'Rpt:Kind             LONG',
+        'Loc:Amount           DECIMAL(12,2)',
+        'Loc:Name             STRING(40)',
+        'Loc:Count            LONG',
+        'Loc:Index            LONG',
+        'Loc:Total            LONG',
+        'Fields:Queue         QUEUE,PRE(FQ)',
+        'Name                   STRING(60)',
+        'Kind                   LONG',
+        '                     END',
+        'ThisWindow           CLASS(WindowManager)',
+        'Init                   PROCEDURE(),BYTE,DERIVED',
+        'Kill                   PROCEDURE(),BYTE,DERIVED',
+        '                     END',
+        "Window               WINDOW('Designer'),AT(,,400,240),CENTER,GRAY,SYSTEM",
+        '                       LIST,AT(8,8,384,200),USE(?Fields),FROM(Fields:Queue)',
+        "                       BUTTON('&Close'),AT(340,214,50,16),USE(?Close)",
+        '                     END',
+        '',
+        '  CODE',
+        '  OPEN(Window)',
+        '  ACCEPT',
+        '    CASE EVENT()',
+        '    OF EVENT:OpenWindow',
+        '      DO Fields0',
+        '    OF EVENT:CloseWindow',
+        '      BREAK',
+        '    END',
+        '    CASE FIELD()',
+        '    OF ?Close',
+        '      POST(EVENT:CloseWindow)',
+        '    END',
+        '  END',
+        '  CLOSE(Window)',
+        '  RETURN',
+        '',
+        'SendField            ROUTINE',
+        '  FQ:Name = Rpt:Name',
+        '  FQ:Kind = Rpt:Kind',
+        '  ADD(Fields:Queue)',
+        '',
+    ];
+    const routines = 50;
+    const perRoutine = Math.max(20, Math.floor((targetLines - head.length) / routines));
+    const lines = [...head];
+    for (let r = 0; r < routines; r++) {
+        lines.push(`Fields${r}             ROUTINE`);
+        const end = lines.length + perRoutine - 3;
+        for (let b = 0; lines.length < end; b++) lines.push(...fieldBlock(r, b));
+        if (r + 1 < routines) lines.push(`  DO Fields${r + 1}`);
+        lines.push('');
+    }
+    return lines;
+}
+function giantModuleLines(targetLines) {
+    const perProc = procedure(0, 1).length;
+    const module = ["  MEMBER('Synth')", '', "  INCLUDE('EQUATES.CLW'),ONCE", 'KIND:Number          EQUATE(1)', 'KIND:Text            EQUATE(2)', '', '  MAP', '  END', ''];
+    module.push(...giantProcedure(targetLines - SMALL_AFTER_GIANT * perProc));
+    for (let i = 0; i < SMALL_AFTER_GIANT; i++) module.push(...procedure(i, SMALL_AFTER_GIANT));
+    return module;
+}
+
+/**
+ * The MEMBER module's text, about `targetLines` lines long (CRLF), with no files written.
+ * `shape: 'giant'` gives one procedure that is nearly the whole module (#715).
+ */
+function syntheticModuleText(targetLines, { shape = 'procedures' } = {}) {
+    if (shape === 'giant') return giantModuleLines(targetLines).join(CRLF) + CRLF;
     const perProc = procedure(0, 1).length;
     return syntheticModuleLines(Math.max(2, Math.round(targetLines / perProc))).join(CRLF) + CRLF;
 }
 
 /** Write the solution under `dir`; the module is grown to about `targetLines` lines. */
-function writeSyntheticSolution(dir, targetLines) {
+function writeSyntheticSolution(dir, targetLines, { shape = 'procedures' } = {}) {
     fs.mkdirSync(dir, { recursive: true });
     const perProc = procedure(0, 1).length;
-    const procedures = Math.max(2, Math.round(targetLines / perProc));
+    const procedures = shape === 'giant' ? SMALL_AFTER_GIANT : Math.max(2, Math.round(targetLines / perProc));
 
-    const module = syntheticModuleLines(procedures);
+    const module = shape === 'giant' ? giantModuleLines(targetLines) : syntheticModuleLines(procedures);
 
     const program = ['  PROGRAM', '', "  INCLUDE('EQUATES.CLW'),ONCE", '', '  MAP', "    MODULE('SynthMod.clw')"];
+    if (shape === 'giant') program.push('Designer            PROCEDURE');
     for (let i = 0; i < procedures; i++) program.push(`Proc${i}              PROCEDURE`);
     program.push('    END', '  END', '');
     for (let i = 0; i < 40; i++) program.push(...fileDecl(i));
@@ -208,5 +309,5 @@ module.exports = { writeSyntheticSolution, syntheticModuleText };
 if (require.main === module) {
     const out = process.argv[2] || path.join(require('os').tmpdir(), 'clarion-synth');
     const lines = Number(process.argv[3] || 60000);
-    console.log(writeSyntheticSolution(out, lines));
+    console.log(writeSyntheticSolution(out, lines, { shape: process.argv[4] || 'procedures' }));
 }

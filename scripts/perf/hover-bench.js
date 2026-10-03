@@ -10,6 +10,7 @@
  *   node scripts/perf/hover-bench.js [--sizes=10000,30000,60000] [--n=40] [--edits=15] [--bursts=8]
  *                                    [--server=<path to server.js>] [--clarion=<install root>] [--json=out.json]
  *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged] [--log=<file>]
+ *                                    [--shape=giant] [--edit=near]
  *
  * --detail prints each unchanged hover in order and by word kind (a slow kind vs a slow first hover).
  * --ranged sends each edit as a one-character ranged didChange (a space typed at the end of a line
@@ -33,6 +34,8 @@ const EDITS = Number(arg('edits', 15));
 const BURSTS = Number(arg('bursts', 8));
 const CLARION = arg('clarion', process.env.CLARION_ROOT || 'C:\\Clarion\\Clarion12-12.0.14204');
 const CPU_PROF = arg('cpu-prof', '');
+const SHAPE = arg('shape', 'procedures'); // #715: 'giant' = one procedure that is nearly the whole module
+const EDIT = arg('edit', 'end');         // #715: 'near' = a comment typed on the line above each hovered word
 const LOG = arg('log', ''); // #715: append the server's log messages here, with the performance channel on
 
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => d.toLowerCase() + '%3A');
@@ -87,9 +90,9 @@ function positions(text, n) {
     let inCode = false;
     lines.forEach((l, i) => {
         if (/^\S+\s+PROCEDURE\b/.test(l)) inCode = false;
-        if (/^\s+CODE\b/.test(l)) { inCode = true; return; }
+        if (/^\s+CODE\b/.test(l) || /^\S+\s+ROUTINE\b/.test(l)) { inCode = true; return; }
         if (!inCode) return;
-        const m = /\b(Loc:\w+|PQ\d+:\w+|PG\d+:\w+|Proc\d+)\b/.exec(l);
+        const m = /\b(Loc:\w+|Rpt:\w+|PQ\d+:\w+|PG\d+:\w+|Proc\d+)\b/.exec(l);
         if (m) cands.push({ line: i, character: m.index + Math.floor(m[0].length / 2), kind: m[1].replace(/\d+/g, '').replace(/:\w+$/, ':') });
     });
     const out = [];
@@ -103,9 +106,9 @@ const stats = xs => xs.length === 0
     : { n: xs.length, p50: Math.round(pct(xs, 0.5)), p95: Math.round(pct(xs, 0.95)), max: Math.round(Math.max(...xs)) };
 
 async function benchSize(size) {
-    const dir = path.join(os.tmpdir(), `clarion-synth-${size}`);
+    const dir = path.join(os.tmpdir(), `clarion-synth-${SHAPE}-${size}`);
     fs.rmSync(dir, { recursive: true, force: true });
-    const sol = writeSyntheticSolution(dir, size);
+    const sol = writeSyntheticSolution(dir, size, { shape: SHAPE });
     const text = fs.readFileSync(sol.module, 'utf8');
     const uri = toUri(sol.module);
     const s = startServer();
@@ -144,10 +147,20 @@ async function benchSize(size) {
     }
 
     let version = 1;
-    const RANGED = process.argv.includes('--ranged');
+    const RANGED = process.argv.includes('--ranged') || EDIT === 'near';
     const lineText = text.split(/\r?\n/);
-    const change = () => {
+    const change = target => {
         version++;
+        if (EDIT === 'near') {
+            // #715 — as Clarion Assistant's -EditMode near: a comment typed at the end of the line
+            // above the word about to be hovered, in the same procedure. Edits accumulate.
+            const line = Math.max(0, target.line - 1);
+            const at = { line, character: lineText[line].length };
+            const add = ` !e${version}`;
+            lineText[line] += add;
+            s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ range: { start: at, end: at }, text: add }] });
+            return;
+        }
         if (!RANGED) { s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: `${text}! edit ${version}\r\n` }] }); return; }
         // #715 — one character typed at the end of a line, a different line each time.
         const line = pos[(version * 5 + 3) % pos.length].line;
@@ -157,11 +170,11 @@ async function benchSize(size) {
     };
 
     const edited = [];
-    for (let k = 0; k < EDITS; k++) { change(); edited.push(await hover(pos[(k * 7) % pos.length])); }
+    for (let k = 0; k < EDITS; k++) { const p = pos[(k * 7) % pos.length]; change(p); edited.push(await hover(p)); }
     if (process.argv.includes('--detail')) console.log('  edited in order:', edited.map(x => Math.round(x)).join(' '));
 
     const burst = [];
-    for (let k = 0; k < BURSTS; k++) { for (let j = 0; j < 5; j++) change(); burst.push(await hover(pos[(k * 11) % pos.length])); }
+    for (let k = 0; k < BURSTS; k++) { const p = pos[(k * 11) % pos.length]; for (let j = 0; j < 5; j++) change(p); burst.push(await hover(p)); }
 
     await Promise.race([s.request('shutdown', null), new Promise(r => setTimeout(r, 15000))]);
     s.notify('exit');
