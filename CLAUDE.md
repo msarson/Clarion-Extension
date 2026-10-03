@@ -151,12 +151,27 @@ Shared plumbing: `scripts/health/corpus.js` (walk, snapshot, compare) and
   `Diagnostics`, `Performance`, `Configuration and build`, `Syntax`, `Editing`,
   `Maintenance`); a bold short statement ending in a full stop, one or two
   plain sentences, the issue/PR link, then `@handle` if contributed. Cause
-  narrative, measurements and test counts stay in the issue and commit. At
-  release time the section head gets the shields.io pills
-  (`fixes` 1f6feb · `new` 2da44e · `performance` 8250df, `?style=flat-square`)
-  and a one-to-two-sentence lead; the three newest versions stay in full,
-  older ones become a Highlights block linking `dev/docs-internal/changelogs/`
-  (that folder is gitignored — `git add -f` new archives).
+  narrative, measurements and test counts stay in the issue and commit.
+- **Release-day docs** (half the release work; 1.0.6 is the worked example,
+  commit `4a8ce56d`):
+  - CHANGELOG head: replace `Unreleased` with the date; add the shields.io pills
+    (`fixes` 1f6feb · `new` 2da44e · `performance` 8250df, `?style=flat-square`),
+    counting entries by kind — `new` is an entry whose commit is a `feat`,
+    `performance` one under the Performance heading, the rest are fixes; omit a
+    pill whose count is zero; then a one-to-two-sentence lead.
+  - The three newest versions stay in full. The one that drops to fourth moves,
+    verbatim and whole, to `dev/docs-internal/changelogs/CHANGELOG-x.y.z.md`
+    (header `# Changelog — x.y.z` plus "Archived from the main CHANGELOG when
+    a.b.c was released..."), and its CHANGELOG section becomes a **Highlights**
+    block of four or five bullets ending `[**→ Full details**](dev/docs-internal/changelogs/CHANGELOG-x.y.z.md)`.
+    `dev/` is gitignored but every archive is tracked: `git add -f` it, or the
+    Highlights link 404s on GitHub. Check the entry count of the archive against
+    the section it came from.
+  - README *What's new*: one full `### x.y.z (date)` block; the `**Earlier:**`
+    paragraph covers the two versions before it, so the oldest drops out.
+  - Audit every relative link, `#anchor` and `clarion.*` id the docs mention.
+  - The version-branch hook accepts a CHANGELOG-only commit, not the README or
+    an archive: commit on a `docs/…` branch and fast-forward.
 - Release packaging: run `npm run bundle` before `vsce package` if the VSIX
   comes out with hundreds of files (the `rimraf` in `package:release` can miss,
   leaving the tsc tree in `out/`; a correct bundle VSIX is ~26 files).
