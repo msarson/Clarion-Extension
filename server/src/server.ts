@@ -113,6 +113,23 @@ import { StartupProgress, adaptLibraryReporter } from './utils/StartupProgress';
 import { EventLoopLagTracker } from './utils/EventLoopLagTracker'; // #661
 import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
 import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
+import { yieldToRequests } from './utils/cooperativeScan';
+import { beginInteractive, runAsBackground } from './utils/interactivePriority';
+
+/**
+ * #715 item 1 — a request handler that background validation waits for while it runs (hover,
+ * completion, F12): see utils/interactivePriority.ts.
+ */
+function interactive<A extends unknown[], R>(handler: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+    return async (...args: A) => {
+        const done = beginInteractive();
+        try {
+            return await handler(...args);
+        } finally {
+            done();
+        }
+    };
+}
 
 const logger = LoggerManager.getLogger("Server");
 logger.setLevel("error");
@@ -754,7 +771,13 @@ function sendDiagnosticsStatus(uri: string, version: number, state: DiagnosticsS
     connection.sendNotification('clarion/diagnosticsStatus', { uri, version, state });
 }
 
-async function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
+// #715 item 1: validation is background work. At its yield points it waits while a hover,
+// completion or F12 is in flight, up to a starvation cap (utils/interactivePriority.ts).
+function validateTextDocument(document: TextDocument, caller: string = 'unknown'): Promise<void> {
+    return runAsBackground(() => validateTextDocumentInBackground(document, caller));
+}
+
+async function validateTextDocumentInBackground(document: TextDocument, caller: string): Promise<void> {
     try {
         // Skip non-Clarion files
         if (!document.uri.toLowerCase().endsWith('.clw') &&
@@ -962,8 +985,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
             // two abandoned passes were still running beside it).
             if (isStale()) break;
             validatorResults.push(await timeIt(name, thunk()));
-            // Real macrotask yield between validators — lets queued requests in.
-            await new Promise<void>(resolve => setImmediate(resolve));
+            // Real macrotask yield between validators — lets queued requests in, and (#715)
+            // waits while a hover, completion or F12 is in flight, up to the starvation cap.
+            await yieldToRequests();
         }
         const [viewProjectFieldsDiags, discardedReturnDiags, missingIncludeDiags, missingConstantsDiags, missingMapDeclDiags, missingImplDiags, privateCallDiags, undeclaredVarDiags, unresolvedProcCallDiags, ifaceImplDiags, unresolvedFileRefDiags] = validatorResults;
         const asyncMs = Date.now() - asyncStart;
@@ -3233,7 +3257,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
 });
 
 // Handle definition requests
-connection.onDefinition(async (params, token) => {
+connection.onDefinition(interactive(async (params, token) => {
 
     if (!serverInitialized) {
         logger.info(`⚠️ [DELAY] Server not initialized yet, delaying definition request`);
@@ -3260,7 +3284,7 @@ connection.onDefinition(async (params, token) => {
         logger.error(`❌ Error providing definition: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
-});
+}));
 
 // Handle implementation requests
 connection.onImplementation(async (params, token) => {
@@ -3452,7 +3476,7 @@ connection.onWorkspaceSymbol(async (params, token) => {
     }
 });
 
-connection.onHover(async (params) => {
+connection.onHover(interactive(async (params) => {
     logger.info(`📂 Received hover request for: ${params.textDocument.uri} at position ${params.position.line}:${params.position.character}`);
 
     // #301: while startup pipelines run, an unresolved hover shows a "still indexing" note
@@ -3515,7 +3539,7 @@ connection.onHover(async (params) => {
         logger.error(`❌ Error providing hover: ${error instanceof Error ? error.message : String(error)}`);
         return null;
     }
-});
+}));
 
 // Handle code actions (lightbulb) requests
 connection.onCodeAction(async (params) => {
@@ -3618,7 +3642,7 @@ connection.onSignatureHelp(async (params) => {
 });
 
 // ✅ Handle Completion Request (dot-triggered member completion)
-connection.onCompletion(async (params) => {
+connection.onCompletion(interactive(async (params) => {
     try {
         const document = documents.get(params.textDocument.uri);
         if (!document || !serverInitialized) return [];
@@ -3627,7 +3651,7 @@ connection.onCompletion(async (params) => {
         logger.error(`❌ [COMPLETION] Error: ${error instanceof Error ? error.message : String(error)}`);
         return [];
     }
-});
+}));
 
 // ✅ Handle Semantic Tokens Request
 connection.languages.semanticTokens.on((params) => {

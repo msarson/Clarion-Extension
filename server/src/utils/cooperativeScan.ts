@@ -1,4 +1,5 @@
 import { CancellationToken } from 'vscode-languageserver';
+import { yieldForInteractive } from './interactivePriority';
 
 /**
  * #187 — cooperative-scanning helper for heavy synchronous loops on the single
@@ -24,7 +25,7 @@ export async function cooperativeCheckpoint(
     every = 25
 ): Promise<boolean> {
     if (iteration > 0 && iteration % every === 0) {
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await yieldToRequests();
     }
     return token?.isCancellationRequested ?? false;
 }
@@ -42,8 +43,18 @@ export function makeTimeSlicer(budgetMs = 25): () => Promise<void> {
     let lastYield = Date.now();
     return async () => {
         if (Date.now() - lastYield >= budgetMs) {
-            await new Promise<void>(resolve => setImmediate(resolve));
+            await yieldToRequests();
             lastYield = Date.now();
         }
     };
+}
+
+/**
+ * #715 item 1 — a macrotask yield that lets queued requests in; inside background validation
+ * (runAsBackground) it then also waits while a hover, completion or F12 is in flight, up to the
+ * starvation cap (interactivePriority.ts). Outside it, the plain yield it always was.
+ */
+export async function yieldToRequests(): Promise<void> {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await yieldForInteractive();
 }
