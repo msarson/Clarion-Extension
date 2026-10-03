@@ -112,6 +112,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - **No more multi-second freeze reading a class header that pads its parameter lists with spaces.** A prototype such as `Name PROCEDURE(<hundreds of spaces>)` took time that grew with the cube of the padding, so one such header held the language server for over two seconds on a first start. It now reads in a few milliseconds. [#660](https://github.com/msarson/Clarion-Extension/issues/660)
 - **Hover stays fast in very large modules, also straight after an edit.** On a 60,000-line generated module a hover took over 150 ms with nothing changed, and up to 18 seconds after an edit. It now answers in a few milliseconds when nothing has changed, and in about half a second after an edit. [#711](https://github.com/msarson/Clarion-Extension/issues/711)
+- **Opening or editing a large module no longer holds up the language server while it checks by-reference arguments.** The check rebuilt a list of the document's EQUATEs for every call it looked at, so on a 30,000-line module one pass took about ten seconds, during which hover and everything else waited. [#713](https://github.com/msarson/Clarion-Extension/pull/713) @geircodes
 
 #### Editing
 
