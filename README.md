@@ -89,19 +89,15 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.6 (2026-10-03)
+### 1.0.7 (2026-10-03)
 
-Ninety-five changes. Most make the navigation features agree with each other on what a name is; the rest are about building and running a solution, and about speed on very large modules.
+A release about editing large generated modules.
 
-- Hover, Go to Definition, Go to Implementation, Find All References, Rename, completion and signature help read `SELF.x`, `PARENT.x`, `obj.Method()` and chains such as `SELF.Part.Get()` through one resolver, so they land on the same member — including a procedure's own local class, inherited overloads, and colon-named objects such as `Relate:Customer.Open()`.
-- Hovering `SELF` or `PARENT` shows the class it stands for; Go to Definition and Go to Implementation select the name they land on, and Go to Implementation and hover find a method body you have not saved yet.
-- New diagnostics: an INCLUDE or MEMBER whose file cannot be found is an error, a redefined `SELF`, `PARENT` or `NULL` is reported as the compiler reports it, and every restored tab gets its problems after a restart. A report lists the file references that do not resolve.
-- Build and Run follow the configuration actually in force: the Clarion Tools pane shows the build log, run command, startup project and build settings; Run takes a custom command and no longer needs a file open; a solution in a folder with a space in its name builds.
-- Hover stays fast in very large generated modules: a few milliseconds with nothing changed, and well under a second straight after an edit, where a 60,000-line module could take many seconds.
-- Introduce EQUATE puts the EQUATE above its first use in data, and takes the whole of a string built from several literals.
-- Contributions from [@geircodes](https://github.com/geircodes), with reports from Bill Atchison.
+- Fixed: after an edit, the extension could read the module wrongly until the file was reopened — a structure whose END was removed kept its old extent, a new PROCEDURE line or a period in column 0 went unnoticed — so folding, the outline, hover and diagnostics worked from the wrong structure.
+- The hover after an edit is much quicker on large modules, including ones that are a single giant procedure: on a 61,000-line generated module the hover just after typing nearby went from about half a second to about 0.21 s.
+- A hover that arrives while the module is being re-checked no longer waits for the whole re-check, and pressing Enter or hovering a procedure call after an edit no longer re-reads the whole file.
 
-**Earlier:** 1.0.5 (2026-09-18) resolved names the extension could not in a real generated application — a prefix past eight characters, a prototype an INCLUDE carries into a MAP, the scope a program's MAP actually has — and settled what the compiler does with whitespace around the member-access dot; 1.0.4 (2026-09-17) was a release about what a real solution runs into — which Clarion version and settings are actually in force, how a name resolves across a multi-project solution and a DLL family, and how Clarion source is read when it is written the way the compiler allows — and made editing large modules markedly quicker. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.6 (2026-10-03) made hover, Go to Definition, Go to Implementation, Find All References and completion agree on what a name is (`SELF`, `PARENT`, a procedure's own classes, chained members), had Build and Run follow the configuration actually in force, and kept hover fast in very large modules; 1.0.5 (2026-09-18) resolved names the extension could not in a real generated application — a prefix past eight characters, a prototype an INCLUDE carries into a MAP, the scope a program's MAP actually has — and settled what the compiler does with whitespace around the member-access dot. [Full changelog](CHANGELOG.md).
 
 ---
 

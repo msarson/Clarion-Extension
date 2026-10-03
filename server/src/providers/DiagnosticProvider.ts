@@ -65,12 +65,56 @@ export class DiagnosticProvider {
             structure = TokenCache.getInstance().getStructure(document);
         }
 
+        const diagnostics: Diagnostic[] = [];
+        const timings: Array<[string, number]> = [];
+        for (const [name, checkId, run] of this.syncChecks(document, tokens, structure)) {
+            if (!isDiagnosticEnabled(checkId)) continue;
+            const t0 = performance.now();
+            diagnostics.push(...applyCheckSeverity(checkId, run())); // #543
+            timings.push([name, performance.now() - t0]);
+        }
+        return this.finishSyncPass(diagnostics, timings, perfStart, tokens, document, caller);
+    }
+
+    /**
+     * #715 step 2 — the same checks as validateDocument, one at a time with a macrotask yield
+     * before each, so a request that arrives meanwhile (a hover just after an edit) is answered
+     * between two checks instead of after the whole pass. Null when `isStale` turns true at a
+     * yield: a newer version exists and this answer would be discarded.
+     */
+    public static async validateDocumentYielding(
+        document: TextDocument,
+        tokens: Token[],
+        caller: string | undefined,
+        isStale: () => boolean
+    ): Promise<Diagnostic[] | null> {
+        const perfStart = performance.now();
+        const yieldToRequests = () => new Promise<void>(resolve => setImmediate(resolve));
+        await yieldToRequests();
+        if (isStale()) return null;
+        const structure = TokenCache.getInstance().getStructure(document);
+        const diagnostics: Diagnostic[] = [];
+        const timings: Array<[string, number]> = [];
+        for (const [name, checkId, run] of this.syncChecks(document, tokens, structure)) {
+            if (!isDiagnosticEnabled(checkId)) continue;
+            await yieldToRequests();
+            if (isStale()) return null;
+            const t0 = performance.now();
+            diagnostics.push(...applyCheckSeverity(checkId, run())); // #543
+            timings.push([name, performance.now() - t0]);
+        }
+        await yieldToRequests();
+        if (isStale()) return null;
+        return this.finishSyncPass(diagnostics, timings, perfStart, tokens, document, caller);
+    }
+
+    private static syncChecks(document: TextDocument, tokens: Token[], structure: DocumentStructure | undefined): Array<[string, DiagnosticCheckId, () => Diagnostic[]]> {
         // #181: class-interface-implementation and (6b40d7da/#115) undeclared-variable
         // validators live in the ASYNC pass — they resolve cross-file via
         // MemberLocator / SymbolFinderService. See the server.ts await sites.
         // #542 — [perf-timing name, check id (its clarion.diagnostics.<id>.enabled setting), validator].
         // Each runs only when isDiagnosticEnabled(id), which also applies the master switch.
-        const syncValidators: Array<[string, DiagnosticCheckId, () => Diagnostic[]]> = [
+        return [
             ['structureTerminators', 'unterminatedStructures', () => validateStructureTerminators(tokens!, document)],
             ['conditionalBlocks', 'omitCompileBlocks', () => validateConditionalBlocks(tokens!, document)],
             ['fileStructures', 'fileDeclarations', () => validateFileStructures(tokens!, document)],
@@ -88,16 +132,12 @@ export class DiagnosticProvider {
             ['indistinguishablePrototypes', 'indistinguishablePrototypes', () => validateIndistinguishablePrototypes(tokens!, document)],
             ['byRefArguments', 'byRefArguments', () => validateByRefArguments(tokens!, document)],
         ];
+    }
 
-        const diagnostics: Diagnostic[] = [];
-        const timings: Array<[string, number]> = [];
-        for (const [name, checkId, run] of syncValidators) {
-            if (!isDiagnosticEnabled(checkId)) continue;
-            const t0 = performance.now();
-            diagnostics.push(...applyCheckSeverity(checkId, run())); // #543
-            timings.push([name, performance.now() - t0]);
-        }
-
+    private static finishSyncPass(
+        diagnostics: Diagnostic[], timings: Array<[string, number]>, perfStart: number,
+        tokens: Token[], document: TextDocument, caller: string | undefined
+    ): Diagnostic[] {
         // #306 — name the fat validators when the sync pass is slow.
         const totalMs = performance.now() - perfStart;
         if (totalMs >= SYNC_PASS_REPORT_THRESHOLD_MS) {

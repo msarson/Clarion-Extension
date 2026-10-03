@@ -801,9 +801,21 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
 
         // PERFORMANCE: Use cached tokens instead of re-tokenizing
         const tokens = getTokens(document);
+        // True once a newer version of this document exists: this pass's answer would be
+        // discarded, so it stops at its next yield and the version is reported superseded.
+        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
         const syncStart = Date.now();
-        const diagnostics = DiagnosticProvider.validateDocument(document, tokens, caller, getOpenDocumentContent);
+        // #715 step 2: the sync checks yield to requests between them. As one block they held
+        // a hover that arrived during the pass for up to a second on a 60k-line module.
+        const syncDiagnostics = await DiagnosticProvider.validateDocumentYielding(document, tokens, caller, isStale);
         const syncMs = Date.now() - syncStart;
+        if (syncDiagnostics === null) {
+            // #460: superseded — a newer version arrived during the sync pass; nothing was
+            // published for this one, and the newer version's pass is the live one.
+            sendDiagnosticsStatus(document.uri, startVersion, 'superseded');
+            return;
+        }
+        const diagnostics = syncDiagnostics;
 
         // #158 Phase B Priority 3 — skip async validators for libsrcPaths-hosted
         // files. Library files (StringTheory, ABC, etc.) are stable, read-only
@@ -912,10 +924,9 @@ async function validateTextDocument(document: TextDocument, caller: string = 'un
         // microtask queue full. VM run 5: a tree expand starved through a 20s+ validator window
         // even with time-sliced loops. Sequential execution restores the yields' effect; total
         // work is unchanged (single thread — the concurrency never bought parallelism).
-        // True once a newer version of this document exists. The stale-version guard after
-        // the validators discards this pass's answer in that case, so both the loop below and
-        // the long-running validators that accept it can stop early instead of finishing.
-        const isStale = () => liveVersion(document.uri) !== startVersion; // #696
+        // isStale (above): the stale-version guard after the validators discards this pass's
+        // answer once it is true, so both the loop below and the long-running validators that
+        // accept it can stop early instead of finishing.
         const validatorThunks: [string, () => Promise<Diagnostic[]>][] = [
             // #352: moved out of the sync pass — its cold include-chain walk blocked
             // onDidOpen ~4.4s. Runs first so its perf line stays comparable across logs.
@@ -1459,67 +1470,6 @@ connection.onCodeLensResolve(async (lens) => {
 
 
 
-/**
- * 🔍 Detect if a document edit may affect structure lifecycle
- * Structure-affecting edits require full re-tokenization to maintain correctness
- * 
- * An edit is structure-affecting if it involves:
- * - Structure keywords: IF, CASE, LOOP, CLASS, MAP, GROUP, QUEUE, RECORD, etc.
- * - Structure terminators: END, standalone dot (.)
- * - CODE keyword (starts executable section)
- * - Structural indentation changes (column 0 keywords)
- * 
- * @param document Current document state
- * @returns true if edit may affect structure lifecycle, false otherwise
- */
-function isStructureAffectingEdit(document: TextDocument): boolean {
-    // Get current document text
-    const text = document.getText();
-    
-    // 🚀 PERF: Get cached text to detect what changed
-    // If no cache exists, this is first edit - let incremental handle it
-    // #260: use the public accessor (the private-map reach would silently miss
-    // now that cache keys are canonicalized).
-    const cachedText = tokenCache.getDocumentText(document.uri);
-    if (!cachedText) {
-        return false; // No baseline to compare, incremental will handle
-    }
-
-    // 🚀 PERF: Quick length check - if document length changed significantly, likely structural
-    const lengthDiff = Math.abs(text.length - cachedText.length);
-    if (lengthDiff > 50) {
-        return true; // Large changes likely affect structure
-    }
-
-    // 🔍 CORRECTNESS: Detect changed lines by comparing text
-    const newLines = text.split(/\r?\n/);
-    const oldLines = cachedText.split(/\r?\n/);
-    
-    // Check each changed line for structure-affecting keywords
-    const maxLines = Math.max(newLines.length, oldLines.length);
-    for (let i = 0; i < maxLines; i++) {
-        const newLine = newLines[i] || '';
-        const oldLine = oldLines[i] || '';
-        
-        if (newLine !== oldLine) {
-            // Line changed - check if it contains structure-affecting content
-            const combinedLine = (newLine + ' ' + oldLine).toUpperCase();
-            
-            // Check for structure keywords
-            if (/\b(IF|CASE|LOOP|CLASS|MAP|GROUP|QUEUE|RECORD|FILE|INTERFACE|MODULE|EXECUTE|BEGIN|ACCEPT|ROUTINE|CODE|END)\b/.test(combinedLine)) {
-                return true;
-            }
-            
-            // Check for standalone dot (period not part of number/member access)
-            // Pattern: whitespace followed by dot followed by whitespace/comment/EOL
-            if (/\s+\.\s*(!|$)/.test(newLine) || /\s+\.\s*(!|$)/.test(oldLine)) {
-                return true;
-            }
-        }
-    }
-    
-    return false; // No structure-affecting changes detected
-}
 
 // ✅ Handle Content Changes (Recompute Tokens)
 /**
@@ -1728,7 +1678,7 @@ documents.onDidChangeContent(event => {
         // 🔍 CORRECTNESS: Check if this edit affects structure lifecycle
         // If so, clear token cache to force full re-tokenization
         // Otherwise, let incremental tokenization optimize performance
-        const isStructureAffecting = isStructureAffectingEdit(document);
+        const isStructureAffecting = tokenCache.isStructureAffectingEdit(document);
         if (isStructureAffecting) {
             logger.info(`🔄 Structure-affecting edit detected, clearing token cache for: ${uri}`);
             tokenCache.clearTokens(uri);

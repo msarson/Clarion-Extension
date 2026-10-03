@@ -406,6 +406,51 @@ export class SymbolFinderService {
         return symbols;
     }
 
+    /**
+     * #715 step 3 — the procedure symbol a local lookup at `line` searches, built from that
+     * procedure's data sections only: its own declarations (header to CODE) and each of its
+     * ROUTINEs' header and DATA section. That is everything the lookup reads (declarations,
+     * structures, the window, local classes, each routine's locals), so the symbol equals the
+     * whole-document tree's - pinned by ScopedSymbolTree715.test.ts. The whole tree was built
+     * after every edit: about 85 ms on a 60k-line module that is one giant procedure.
+     *
+     * Undefined when the scope cannot be cut out (no procedure token contains the line, or one
+     * without a known extent): the caller then uses the whole-document tree.
+     */
+    private scopedProcedureSymbol(tokens: Token[], document: TextDocument, line: number): ClarionDocumentSymbol | null | undefined {
+        const firstIndexAt = (l: number) => {
+            let lo = 0, hi = tokens.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (tokens[mid].line < l) lo = mid + 1; else hi = mid; }
+            return lo;
+        };
+        const isProcedure = (t: Token) => t.subType === TokenType.GlobalProcedure || t.subType === TokenType.Procedure || t.subType === TokenType.MethodImplementation;
+        let proc: Token | undefined;
+        for (let i = Math.min(firstIndexAt(line + 1), tokens.length) - 1; i >= 0; i--) {
+            if (isProcedure(tokens[i])) { proc = tokens[i]; break; }
+        }
+        if (!proc || proc.finishesAt === undefined || proc.finishesAt < line) return undefined;
+        // Once per procedure per token array, as #711 built the whole tree once per array: the
+        // token cache hands out the same array until the document changes.
+        let memo = this.scopedSymbols.get(tokens);
+        if (!memo) { memo = new Map(); this.scopedSymbols.set(tokens, memo); }
+        const key = `${document.uri}|${proc.line}`;
+        if (memo.has(key)) return this.findProcedureContainingLine(memo.get(key)!, line);
+        const sections: Array<[number, number]> = [[proc.line, proc.executionMarker?.line ?? proc.finishesAt]];
+        const structure = this.tokenCache.getStructure(document);
+        for (const r of structure.findRoutines()) {
+            if (r.line > proc.line && r.line <= proc.finishesAt) sections.push([r.line, r.executionMarker?.line ?? r.line]);
+        }
+        sections.sort((a, b) => a[0] - b[0]);
+        const subset: Token[] = [];
+        for (const [from, to] of sections) {
+            for (let i = firstIndexAt(from); i < tokens.length && tokens[i].line <= to; i++) subset.push(tokens[i]);
+        }
+        const symbols = this.symbolProvider.provideDocumentSymbols(subset, document.uri, document);
+        memo.set(key, symbols);
+        return this.findProcedureContainingLine(symbols, line);
+    }
+    private readonly scopedSymbols = new WeakMap<Token[], Map<string, ClarionDocumentSymbol[]>>();
+
     findLocalVariable(
         word: string,
         tokens: Token[],
@@ -468,11 +513,12 @@ export class SymbolFinderService {
             }
         }
 
-        // Get the symbol tree (pass document for better results)
-        const symbols = this.symbolTree(tokens, document);
-
-        // Find the procedure/method symbol containing this scope
-        const procedureSymbol = this.findProcedureContainingLine(symbols, scopeToken.line);
+        // Find the procedure/method symbol containing this scope: built from that procedure's
+        // data sections (#715), or from the whole-document tree when it cannot be cut out.
+        const scoped = this.scopedProcedureSymbol(tokens, document, scopeToken.line);
+        const procedureSymbol = scoped !== undefined
+            ? scoped
+            : this.findProcedureContainingLine(this.symbolTree(tokens, document), scopeToken.line);
         if (!procedureSymbol) {
             logger.info(`❌ No procedure symbol found for scope at line ${scopeToken.line} — falling back to token scan`);
         }

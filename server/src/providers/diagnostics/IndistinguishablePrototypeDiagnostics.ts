@@ -69,18 +69,7 @@ export function validateIndistinguishablePrototypes(
     const lines = document.getText().split('\n');
     const diagnostics: Diagnostic[] = [];
 
-    for (const container of containers) {
-        const start = container.line;
-        const end = container.finishesAt!;
-
-        const memberDecls = tokens.filter(t =>
-            t.line > start && t.line < end &&
-            TokenHelper.isProcedureOrFunction(t) &&
-            t.subType !== undefined && DECL_SUBTYPES.has(t.subType) &&
-            !!t.label &&
-            isImmediatelyContainedBy(t, container, containers)
-        );
-
+    for (const [container, memberDecls] of declsByContainer(tokens, containers)) {
         const byName = new Map<string, Token[]>();
         for (const decl of memberDecls) {
             const key = decl.label!.toLowerCase();
@@ -122,21 +111,29 @@ export function validateIndistinguishablePrototypes(
 }
 
 /**
- * True when `decl`'s nearest enclosing structure-container is `container`.
- * Prevents nested-container leakage (a CLASS inside a MAP shouldn't contribute
- * methods to the MAP's name-group).
+ * Each container's member declarations: those whose nearest enclosing container
+ * (the latest-starting one whose lines strictly enclose the declaration's) it is,
+ * so a CLASS inside a MAP doesn't contribute methods to the MAP's name-group.
+ *
+ * #715 — one sweep in line order with a stack of open containers. It filtered
+ * every token once per container, which on a generated module (a local CLASS in
+ * every procedure) took over a second after every edit.
  */
-function isImmediatelyContainedBy(decl: Token, container: Token, allContainers: Token[]): boolean {
-    let nearest: Token | null = null;
-    for (const c of allContainers) {
-        const end = c.finishesAt;
-        if (typeof end !== 'number') continue;
-        if (decl.line <= c.line || decl.line >= end) continue;
-        if (!nearest || c.line > nearest.line) {
-            nearest = c;
-        }
+function declsByContainer(tokens: Token[], containers: Token[]): Map<Token, Token[]> {
+    const result = new Map<Token, Token[]>(containers.map(c => [c, []]));
+    const byStart = [...containers].sort((a, b) => a.line - b.line);
+    const open: Token[] = [];
+    let next = 0;
+    for (const t of tokens) {
+        if (!(TokenHelper.isProcedureOrFunction(t) &&
+            t.subType !== undefined && DECL_SUBTYPES.has(t.subType) && !!t.label)) continue;
+        while (next < byStart.length && byStart[next].line < t.line) open.push(byStart[next++]);
+        // Containers that end at or before this line no longer enclose it. One left
+        // under a still-open later container never wins: the later one starts later.
+        while (open.length > 0 && open[open.length - 1].finishesAt! <= t.line) open.pop();
+        if (open.length > 0) result.get(open[open.length - 1])!.push(t);
     }
-    return nearest === container;
+    return result;
 }
 
 function makeDiagnostic(decl: Token, message: string): Diagnostic {

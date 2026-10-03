@@ -9,9 +9,12 @@
  *
  *   node scripts/perf/hover-bench.js [--sizes=10000,30000,60000] [--n=40] [--edits=15] [--bursts=8]
  *                                    [--server=<path to server.js>] [--clarion=<install root>] [--json=out.json]
- *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"]
+ *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged] [--log=<file>]
+ *                                    [--shape=giant] [--edit=near] [--pauses=N] [--pause-ms=650]
  *
  * --detail prints each unchanged hover in order and by word kind (a slow kind vs a slow first hover).
+ * --ranged sends each edit as a one-character ranged didChange (a space typed at the end of a line
+ * in the middle of the module), as a client using TextDocumentSyncKind.Incremental does (#715).
  * --cpu-prof writes a V8 profile of the server; summarise it with scripts/perf/cpuprofile-summary.js.
  *
  * `npm run compile` first when --server is the default (this repo's out/).
@@ -31,6 +34,11 @@ const EDITS = Number(arg('edits', 15));
 const BURSTS = Number(arg('bursts', 8));
 const CLARION = arg('clarion', process.env.CLARION_ROOT || 'C:\\Clarion\\Clarion12-12.0.14204');
 const CPU_PROF = arg('cpu-prof', '');
+const SHAPE = arg('shape', 'procedures'); // #715: 'giant' = one procedure that is nearly the whole module
+const EDIT = arg('edit', 'end');         // #715: 'near' = a comment typed on the line above each hovered word
+const PAUSES = Number(arg('pauses', 0));     // #715: edits followed by a pause, then a hover during re-validation
+const PAUSE_MS = Number(arg('pause-ms', 650));
+const LOG = arg('log', ''); // #715: append the server's log messages here, with the performance channel on
 
 const toUri = p => 'file:///' + p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => d.toLowerCase() + '%3A');
 
@@ -63,6 +71,7 @@ function startServer() {
                 // server -> client request: configuration gets defaults, everything else null
                 send({ id: msg.id, result: msg.method === 'workspace/configuration' ? (msg.params.items || []).map(() => null) : null });
             } else {
+                if (LOG && msg.method === 'window/logMessage') fs.appendFileSync(LOG, msg.params.message + '\n');
                 for (let i = waiters.length - 1; i >= 0; i--) if (waiters[i].method === msg.method && waiters[i].test(msg.params)) waiters.splice(i, 1)[0].resolve(msg.params);
             }
         }
@@ -83,9 +92,9 @@ function positions(text, n) {
     let inCode = false;
     lines.forEach((l, i) => {
         if (/^\S+\s+PROCEDURE\b/.test(l)) inCode = false;
-        if (/^\s+CODE\b/.test(l)) { inCode = true; return; }
+        if (/^\s+CODE\b/.test(l) || /^\S+\s+ROUTINE\b/.test(l)) { inCode = true; return; }
         if (!inCode) return;
-        const m = /\b(Loc:\w+|PQ\d+:\w+|PG\d+:\w+|Proc\d+)\b/.exec(l);
+        const m = /\b(Loc:\w+|Rpt:\w+|PQ\d+:\w+|PG\d+:\w+|Proc\d+)\b/.exec(l);
         if (m) cands.push({ line: i, character: m.index + Math.floor(m[0].length / 2), kind: m[1].replace(/\d+/g, '').replace(/:\w+$/, ':') });
     });
     const out = [];
@@ -99,9 +108,9 @@ const stats = xs => xs.length === 0
     : { n: xs.length, p50: Math.round(pct(xs, 0.5)), p95: Math.round(pct(xs, 0.95)), max: Math.round(Math.max(...xs)) };
 
 async function benchSize(size) {
-    const dir = path.join(os.tmpdir(), `clarion-synth-${size}`);
+    const dir = path.join(os.tmpdir(), `clarion-synth-${SHAPE}-${size}`);
     fs.rmSync(dir, { recursive: true, force: true });
-    const sol = writeSyntheticSolution(dir, size);
+    const sol = writeSyntheticSolution(dir, size, { shape: SHAPE });
     const text = fs.readFileSync(sol.module, 'utf8');
     const uri = toUri(sol.module);
     const s = startServer();
@@ -109,6 +118,7 @@ async function benchSize(size) {
     await s.request('initialize', {
         processId: process.pid, rootUri: toUri(dir), workspaceFolders: [{ uri: toUri(dir), name: 'synth' }],
         capabilities: { textDocument: { hover: { contentFormat: ['markdown', 'plaintext'] } }, workspace: { configuration: true } },
+        ...(LOG ? { initializationOptions: { settings: { log: { performance: { enabled: true } } } } } : {}),
     });
     s.notify('initialized', {});
     const ready = s.waitFor('clarion/solutionReady');
@@ -139,19 +149,55 @@ async function benchSize(size) {
     }
 
     let version = 1;
-    const change = () => { version++; s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: `${text}! edit ${version}\r\n` }] }); };
+    const RANGED = process.argv.includes('--ranged') || EDIT === 'near';
+    const lineText = text.split(/\r?\n/);
+    const change = target => {
+        version++;
+        if (EDIT === 'near') {
+            // #715 — as Clarion Assistant's -EditMode near: a comment typed at the end of the line
+            // above the word about to be hovered, in the same procedure. Edits accumulate.
+            const line = Math.max(0, target.line - 1);
+            const at = { line, character: lineText[line].length };
+            const add = ` !e${version}`;
+            lineText[line] += add;
+            s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ range: { start: at, end: at }, text: add }] });
+            return;
+        }
+        if (!RANGED) { s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: `${text}! edit ${version}\r\n` }] }); return; }
+        // #715 — one character typed at the end of a line, a different line each time.
+        const line = pos[(version * 5 + 3) % pos.length].line;
+        const at = { line, character: lineText[line].length };
+        lineText[line] += ' ';
+        s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ range: { start: at, end: at }, text: ' ' }] });
+    };
 
     const edited = [];
-    for (let k = 0; k < EDITS; k++) { change(); edited.push(await hover(pos[(k * 7) % pos.length])); }
+    for (let k = 0; k < EDITS; k++) { const p = pos[(k * 7) % pos.length]; change(p); edited.push(await hover(p)); }
+    if (process.argv.includes('--detail')) console.log('  edited in order:', edited.map(x => Math.round(x)).join(' '));
 
     const burst = [];
-    for (let k = 0; k < BURSTS; k++) { for (let j = 0; j < 5; j++) change(); burst.push(await hover(pos[(k * 11) % pos.length])); }
+    for (let k = 0; k < BURSTS; k++) { const p = pos[(k * 11) % pos.length]; for (let j = 0; j < 5; j++) change(p); burst.push(await hover(p)); }
+
+    // #715 step 2 — an edit, a pause long enough for the re-validation to start (the server waits
+    // 500 ms after the last change), then a hover that lands while it runs; and how long after the
+    // edit that version's diagnostics are complete (clarion/diagnosticsStatus).
+    const paused = [], complete = [];
+    for (let k = 0; k < PAUSES; k++) {
+        const p = pos[(k * 13 + 5) % pos.length];
+        const target = version + 1;
+        const done = s.waitFor('clarion/diagnosticsStatus', q => q && q.uri === uri && q.version === target && q.state === 'complete', 60000);
+        const t0 = performance.now();
+        change(p);
+        await new Promise(r => setTimeout(r, PAUSE_MS));
+        paused.push(await hover(p));
+        await done.then(() => complete.push(performance.now() - t0), () => complete.push(60000));
+    }
 
     await Promise.race([s.request('shutdown', null), new Promise(r => setTimeout(r, 15000))]);
     s.notify('exit');
     await new Promise(r => setTimeout(r, 1500));
     s.child.kill();
-    return { size: sol.lines, procedures: sol.procedures, settleMs, unchanged: stats(unchanged), edited: stats(edited), burst: stats(burst) };
+    return { size: sol.lines, procedures: sol.procedures, settleMs, unchanged: stats(unchanged), edited: stats(edited), burst: stats(burst), paused: stats(paused), complete: stats(complete) };
 }
 
 (async () => {
@@ -162,7 +208,8 @@ async function benchSize(size) {
         results.push(r);
         console.log(`${String(r.size).padStart(6)} lines | unchanged p50 ${r.unchanged.p50} p95 ${r.unchanged.p95} max ${r.unchanged.max}` +
             ` | edited p50 ${r.edited.p50} p95 ${r.edited.p95} max ${r.edited.max}` +
-            ` | burst p50 ${r.burst.p50} p95 ${r.burst.p95} max ${r.burst.max}  (ms)`);
+            ` | burst p50 ${r.burst.p50} p95 ${r.burst.p95} max ${r.burst.max}` +
+            (r.paused.n ? ` | during re-validation p50 ${r.paused.p50} p95 ${r.paused.p95} max ${r.paused.max} | diagnostics complete p50 ${r.complete.p50} p95 ${r.complete.p95} max ${r.complete.max}` : "") + "  (ms)");
     }
     const json = arg('json', '');
     if (json) fs.writeFileSync(json, JSON.stringify({ server: SERVER, when: new Date().toISOString(), results }, null, 2));
