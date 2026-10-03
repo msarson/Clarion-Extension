@@ -9,9 +9,11 @@
  *
  *   node scripts/perf/hover-bench.js [--sizes=10000,30000,60000] [--n=40] [--edits=15] [--bursts=8]
  *                                    [--server=<path to server.js>] [--clarion=<install root>] [--json=out.json]
- *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"]
+ *                                    [--detail] [--cpu-prof=<dir>] [--node-flags="--no-turbo-inlining"] [--ranged]
  *
  * --detail prints each unchanged hover in order and by word kind (a slow kind vs a slow first hover).
+ * --ranged sends each edit as a one-character ranged didChange (a space typed at the end of a line
+ * in the middle of the module), as a client using TextDocumentSyncKind.Incremental does (#715).
  * --cpu-prof writes a V8 profile of the server; summarise it with scripts/perf/cpuprofile-summary.js.
  *
  * `npm run compile` first when --server is the default (this repo's out/).
@@ -139,7 +141,17 @@ async function benchSize(size) {
     }
 
     let version = 1;
-    const change = () => { version++; s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: `${text}! edit ${version}\r\n` }] }); };
+    const RANGED = process.argv.includes('--ranged');
+    const lineText = text.split(/\r?\n/);
+    const change = () => {
+        version++;
+        if (!RANGED) { s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: `${text}! edit ${version}\r\n` }] }); return; }
+        // #715 — one character typed at the end of a line, a different line each time.
+        const line = pos[(version * 5 + 3) % pos.length].line;
+        const at = { line, character: lineText[line].length };
+        lineText[line] += ' ';
+        s.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ range: { start: at, end: at }, text: ' ' }] });
+    };
 
     const edited = [];
     for (let k = 0; k < EDITS; k++) { change(); edited.push(await hover(pos[(k * 7) % pos.length])); }
