@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'async_hooks';
+import { performance } from 'perf_hooks';
 
 /**
  * #715 item 1 — interactive requests run ahead of background validation.
@@ -53,20 +54,29 @@ export function beginInteractive(): () => void {
  */
 export async function yieldForInteractive(): Promise<void> {
     if (!isBackground()) return;
-    const now = Date.now();
-    if (inFlight > 0) {
-        const remaining = lastBackgroundSlice + BACKGROUND_STARVATION_CAP_MS - now;
-        if (remaining > 0) {
-            await new Promise<void>(resolve => {
-                let settled = false;
-                const wake = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
-                const timer = setTimeout(wake, remaining);
-                idleWaiters.push(wake);
-            });
-        }
+    // Wait in short steps while a request is in flight AND busy. A request in flight on an idle
+    // loop is waiting for something - often work background validation started, such as a shared
+    // index - so holding background back would only make it wait longer: measured on a real
+    // module, a quarter of steady-state hovers lost ~130 ms that way before this check.
+    while (inFlight > 0) {
+        const remaining = lastBackgroundSlice + BACKGROUND_STARVATION_CAP_MS - Date.now();
+        if (remaining <= 0) break;
+        const before = performance.eventLoopUtilization();
+        await new Promise<void>(resolve => {
+            let settled = false;
+            const wake = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
+            const timer = setTimeout(wake, Math.min(BUSY_CHECK_MS, remaining));
+            idleWaiters.push(wake);
+        });
+        if (inFlight > 0 && performance.eventLoopUtilization(before).utilization < BUSY_UTILIZATION) break;
     }
     lastBackgroundSlice = Date.now();
 }
+
+/** How often background re-checks whether the request in flight is still using the loop. */
+const BUSY_CHECK_MS = 10;
+/** Below this share of the last step spent running code, the loop counts as idle. */
+const BUSY_UTILIZATION = 0.5;
 
 /** Test seam: forget any in-flight count and slice time left by an earlier test. */
 export function resetInteractivePriorityForTests(): void {
