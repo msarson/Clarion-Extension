@@ -60,6 +60,9 @@ export interface ClassifierContext {
 
 const PICTURE_FORMAT_PATTERN = /^@[a-z]/i;
 
+/** EQUATE name → value per token array (see buildEquateValueMap). */
+const equateValueMaps = new WeakMap<Token[], { length: number; map: Map<string, string> }>();
+
 /**
  * Pure-function classifier for call-site arguments. Walks the token stream
  * starting from a call's name token, locates the `(...)` argument list, and
@@ -502,8 +505,16 @@ export class CallSiteArgumentClassifier {
     // We derive that type from the raw value text captured on the declaration token
     // (`Token.dataValue`), so it works purely from the token stream (no resolver).
 
-    /** name(upper) → raw parenthesised EQUATE value text (e.g. '100', "'hi'", '@P##'). */
+    /**
+     * name(upper) → raw parenthesised EQUATE value text (e.g. '100', "'hi'", '@P##').
+     * Built once per token array: the by-reference diagnostic and the inlay hints classify
+     * every call in the document, and rebuilt per call this walked every token once per
+     * call site. A cached array is never mutated after it is handed out; the length check
+     * catches one that grew anyway.
+     */
     private buildEquateValueMap(tokens: Token[]): Map<string, string> {
+        const cached = equateValueMaps.get(tokens);
+        if (cached && cached.length === tokens.length) return cached.map;
         const map = new Map<string, string>();
         for (const t of tokens) {
             if (t.dataType === 'EQUATE' && t.dataValue !== undefined && t.value) {
@@ -511,6 +522,7 @@ export class CallSiteArgumentClassifier {
                 if (!map.has(key)) map.set(key, t.dataValue); // first declaration wins
             }
         }
+        equateValueMaps.set(tokens, { length: tokens.length, map });
         return map;
     }
 
