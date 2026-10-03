@@ -60,6 +60,20 @@ suite('#715 interactive requests run ahead of background validation', () => {
         assert.ok(waited < 80, `background waited ${waited} ms behind an idle request`);
     });
 
+    // A request waiting on background work (an index background started) would otherwise make
+    // background re-check every 10 ms (16 ms with Windows timers) and so slow the very work it waits
+    // for: measured on a real module, hovers during a module's opening check went from ~64 to ~180 ms.
+    test('once a request in flight is found waiting, background stops checking until another request begins', async () => {
+        await runAsBackground(async () => { await yieldForInteractive(); });
+        const done = beginInteractive(); // in flight, idle: waiting for something
+        await runAsBackground(async () => { await yieldForInteractive(); }); // finds it idle once
+        const t0 = Date.now();
+        await runAsBackground(async () => { for (let k = 0; k < 10; k++) await yieldForInteractive(); });
+        const tenYields = Date.now() - t0;
+        done();
+        assert.ok(tenYields < 30, `ten yields behind the same waiting request took ${tenYields} ms`);
+    });
+
     test('the starvation cap: background still gets a slice every ~250 ms under a steady stream of busy requests', async () => {
         let stop = false;
         const stream = (async () => { while (!stop) { const req = busyRequest(); await sleep(20); req.state.stop = true; await req.finished; } })();

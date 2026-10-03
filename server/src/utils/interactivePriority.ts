@@ -23,6 +23,9 @@ const background = new AsyncLocalStorage<boolean>();
 let inFlight = 0;
 let idleWaiters: Array<() => void> = [];
 let lastBackgroundSlice = 0;
+/** Bumped by every request that begins; `waitingGeneration` is the one background found waiting. */
+let generation = 0;
+let waitingGeneration = -1;
 
 export function runAsBackground<T>(work: () => Promise<T>): Promise<T> {
     return background.run(true, work);
@@ -35,6 +38,7 @@ export function isBackground(): boolean {
 /** Marks an interactive request in flight; call the returned function when it has answered. */
 export function beginInteractive(): () => void {
     inFlight++;
+    generation++;
     let finished = false;
     return () => {
         if (finished) return;
@@ -57,8 +61,10 @@ export async function yieldForInteractive(): Promise<void> {
     // Wait in short steps while a request is in flight AND busy. A request in flight on an idle
     // loop is waiting for something - often work background validation started, such as a shared
     // index - so holding background back would only make it wait longer: measured on a real
-    // module, a quarter of steady-state hovers lost ~130 ms that way before this check.
-    while (inFlight > 0) {
+    // module, a quarter of steady-state hovers lost ~130 ms that way before this check. Once a
+    // step finds the loop idle, background stops checking until another request begins: checking
+    // every step (16 ms on Windows timers) slowed the very work the request was waiting for.
+    while (inFlight > 0 && waitingGeneration !== generation) {
         const remaining = lastBackgroundSlice + BACKGROUND_STARVATION_CAP_MS - Date.now();
         if (remaining <= 0) break;
         const before = performance.eventLoopUtilization();
@@ -68,7 +74,7 @@ export async function yieldForInteractive(): Promise<void> {
             const timer = setTimeout(wake, Math.min(BUSY_CHECK_MS, remaining));
             idleWaiters.push(wake);
         });
-        if (inFlight > 0 && performance.eventLoopUtilization(before).utilization < BUSY_UTILIZATION) break;
+        if (inFlight > 0 && performance.eventLoopUtilization(before).utilization < BUSY_UTILIZATION) { waitingGeneration = generation; break; }
     }
     lastBackgroundSlice = Date.now();
 }
@@ -83,4 +89,6 @@ export function resetInteractivePriorityForTests(): void {
     inFlight = 0;
     idleWaiters = [];
     lastBackgroundSlice = 0;
+    generation = 0;
+    waitingGeneration = -1;
 }
