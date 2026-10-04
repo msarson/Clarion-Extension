@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.8**.
+Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.9**.
 
 Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the editor and Solution View, or the keyboard shortcuts listed below. In the palette every command is grouped under the **`Clarion:`** category, so typing `clarion` lists all of them — the tables below give the underlying command IDs rather than the palette labels. Settings are documented separately in **[Settings Reference](settings.md)**.
 
