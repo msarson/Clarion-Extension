@@ -125,4 +125,27 @@ suite('#715 diagnostics status ordering while the re-validation yields to hovers
         assert.ok(log.some(e => e.kind === 'status' && e.version === b && e.state === 'complete'), describe());
         assert.ok(log.some(e => e.kind === 'status' && e.version === c && e.state === 'complete'), describe());
     });
+
+    // #715 item 1: background validation waits while a request is in flight, but gets a slice at
+    // least every ~250 ms. Under a steady stream of completion requests (each sent as soon as the
+    // last one answered) the re-validation must still finish, within a bound, in order.
+    test('a re-validation finishes under a steady stream of completion requests', async () => {
+        const v = edit(codeLine(3));
+        const t0 = Date.now();
+        const vComplete = server.waitFor('clarion/diagnosticsStatus', p => p.uri === uri && p.version === v && p.state === 'complete', 60000);
+        let done = false, completions = 0;
+        vComplete.then(() => { done = true; }, () => { done = true; });
+        while (!done) {
+            await server.request('textDocument/completion', { textDocument: { uri }, position: { line: hoverLine(3), character: 6 } });
+            completions++;
+        }
+        await vComplete;
+        const took = Date.now() - t0;
+        assert.ok(completions > 0, 'completions were answered while the re-validation ran');
+        assert.ok(took < 20000, `diagnostics took ${took} ms to complete under the completion stream`);
+        const log = events().filter(e => e.version >= v);
+        const completeAt = log.findIndex(e => e.kind === 'status' && e.version === v && e.state === 'complete');
+        assert.ok(log.slice(0, completeAt).some(e => e.kind === 'publish' && e.version === v), 'complete after its publish');
+        assert.ok(!log.slice(completeAt + 1).some(e => e.kind === 'publish' && e.version === v), 'nothing published after complete');
+    });
 });

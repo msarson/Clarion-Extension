@@ -1,5 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic } from 'vscode-languageserver/node';
+import { yieldToRequests } from '../utils/cooperativeScan';
 import { ClarionTokenizer, Token } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
@@ -89,7 +90,6 @@ export class DiagnosticProvider {
         isStale: () => boolean
     ): Promise<Diagnostic[] | null> {
         const perfStart = performance.now();
-        const yieldToRequests = () => new Promise<void>(resolve => setImmediate(resolve));
         await yieldToRequests();
         if (isStale()) return null;
         const structure = TokenCache.getInstance().getStructure(document);

@@ -214,6 +214,38 @@ function rvdRevalidateMemoByMtime(
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
+/**
+ * #715 item 2 — a hash of the document's declarations: every line outside a procedure's CODE
+ * section (module data, MAPs, classes, procedure headers and their data), plus each ROUTINE's
+ * header and DATA section, which sit inside their procedure's CODE section. A receiver's type and
+ * a class's members are read only from there (and from other files, which the epoch and mtime
+ * checks cover), so two versions with the same declarations share the RVD memos, whatever
+ * changed in their code - including lines added or removed there.
+ */
+function rvdDeclarationsHash(tokens: Token[], docLines: string[]): { hash: number; length: number } {
+    const inCode = new Uint8Array(docLines.length);
+    for (const t of tokens) {
+        if (!t.executionMarker || t.type === TokenType.Routine || !TokenHelper.isProcedureOrFunction(t)) continue;
+        if (t.subType === TokenType.MethodDeclaration || t.subType === TokenType.InterfaceMethod) continue;
+        const end = Math.min(t.finishesAt ?? docLines.length - 1, docLines.length - 1);
+        for (let l = t.executionMarker.line + 1; l <= end; l++) inCode[l] = 1;
+    }
+    for (const t of tokens) {
+        if (t.type !== TokenType.Routine && t.subType !== TokenType.Routine) continue;
+        const end = Math.min(t.executionMarker?.line ?? t.line, docLines.length - 1);
+        for (let l = t.line; l <= end; l++) inCode[l] = 0;
+    }
+    let hash = 5381, length = 0;
+    for (let l = 0; l < docLines.length; l++) {
+        if (inCode[l]) continue;
+        const line = docLines[l];
+        for (let i = 0; i < line.length; i++) hash = ((hash * 33) ^ line.charCodeAt(i)) >>> 0;
+        hash = ((hash * 33) ^ 10) >>> 0;
+        length += line.length + 1;
+    }
+    return { hash, length };
+}
+
 function getCodeBlockRanges(
     tokens: Token[]
 ): { start: number; end: number; selfClassName: string | null }[] {
@@ -1021,21 +1053,19 @@ export async function validateDiscardedReturnValues(
         }
         rvdMemoEpoch = rvdEpochNow;
     }
-    // Content is part of the identity (the #340/#344 lesson) — same uri+version
-    // with different text (test fixtures, unsaved flows) must never share memos.
-    const rvdText = document.getText();
-    let rvdHash = 5381;
-    for (let i = 0; i < rvdText.length; i += 127) {
-        rvdHash = ((rvdHash * 33) ^ rvdText.charCodeAt(i)) >>> 0;
-    }
-    const rvdDocKey = `${document.uri.toLowerCase()}|${document.version}|${rvdText.length}|${rvdHash}`;
+    // Content is part of the identity (the #340/#344 lesson) — different text (test fixtures,
+    // unsaved flows) must never share memos. #715 item 2: but only the DECLARATIONS - what a
+    // receiver's type and a class's members are read from. Keyed by version, every edit re-resolved
+    // every receiver (2.2 s a pass on a 61k-line module); an edit to code alone now reuses them.
+    const { hash: rvdHash, length: declLength } = rvdDeclarationsHash(tokens, docLines);
+    const rvdDocKey = `${document.uri.toLowerCase()}|decl|${declLength}|${rvdHash}`;
     // #358: the open doc's own FS path, so class members enumerated from live tokens are
     // excluded from the mtime fingerprint (their validity is pinned by rvdDocKey above).
     const openDocPathLower = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\').toLowerCase();
     // #358-cold: on the first pass for this doc content, seed the memos from the
     // persisted envelope — a restart then skips the multi-second cold enumeration
     // (thisStartup ~3.2s measured) instead of re-walking the include universe.
-    const rvdDiskSignature = `${RVD_RESOLUTION_RULES}|${rvdText.length}|${rvdHash}`;
+    const rvdDiskSignature = `${RVD_RESOLUTION_RULES}|decl|${declLength}|${rvdHash}`;
     await seedRvdMemosFromDisk(rvdDocKey, openDocPathLower, rvdDiskSignature);
     const typeMemo = {
         get: (k: string) => rvdTypeMemo.get(`${rvdDocKey}|${k}`),
