@@ -89,15 +89,15 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.7 (2026-10-03)
+### 1.0.8 (2026-10-04)
 
-A release about editing large generated modules.
+A follow-up to 1.0.7 for large generated modules.
 
-- Fixed: after an edit, the extension could read the module wrongly until the file was reopened — a structure whose END was removed kept its old extent, a new PROCEDURE line or a period in column 0 went unnoticed — so folding, the outline, hover and diagnostics worked from the wrong structure.
-- The hover after an edit is much quicker on large modules, including ones that are a single giant procedure: on a 61,000-line generated module the hover just after typing nearby went from about half a second to about 0.21 s.
-- A hover that arrives while the module is being re-checked no longer waits for the whole re-check, and pressing Enter or hovering a procedure call after an edit no longer re-reads the whole file.
+- Diagnostics after an edit are ready in about a third of the time on a large module: on a 61,000-line generated module, about 2.3 s instead of about 7 s on the same machine.
+- Fixed: a discarded-return-value warning could keep judging a call by a variable's old type after its declaration changed.
+- Hover, completion and Go to Definition run ahead of the background check that follows an edit or opens a module, so the occasional multi-second hover is gone.
 
-**Earlier:** 1.0.6 (2026-10-03) made hover, Go to Definition, Go to Implementation, Find All References and completion agree on what a name is (`SELF`, `PARENT`, a procedure's own classes, chained members), had Build and Run follow the configuration actually in force, and kept hover fast in very large modules; 1.0.5 (2026-09-18) resolved names the extension could not in a real generated application — a prefix past eight characters, a prototype an INCLUDE carries into a MAP, the scope a program's MAP actually has — and settled what the compiler does with whitespace around the member-access dot. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.7 (2026-10-03) fixed the extension reading a module wrongly after some edits and made the hover after an edit much quicker on large modules, including ones that are a single giant procedure; 1.0.6 (2026-10-03) made hover, Go to Definition, Go to Implementation, Find All References and completion agree on what a name is, had Build and Run follow the configuration actually in force, and kept hover fast in very large modules. [Full changelog](CHANGELOG.md).
 
 ---
 
