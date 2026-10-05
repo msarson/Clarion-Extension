@@ -10,7 +10,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Hover
 
-- **Hover on a global no longer shows a MAP procedure whose name merely starts with it.** From a member module, hovering a global object or variable such as `Log` in `Log.Write(...)` showed a "Global Procedure" card for an unrelated prototype like `LogViewer` declared in the program's MAP, because the MAP lookup matched any prototype that started with the hovered word. It now matches the whole name, so the global's own card appears; overloaded procedures still resolve.
+- **Hover on a global no longer shows a MAP procedure whose name merely starts with it.** From a member module, hovering a global object or variable such as `Log` in `Log.Write(...)` showed a "Global Procedure" card for an unrelated prototype like `LogViewer` declared in the program's MAP, because the MAP lookup matched any prototype that started with the hovered word. It now matches the whole name, so the global's own card appears; overloaded procedures still resolve. [#716](https://github.com/msarson/Clarion-Extension/issues/716)
 
 ---
 
