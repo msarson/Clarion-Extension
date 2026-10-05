@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.9] - Unreleased
 
+#### Navigation and diagnostics
+
+- **An OMIT or COMPILE terminator that starts with END no longer closes the structure around it.** With `COMPILE('END***',_WIDTH32_)` inside a MAP's MODULE, the terminator line `END***` was read as an END, so the MODULE and then the MAP closed early. Every global declared after the MAP was then invisible to hover and Go to Definition, and could be flagged as not declared. The terminator text on its line is now ignored, as the compiler ignores it; the rest of the line is still read. [#718](https://github.com/msarson/Clarion-Extension/issues/718)
+
 ---
 
 ### [1.0.8] - 2026-10-04
