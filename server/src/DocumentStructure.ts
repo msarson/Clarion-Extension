@@ -10,6 +10,7 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 import { firstTokenAfterLine } from './utils/TokenLineIndex';
+import { OmitCompileDetector } from './utils/OmitCompileDetector';
 
 /**
  * The two structure keywords that can open a block inside a MAP body. Matched
@@ -645,11 +646,68 @@ export class DocumentStructure {
         return ControlService.getInstance().isControl(keyword);
     }
 
+    /**
+     * Which lines are the body of an unconditional OMIT block (after the directive, before the
+     * terminator line), as a per-line flag; undefined when there are none or no source lines were
+     * given. Same blocks as OmitCompileDetector: a conditional OMIT/COMPILE cannot be evaluated
+     * here and stays live, and the terminator line stays live (its other text is code).
+     */
+    private omittedLines(): Uint8Array | undefined {
+        const lines = this.lines;
+        if (!lines || !this.tokens.some(t => t.type === TokenType.Directive && t.value.toUpperCase() === 'OMIT')) return undefined;
+        const blocks = OmitCompileDetector.findDirectiveBlocksInLines(this.tokens, lines.length, l => lines[l]);
+        let flags: Uint8Array | undefined;
+        for (const block of blocks) {
+            if (block.type !== 'OMIT') continue;
+            const end = block.endLine ?? lines.length;
+            for (let line = block.startLine + 1; line < end; line++) {
+                (flags ??= new Uint8Array(lines.length))[line] = 1;
+            }
+        }
+        return flags;
+    }
+
+    /**
+     * Inside an OMIT body, the structures open when the body began: an END or WHILE/UNTIL in the
+     * body cannot close them. 0 outside an OMIT body.
+     */
+    private omitFloor = 0;
+
+    /**
+     * Leaves an OMIT body: a structure it opened and left open is closed with the body, on its
+     * last line, and the floor is lifted.
+     */
+    private leaveOmitBody(lastLine: number, mapDepth: number): void {
+        while (this.structureStack.length > this.omitFloor) this.structureStack.pop()!.finishesAt = lastLine;
+        this.insideClassOrInterfaceOrMapDepth = mapDepth;
+        this.omitFloor = 0;
+    }
+
     public process(): void {
         // Issue #233: any cached scope resolver is stale once we re-derive structure.
         this._scopeResolver = undefined;
+        const omitted = this.omittedLines();
+        this.omitFloor = 0;
+        // The MAP/CLASS depth when the current OMIT body began; undefined outside one.
+        let mapDepthAtOmit: number | undefined;
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
+
+            // An unconditional OMIT body is not code: its structures and ENDs pair with each other
+            // and never with the code around it. Compiler-verified (Clarion 12): an IF opened in an
+            // OMIT body whose `.` sits just past the terminator line leaves that `.` to the IF
+            // around the block. Read as code, the omitted IF took the `.`, the outer IF took the
+            // next END, and every structure above it closed one END late (an ACCEPT never closed,
+            // so every CYCLE in it was "outside of a LOOP or ACCEPT"). The structures around the
+            // body stay on the stack, so a prototype omitted inside a MAP still reads as one.
+            const inOmit = omitted !== undefined && omitted[token.line] === 1;
+            if (inOmit && mapDepthAtOmit === undefined) {
+                mapDepthAtOmit = this.insideClassOrInterfaceOrMapDepth;
+                this.omitFloor = this.structureStack.length;
+            } else if (!inOmit && mapDepthAtOmit !== undefined) {
+                this.leaveOmitBody(this.tokens[i - 1].line, mapDepthAtOmit);
+                mapDepthAtOmit = undefined;
+            }
 
             // ✅ Always prioritize structure tokens first.
             // TokenType.Procedure is included for idempotency: handleProcedureToken
@@ -718,6 +776,9 @@ export class DocumentStructure {
                 }
             }
             
+        }
+        if (mapDepthAtOmit !== undefined) {
+            this.leaveOmitBody(this.tokens[this.tokens.length - 1].line, mapDepthAtOmit);
         }
         
         // Resolve file references for all tokens that have them
@@ -2012,7 +2073,7 @@ export class DocumentStructure {
         // wrong loop, treats the header condition as a terminator, and closes the
         // inner loop on its own line. (#178)
         let loopIndex = -1;
-        for (let i = this.structureStack.length - 1; i >= 0; i--) {
+        for (let i = this.structureStack.length - 1; i >= this.omitFloor; i--) {
             if (this.structureStack[i].value.toUpperCase() === 'LOOP') {
                 loopIndex = i;
                 break;
@@ -2090,7 +2151,8 @@ export class DocumentStructure {
         
         // This END/period terminates a structure from the stack
         // Simply pop the last opened structure - Clarion uses explicit END markers, not indentation
-        const lastStructure = this.structureStack.pop();
+        // In an OMIT body, an END with nothing of the body's own left to close closes nothing.
+        const lastStructure = this.structureStack.length > this.omitFloor ? this.structureStack.pop() : undefined;
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
             
