@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.9] - Unreleased
 
+#### Diagnostics
+
+- **Code inside an OMIT block no longer pairs with the code around it.** An IF opened in an OMIT block, whose `.` comes just after the terminator line, took that `.` as its own. Each structure above it then closed one END late. In a generated module this left an ACCEPT unclosed: every CYCLE in it was reported as "used outside of a LOOP or ACCEPT structure" (over 160 of them), and two CASE statements were reported as not terminated, on code that compiles. The body of an unconditional OMIT block is now matched on its own, as the compiler skips it. A conditional OMIT or COMPILE still counts as live code. [#720](https://github.com/msarson/Clarion-Extension/issues/720)
+
 ---
 
 ### [1.0.8] - 2026-10-04

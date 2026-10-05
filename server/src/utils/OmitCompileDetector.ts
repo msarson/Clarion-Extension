@@ -81,6 +81,17 @@ export class OmitCompileDetector {
      * 🚀 PERF: Make this public so callers can compute once and reuse
      */
     public static findDirectiveBlocks(tokens: Token[], document: TextDocument): DirectiveBlock[] {
+        return this.findDirectiveBlocksInLines(tokens, document.lineCount, lineNum => document.getText({
+            start: { line: lineNum, character: 0 },
+            end: { line: lineNum, character: 1000 }
+        }));
+    }
+
+    /**
+     * findDirectiveBlocks over the document's lines rather than a TextDocument — for
+     * DocumentStructure, which has the tokens and the source lines but no document.
+     */
+    public static findDirectiveBlocksInLines(tokens: Token[], lineCount: number, lineText: (line: number) => string): DirectiveBlock[] {
         const blocks: DirectiveBlock[] = [];
 
         // Pass 1: collect OMIT/COMPILE directive positions from tokens
@@ -130,13 +141,9 @@ export class OmitCompileDetector {
         // appears only inside quotes (e.g. MESSAGE('***')) does NOT close the block.
         // Clarion strings are single-quoted; '' is an escaped single quote inside a string.
         const activeBlocks = [...pendingBlocks];
-        const lineCount = document.lineCount;
 
         for (let lineNum = 0; lineNum < lineCount && activeBlocks.length > 0; lineNum++) {
-            const rawLine = document.getText({
-                start: { line: lineNum, character: 0 },
-                end: { line: lineNum, character: 1000 }
-            });
+            const rawLine = lineText(lineNum);
             // Strip string literals (handles '' escaped quotes inside strings)
             const lineWithoutStrings = rawLine.replace(/'([^']|'')*'/g, "''");
 

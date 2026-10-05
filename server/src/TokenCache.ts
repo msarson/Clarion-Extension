@@ -202,7 +202,7 @@ export class TokenCache {
                 // Reuse that instance — do NOT call process() again on the same token array,
                 // as a second pass corrupts subType assignments (e.g. MapProcedure explosion).
                 const structure = tokenizer.getDocumentStructure() ?? (() => {
-                    const s = new DocumentStructure(tokens);
+                    const s = new DocumentStructure(tokens, TokenCache.linesIfOmit(document.getText()));
                     s.process();
                     return s;
                 })();
@@ -277,7 +277,7 @@ export class TokenCache {
         // Fallback (should be rare — e.g. tokenizer returned no structure): build once
         // and store on the LIVE entry so repeat calls return the same instance.
         logger.info(`Building fallback DocumentStructure for ${uri} (entry=${!!refreshed}, hasStructure=${!!(refreshed?.structure)})`);
-        const structure = new DocumentStructure(tokens);
+        const structure = new DocumentStructure(tokens, TokenCache.linesIfOmit(document.getText()));
         structure.process();
         if (refreshed) {
             refreshed.structure = structure;
@@ -577,6 +577,11 @@ export class TokenCache {
         return touchesStructure(false) && touchesStructure(true);
     }
 
+    /** The text's lines when it has an OMIT directive (DocumentStructure reads OMIT bodies from them). */
+    static linesIfOmit(text: string): string[] | undefined {
+        return /\bOMIT\s*\(/i.test(text) ? text.split(/\r?\n/) : undefined;
+    }
+
     /** A line's code: string literals blanked ('' escapes kept inside), the comment removed. */
     static codePart(line: string): string {
         return line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length)).replace(/!.*$/, '');
@@ -786,7 +791,8 @@ export class TokenCache {
         // Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
         // This modifies tokens in-place - must be done BEFORE caching
         const processStart = performance.now();
-        const structure = new DocumentStructure(mergedTokens);
+        // The source lines let process() read an OMIT body as not code (only needed when there is one).
+        const structure = new DocumentStructure(mergedTokens, TokenCache.linesIfOmit(newText));
         structure.process();
         const processTime = performance.now() - processStart;
         
