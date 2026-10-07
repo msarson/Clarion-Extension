@@ -47,7 +47,9 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // v8: scanSourceForDeclarations no longer indexes a structure declared inside a CLASS
 // body or a `,TYPE` structure (a member, not a global type). Library files
 // never change, so without this bump every warm cache keeps those member entries.
-const DISK_CACHE_VERSION = 8;
+// v9: an ITEMIZE now closes on an indented END (it stayed open, prefixing every later
+// EQUATE in the file), and extractPre accepts a colon-qualified prefix (`PRE(AB:CD)`).
+const DISK_CACHE_VERSION = 9;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -244,9 +246,13 @@ const PROC_CONTEXT_EXCLUDE = new Set<string>([
     'OPTION', 'ITEMIZE', 'JOIN'
 ]);
 
-/** Extract the PRE attribute value from an ITEMIZE line, e.g. "Color ITEMIZE(0),PRE(Clr)" → "Clr" */
+/**
+ * Extract the PRE attribute value from an ITEMIZE line, e.g. "Color ITEMIZE(0),PRE(Clr)" → "Clr".
+ * A prefix may itself contain a colon (`ITEMIZE,PRE(AB:CD)` → members `AB:CD:Name`); a `\w`-only
+ * match found no prefix there and indexed the members under their bare names.
+ */
 function extractPre(line: string): string {
-    const m = /,\s*PRE\s*\(\s*([A-Za-z_]\w*)\s*\)/i.exec(line);
+    const m = /,\s*PRE\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(line);
     return m ? m[1] : '';
 }
 
@@ -305,8 +311,10 @@ export function scanSourceForDeclarations(
 
         if (!trimmed) continue;
 
-        // Exit ITEMIZE on END
-        if (inItemize && END_PATTERN.test(trimmed)) {
+        // Exit ITEMIZE on END. `trimmed` keeps its indentation, and an ITEMIZE's END is
+        // usually indented like its keyword — testing it raw left the block open, so every
+        // EQUATE to the end of the file took the last PRE (`EVENT:X` became `Pre:EVENT:X`).
+        if (inItemize && (END_PATTERN.test(trimmed.trim()) || PERIODS_ONLY_PATTERN.test(trimmed.trim()))) {
             inItemize = false;
             itemizePre = '';
             continue;
