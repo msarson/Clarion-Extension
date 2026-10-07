@@ -2379,7 +2379,7 @@ export class SymbolFinderService {
                 await sdi.getOrBuildIndex(project.path);
                 let definitions = sdi.find(word, project.path);
                 if (definitions.length === 0) definitions = sdi.find(word);
-                return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
+                return definitions.length ? this.toIndexedTypeInfo(this.preferReachable(definitions, fromPath)) : null;
             }
 
             // Not a solution member (a loose / red-path file opened directly, e.g.
@@ -2401,11 +2401,28 @@ export class SymbolFinderService {
                 await sdi.getOrBuildIndex(path.dirname(fromPath));
                 definitions = sdi.find(word);
             }
-            return definitions.length ? this.toIndexedTypeInfo(definitions[0]) : null;
+            // An included header listed in the project as `None`, not a source file, lands here
+            // too - and its stray duplicates need the same choice as a project member's.
+            return definitions.length ? this.toIndexedTypeInfo(this.preferReachable(definitions, fromPath)) : null;
         } catch (e) {
             logger.error(`findIndexedTypeDeclaration error for "${word}": ${e}`);
             return null;
         }
+    }
+
+    /**
+     * Of several declarations of one name, the one the document can see. The project index holds
+     * every include file in the project's directories - the compiler's `.\` search path - so a
+     * stray copy that nothing compiles (an old dictionary include left beside the real one) is
+     * indexed too, and taking the first hit could name it. A declaration is preferred when #483's
+     * reachability check reaches it from the document or from the document's PROGRAM, which for
+     * an included file is the PROGRAM of the modules that include it. Only the order changes:
+     * when none is known to be reachable, the first declaration answers as before.
+     */
+    private preferReachable(definitions: StructureDeclarationInfo[], fromPath: string): StructureDeclarationInfo {
+        if (definitions.length < 2) return definitions[0];
+        const frg = FileRelationshipGraph.getInstance();
+        return definitions.find(d => frg.isDeclarationVisibleFrom(d.filePath, fromPath)) ?? definitions[0];
     }
 
     private toIndexedTypeInfo(def: StructureDeclarationInfo): IndexedTypeInfo {
