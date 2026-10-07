@@ -118,10 +118,8 @@ suite('Word completion finds the PROGRAM of an included file through the modules
             edges.push({ type: 'MEMBER', fromFile: `c:/cap/mod${i}.clw`, toFile: 'c:/cap/prog.clw' });
         }
         graph.seedEdgesForTest(edges as never);
-        const resolve = (provider as unknown as { resolveProgramViaIncluders(p: string, g: FileRelationshipGraph): string | undefined })
-            .resolveProgramViaIncluders.bind(provider);
-        assert.strictEqual(resolve('c:/cap/target.inc', graph), undefined);
-        assert.strictEqual(resolve('c:/cap/hdr0.inc', graph), 'c:/cap/prog.clw', 'a short walk still answers');
+        assert.strictEqual(graph.resolveProgramViaIncluders('c:/cap/target.inc'), undefined);
+        assert.strictEqual(graph.resolveProgramViaIncluders('c:/cap/hdr0.inc'), 'c:/cap/prog.clw', 'a short walk still answers');
         graph.reset();
     });
 });
