@@ -1812,7 +1812,7 @@ export class MemberLocatorService {
         doc: TextDocument,
         className: string,
         filePath: string,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE' = 'CLASS'
     ): MemberEnumItem[] {
         const classToken = tokens.find(t =>
             t.type === TokenType.Structure &&
@@ -1823,16 +1823,25 @@ export class MemberLocatorService {
         if (!classToken || classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
+        // A FILE keeps its fields inside its own RECORD, so for a FILE the RECORD is transparent:
+        // its fields are members (`File.Field`) and only its header line is not.
+        const isFileRecord = (t: Token): boolean =>
+            structureType === 'FILE' && t.value.toUpperCase() === 'RECORD';
+
         // Ranges of nested GROUP/QUEUE/RECORD structures inside this class — skip their contents
         const nestedRanges = tokens
             .filter(t =>
                 t.type === TokenType.Structure &&
                 ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                !isFileRecord(t) &&
                 t.finishesAt !== undefined &&
                 t.line > classToken.line &&
                 t.line < classEnd
             )
             .map(t => ({ start: t.line, end: t.finishesAt! }));
+        const recordHeaderLines = new Set(
+            tokens.filter(t => t.type === TokenType.Structure && isFileRecord(t)).map(t => t.line)
+        );
 
         const isInsideNested = (line: number): boolean =>
             nestedRanges.some(r => line > r.start && line < r.end);
@@ -1849,6 +1858,7 @@ export class MemberLocatorService {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (isInsideNested(token.line)) continue;
+            if (recordHeaderLines.has(token.line)) continue;
             if (seenLines.has(token.line)) continue;
 
             const raw = docLines[token.line] ?? '';
@@ -2325,7 +2335,7 @@ export class MemberLocatorService {
         const info = infos.find(d => !d.isType) || infos[0];
         const indexedData = await this.loadDocument(info.filePath);
         if (indexedData) {
-            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | 'FILE' | undefined);
             if (indexedMembers.length > 0) return indexedMembers;
         }
         return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
