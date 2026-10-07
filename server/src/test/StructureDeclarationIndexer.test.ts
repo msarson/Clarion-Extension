@@ -234,6 +234,112 @@ suite('StructureDeclarationIndexer — scanSourceForDeclarations', () => {
     });
 
     // -----------------------------------------------------------------------
+    // ITEMIZE closed by an indented END / a period, and colon-qualified PRE
+    // -----------------------------------------------------------------------
+    suite('ITEMIZE close and colon-qualified PRE', () => {
+        const names = (r: StructureDeclarationInfo[]) => r.map(d => d.name);
+
+        test('indented END closes the ITEMIZE — later EQUATEs keep their own names', () => {
+            const source = [
+                '                     ITEMIZE(200),PRE(Btn)',
+                'Ok                     EQUATE',
+                'Cancel                 EQUATE',
+                '                     END',
+                '',
+                'Evt:Refresh          EQUATE(282H)',
+                'PageBase             EQUATE(040000H)',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Btn:Ok'), 'Btn:Ok should be indexed');
+            assert.ok(findByName(r, 'Btn:Cancel'), 'Btn:Cancel should be indexed');
+            const evt = findByName(r, 'Evt:Refresh');
+            assert.ok(evt, `Evt:Refresh should be indexed under its own name; got ${names(r).join(', ')}`);
+            assert.strictEqual(evt!.structureType, 'EQUATE');
+            const pb = findByName(r, 'PageBase');
+            assert.ok(pb, `PageBase should be indexed under its own name; got ${names(r).join(', ')}`);
+            assert.strictEqual(pb!.structureType, 'EQUATE');
+            assert.strictEqual(findByName(r, 'Btn:Evt:Refresh'), undefined);
+            assert.strictEqual(findByName(r, 'Btn:PageBase'), undefined);
+        });
+
+        test('labelled ITEMIZE with an indented END closes too', () => {
+            const source = [
+                'Shade  ITEMIZE(0),PRE(Shade)',
+                'Dark   EQUATE',
+                '       END',
+                'Loose  EQUATE(7)',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Shade:Dark'));
+            const loose = findByName(r, 'Loose');
+            assert.ok(loose, `Loose should be indexed under its own name; got ${names(r).join(', ')}`);
+            assert.strictEqual(loose!.structureType, 'EQUATE');
+        });
+
+        test('a period on its own line closes the ITEMIZE', () => {
+            const source = [
+                '  ITEMIZE,PRE(Mode)',
+                'Fast    EQUATE',
+                '  .',
+                'Slow    EQUATE(9)',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Mode:Fast'));
+            assert.ok(findByName(r, 'Slow'), `Slow should be indexed under its own name; got ${names(r).join(', ')}`);
+            assert.strictEqual(findByName(r, 'Mode:Slow'), undefined);
+        });
+
+        test('consecutive ITEMIZE blocks with indented ENDs each use their own PRE', () => {
+            const source = [
+                '  ITEMIZE,PRE(First)',
+                'One     EQUATE',
+                '  END',
+                '  ITEMIZE',
+                'Two     EQUATE',
+                '  END',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'First:One'));
+            assert.ok(findByName(r, 'Two'), `Two (no PRE) should be indexed bare; got ${names(r).join(', ')}`);
+            assert.strictEqual(findByName(r, 'First:Two'), undefined);
+        });
+
+        test('blank-label ITEMIZE,PRE(AB:CD) expands members to AB:CD:Name', () => {
+            const source = [
+                '                     ITEMIZE,PRE(AB:CD)',
+                'None                   EQUATE(-1)',
+                'Text                   EQUATE(00H)',
+                'Value                  EQUATE',
+                '                     END',
+            ].join('\n');
+            const r = scan(source);
+            for (const n of ['AB:CD:None', 'AB:CD:Text', 'AB:CD:Value']) {
+                const d = findByName(r, n);
+                assert.ok(d, `${n} should be indexed; got ${names(r).join(', ')}`);
+                assert.strictEqual(d!.structureType, 'ITEMIZE_EQUATE');
+            }
+            for (const bare of ['None', 'Text', 'Value']) {
+                assert.strictEqual(findByName(r, bare), undefined, `bare "${bare}" should not be indexed`);
+            }
+        });
+
+        test('labelled ITEMIZE,PRE(AB:CD) expands members to AB:CD:Name', () => {
+            const source = [
+                'Flags  ITEMIZE(1),PRE(AB:CD)',
+                'On     EQUATE',
+                'Off    EQUATE(5)',
+                '       END',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Flags'), 'the ITEMIZE itself is indexed');
+            assert.ok(findByName(r, 'AB:CD:On'), `AB:CD:On should be indexed; got ${names(r).join(', ')}`);
+            assert.ok(findByName(r, 'AB:CD:Off'), `AB:CD:Off should be indexed; got ${names(r).join(', ')}`);
+            assert.strictEqual(findByName(r, 'On'), undefined);
+            assert.strictEqual(findByName(r, 'Off'), undefined);
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Comment handling
     // -----------------------------------------------------------------------
     suite('comments', () => {
