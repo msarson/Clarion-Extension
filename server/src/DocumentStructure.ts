@@ -1177,7 +1177,11 @@ export class DocumentStructure {
             }
 
             if (pre) {
-                t.prefixedEquateName = `${pre}:${t.value}`;
+                // A member already spelled with the prefix keeps its name (`BtnState:Normal`
+                // under `BtnState ITEMIZE,PRE()`), it is not prefixed a second time.
+                t.prefixedEquateName = t.value.toUpperCase().startsWith(pre.toUpperCase() + ':')
+                    ? t.value
+                    : `${pre}:${t.value}`;
                 this.equateIndex.set(t.prefixedEquateName.toUpperCase(), t);
             }
             // Always index by the raw label too — callers may look up either form.
@@ -1755,6 +1759,11 @@ export class DocumentStructure {
                             token.structurePrefix = prefixValue;
                             if (DOCSTRUCT_TRACE) logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
                         }
+                    }
+                    // An ITEMIZE with an empty prefix (`Color ITEMIZE,PRE` / `,PRE()`) uses its own
+                    // label: its members are `Color:Name`. Without a label there is no prefix.
+                    if (!token.structurePrefix && token.label && token.value.toUpperCase() === 'ITEMIZE') {
+                        token.structurePrefix = token.label;
                     }
                     break prefixSearch;
                 }
