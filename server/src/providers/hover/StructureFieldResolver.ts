@@ -458,10 +458,20 @@ export class StructureFieldResolver {
      * Used to resolve same-file type definitions without a disk read.
      */
     private async findFieldInTokens(typeName: string, fieldName: string, tokens: Token[], sourceUri: string, atLine?: number, sourceDoc?: TextDocument): Promise<Hover | null> {
+        // Where each structure on a line ends. The owner must be a label that OPENS a structure:
+        // a plain field of the same name (`Owner LONG` beside `Field LIKE(Owner.Field)`) opens
+        // none, and taking it left the field search unbounded - it found the hovered line itself.
+        const structureEndByLine = new Map<number, number>();
+        for (const t of tokens) {
+            if (t.type === TokenType.Structure && t.finishesAt !== undefined && !structureEndByLine.has(t.line)) {
+                structureEndByLine.set(t.line, t.finishesAt);
+            }
+        }
         const matchesName = (t: Token) =>
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
             t.start === 0 &&
-            t.value.toLowerCase() === typeName.toLowerCase();
+            t.value.toLowerCase() === typeName.toLowerCase() &&
+            structureEndByLine.has(t.line);
 
         // `atLine` (a cursor line) selects the declaration IN SCOPE rather than the first in the
         // file. A type name is unique per file, so the default is fine for one — but a VARIABLE
@@ -473,16 +483,7 @@ export class StructureFieldResolver {
                 matchesName(t) && t.line <= atLine && (!best || t.line > best.line) ? t : best, undefined);
         if (!labelToken) return null;
 
-        const labelIdx = tokens.indexOf(labelToken);
-        let structureEndLine = Number.MAX_VALUE;
-        for (let i = labelIdx + 1; i < tokens.length; i++) {
-            const t = tokens[i];
-            if (t.line !== labelToken.line) break;
-            if (t.type === TokenType.Structure && t.finishesAt !== undefined) {
-                structureEndLine = t.finishesAt;
-                break;
-            }
-        }
+        const structureEndLine = structureEndByLine.get(labelToken.line)!;
 
         const fieldToken = tokens.find(t =>
             (t.type === TokenType.Label || t.type === TokenType.Variable) &&
