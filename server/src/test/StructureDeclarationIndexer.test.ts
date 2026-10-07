@@ -340,6 +340,71 @@ suite('StructureDeclarationIndexer — scanSourceForDeclarations', () => {
     });
 
     // -----------------------------------------------------------------------
+    // ITEMIZE with an empty prefix, and members already spelled with the prefix
+    // -----------------------------------------------------------------------
+    suite('ITEMIZE empty prefix and pre-qualified members', () => {
+        const names = (r: StructureDeclarationInfo[]) => r.map(d => d.name);
+
+        test('labelled ITEMIZE,PRE (no parentheses) uses the label as the prefix', () => {
+            const source = [
+                'Shade             ITEMIZE(0),PRE',
+                'Off                 EQUATE',
+                'Vertical            EQUATE',
+                '                  END',
+            ].join('\n');
+            const r = scan(source);
+            for (const n of ['Shade:Off', 'Shade:Vertical']) {
+                const d = findByName(r, n);
+                assert.ok(d, `${n} should be indexed; got ${names(r).join(', ')}`);
+                assert.strictEqual(d!.structureType, 'ITEMIZE_EQUATE');
+            }
+            assert.strictEqual(findByName(r, 'Off'), undefined);
+            assert.strictEqual(findByName(r, 'Vertical'), undefined);
+        });
+
+        test('labelled ITEMIZE,PRE() uses the label as the prefix', () => {
+            const source = [
+                'Mode   ITEMIZE,PRE()',
+                'Fast   EQUATE',
+                '       END',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Mode:Fast'), `Mode:Fast should be indexed; got ${names(r).join(', ')}`);
+            assert.strictEqual(findByName(r, 'Fast'), undefined);
+        });
+
+        test('blank-label ITEMIZE,PRE() has no prefix', () => {
+            const source = [
+                '       ITEMIZE,PRE()',
+                'Fast   EQUATE',
+                '       END',
+            ].join('\n');
+            const r = scan(source);
+            assert.ok(findByName(r, 'Fast'), `Fast should be indexed bare; got ${names(r).join(', ')}`);
+        });
+
+        test('a member already spelled with the prefix is not prefixed twice', () => {
+            const source = [
+                'BtnState ITEMIZE,PRE()',
+                'BtnState:Normal EQUATE(1)',
+                'Hot             EQUATE',
+                '         END',
+                '         ITEMIZE,PRE(Px)',
+                'Px:Own   EQUATE',
+                'Zz:Other EQUATE',
+                '         END',
+            ].join('\n');
+            const r = scan(source);
+            for (const n of ['BtnState:Normal', 'BtnState:Hot', 'Px:Own', 'Px:Zz:Other']) {
+                assert.ok(findByName(r, n), `${n} should be indexed; got ${names(r).join(', ')}`);
+            }
+            for (const n of ['BtnState:BtnState:Normal', 'Px:Px:Own', 'Zz:Other']) {
+                assert.strictEqual(findByName(r, n), undefined, `${n} should not be indexed`);
+            }
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Comment handling
     // -----------------------------------------------------------------------
     suite('comments', () => {

@@ -45,6 +45,15 @@ suite('UndeclaredVariableDiagnostics — SDI ITEMIZE close and colon PRE', () =>
             '',
             'Evt:Refresh          EQUATE(282H)',
             '',
+            'Tint                 ITEMIZE(0),PRE',
+            'Glossy                 EQUATE',
+            '                     END',
+            '',
+            'KeyState             ITEMIZE,PRE()',
+            'KeyState:Down          EQUATE(1)',
+            'Held                   EQUATE',
+            '                     END',
+            '',
         ].join('\n'), 'utf8');
         const indexer = StructureDeclarationIndexer.getInstance();
         savedLibsrc = serverSettings.libsrcPaths;
@@ -108,5 +117,42 @@ suite('UndeclaredVariableDiagnostics — SDI ITEMIZE close and colon PRE', () =>
         const bare = byLine(12);
         assert.ok(bare, 'expected a diagnostic on bare Shade (only AB:CD:Shade is declared); got: ' + all());
         assert.ok(/Shade/i.test(String(bare.message)), 'expected the diagnostic to name Shade; got: ' + bare.message);
+    });
+
+    test('empty-prefix ITEMIZE members use the label; a pre-qualified member is not doubled', async () => {
+        const code = [
+            '  PROGRAM',                                    // 0
+            '  MAP',                                        // 1
+            '  END',                                        // 2
+            '  CODE',                                       // 3
+            '  RETURN',                                     // 4
+            '',                                             // 5
+            'MyProc  PROCEDURE',                            // 6
+            'k           LONG',                             // 7
+            '  CODE',                                       // 8
+            '  k = Tint:Glossy',                            // 9  — `Tint ITEMIZE,PRE` member: no fire
+            '  k = KeyState:Down',                          // 10 — pre-qualified member of `KeyState ITEMIZE,PRE()`: no fire
+            '  k = KeyState:Held',                          // 11 — `KeyState ITEMIZE,PRE()` member: no fire
+            '  k = Glossy',                                 // 12 — bare member name, not declared: fires
+            '  RETURN',                                     // 13
+        ].join('\n');
+        const doc = TextDocument.create('file:///test-sdi-itemize-empty-pre.clw', 'clarion', 1, code);
+        const tokens = new ClarionTokenizer(code).tokenize();
+
+        const tokenCache = TokenCache.getInstance();
+        const scopeAnalyzer = new ScopeAnalyzer(tokenCache, undefined as never);
+        const symbolFinder = new SymbolFinderService(tokenCache, scopeAnalyzer);
+        const diags = await validateUndeclaredVariablesAsync(tokens, doc, symbolFinder);
+
+        const all = () => JSON.stringify(diags.map(d => ({ line: d.range.start.line, msg: d.message })));
+        const byLine = (line: number) => diags.find(d => d.range.start.line === line);
+
+        assert.strictEqual(byLine(9), undefined, 'expected NO diagnostic on Tint:Glossy; got: ' + all());
+        assert.strictEqual(byLine(10), undefined, 'expected NO diagnostic on KeyState:Down; got: ' + all());
+        assert.strictEqual(byLine(11), undefined, 'expected NO diagnostic on KeyState:Held; got: ' + all());
+
+        const bare = byLine(12);
+        assert.ok(bare, 'expected a diagnostic on bare Glossy (only Tint:Glossy is declared); got: ' + all());
+        assert.ok(/Glossy/i.test(String(bare.message)), 'expected the diagnostic to name Glossy; got: ' + bare.message);
     });
 });

@@ -49,7 +49,10 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // never change, so without this bump every warm cache keeps those member entries.
 // v9: an ITEMIZE now closes on an indented END (it stayed open, prefixing every later
 // EQUATE in the file), and extractPre accepts a colon-qualified prefix (`PRE(AB:CD)`).
-const DISK_CACHE_VERSION = 9;
+// v10: a labelled ITEMIZE with an empty prefix (`Label ITEMIZE,PRE` / `,PRE()`) names its
+// members `Label:Name` (they were bare), and a member already spelled `Pre:Name` is no
+// longer prefixed a second time.
+const DISK_CACHE_VERSION = 10;
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -251,9 +254,22 @@ const PROC_CONTEXT_EXCLUDE = new Set<string>([
  * A prefix may itself contain a colon (`ITEMIZE,PRE(AB:CD)` → members `AB:CD:Name`); a `\w`-only
  * match found no prefix there and indexed the members under their bare names.
  */
-function extractPre(line: string): string {
-    const m = /,\s*PRE\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(line);
-    return m ? m[1] : '';
+function extractPre(line: string, label?: string): string {
+    const m = /,\s*PRE\b(?:\s*\(\s*([A-Za-z_][\w:]*)?\s*\))?/i.exec(line);
+    if (!m) return '';
+    // An empty prefix (`,PRE` or `,PRE()`) uses the ITEMIZE's own label: `Color ITEMIZE,PRE`
+    // names its members `Color:Name`. With no label there is no prefix.
+    return m[1] ?? label ?? '';
+}
+
+/**
+ * PRE-expand an ITEMIZE member: `Red` → `Color:Red`. A member already spelled with the
+ * prefix keeps its name (`BtnState ITEMIZE,PRE()` / `BtnState:Normal EQUATE(1)` declares
+ * `BtnState:Normal`, not `BtnState:BtnState:Normal`); any other colon label is prefixed.
+ */
+export function expandItemizeMember(pre: string, rawName: string): string {
+    if (!pre || rawName.toUpperCase().startsWith(pre.toUpperCase() + ':')) return rawName;
+    return `${pre}:${rawName}`;
 }
 
 /**
@@ -324,7 +340,7 @@ export function scanSourceForDeclarations(
         let m: RegExpExecArray | null;
         if ((m = ITEMIZE_PATTERN.exec(trimmed))) {
             const name = m[1];
-            const pre = extractPre(trimmed);
+            const pre = extractPre(trimmed, name);
             results.push({
                 name,
                 filePath,
@@ -354,8 +370,7 @@ export function scanSourceForDeclarations(
         if ((m = EQUATE_PATTERN.exec(trimmed))) {
             const rawName = m[1];
             if (inItemize) {
-                // PRE-expand: "Red" → "Color:Red"
-                const expandedName = itemizePre ? `${itemizePre}:${rawName}` : rawName;
+                const expandedName = expandItemizeMember(itemizePre, rawName);
                 results.push({
                     name: expandedName,
                     filePath,
