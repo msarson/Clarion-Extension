@@ -8,6 +8,14 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.9] - Unreleased
 
+#### Diagnostics
+
+- **An attribute the WINDOW does not accept is flagged on its header line.** The `WINDOW` line itself was never checked, so `HIDE` or `PRE(...)` there, which the compiler rejects as an unknown attribute, went unnoticed until the build; HVSCROLL together with HSCROLL or VSCROLL is flagged as well. [#730](https://github.com/msarson/Clarion-Extension/pull/730)
+
+#### Navigation and hover
+
+- **Hovering an attribute on a WINDOW header line shows its card.** It showed nothing there; it now also says when the WINDOW does not accept the attribute. The TEXT control card lists HSCROLL and VSCROLL beside HVSCROLL. [#730](https://github.com/msarson/Clarion-Extension/pull/730)
+
 ---
 
 ### [1.0.8] - 2026-10-04

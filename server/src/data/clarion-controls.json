@@ -46,7 +46,7 @@
       "name": "TEXT",
       "description": "Declares a multi-line text control for text input/display",
       "syntax": "TEXT()",
-      "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HVSCROLL", "READONLY"]
+      "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HSCROLL", "VSCROLL", "HVSCROLL", "READONLY"]
     },
     {
       "name": "STRING",
@@ -221,7 +221,9 @@
       "params": [
         { "name": "title", "description": "String constant for the window title bar text (PROP:Text)", "optional": false }
       ],
-      "commonAttributes": ["AT", "CENTER", "MDI", "MODAL", "RESIZE", "MAX", "ICON", "FONT", "GRAY", "TIMER", "AUTO", "SYSTEM", "STATUS", "DOUBLE", "NOFRAME", "TOOLBOX", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "DOCK", "DOCKED", "LAYOUT", "MASK", "MSG", "PALETTE", "DROPID", "IMM"]
+      "commonAttributes": ["AT", "CENTER", "MDI", "MODAL", "RESIZE", "MAX", "ICON", "FONT", "GRAY", "TIMER", "AUTO", "SYSTEM", "STATUS", "DOUBLE", "NOFRAME", "TOOLBOX", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "DOCK", "DOCKED", "LAYOUT", "MASK", "MSG", "PALETTE", "DROPID", "IMM"],
+      "attributes": ["AT()", "CENTER", "SYSTEM", "MAX", "ICON()", "STATUS()", "HLP()", "CURSOR()", "MDI", "MODAL", "MASK", "FONT()", "GRAY", "TIMER()", "ALRT()", "ICONIZE", "MAXIMIZE", "MSG()", "PALETTE()", "DROPID()", "IMM", "AUTO", "COLOR()", "TOOLBOX", "DOCK()", "DOCKED()", "LAYOUT()", "WALLPAPER()", "TILED", "CENTERED", "HSCROLL", "VSCROLL", "HVSCROLL", "DOUBLE", "NOFRAME", "RESIZE"],
+      "exclusive": [["TILED", "CENTERED"], ["HSCROLL", "HVSCROLL"], ["VSCROLL", "HVSCROLL"], ["DOUBLE", "NOFRAME", "RESIZE"]]
     },
     {
       "name": "APPLICATION",

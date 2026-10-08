@@ -8,6 +8,9 @@ import { RoutineHoverResolver } from './RoutineHoverResolver';
 import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
+import { ControlService } from '../../utils/ControlService';
+import { readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
+import { LogicalLine } from '../../DocumentStructure';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
@@ -41,6 +44,7 @@ export class HoverRouter {
     private argClassifier = new CallSiteArgumentClassifier();
     private argTypeResolver = new ArgumentTypeResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private controlService = ControlService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -133,6 +137,11 @@ export class HoverRouter {
             const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
             mark('symbol');
             if (symbolHover) return symbolHover;
+
+            // 8.5 Attributes on a WINDOW/APPLICATION header line — no control context
+            // there, so step 9 never sees them.
+            const headerAttributeHover = this.handleHeaderAttribute(word, position, documentStructure);
+            if (headerAttributeHover) return headerAttributeHover;
 
             // 9. Handle attributes
             const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
@@ -699,6 +708,42 @@ export class HoverRouter {
         logger.info(`Attribute parameter count: ${paramCount}`);
 
         return this.formatter.formatAttribute(word, attribute, paramCount);
+    }
+
+    /**
+     * An attribute on a WINDOW/APPLICATION header (`MyWindow WINDOW('T'),AT(...),HIDE`):
+     * its attribute card, plus a warning when the structure does not accept it.
+     */
+    private handleHeaderAttribute(
+        word: string,
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined } | undefined
+    ): Hover | null {
+        const logical = documentStructure?.getLogicalLine?.(position.line);
+        if (!logical) return null;
+        const keyword = logical.tokens.find(t => t.type !== TokenType.Label);
+        if (!keyword) return null;
+        const def = this.controlService.getContainerStructure(keyword.value);
+        if (!def?.attributes) return null;
+        const declared = readDeclaredAttributes(logical, keyword);
+        const hit = declared.find(d =>
+            d.name === word.toUpperCase() &&
+            d.token.line === position.line &&
+            position.character >= d.token.start &&
+            position.character <= d.token.start + d.token.value.length);
+        if (!hit) return null;
+
+        const attribute = this.attributeService.getAttribute(hit.name);
+        let value = '';
+        if (attribute) {
+            const card = this.formatter.formatAttribute(hit.name, attribute, null).contents as MarkupContent;
+            value = card.value;
+        }
+        const problems = findAttributeProblems(def, declared).filter(p => p.attribute === hit);
+        for (const problem of problems) {
+            value = `⚠ ${problem.message}\n\n` + value;
+        }
+        return value ? { contents: { kind: 'markdown', value: value.trimEnd() } } : null;
     }
 
     /**
