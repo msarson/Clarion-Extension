@@ -4,8 +4,11 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { AttributeService } from '../../utils/AttributeService';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs } from '../../utils/AttributeContextGuards';
+import { ControlService } from '../../utils/ControlService';
+import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
 
 const attributeService = AttributeService.getInstance();
+const controlService = ControlService.getInstance();
 
 /**
  * Controls that are unambiguously window/report elements (TokenType.WindowElement).
@@ -180,6 +183,37 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
         });
     }
 
+    diagnostics.push(...validateHeaderAttributes(tokens, structure));
+    return diagnostics;
+}
+
+/**
+ * WINDOW/APPLICATION header lines have no control context, so the loop above never
+ * checks them. Check them against the structure's `attributes` list instead (a
+ * structure without one is not checked): the Clarion 11.1 compiler rejects
+ * `MyWindow WINDOW('T'),HIDE` with "unknown attribute HIDE".
+ */
+function validateHeaderAttributes(tokens: Token[], structure: DocumentStructure): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    for (const token of tokens) {
+        const def = controlService.getContainerStructure(token.value);
+        if (!def?.attributes) continue;
+        const logical = structure.getLogicalLine(token.line);
+        if (!logical || !findDeclarationKeyword(logical, token.line, token.start)) continue;
+        for (const problem of findAttributeProblems(def, readDeclaredAttributes(logical, token))) {
+            const at = problem.attribute.token;
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: at.line, character: at.start },
+                    end: { line: at.line, character: at.start + at.value.length },
+                },
+                message: problem.message,
+                source: 'clarion',
+                code: 'invalid-attribute-context',
+            });
+        }
+    }
     return diagnostics;
 }
 
