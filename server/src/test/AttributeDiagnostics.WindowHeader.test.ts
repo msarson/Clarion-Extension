@@ -113,8 +113,10 @@ suite('Attributes on a WINDOW header line', () => {
         const card = await hoverWord(program(
             ["MyWindow WINDOW('Test'),AT(,,300,200)"],
             ["           TEXT,AT(10,10,100,50),USE(?Notes)"]), 'TEXT,', 'TEXT');
+        // a card for the declaration offers them under Available
+        const available = card.slice(card.indexOf('**Available:**'));
         for (const name of ['HSCROLL', 'VSCROLL', 'HVSCROLL']) {
-            assert.ok(new RegExp(`- ${name}\\b`).test(card), `${name}: ${card}`);
+            assert.ok(new RegExp(`\\b${name}\\b`).test(available), `${name}: ${card}`);
         }
     });
 });

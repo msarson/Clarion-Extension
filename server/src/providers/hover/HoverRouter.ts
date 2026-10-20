@@ -9,7 +9,7 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { ControlService } from '../../utils/ControlService';
-import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
+import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
 import { LogicalLine } from '../../DocumentStructure';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
@@ -140,7 +140,7 @@ export class HoverRouter {
             // 8. Handle data types and controls
             const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
             mark('symbol');
-            if (symbolHover) return symbolHover;
+            if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure);
 
             // 8.5 Attributes on a WINDOW/APPLICATION header line — no control context
             // there, so step 9 never sees them.
@@ -821,6 +821,33 @@ export class HoverRouter {
         logger.info(`Attribute parameter count: ${paramCount}`);
 
         return this.formatter.formatAttribute(word, attribute, paramCount);
+    }
+
+    /**
+     * A control card hovered on the keyword of its own declaration
+     * (`TEXT,AT(...),HVSCROLL`) lists that declaration's attributes instead of
+     * the generic "Common Attributes". Any other control card is returned as is.
+     */
+    private withDeclaredAttributes(
+        hover: Hover,
+        word: string,
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined } | undefined
+    ): Hover {
+        const def = this.controlService.getControl(word);
+        if (!def?.attributes || !documentStructure?.getLogicalLine) return hover;
+        const logical = documentStructure.getLogicalLine(position.line);
+        if (!logical) return hover;
+        const keywordToken = logical.tokens.find(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        if (!keywordToken) return hover;
+        const keyword = findControlKeyword(logical, keywordToken.line, keywordToken.start);
+        if (!keyword) return hover;
+        const section = formatDeclaredAttributes(def, readDeclaredAttributes(logical, keyword));
+        if (!section) return hover;
+        return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };
     }
 
     /**

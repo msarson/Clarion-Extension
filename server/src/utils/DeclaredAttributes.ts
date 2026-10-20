@@ -17,10 +17,20 @@ export interface DeclaredAttribute {
  * attribute, `Window{PROP:Alrt,255}` in code) is not a declaration.
  */
 export function findDeclarationKeyword(logical: LogicalLine, line: number, character: number): Token | null {
+    const keyword = findControlKeyword(logical, line, character);
+    // The structure needs a label: an unlabelled `Window` opening a line is code.
+    return keyword && logical.tokens.indexOf(keyword) >= 1 ? keyword : null;
+}
+
+/**
+ * The control keyword token (TEXT, BUTTON…) at a position, if it opens its logical line,
+ * optionally after a label: a control inside a WINDOW usually has none (`TEXT,AT(...)`).
+ * The control card's check; a WINDOW header goes through findDeclarationKeyword.
+ */
+export function findControlKeyword(logical: LogicalLine, line: number, character: number): Token | null {
     const index = logical.tokens.findIndex(t => t.line === line && t.start === character);
-    // A label is never the keyword, even when it is spelled like one (`Window WINDOW(...)`),
-    // and the structure needs one: an unlabelled `Window` opening a line is code.
-    if (index < 1 || logical.tokens[index].type === TokenType.Label) return null;
+    // A label is never the keyword, even when it is spelled like one (`Window WINDOW(...)`).
+    if (index < 0 || logical.tokens[index].type === TokenType.Label) return null;
     for (let i = 0; i < index; i++) {
         if (logical.tokens[i].type !== TokenType.Label) return null;
     }
@@ -57,14 +67,17 @@ export function readDeclaredAttributes(logical: LogicalLine, keyword: Token): De
     return result;
 }
 
-/** The upper-cased names in a definition's `attributes` list (`AT()` → `AT`). */
-function acceptedNames(def: ControlDefinition): Set<string> {
-    return new Set((def.attributes ?? []).map(a => (a.endsWith('()') ? a.slice(0, -2) : a).toUpperCase()));
+/** `X()` in a definition's `attributes` list takes a value; a bare `X` is a flag. */
+function parseAccepted(def: ControlDefinition): { name: string; flag: boolean }[] {
+    return (def.attributes ?? []).map(a => {
+        const flag = !a.endsWith('()');
+        return { name: (flag ? a : a.slice(0, -2)).toUpperCase(), flag };
+    });
 }
 
 /** Problems with a declaration's attributes: not accepted here, unknown, or mutually exclusive. */
 export function findAttributeProblems(def: ControlDefinition, declared: DeclaredAttribute[]): { attribute: DeclaredAttribute; message: string }[] {
-    const accepted = acceptedNames(def);
+    const accepted = new Set(parseAccepted(def).map(a => a.name));
     const problems: { attribute: DeclaredAttribute; message: string }[] = [];
     for (const attribute of declared) {
         if (accepted.has(attribute.name)) continue;
@@ -86,4 +99,70 @@ export function findAttributeProblems(def: ControlDefinition, declared: Declared
         }
     }
     return problems;
+}
+
+/** Longest Available line, in characters, before it wraps (keeps the card narrow). */
+const AVAILABLE_LINE_WIDTH = 75;
+
+/**
+ * The card section for a declaration, compact and most important first:
+ *   ⚠ problems (attributes not valid here grouped on one line),
+ *   **Attributes:** the valid attributes the declaration carries, by name only — their
+ *     values are in the code right above the card,
+ *   **Available:** the flags the control accepts that are not set, alphabetical, wrapped.
+ * Empty when the definition carries no `attributes` list — the card then keeps its
+ * generic "Common Attributes".
+ */
+export function formatDeclaredAttributes(def: ControlDefinition, declared: DeclaredAttribute[]): string {
+    if (!def.attributes || def.attributes.length === 0) return '';
+
+    const accepted = parseAccepted(def);
+    const acceptedNames = new Set(accepted.map(a => a.name));
+    const known = AttributeService.getInstance();
+    const notValid = declared.filter(d => !acceptedNames.has(d.name) && known.isAttribute(d.name)).map(d => d.name);
+    const unknown = declared.filter(d => !acceptedNames.has(d.name) && !known.isAttribute(d.name)).map(d => d.name);
+    const exclusive = findAttributeProblems(def, declared).filter(p => / are mutually exclusive$/.test(p.message));
+
+    const problems: string[] = [];
+    if (notValid.length > 0) problems.push(`⚠ ${notValid.join(', ')}: not valid on ${def.name}`);
+    if (unknown.length > 0) problems.push(`⚠ ${unknown.join(', ')}: not a known attribute`);
+    for (const problem of exclusive) problems.push(`⚠ ${problem.message}`);
+
+    const blocks: string[] = [];
+    // two trailing spaces: a markdown line break, so each block stays one paragraph
+    if (problems.length > 0) blocks.push(problems.join('  \n'));
+
+    const valid = declared.filter(d => acceptedNames.has(d.name));
+    if (valid.length > 0) {
+        blocks.push(`**Attributes:** ${valid.map(d => '`' + d.name + '`').join(' ')}`);
+    }
+    const setNames = new Set(declared.map(d => d.name));
+    const available = accepted.filter(a => a.flag && !setNames.has(a.name)).map(a => a.name).sort();
+    if (available.length > 0) {
+        blocks.push(wrapList('**Available:** ', available, AVAILABLE_LINE_WIDTH));
+    }
+    return blocks.join('\n\n');
+}
+
+/** `prefix A · B · C`, broken into markdown lines of at most `width` visible characters. */
+function wrapList(prefix: string, names: string[], width: number): string {
+    const lines: string[] = [];
+    let line = prefix;
+    let visible = prefix.replace(/\*/g, '').length;
+    for (let i = 0; i < names.length; i++) {
+        const text = names[i] + (i < names.length - 1 ? ' ·' : '');
+        if (line === prefix) {
+            line += text;
+            visible += text.length;
+        } else if (visible + 1 + text.length > width) {
+            lines.push(line);
+            line = text;
+            visible = text.length;
+        } else {
+            line += ' ' + text;
+            visible += 1 + text.length;
+        }
+    }
+    lines.push(line);
+    return lines.join('  \n');
 }
