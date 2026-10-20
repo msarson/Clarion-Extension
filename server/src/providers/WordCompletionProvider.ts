@@ -884,8 +884,16 @@ export class WordCompletionProvider {
      * module found no PROGRAM at all and got none of its globals. Same rule as the hover and
      * definition paths (SymbolFinderService / MemberLocatorService.resolveMemberHeaderToken):
      * only the first statement is consulted, redirection first, bounded hops.
+     *
+     * A file with no MEMBER at all - an included class header or TYPE file - belongs to the
+     * PROGRAM of the modules that include it (FileRelationshipGraph.resolveProgramViaIncluders).
      */
     private resolveProgramPath(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
+        return this.resolveProgramViaMember(tokens, filePath, graph)
+            ?? graph.resolveProgramViaIncluders(filePath);
+    }
+
+    private resolveProgramViaMember(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
         const visited = new Set<string>();
         for (let hop = 0; hop <= WordCompletionProvider.MAX_SHIM_HOPS; hop++) {
             const raw = (graph.isBuilt ? graph.getProgramFile(filePath) : undefined)

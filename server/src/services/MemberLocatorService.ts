@@ -16,6 +16,7 @@ import { Token, TokenType } from '../ClarionTokenizer';
 import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
 import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
@@ -671,10 +672,18 @@ export class MemberLocatorService {
         const infos = this.sdi.findFor(typeName, fromFile); // #571
         if (infos.length === 0) return null;
 
+        // Visibility ranks first: the project index holds every include file in the folder, so a
+        // stray copy of a dictionary include that nothing compiles sits in the SAME directory as
+        // the real one, and the directory tiebreak below cannot tell them apart. Only the order
+        // changes - with nothing known to be visible, the tiebreak decides as before.
+        const frg = fromFile ? FileRelationshipGraph.getInstance() : undefined;
+        const visible = frg && fromFile ? infos.filter(d => frg.isDeclarationVisibleFrom(d.filePath, fromFile)) : [];
+        const candidates = visible.length > 0 ? visible : infos;
+
         const preferred = preferDir
-            ? infos.find(d => path.dirname(d.filePath).toLowerCase() === preferDir.toLowerCase())
+            ? candidates.find(d => path.dirname(d.filePath).toLowerCase() === preferDir.toLowerCase())
             : undefined;
-        const info = preferred ?? infos.find(d => !d.isType) ?? infos[0];
+        const info = preferred ?? candidates.find(d => !d.isType) ?? candidates[0];
 
         const loaded = await this.loadDocument(info.filePath);
         if (!loaded) return null;

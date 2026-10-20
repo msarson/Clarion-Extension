@@ -804,12 +804,15 @@ export class DefinitionProvider {
                 const structureName = structureMatch[1];
                 const fieldName = fieldMatch[1];
                 
-                // Check if cursor is on the structure name or the field name
+                // Check if cursor is on the structure name or the field name. On the field the word
+                // arrives as the whole dotted name (`Widget.Notes`), so the field half is its last
+                // segment - as the dot-access branch of provideDefinition already reads it.
+                const wordField = word.includes('.') ? word.substring(word.lastIndexOf('.') + 1) : word;
                 if (word.toLowerCase() === structureName.toLowerCase()) {
                     // Cursor is on structure name - find the structure declaration
                     logger.info(`Detected dot notation: cursor on structure "${structureName}" in ${structureName}.${fieldName}`);
                     return this.symbolResolver.findLabelDefinition(structureName, document, position, tokens);
-                } else if (word.toLowerCase() === fieldName.toLowerCase()) {
+                } else if (wordField.toLowerCase() === fieldName.toLowerCase()) {
                     // Cursor is on field name - find the field within the structure
                     logger.info(`Detected dot notation: cursor on field "${fieldName}" in ${structureName}.${fieldName}`);
 
@@ -854,8 +857,15 @@ export class DefinitionProvider {
 
                     if (structureTokens.length > 0) {
                         // Find the field within the structure
-                        return this.findFieldInStructure(tokens, structureTokens[0], fieldName, document, position);
+                        const local = await this.findFieldInStructure(tokens, structureTokens[0], fieldName, document, position);
+                        if (local) return local;
                     }
+
+                    // A structure declared in another file - a dictionary FILE in an include, a
+                    // GROUP,TYPE in a header - is reached the way hover reaches it, so the two
+                    // name the same declaration. A same-named plain field in this file (`Widget LONG`
+                    // beside `Notes LIKE(Widget.Notes)`) opens no structure and answered nothing above.
+                    return this.findFieldInIndexedStructure(structureName, fieldName, document);
                 }
             }
         }
@@ -873,6 +883,36 @@ export class DefinitionProvider {
         // qualified-access tests in HoverF12.VariableAgreement.test.ts and
         // DefinitionProvider.QualifiedShapes327.test.ts.
         return null;
+    }
+
+    /**
+     * F12 on the field of `Structure.Field` where Structure is declared in another file. The
+     * declaring file comes from the structure index through resolveSdiDeclaration - the call field
+     * hover makes (StructureFieldResolver.resolveStructureTypeFieldHover), with its preference for
+     * the copy the document can see - and the field is searched inside that structure's own block.
+     * For a FILE that block includes its RECORD.
+     */
+    private async findFieldInIndexedStructure(structureName: string, fieldName: string, document: TextDocument): Promise<Definition | null> {
+        const filePath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+        const hit = await this.memberLocator.resolveSdiDeclaration(structureName, path.dirname(filePath), filePath);
+        if (!hit) return null;
+
+        const isColumn0Label = (t: Token, name: string) =>
+            (t.type === TokenType.Label || t.type === TokenType.Variable) &&
+            t.start === 0 &&
+            t.value.toLowerCase() === name.toLowerCase();
+        // The structure's label is one whose line opens a structure; its end bounds the search.
+        let structureEnd: number | undefined;
+        const owner = hit.tokens.find(t => {
+            if (!isColumn0Label(t, structureName)) return false;
+            const opener = hit.tokens.find(s => s.line === t.line && s.type === TokenType.Structure && s.finishesAt !== undefined);
+            structureEnd = opener?.finishesAt;
+            return structureEnd !== undefined;
+        });
+        if (!owner || structureEnd === undefined) return null;
+
+        const field = hit.tokens.find(t => isColumn0Label(t, fieldName) && t.line > owner.line && t.line < structureEnd!);
+        return field ? labelLocation(hit.filePath, field.line, fieldName) : null;
     }
 
     /**
