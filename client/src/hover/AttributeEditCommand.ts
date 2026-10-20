@@ -72,6 +72,9 @@ export function registerAttributeEditCommand(context: ExtensionContext): void {
             // line, so its position still holds.
             const at = new Position(anchor.line, anchor.character);
             editor.selection = new Selection(at, at);
+            // While a hover is visible, showHover only focuses it and keeps the old card (#742):
+            // close it first, so the card is asked for again and shows the new lists.
+            await commands.executeCommand('editor.action.hideHover');
             await commands.executeCommand('editor.action.showHover');
         }
         return applied;
