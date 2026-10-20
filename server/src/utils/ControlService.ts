@@ -12,6 +12,10 @@ export interface ControlDefinition {
     syntax: string;
     commonAttributes: string[];
     params?: ControlParam[];
+    /** Every attribute the structure accepts: `X()` takes a value, `X` is a flag. Checked against the compiler. */
+    attributes?: string[];
+    /** Groups of attributes of which at most one may be present (`[HSCROLL, HVSCROLL]`, `[DOUBLE, NOFRAME, RESIZE]`). */
+    exclusive?: string[][];
 }
 
 interface ControlData {
