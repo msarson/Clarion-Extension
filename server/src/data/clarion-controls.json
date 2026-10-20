@@ -4,159 +4,191 @@
       "name": "BUTTON",
       "description": "Declares a pushbutton control that executes when clicked",
       "syntax": "BUTTON([text])",
-      "commonAttributes": ["AT", "USE", "KEY", "DEFAULT", "ICON", "TIP", "FLAT", "HIDE", "DISABLE"]
+      "commonAttributes": ["AT", "USE", "KEY", "DEFAULT", "ICON", "TIP", "FLAT", "HIDE", "DISABLE"],
+      "attributes": ["ALRT()", "AT()", "COLOR()", "CURSOR()", "DEFAULT", "DELAY()", "DISABLE", "DROPID()", "FLAT", "FONT()", "FULL", "HIDE", "HLP()", "ICON()", "IMM", "KEY()", "LAYOUT()", "LEFT", "MSG()", "REPEAT()", "REQ", "RIGHT", "SCROLL", "SKIP", "STD()", "TIP()", "TRN", "USE()"]
     },
     {
       "name": "ENTRY",
       "description": "Declares a data entry control for single-line text input",
       "syntax": "ENTRY([picture])",
-      "commonAttributes": ["AT", "USE", "IMM", "READONLY", "REQ", "AUTO", "CAP", "UPR", "MASK", "PASSWORD", "RANGE"]
+      "commonAttributes": ["AT", "USE", "IMM", "READONLY", "REQ", "AUTO", "CAP", "UPR", "MASK", "PASSWORD", "RANGE"],
+      "attributes": ["ALRT()", "AT()", "CAP", "CENTER", "COLOR()", "CURSOR()", "DECIMAL", "DISABLE", "DROPID()", "FLAT", "FONT()", "FULL", "HIDE", "HLP()", "IMM", "INS", "KEY()", "LAYOUT()", "LEFT", "MASK", "MSG()", "OVR", "PASSWORD", "READONLY", "REQ", "RIGHT", "SCROLL", "SKIP", "TIP()", "TRN", "UPR", "USE()"]
     },
     {
       "name": "LIST",
       "description": "Declares a window list control for displaying data from a queue or file",
       "syntax": "LIST()",
-      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "MARK", "DROP", "COLUMN", "GRID", "NOBAR", "HVSCROLL"]
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "MARK", "DROP", "COLUMN", "GRID", "NOBAR", "HVSCROLL"],
+      "attributes": ["ALRT()", "AT()", "CENTER", "COLOR()", "COLUMN", "CURSOR()", "DECIMAL", "DISABLE", "DRAGID()", "DROP()", "DROPID()", "FLAT", "FONT()", "FORMAT()", "FROM()", "FULL", "GRID()", "HIDE", "HLP()", "HSCROLL", "HVSCROLL", "IMM", "KEY()", "LAYOUT()", "LEFT", "MARK()", "MSG()", "NOBAR", "RIGHT", "SCROLL", "SKIP", "TIP()", "TRN", "USE()", "VCR", "VSCROLL"]
     },
     {
       "name": "COMBO",
       "description": "Declares an entry list control combining entry field with dropdown list",
       "syntax": "COMBO([picture])",
-      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "DROP"]
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "DROP"],
+      "attributes": ["ALRT()", "AT()", "CAP", "CENTER", "COLOR()", "COLUMN", "CURSOR()", "DECIMAL", "DISABLE", "DRAGID()", "DROP()", "DROPID()", "FLAT", "FONT()", "FORMAT()", "FROM()", "FULL", "GRID()", "HIDE", "HLP()", "HSCROLL", "HVSCROLL", "IMM", "INS", "KEY()", "LAYOUT()", "LEFT", "MARK()", "MASK", "MSG()", "NOBAR", "OVR", "READONLY", "REQ", "RIGHT", "SCROLL", "SKIP", "TIP()", "TRN", "UPR", "USE()", "VCR", "VSCROLL"]
     },
     {
       "name": "CHECK",
       "description": "Declares a checkbox control for on/off selection",
       "syntax": "CHECK([text])",
-      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"]
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"],
+      "attributes": ["ALRT()", "AT()", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FLAT", "FONT()", "FULL", "HIDE", "HLP()", "ICON()", "KEY()", "LAYOUT()", "LEFT", "MSG()", "READONLY", "RIGHT", "SCROLL", "SKIP", "TIP()", "TRN", "USE()", "VALUE()"]
     },
     {
       "name": "RADIO",
       "description": "Declares a radio button control for mutually exclusive selection",
       "syntax": "RADIO([text])",
-      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"]
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"],
+      "attributes": ["ALRT()", "AT()", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FLAT", "FONT()", "FULL", "HIDE", "HLP()", "ICON()", "KEY()", "LAYOUT()", "LEFT", "MSG()", "RIGHT", "SCROLL", "SKIP", "TIP()", "TRN", "USE()", "VALUE()"]
     },
     {
       "name": "OPTION",
       "description": "Declares a set of radio button controls grouped together",
       "syntax": "OPTION()",
-      "commonAttributes": ["AT", "USE"]
+      "commonAttributes": ["AT", "USE"],
+      "attributes": ["ALRT()", "AT()", "BEVEL()", "BOXED", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FONT()", "FULL", "HIDE", "HLP()", "KEY()", "LAYOUT()", "MSG()", "READONLY", "SCROLL", "SKIP", "TIP()", "TRN", "USE()"]
     },
     {
       "name": "TEXT",
       "description": "Declares a multi-line text control for text input/display",
       "syntax": "TEXT()",
       "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HSCROLL", "VSCROLL", "HVSCROLL", "READONLY"],
-      "attributes": ["AT()", "CURSOR()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "KEY()", "MSG()", "HLP()", "BOXED", "SKIP", "FONT()", "REQ", "FULL", "SCROLL", "ALRT()", "HIDE", "READONLY", "FLAT", "DROPID()", "UPR", "TRN", "RTF()", "TIP()", "HSCROLL", "VSCROLL", "HVSCROLL", "LEFT", "RIGHT", "CENTER", "COLOR()", "SINGLE"],
+      "attributes": ["ALRT()", "AT()", "BOXED", "CAP", "CENTER", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FLAT", "FONT()", "FULL", "HIDE", "HLP()", "HSCROLL", "HVSCROLL", "IMM", "INS", "KEY()", "LAYOUT()", "LEFT", "MSG()", "OVR", "PASSWORD", "READONLY", "REQ", "RIGHT", "RTF()", "SCROLL", "SINGLE", "SKIP", "TIP()", "TRN", "UPR", "USE()", "VSCROLL"],
       "exclusive": [["HSCROLL", "HVSCROLL"], ["VSCROLL", "HVSCROLL"], ["LEFT", "RIGHT", "CENTER"]]
     },
     {
       "name": "STRING",
       "description": "Declares a string control for static text display",
       "syntax": "STRING([text])",
-      "commonAttributes": ["AT", "USE", "COLOR", "FONT", "CENTER", "RIGHT", "LEFT"]
+      "commonAttributes": ["AT", "USE", "COLOR", "FONT", "CENTER", "RIGHT", "LEFT"],
+      "attributes": ["ANGLE()", "AT()", "CENTER", "COLOR()", "CURSOR()", "DECIMAL", "DISABLE", "DROPID()", "FONT()", "FULL", "HIDE", "LAYOUT()", "LEFT", "RIGHT", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "PROMPT",
       "description": "Declares a prompt control for field labels",
       "syntax": "PROMPT([text])",
-      "commonAttributes": ["AT", "COLOR", "FONT"]
+      "commonAttributes": ["AT", "COLOR", "FONT"],
+      "attributes": ["AT()", "CENTER", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FONT()", "FULL", "HIDE", "LAYOUT()", "LEFT", "RIGHT", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "IMAGE",
       "description": "Declares a graphic image control for displaying bitmaps/icons",
       "syntax": "IMAGE([filename])",
-      "commonAttributes": ["AT", "CENTERED", "TILED", "AUTOSIZE", "STRETCH"]
+      "commonAttributes": ["AT", "CENTERED", "TILED", "AUTOSIZE", "STRETCH"],
+      "attributes": ["AT()", "CENTERED", "CURSOR()", "DISABLE", "DROPID()", "FULL", "HIDE", "HSCROLL", "HVSCROLL", "LAYOUT()", "SCROLL", "TILED", "TRN", "USE()", "VSCROLL"]
     },
     {
       "name": "BOX",
       "description": "Declares a box control for drawing rectangles",
       "syntax": "BOX()",
-      "commonAttributes": ["AT", "COLOR", "FILL", "ROUND", "BEVEL"]
+      "commonAttributes": ["AT", "COLOR", "FILL", "ROUND", "BEVEL"],
+      "attributes": ["AT()", "COLOR()", "CURSOR()", "DISABLE", "FILL()", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "ROUND", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "LINE",
       "description": "Declares a line control for drawing lines",
       "syntax": "LINE()",
-      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"]
+      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"],
+      "attributes": ["AT()", "COLOR()", "DISABLE", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "ELLIPSE",
       "description": "Declares an ellipse control for drawing circles/ovals",
       "syntax": "ELLIPSE()",
-      "commonAttributes": ["AT", "COLOR", "FILL"]
+      "commonAttributes": ["AT", "COLOR", "FILL"],
+      "attributes": ["AT()", "COLOR()", "CURSOR()", "DISABLE", "FILL()", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "REGION",
       "description": "Declares a window region control for grouping areas",
       "syntax": "REGION()",
-      "commonAttributes": ["AT", "COLOR", "FILL"]
+      "commonAttributes": ["AT", "COLOR", "FILL"],
+      "attributes": ["AT()", "BEVEL()", "COLOR()", "CURSOR()", "DISABLE", "DRAGID()", "DROPID()", "FILL()", "FULL", "HIDE", "IMM", "LAYOUT()", "SCROLL", "TIP()", "TRN", "USE()"]
     },
     {
       "name": "GROUP",
       "description": "Declares a group of controls for logical organization",
       "syntax": "GROUP()",
-      "commonAttributes": ["AT", "USE", "BOXED", "HIDE", "DISABLE"]
+      "commonAttributes": ["AT", "USE", "BOXED", "HIDE", "DISABLE"],
+      "attributes": ["ALRT()", "AT()", "BEVEL()", "BOXED", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FONT()", "FULL", "HIDE", "HLP()", "KEY()", "LAYOUT()", "MSG()", "SCROLL", "SKIP", "TIP()", "TRN", "USE()"]
     },
     {
       "name": "SHEET",
       "description": "Declares a group of tab controls (tabbed interface)",
       "syntax": "SHEET()",
-      "commonAttributes": ["AT", "USE"]
+      "commonAttributes": ["AT", "USE"],
+      "attributes": ["ABOVE", "AT()", "BELOW", "COLOR()", "CURSOR()", "DISABLE", "DOWN", "DROPID()", "FONT()", "FULL", "HIDE", "HSCROLL", "IMM", "JOIN", "KEY()", "LAYOUT()", "LEFT", "NOSHEET", "RIGHT", "SCROLL", "SPREAD", "TRN", "UP", "USE()", "VSCROLL", "WIZARD"]
     },
     {
       "name": "TAB",
       "description": "Declares a page of a sheet control",
       "syntax": "TAB([text])",
-      "commonAttributes": ["USE", "ICON", "LEFT", "RIGHT", "ABOVE", "BELOW"]
+      "commonAttributes": ["USE", "ICON", "LEFT", "RIGHT", "ABOVE", "BELOW"],
+      "attributes": ["ALRT()", "AT()", "COLOR()", "DISABLE", "DROPID()", "FONT()", "HIDE", "HLP()", "ICON()", "KEY()", "LAYOUT()", "MSG()", "REQ", "TIP()", "TRN", "USE()"]
     },
     {
       "name": "SPIN",
       "description": "Declares a spinning list control with up/down buttons",
       "syntax": "SPIN([picture])",
-      "commonAttributes": ["AT", "USE", "FROM", "STEP", "RANGE"]
+      "commonAttributes": ["AT", "USE", "FROM", "STEP", "RANGE"],
+      "attributes": ["ALRT()", "AT()", "CAP", "CENTER", "COLOR()", "CURSOR()", "DECIMAL", "DELAY()", "DISABLE", "DROPID()", "FLAT", "FONT()", "FROM()", "FULL", "HIDE", "HLP()", "HSCROLL", "HVSCROLL", "IMM", "INS", "KEY()", "LAYOUT()", "LEFT", "MASK", "MSG()", "OVR", "RANGE()", "READONLY", "REPEAT()", "REQ", "RIGHT", "SCROLL", "SKIP", "STEP()", "TIP()", "TRN", "UPR", "USE()", "VSCROLL"]
     },
     {
       "name": "PANEL",
       "description": "Declares a panel control for containing other controls",
       "syntax": "PANEL()",
-      "commonAttributes": ["AT", "USE", "HVSCROLL", "COLOR"]
+      "commonAttributes": ["AT", "USE", "HVSCROLL", "COLOR"],
+      "attributes": ["AT()", "BEVEL()", "DISABLE", "FILL()", "FULL", "HIDE", "LAYOUT()", "SCROLL", "USE()"]
     },
     {
       "name": "PROGRESS",
       "description": "Declares a progress control for showing completion status",
       "syntax": "PROGRESS()",
-      "commonAttributes": ["AT", "USE", "VERTICAL"]
+      "commonAttributes": ["AT", "USE", "VERTICAL"],
+      "attributes": ["AT()", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FONT()", "FULL", "HIDE", "LAYOUT()", "RANGE()", "SCROLL", "SMOOTH", "TRN", "USE()", "VERTICAL"]
     },
     {
       "name": "OLE",
       "description": "Declares a window OLE or OCX container control",
       "syntax": "OLE([classname])",
-      "commonAttributes": ["AT", "USE", "CREATE", "DOCUMENT", "LINK", "AUTOSIZE", "STRETCH", "ZOOM"]
+      "commonAttributes": ["AT", "USE", "CREATE", "DOCUMENT", "LINK", "AUTOSIZE", "STRETCH", "ZOOM"],
+      "attributes": ["ALRT()", "AT()", "AUTOSIZE", "CLIP", "COLOR()", "COMPATIBILITY()", "CREATE()", "CURSOR()", "DISABLE", "DOCUMENT()", "DROPID()", "FONT()", "FULL", "HIDE", "HLP()", "KEY()", "LAYOUT()", "LINK()", "MSG()", "OPEN()", "SCROLL", "SKIP", "STRETCH", "TIP()", "TRN", "USE()", "ZOOM"]
     },
     {
       "name": "MENU",
       "description": "Declares a menu box",
       "syntax": "MENU()",
-      "commonAttributes": ["USE"]
+      "commonAttributes": ["USE"],
+      "attributes": ["AT()", "COLOR()", "DISABLE", "FIRST", "FONT()", "HIDE", "HLP()", "ICON()", "KEY()", "LAST", "LEFT", "MSG()", "RIGHT", "STD()", "USE()"]
     },
     {
       "name": "MENUBAR",
       "description": "Declares a menu bar for the window",
       "syntax": "MENUBAR()",
-      "commonAttributes": ["USE"]
+      "commonAttributes": ["USE"],
+      "attributes": ["COLOR()", "FONT()", "NOMERGE", "USE()"]
     },
     {
       "name": "ITEM",
       "description": "Declares a menu item within a menu or toolbar",
       "syntax": "ITEM([text])",
-      "commonAttributes": ["USE", "KEY", "MSG", "ICON", "CHECK", "RADIO", "SEPARATOR"]
+      "commonAttributes": ["USE", "KEY", "MSG", "ICON", "CHECK", "RADIO", "SEPARATOR"],
+      "attributes": ["AT()", "CHECK", "COLOR()", "DISABLE", "FIRST", "FONT()", "HIDE", "HLP()", "ICON()", "KEY()", "LAST", "LEFT", "MSG()", "SEPARATOR", "STD()", "USE()"]
     },
     {
       "name": "TOOLBAR",
       "description": "Declares a toolbar",
       "syntax": "TOOLBAR()",
-      "commonAttributes": ["AT", "USE", "FLAT"]
+      "commonAttributes": ["AT", "USE", "FLAT"],
+      "attributes": ["AT()", "CENTERED", "COLOR()", "CURSOR()", "FONT()", "LAYOUT()", "NOMERGE", "TILED", "USE()", "WALLPAPER()"]
+    },
+    {
+      "name": "SLIDER",
+      "description": "Declares a slider control",
+      "syntax": "SLIDER",
+      "commonAttributes": ["AT", "USE"],
+      "attributes": ["ABOVE", "ALRT()", "AT()", "BELOW", "COLOR()", "CURSOR()", "DISABLE", "DROPID()", "FULL", "HIDE", "HLP()", "IMM", "KEY()", "LAYOUT()", "LEFT", "MSG()", "NOTICKS", "RANGE()", "RIGHT", "SCROLL", "SKIP", "STEP()", "TIP()", "TRN", "USE()", "VERTICAL"]
     }
   ],
   "reportControls": [
@@ -165,38 +197,44 @@
       "description": "Declares a multi-line text control for text input/display",
       "syntax": "TEXT()",
       "commonAttributes": ["AT", "USE", "BOXED", "RESIZE", "FONT"],
-      "attributes": ["AT()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "BOXED", "SKIP", "FONT()", "HIDE", "UPR", "TRN", "RTF()", "LEFT", "RIGHT", "CENTER", "COLOR()", "RESIZE", "EXTEND()"],
+      "attributes": ["AT()", "BOXED", "CAP", "CENTER", "COLOR()", "DISABLE", "EXTEND()", "FONT()", "HIDE", "IMM", "INS", "LAYOUT()", "LEFT", "OVR", "PASSWORD", "RESIZE", "RIGHT", "RTF()", "SKIP", "TRN", "UPR", "USE()"],
       "exclusive": [["LEFT", "RIGHT", "CENTER"]]
     },
     {
       "name": "STRING",
       "description": "Declares a string control for static text on reports",
       "syntax": "STRING([text])",
-      "commonAttributes": ["AT", "COLOR", "FONT"]
+      "commonAttributes": ["AT", "COLOR", "FONT"],
+      "attributes": ["ANGLE()", "AT()", "CENTER", "COLOR()", "DECIMAL", "DISABLE", "EXTEND()", "FONT()", "FULL", "HIDE", "LAYOUT()", "LEFT", "RIGHT", "SKIP", "TRN", "USE()"],
+      "pictureAttributes": ["ANGLE()", "AT()", "AVE", "CENTER", "CNT", "COLOR()", "DECIMAL", "DISABLE", "EXTEND()", "FONT()", "FULL", "HIDE", "LAYOUT()", "LEFT", "MAX", "MIN", "PAGE", "PAGENO", "RESET()", "RIGHT", "SKIP", "SUM", "TALLY()", "TRN", "USE()"]
     },
     {
       "name": "BOX",
       "description": "Declares a box control for drawing rectangles on reports",
       "syntax": "BOX()",
-      "commonAttributes": ["AT", "COLOR", "FILL"]
+      "commonAttributes": ["AT", "COLOR", "FILL"],
+      "attributes": ["AT()", "COLOR()", "CURSOR()", "DISABLE", "EXTEND()", "FILL()", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "ROUND", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "LINE",
       "description": "Declares a line control for drawing lines on reports",
       "syntax": "LINE()",
-      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"]
+      "commonAttributes": ["AT", "COLOR", "LINEWIDTH"],
+      "attributes": ["AT()", "COLOR()", "DISABLE", "EXTEND()", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "ELLIPSE",
       "description": "Declares an ellipse control for drawing circles/ovals on reports",
       "syntax": "ELLIPSE()",
-      "commonAttributes": ["AT", "COLOR", "FILL"]
+      "commonAttributes": ["AT", "COLOR", "FILL"],
+      "attributes": ["AT()", "COLOR()", "CURSOR()", "DISABLE", "EXTEND()", "FILL()", "FULL", "HIDE", "LAYOUT()", "LINEWIDTH()", "SCROLL", "TRN", "USE()"]
     },
     {
       "name": "IMAGE",
       "description": "Declares an image control for displaying graphics on reports",
       "syntax": "IMAGE([filename])",
-      "commonAttributes": ["AT", "CENTERED", "TILED"]
+      "commonAttributes": ["AT", "CENTERED", "TILED"],
+      "attributes": ["AT()", "CENTERED", "DISABLE", "EXTEND()", "FULL", "HIDE", "LAYOUT()", "TILED", "TRN", "USE()"]
     },
     {
       "name": "DETAIL",
@@ -221,6 +259,48 @@
       "description": "Declares a page layout structure printed on every page (e.g. pre-printed form background, watermarks, page borders)",
       "syntax": "FORM",
       "commonAttributes": ["AT", "FONT", "USE", "COLOR"]
+    },
+    {
+      "name": "LIST",
+      "description": "Declares a window list control for displaying data from a queue or file",
+      "syntax": "LIST()",
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "MARK", "DROP", "COLUMN", "GRID", "NOBAR", "HVSCROLL"],
+      "attributes": ["AT()", "CENTER", "COLOR()", "COLUMN", "DECIMAL", "DISABLE", "EXTEND()", "FONT()", "FORMAT()", "FROM()", "FULL", "GRID()", "HIDE", "HLP()", "IMM", "LAYOUT()", "LEFT", "NOBAR", "RIGHT", "TRN", "USE()"]
+    },
+    {
+      "name": "COMBO",
+      "description": "Declares an entry list control combining entry field with dropdown list",
+      "syntax": "COMBO([picture])",
+      "commonAttributes": ["AT", "USE", "FROM", "FORMAT", "DROP"],
+      "attributes": ["AT()", "CENTER", "COLOR()", "COLUMN", "DECIMAL", "DISABLE", "FONT()", "FORMAT()", "FROM()", "FULL", "GRID()", "HIDE", "HLP()", "IMM", "LAYOUT()", "LEFT", "NOBAR", "RIGHT", "TRN", "USE()"]
+    },
+    {
+      "name": "CHECK",
+      "description": "Declares a checkbox control for on/off selection",
+      "syntax": "CHECK([text])",
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"],
+      "attributes": ["AT()", "COLOR()", "DISABLE", "DROPID()", "EXTEND()", "FLAT", "FONT()", "FULL", "HIDE", "ICON()", "LAYOUT()", "LEFT", "READONLY", "RIGHT", "TRN", "USE()", "VALUE()"]
+    },
+    {
+      "name": "OPTION",
+      "description": "Declares a set of radio button controls grouped together",
+      "syntax": "OPTION()",
+      "commonAttributes": ["AT", "USE"],
+      "attributes": ["AT()", "BEVEL()", "BOXED", "COLOR()", "DISABLE", "DROPID()", "EXTEND()", "FONT()", "FULL", "HIDE", "LAYOUT()", "READONLY", "TRN", "USE()"]
+    },
+    {
+      "name": "RADIO",
+      "description": "Declares a radio button control for mutually exclusive selection",
+      "syntax": "RADIO([text])",
+      "commonAttributes": ["AT", "USE", "VALUE", "HIDE", "DISABLE"],
+      "attributes": ["AT()", "COLOR()", "DISABLE", "DROPID()", "EXTEND()", "FLAT", "FONT()", "FULL", "HIDE", "ICON()", "LAYOUT()", "LEFT", "RIGHT", "TRN", "USE()", "VALUE()"]
+    },
+    {
+      "name": "GROUP",
+      "description": "Declares a group of controls for logical organization",
+      "syntax": "GROUP()",
+      "commonAttributes": ["AT", "USE", "BOXED", "HIDE", "DISABLE"],
+      "attributes": ["AT()", "BEVEL()", "BOXED", "COLOR()", "DISABLE", "DROPID()", "EXTEND()", "FONT()", "FULL", "HIDE", "LAYOUT()", "TRN", "USE()"]
     }
   ],
   "containerStructures": [

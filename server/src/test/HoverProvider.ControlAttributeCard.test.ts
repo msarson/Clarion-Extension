@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Hover } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
@@ -225,5 +226,46 @@ suite('Control card — the attributes the declaration sets', () => {
         assert.strictEqual(flagState(card, 'RESIZE'), 'unset', card);
         assert.strictEqual(flagState(card, 'BOXED'), 'set', card);
         assert.ok(/REQ.*not valid on TEXT/i.test(card), card);
+    });
+
+    // #737: every control has a compiler-checked list (test-programs/ControlAttributesTest).
+    const reportWith = (control: string) => REPORT_DECL.replace("TEXT,AT(1,1,500,500),USE(Loc:Notes),BOXED,REQ", control);
+
+    test('#737 a picture STRING in a REPORT offers the totals; a constant STRING does not take them', async () => {
+        const picture = await hoverOn(reportWith('STRING(@n9),AT(1,1,500,200),USE(Loc:Total),SUM'), 'STRING(');
+        assert.strictEqual(flagState(picture, 'SUM'), 'set', picture);
+        for (const f of ['CNT', 'AVE', 'PAGENO']) assert.strictEqual(flagState(picture, f), 'unset', `${f}: ${picture}`);
+        const constant = await hoverOn(reportWith("STRING('Total'),AT(1,1,500,200),SUM"), 'STRING(');
+        assert.ok(/SUM.*not valid on STRING/i.test(constant), constant);
+        assert.strictEqual(flagState(constant, 'PAGENO'), 'absent', constant);
+    });
+
+    test('#737 a BUTTON, a LIST, a SHEET and a menu ITEM get the card', async () => {
+        const button = await hoverOn(program(["           BUTTON('Go'),AT(10,70),USE(?Go),DEFAULT"]), 'BUTTON(');
+        assert.strictEqual(flagState(button, 'DEFAULT'), 'set', button);
+        assert.strictEqual(flagState(button, 'FLAT'), 'unset', button);
+        assert.strictEqual(flagState(button, 'HVSCROLL'), 'absent', button);
+        const list = await hoverOn(program(["           LIST,AT(10,10,100,50),USE(?L),VSCROLL"]), 'LIST,');
+        for (const f of ['IMM', 'NOBAR', 'COLUMN']) assert.strictEqual(flagState(list, f), 'unset', `${f}: ${list}`);
+        const sheet = await hoverOn(program(["           SHEET,AT(1,1,100,100),USE(?S),WIZARD", "             TAB('t'),USE(?T)", "             END", "           END"]), 'SHEET,');
+        assert.strictEqual(flagState(sheet, 'WIZARD'), 'set', sheet);
+        assert.strictEqual(flagState(sheet, 'NOSHEET'), 'unset', sheet);
+        const item = await hoverOn(program(["           MENUBAR", "             MENU('File')", "               ITEM('Exit'),USE(?Exit),SEPARATOR", "             END", "           END"]), 'ITEM(');
+        assert.strictEqual(flagState(item, 'SEPARATOR'), 'set', item);
+        assert.strictEqual(flagState(item, 'CHECK'), 'unset', item);
+    });
+
+    // STRING and GROUP are data types too: a data declaration is not a control.
+    test('#737 a STRING or GROUP data declaration gets no control card', async () => {
+        const text = program([]).replace("  MAP", "Name     STRING(30),PRIVATE\nSettings GROUP,PRE(Set),STATIC\nFlag       BYTE\n         END\n  MAP");
+        for (const needle of ['STRING(30)', 'GROUP,']) {
+            const card = await hoverOn(text, needle);
+            assert.ok(!/\*\*Attributes:\*\*|\*\*Available:\*\*|not valid on/.test(card), `${needle}: ${card}`);
+        }
+    });
+
+    test('#737 clarion-controls.json holds what the compiler results say', () => {
+        const apply = path.resolve(__dirname, '..', '..', '..', '..', 'test-programs', 'ControlAttributesTest', 'apply.js');
+        execFileSync(process.execPath, [apply, '--check'], { stdio: 'pipe' });
     });
 });

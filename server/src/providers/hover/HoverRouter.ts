@@ -828,7 +828,8 @@ export class HoverRouter {
      * (`TEXT,AT(...),HVSCROLL`) lists that declaration's attributes instead of
      * the generic "Common Attributes". Any other control card is returned as is.
      * Inside a REPORT the report definition decides: a report's TEXT accepts a
-     * different set (RESIZE, not the scroll bars).
+     * different set (RESIZE, not the scroll bars), and a STRING with a picture
+     * (`STRING(@n9)`) takes the totals a constant one does not (SUM, PAGENO...).
      */
     private withDeclaredAttributes(
         hover: Hover,
@@ -836,10 +837,14 @@ export class HoverRouter {
         position: { line: number; character: number },
         documentStructure: {
             getLogicalLine?(line: number): LogicalLine | undefined;
-            getStructureContextAt?(line: number): { inReport: boolean };
+            getStructureContextAt?(line: number): { inWindow: boolean; inReport: boolean };
         } | undefined
     ): Hover {
-        const inReport = documentStructure?.getStructureContextAt?.(position.line).inReport ?? false;
+        // STRING and GROUP are data types too: outside a WINDOW, APPLICATION or REPORT the
+        // line is a data declaration, not a control.
+        const context = documentStructure?.getStructureContextAt?.(position.line);
+        if (!context || (!context.inWindow && !context.inReport)) return hover;
+        const inReport = context.inReport;
         const def = (inReport ? this.controlService.getReportControl(word) : undefined) ?? this.controlService.getControl(word);
         if (!def?.attributes || !documentStructure?.getLogicalLine) return hover;
         const logical = documentStructure.getLogicalLine(position.line);
@@ -851,7 +856,12 @@ export class HoverRouter {
         if (!keywordToken) return hover;
         const keyword = findControlKeyword(logical, keywordToken.line, keywordToken.start);
         if (!keyword) return hover;
-        const section = formatDeclaredAttributes(def, readDeclaredAttributes(logical, keyword));
+        const at = logical.tokens.indexOf(keyword);
+        // The tokenizer reads `STRING(@n9)` as one token; `STRING (@n9)` would be three.
+        const isPicture = /^\w+\(\s*@/.test(keyword.value)
+            || (logical.tokens[at + 1]?.value === '(' && logical.tokens[at + 2]?.value.startsWith('@'));
+        const accepted = isPicture && def.pictureAttributes ? { ...def, attributes: def.pictureAttributes } : def;
+        const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword));
         if (!section) return hover;
         return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };
     }

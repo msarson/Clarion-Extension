@@ -21,7 +21,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Go to Definition on the field of `File.Field` works when the FILE is declared in another file.** It now lands on the field inside the dictionary include, the declaration hover names. [#729](https://github.com/msarson/Clarion-Extension/pull/729) @geircodes
 - **Hovering an attribute on a WINDOW header line shows its card.** It also says when the WINDOW does not accept the attribute. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
 - **Hovering IF, LOOP, CASE, EXECUTE, BEGIN or ACCEPT shows what closes it.** The card links to the closing END, period, UNTIL or WHILE, says when the block is never closed, and warns when its END lines up with an enclosing block instead, which usually means a nested block is missing its END. [#734](https://github.com/msarson/Clarion-Extension/pull/734) @geircodes
-- **Hovering a TEXT control on its own declaration shows the attributes it sets.** The card lists them, offers the flags the control accepts and does not set yet, and flags an attribute it does not accept; a TEXT in a REPORT is judged by what a report accepts. [#736](https://github.com/msarson/Clarion-Extension/pull/736) @geircodes
+- **Hovering a control on its own declaration shows the attributes it sets.** The card lists them, offers the flags the control accepts and does not set yet, and flags an attribute it does not accept. Every WINDOW and REPORT control is covered, with the lists checked against the compiler, so a control in a REPORT and a STRING with a picture are judged by what they actually accept. [#736](https://github.com/msarson/Clarion-Extension/pull/736) @geircodes, [#737](https://github.com/msarson/Clarion-Extension/issues/737)
 
 #### Diagnostics
 

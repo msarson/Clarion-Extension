@@ -14,6 +14,8 @@ export interface ControlDefinition {
     params?: ControlParam[];
     /** Every attribute the structure accepts: `X()` takes a value, `X` is a flag. Checked against the compiler. */
     attributes?: string[];
+    /** The `attributes` of a STRING with a picture (`STRING(@n9)`), where they differ from a constant one's. */
+    pictureAttributes?: string[];
     /** Groups of attributes of which at most one may be present (`[HSCROLL, HVSCROLL]`, `[DOUBLE, NOFRAME, RESIZE]`). */
     exclusive?: string[][];
 }
