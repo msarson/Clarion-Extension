@@ -2011,6 +2011,56 @@ END`;
             assert.strictEqual(red!.prefixedEquateName, undefined);
         });
 
+        test('labelled ITEMIZE with an empty prefix (,PRE and ,PRE()) uses its label', () => {
+            const code = [
+                'Shade  ITEMIZE(0),PRE',            // 0
+                'Flat    EQUATE',                    // 1 — Shade:Flat
+                '       END',                         // 2
+                'Mode   ITEMIZE,PRE()',              // 3
+                'Fast    EQUATE',                    // 4 — Mode:Fast
+                '       END',                         // 5
+            ].join('\n');
+            const { structure } = buildB(code);
+            const flat = structure.findEquate('Shade:Flat');
+            assert.ok(flat, 'Shade:Flat should resolve');
+            assert.strictEqual(flat!.prefixedEquateName, 'Shade:Flat');
+            const fast = structure.findEquate('Mode:Fast');
+            assert.ok(fast, 'Mode:Fast should resolve');
+            assert.strictEqual(fast!.prefixedEquateName, 'Mode:Fast');
+        });
+
+        test('blank-label ITEMIZE with an empty prefix: members keep raw names', () => {
+            const code = [
+                '       ITEMIZE,PRE()',              // 0
+                'Flat    EQUATE',                    // 1
+                '       END',                         // 2
+            ].join('\n');
+            const { structure } = buildB(code);
+            const flat = structure.findEquate('Flat');
+            assert.ok(flat, 'Member should be indexed by bare name');
+            assert.strictEqual(flat!.prefixedEquateName, undefined);
+        });
+
+        test('a member already spelled with the prefix is not prefixed twice', () => {
+            const code = [
+                'BtnState ITEMIZE,PRE()',            // 0
+                'BtnState:Normal EQUATE(1)',         // 1 — BtnState:Normal
+                'Hot             EQUATE',            // 2 — BtnState:Hot
+                '         END',                       // 3
+                '         ITEMIZE,PRE(Px)',          // 4
+                'Px:Own   EQUATE',                   // 5 — Px:Own
+                'Zz:Other EQUATE',                   // 6 — Px:Zz:Other (a different prefix is kept and prefixed)
+                '         END',                       // 7
+            ].join('\n');
+            const { structure } = buildB(code);
+            assert.strictEqual(structure.findEquate('BtnState:Normal')?.prefixedEquateName, 'BtnState:Normal');
+            assert.strictEqual(structure.findEquate('BtnState:BtnState:Normal'), undefined);
+            assert.strictEqual(structure.findEquate('BtnState:Hot')?.prefixedEquateName, 'BtnState:Hot');
+            assert.strictEqual(structure.findEquate('Px:Own')?.prefixedEquateName, 'Px:Own');
+            assert.strictEqual(structure.findEquate('Px:Px:Own'), undefined);
+            assert.strictEqual(structure.findEquate('Px:Zz:Other')?.prefixedEquateName, 'Px:Zz:Other');
+        });
+
         test('nested ITEMIZE: inner PRE wins over outer PRE', () => {
             const code = [
                 'OuterColor ITEMIZE,PRE(Out)',      // 0
