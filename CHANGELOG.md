@@ -20,6 +20,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Hover and Go to Definition use the include file the program compiles.** A stale copy of a dictionary include left in the project folder no longer wins over the copy the program actually includes. [#728](https://github.com/msarson/Clarion-Extension/pull/728) @geircodes
 - **Go to Definition on the field of `File.Field` works when the FILE is declared in another file.** It now lands on the field inside the dictionary include, the declaration hover names. [#729](https://github.com/msarson/Clarion-Extension/pull/729) @geircodes
 - **Hovering an attribute on a WINDOW header line shows its card.** It also says when the WINDOW does not accept the attribute. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
+- **Hovering IF, LOOP, CASE, EXECUTE, BEGIN or ACCEPT shows what closes it.** The card links to the closing END, period, UNTIL or WHILE, says when the block is never closed, and warns when its END lines up with an enclosing block instead, which usually means a nested block is missing its END. [#734](https://github.com/msarson/Clarion-Extension/pull/734) @geircodes
 
 #### Diagnostics
 
