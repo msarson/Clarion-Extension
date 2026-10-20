@@ -153,10 +153,16 @@ export class ControlService {
     /**
      * Get documentation for a control
      */
-    public getControlDocumentation(name: string): string {
+    public getControlDocumentation(name: string, declarationSection?: string): string {
         const control = this.getControl(name);
         if (!control) {
             return '';
+        }
+
+        // A card for one specific declaration is kept compact: a one-line title, then
+        // that declaration's attributes in place of the syntax and the generic list.
+        if (declarationSection) {
+            return `**${control.name}** — ${control.description}\n\n${declarationSection}`;
         }
 
         let doc = `**${control.name}**\n\n`;

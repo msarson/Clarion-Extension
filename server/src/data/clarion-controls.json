@@ -46,7 +46,9 @@
       "name": "TEXT",
       "description": "Declares a multi-line text control for text input/display",
       "syntax": "TEXT()",
-      "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HSCROLL", "VSCROLL", "HVSCROLL", "READONLY"]
+      "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HSCROLL", "VSCROLL", "HVSCROLL", "READONLY"],
+      "attributes": ["AT()", "CURSOR()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "KEY()", "MSG()", "HLP()", "BOXED", "SKIP", "FONT()", "REQ", "FULL", "SCROLL", "ALRT()", "HIDE", "READONLY", "FLAT", "DROPID()", "UPR", "TRN", "RTF", "TIP()", "HSCROLL", "VSCROLL", "HVSCROLL", "LEFT", "RIGHT", "CENTER", "COLOR()", "SINGLE", "RESIZE", "EXTEND()"],
+      "exclusive": [["HSCROLL", "HVSCROLL"], ["VSCROLL", "HVSCROLL"], ["LEFT", "RIGHT", "CENTER"]]
     },
     {
       "name": "STRING",
