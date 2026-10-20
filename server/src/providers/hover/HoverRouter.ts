@@ -22,6 +22,7 @@ import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import { tokensOnLine } from '../../utils/TokenLineIndex';
 import { BranchInfo } from '../../tokenizer/TokenTypes';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -507,9 +508,8 @@ export class HoverRouter {
         tokens: Token[],
         document: any
     ): Hover | null {
-        const opener = tokens.find(t =>
+        const opener = tokensOnLine(tokens, position.line).find(t =>
             t.type === TokenType.Structure &&
-            t.line === position.line &&
             position.character >= t.start &&
             position.character <= t.start + t.value.length
         );
@@ -524,7 +524,10 @@ export class HoverRouter {
         if (opener.finishesAt === opener.line || opener.isSingleLineWithContinuation) return null;
 
         const terminator = this.findTerminator(tokens, opener);
-        const word = terminator?.value === '.' ? 'period' : 'END';
+        const word = terminator?.value === '.' ? 'period'
+            : terminator?.type === TokenType.EndStatement ? 'END'
+            : terminator ? terminator.value.toUpperCase()
+            : 'END';
         const lines: string[] = [
             `**${keyword}**${labelText} — closed by ${word} on line ${opener.finishesAt + 1}`,
             '',
@@ -532,7 +535,7 @@ export class HoverRouter {
         ];
 
         if (terminator && word === 'END') {
-            const outer = this.findEnclosingBlockAlignedWith(document.getText().split(/\r?\n/), tokens, opener, terminator);
+            const outer = this.findEnclosingBlockAlignedWith(document, tokens, opener, terminator);
             if (outer) {
                 lines.push('', `⚠️ This END is lined up with the ${outer.value.toUpperCase()} on line ${outer.line + 1}, not with this ${keyword} — a block nested inside it may be missing its END.`);
             }
@@ -541,14 +544,15 @@ export class HoverRouter {
         return { contents: { kind: 'markdown', value: lines.join('\n') } };
     }
 
-    /** The END or period the parser paired with a structure, if any. */
+    /**
+     * The END or period the parser paired with a structure, if any; for a LOOP ended by UNTIL or
+     * WHILE (`DocumentStructure.handleLoopTerminator`, which links no parent), that keyword.
+     */
     private findTerminator(tokens: Token[], opener: Token): Token | undefined {
         if (opener.finishesAt === undefined) return undefined;
-        return tokens.find(t =>
-            t.line === opener.finishesAt &&
-            t.parent === opener &&
-            (t.type === TokenType.EndStatement || t.value === '.')
-        );
+        const onLine = tokensOnLine(tokens, opener.finishesAt);
+        return onLine.find(t => t.parent === opener && (t.type === TokenType.EndStatement || t.value === '.'))
+            ?? onLine.find(t => t.type === TokenType.Keyword && /^(UNTIL|WHILE)$/i.test(t.value));
     }
 
     /**
@@ -561,23 +565,28 @@ export class HoverRouter {
      * Not reported: an END merely indented like the container while the container still has
      * its own lined-up END (both ENDs are there, one is just indented wrong); sloppy
      * indentation matching nothing (an END a column off); an END after other code on its line;
-     * and tab-indented lines, whose column means nothing without a tab width.
+     * and tab-indented lines, whose column means nothing without a tab width. A container
+     * closed by an END after other code on its line (`END ; END`) has its own END: its column
+     * is not judged either.
      */
-    private findEnclosingBlockAlignedWith(source: string[], tokens: Token[], opener: Token, end: Token): Token | null {
-        const indentOf = (line: number) => (source[line] ?? '').match(/^\s*/)![0];
-        const linedUp = (e: Token, s: Token) => {
+    private findEnclosingBlockAlignedWith(document: any, tokens: Token[], opener: Token, end: Token): Token | null {
+        const indentOf = (line: number) =>
+            (document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }) as string).match(/^[ \t]*/)![0];
+        const judged = (e: Token) => {
             const endIndent = indentOf(e.line);
-            const indent = indentOf(s.line);
-            return endIndent.length === e.start && !endIndent.includes('\t') && !indent.includes('\t') &&
-                (e.start === s.start || e.start === indent.length);
+            return endIndent.length === e.start && !endIndent.includes('\t');
         };
-        const endIndent = indentOf(end.line);
-        if (endIndent.length !== end.start || endIndent.includes('\t') || indentOf(opener.line).includes('\t')) return null;
+        const linedUp = (e: Token, s: Token) => {
+            const indent = indentOf(s.line);
+            return judged(e) && !indent.includes('\t') && (e.start === s.start || e.start === indent.length);
+        };
+        if (!judged(end) || indentOf(opener.line).includes('\t')) return null;
         if (linedUp(end, opener)) return null;
         for (let outer = opener.parent; outer; outer = outer.parent) {
             if (outer.type !== TokenType.Structure || !linedUp(end, outer)) continue;
             const outerEnd = this.findTerminator(tokens, outer);
-            const outerHasOwnEnd = outerEnd !== undefined && (outerEnd.value === '.' || linedUp(outerEnd, outer));
+            const outerHasOwnEnd = outerEnd !== undefined &&
+                (outerEnd.value === '.' || !judged(outerEnd) || linedUp(outerEnd, outer));
             return outerHasOwnEnd ? null : outer;
         }
         return null;

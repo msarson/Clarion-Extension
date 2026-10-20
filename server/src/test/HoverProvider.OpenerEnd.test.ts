@@ -94,6 +94,25 @@ const ONE_LINE_NESTED = program([
     "  END",                        // 7
 ]);
 
+// A LOOP may end with UNTIL or WHILE instead of END.
+const LOOP_UNTIL = program([
+    "  LOOP",                   // 5
+    "    BREAK",                // 6
+    "  UNTIL 1 = 1",            // 7
+    "  LOOP",                   // 8
+    "    BREAK",                // 9
+    "  WHILE 1 = 2",            // 10
+]);
+
+// Both ENDs on one line: the first closes the inner LOOP, the second the outer one. The outer
+// LOOP has its own END, it just follows other code on the line, so nothing is missing.
+const END_END = program([
+    "  LOOP 2 TIMES",           // 5
+    "    LOOP 3 TIMES",         // 6
+    "      BREAK",              // 7
+    "  END ; END",              // 8
+]);
+
 suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
 
     setup(() => { tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hover-opener-')); });
@@ -158,5 +177,18 @@ suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
         assert.ok(!/lined up/.test(outer), `no warning expected; got: ${outer}`);
         const inner = await hoverAt(ONE_LINE_NESTED, 6, 'IF');
         assert.ok(!/closed by|not terminated/.test(inner), `one-line inner IF keeps the generic card; got: ${inner}`);
+    });
+
+    test('a LOOP ended by UNTIL or WHILE names that statement, not an END', async () => {
+        const until = await hoverAt(LOOP_UNTIL, 5, 'LOOP');
+        assert.ok(/\*\*LOOP\*\* — closed by UNTIL on line 8\b/.test(until), `expected UNTIL on line 8; got: ${until}`);
+        const whileText = await hoverAt(LOOP_UNTIL, 8, 'LOOP');
+        assert.ok(/\*\*LOOP\*\* — closed by WHILE on line 11\b/.test(whileText), `expected WHILE on line 11; got: ${whileText}`);
+    });
+
+    test('END ; END closing two blocks on one line does not warn', async () => {
+        const text = await hoverAt(END_END, 6, 'LOOP');
+        assert.ok(/closed by END on line 9\b/.test(text), `expected END on line 9; got: ${text}`);
+        assert.ok(!/lined up/.test(text), `the outer LOOP has its own END; got: ${text}`);
     });
 });
