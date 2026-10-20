@@ -2275,7 +2275,15 @@ export class MemberLocatorService {
         // keep the scoped chain walk so the closest declaration wins; several copies of the
         // same filename are resolved in redirection order — see the branch below.
         await this.ensureIndexBuilt();
-        const infos = this.sdi.findFor(className, docPath); // #571
+        const indexed = this.sdi.findFor(className, docPath); // #571
+        // #732: with several declaring files, the ones the document can reach (itself, or its
+        // PROGRAM) are the ones the compiler sees - as resolveSdiDeclaration ranks them for hover
+        // and F12 (#728). A stray copy of an include that nothing compiles drops out; with nothing
+        // known to be visible, every declaration stays a candidate as before.
+        const visible = indexed.length > 1
+            ? indexed.filter(d => FileRelationshipGraph.getInstance().isDeclarationVisibleFrom(d.filePath, docPath))
+            : [];
+        const infos = visible.length > 0 ? visible : indexed;
         const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
         if (distinctFiles.size === 1) {
             const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);

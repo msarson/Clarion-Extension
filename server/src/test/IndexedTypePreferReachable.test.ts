@@ -115,4 +115,36 @@ suite('findIndexedTypeDeclaration prefers the declaration the document can reach
     test('field hover: with nothing visible the directory tiebreak still decides', async () => {
         assert.strictEqual(await sdiFrom('elsewhere.clw'), 'olddct.inc');
     });
+
+    // #732: dot completion on the FILE (`Widget.`) enumerates members through the index tier of
+    // findAllMembersInClass, which took the first non-TYPE declaration: the stray copy's fields.
+    const SOURCES: Record<string, string> = {
+        [stray]: ['Widget  FILE,DRIVER(\'TOPSPEED\'),PRE(Wid)', 'Record    RECORD', 'OldField    LONG', '          END', '        END'].join('\r\n'),
+        [real]: ['Widget  FILE,DRIVER(\'TOPSPEED\'),PRE(Wid)', 'Record    RECORD', 'NewField    LONG', '          END', '        END'].join('\r\n'),
+    };
+    const membersFrom = async (file: string) => {
+        const service = new MemberLocatorService();
+        (service as unknown as { sdi: { findFor: () => StructureDeclarationInfo[] } }).sdi = { findFor: () => [decl(stray), decl(real)] };
+        (service as unknown as { ensureIndexBuilt: () => Promise<void> }).ensureIndexBuilt = async () => { /* nothing to build */ };
+        (service as unknown as { loadDocument: (p: string) => Promise<unknown> }).loadDocument = async (p: string) => {
+            const doc = TextDocument.create(`file:///${p}`, 'clarion', 1, SOURCES[p]);
+            return { doc, tokens: TokenCache.getInstance().getTokens(doc) };
+        };
+        const doc = TextDocument.create(`file:///${at(file)}`, 'clarion', 1, '');
+        const members = await (service as unknown as { findAllMembersInClass: (c: string, d: TextDocument) => Promise<{ name: string }[]> })
+            .findAllMembersInClass('Widget', doc);
+        return members.map(m => m.name);
+    };
+
+    test('dot completion: the members of the visible copy, not the first one in the folder', async () => {
+        const fromModule = await membersFrom('mod.clw');
+        assert.ok(fromModule.includes('NewField') && !fromModule.includes('OldField'), `from a MEMBER module; got: ${fromModule.join(', ')}`);
+        const fromHeader = await membersFrom('classhdr.inc');
+        assert.ok(fromHeader.includes('NewField') && !fromHeader.includes('OldField'), `from an included class header; got: ${fromHeader.join(', ')}`);
+    });
+
+    test('dot completion: with nothing visible the first declaration answers as before', async () => {
+        const fromElsewhere = await membersFrom('elsewhere.clw');
+        assert.ok(fromElsewhere.includes('OldField'), `got: ${fromElsewhere.join(', ')}`);
+    });
 });
