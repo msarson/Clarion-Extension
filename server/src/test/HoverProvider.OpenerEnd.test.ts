@@ -83,6 +83,17 @@ const ONE_LINE = program([
     "  IF 1 = 1 THEN RETURN.",  // 5
 ]);
 
+const ONE_LINE_END = program([
+    "  IF 1 = 1 THEN RETURN END",   // 5
+]);
+
+// A one-line IF inside a multi-line one takes none of the outer IF's END.
+const ONE_LINE_NESTED = program([
+    "  IF 1 = 1",                   // 5
+    "    IF 2 = 2 THEN BREAK END",  // 6
+    "  END",                        // 7
+]);
+
 suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
 
     setup(() => { tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hover-opener-')); });
@@ -133,5 +144,19 @@ suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
         const text = await hoverAt(ONE_LINE, 5, 'IF');
         assert.ok(!/closed by/.test(text), `one-line IF must not get the END card; got: ${text}`);
         assert.ok(!/not terminated/i.test(text), `one-line IF is terminated; got: ${text}`);
+    });
+
+    test('one-line IF ... THEN ... END keeps the generic keyword card', async () => {
+        const text = await hoverAt(ONE_LINE_END, 5, 'IF');
+        assert.ok(!/closed by/.test(text), `one-line IF must not get the END card; got: ${text}`);
+        assert.ok(!/not terminated/i.test(text), `one-line IF is terminated; got: ${text}`);
+    });
+
+    test('a one-line IF nested in a multi-line IF leaves the outer pairing intact', async () => {
+        const outer = await hoverAt(ONE_LINE_NESTED, 5, 'IF');
+        assert.ok(/closed by END on line 8\b/.test(outer), `expected END on line 8; got: ${outer}`);
+        assert.ok(!/lined up/.test(outer), `no warning expected; got: ${outer}`);
+        const inner = await hoverAt(ONE_LINE_NESTED, 6, 'IF');
+        assert.ok(!/closed by|not terminated/.test(inner), `one-line inner IF keeps the generic card; got: ${inner}`);
     });
 });
