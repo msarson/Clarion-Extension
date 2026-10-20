@@ -461,10 +461,11 @@ export class StructureFieldResolver {
         // Where each structure on a line ends. The owner must be a label that OPENS a structure:
         // a plain field of the same name (`Owner LONG` beside `Field LIKE(Owner.Field)`) opens
         // none, and taking it left the field search unbounded - it found the hovered line itself.
+        // A structure with no END yet (still being typed) runs to the end of the file.
         const structureEndByLine = new Map<number, number>();
         for (const t of tokens) {
-            if (t.type === TokenType.Structure && t.finishesAt !== undefined && !structureEndByLine.has(t.line)) {
-                structureEndByLine.set(t.line, t.finishesAt);
+            if (t.type === TokenType.Structure && !structureEndByLine.has(t.line)) {
+                structureEndByLine.set(t.line, t.finishesAt ?? Number.MAX_SAFE_INTEGER);
             }
         }
         const matchesName = (t: Token) =>

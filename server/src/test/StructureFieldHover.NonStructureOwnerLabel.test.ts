@@ -58,4 +58,15 @@ suite('StructureFieldHover - an owner label that opens no structure', () => {
         assert.ok(hover, 'Holder.Notes must resolve');
         assert.ok(JSON.stringify(hover).includes('STRING'), `got: ${JSON.stringify(hover)}`);
     });
+
+    test('a structure still being typed (no END yet) resolves its field', async () => {
+        const open = new ClarionTokenizer([
+            'Holder     GROUP',                // 0  <- no END yet: finishesAt is not set
+            'Name         STRING(20)',         // 1
+            'Notes        STRING(20)',         // 2
+        ].join('\n')).tokenize();
+        const hover = await resolver().findFieldInTokens('Holder', 'Notes', open, uri, 2);
+        assert.ok(hover, 'Holder.Notes must resolve while the GROUP is unterminated');
+        assert.ok(JSON.stringify(hover).includes('STRING'), `got: ${JSON.stringify(hover)}`);
+    });
 });
