@@ -21,14 +21,14 @@ node test-programs/ControlAttributesTest/apply.js --check    # exit 1 when the d
 - **Clashes:** pairs that look like alternatives (HSCROLL/HVSCROLL, LEFT/RIGHT/CENTER, INS/OVR, ...) are built together.
 - **Speed:** a full run is about 60 builds a version, about five minutes.
 
-Results: [Clarion 10](results-10.md) (10.0.12567) and [Clarion 12](results-12.md) (12.0.14204). `apply.js` keeps an attribute only when every results file accepts it, so the card never offers what an older compiler rejects. To add Clarion 11.1, run `run.js` against it and then `apply.js`. The server test `HoverProvider.ControlAttributeCard.test.ts` fails until the data file matches the results again.
+Results: [Clarion 10](results-10.md) (10.0.12567), [Clarion 11.1](results-11.md) (11.1.13855, run by @geircodes) and [Clarion 12](results-12.md) (12.0.14204). `apply.js` keeps an attribute only when every results file accepts it, so the card never offers what an older compiler rejects. To add another version, run `run.js` against it and then `apply.js`. The server test `HoverProvider.ControlAttributeCard.test.ts` fails until the data file matches the results again.
 
 ## What the compiler says
 
-- **Clarion 10 and 12 agree on everything except one case:** IMAGE accepts COLOR on 10 and rejects it on 12.
+- **Clarion 10, 11.1 and 12 agree on everything except one case:** IMAGE accepts COLOR on 10 and rejects it on 11.1 and 12.
 - **A REPORT is not a WINDOW.** A TEXT in a REPORT rejects 16 attributes that a WINDOW accepts: CURSOR, KEY, MSG, HLP, ALRT, DROPID, TIP, FLAT, FULL, the three scroll bars, READONLY, REQ, SCROLL and SINGLE. RESIZE and EXTEND are accepted only in a REPORT. LIST, COMBO, CHECK, OPTION, RADIO, GROUP, IMAGE and STRING also drop their focus and input attributes in a REPORT (ALRT, KEY, MSG, TIP, CURSOR, ...). All of them except COMBO, and BOX, LINE and ELLIPSE too, take EXTEND there. The other controls (BUTTON, ENTRY, SHEET, ...) build in a REPORT with exactly their WINDOW list. MENUBAR, MENU, ITEM and TOOLBAR are not valid in a REPORT at all.
 - **A STRING with a picture is not a STRING with text.** In a REPORT, `STRING(@n9)` takes SUM, CNT, AVE, MIN, MAX, PAGE, PAGENO, RESET(break) and TALLY(detail). `STRING('Total')` rejects all of them with `Unknown attribute`. The data file keeps the picture form's list as `pictureAttributes`.
-- **Headers agree on Clarion 10 and 12.**
+- **Headers agree on Clarion 10, 11.1 and 12.**
   - A WINDOW header takes TIP and TRN as well as the #730 list. STATUS builds bare, so it is a flag.
   - An APPLICATION header takes the WINDOW list without MDI, MODAL, TOOLBOX, DOCK, DOCKED, DROPID, GRAY and TRN.
   - A REPORT header takes AT, COLOR, FONT, LANDSCAPE, LAYOUT, MM, PAPER, POINTS, PREVIEW, THOUS and PRE. ORIENT, COPIES, DRIVER and NAME, which the data file used to list, are `Unknown attribute`. TO is a reserved word (`Expected: <ID>`).
