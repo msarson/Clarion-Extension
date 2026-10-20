@@ -619,11 +619,13 @@ export class MapProcedureResolver {
             const tokensInMap = pass.tokensFor(mapToken);
             logger.info(`📋 Found ${tokensInMap.length} total tokens in MAP (${pass.label})`);
 
-            // Look for MapProcedure tokens or Function tokens matching our procedure name
+            // Look for MapProcedure tokens or Function tokens matching our procedure name.
+            // The WHOLE name: an indented prototype's value is its name, so a prefix test
+            // let `Log` match `LogViewer` and outrank the real global `Log` in hover.
             for (const t of tokensInMap) {
                 const isMatch = (t.subType === TokenType.MapProcedure && 
                                  (t.label?.toLowerCase() === procName.toLowerCase() || 
-                                  t.value.toLowerCase().startsWith(procName.toLowerCase()))) ||
+                                  t.value.toLowerCase() === procName.toLowerCase())) ||
                                 (t.type === TokenType.Function && 
                                  t.value.toLowerCase() === procName.toLowerCase());
                 
