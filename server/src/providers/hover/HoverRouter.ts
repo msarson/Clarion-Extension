@@ -11,6 +11,8 @@ import { AttributeService } from '../../utils/AttributeService';
 import { ControlService } from '../../utils/ControlService';
 import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems, controlDefinitionFor } from '../../utils/DeclaredAttributes';
 import { LogicalLine } from '../../DocumentStructure';
+import { clientFeatures } from '../../utils/ClientFeatures';
+import { isGeneratedFile } from '../../utils/GeneratedFile';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
@@ -140,7 +142,7 @@ export class HoverRouter {
             // 8. Handle data types and controls
             const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
             mark('symbol');
-            if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure);
+            if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure, document);
 
             // 8.5 Attributes on a WINDOW/APPLICATION header line — no control context
             // there, so step 9 never sees them.
@@ -838,7 +840,8 @@ export class HoverRouter {
         documentStructure: {
             getLogicalLine?(line: number): LogicalLine | undefined;
             getStructureContextAt?(line: number): { inWindow: boolean; inReport: boolean };
-        } | undefined
+        } | undefined,
+        document: { uri: string; getText(): string }
     ): Hover {
         const logical = documentStructure?.getLogicalLine?.(position.line);
         if (!logical) return hover;
@@ -851,7 +854,13 @@ export class HoverRouter {
         if (!keyword) return hover;
         const accepted = controlDefinitionFor(logical, keyword, documentStructure?.getStructureContextAt?.(position.line));
         if (!accepted) return hover;
-        const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword));
+        // A client that applies attribute edit links gets the flag names as links (#731), except
+        // in a generated module: the next generate would undo the edit, as with rename (#549).
+        const links = clientFeatures.attributeEditLinks &&
+            !isGeneratedFile(decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'))
+            ? { lines: document.getText().split(/\r?\n/), anchorLine: position.line, logical }
+            : undefined;
+        const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword), links);
         if (!section) return hover;
         return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };
     }

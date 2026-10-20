@@ -9,6 +9,8 @@ export interface DeclaredAttribute {
     name: string;
     /** The attribute's name token. */
     token: Token;
+    /** The comma (at paren depth 0) that introduces the attribute. */
+    comma: Token;
 }
 
 /**
@@ -49,17 +51,17 @@ export function readDeclaredAttributes(logical: LogicalLine, keyword: Token): De
 
     const result: DeclaredAttribute[] = [];
     let depth = 0;
-    let expectName = false;
+    let comma: Token | null = null;
     for (let i = start + 1; i < tokens.length; i++) {
         const token = tokens[i];
         const value = token.value;
         if (depth === 0 && value === ',') {
-            expectName = true;
+            comma = token;
             continue;
         }
-        if (expectName) {
-            result.push({ name: value.toUpperCase(), token });
-            expectName = false;
+        if (comma) {
+            result.push({ name: value.toUpperCase(), token, comma });
+            comma = null;
         }
         if (value === '(') depth++;
         else if (value === ')' && depth > 0) depth--;
@@ -135,9 +137,10 @@ const AVAILABLE_LINE_WIDTH = 75;
  *     values are in the code right above the card,
  *   **Available:** the flags the control accepts that are not set, alphabetical, wrapped.
  * Empty when the definition carries no `attributes` list — the card then keeps its
- * generic "Common Attributes".
+ * generic "Common Attributes". With `links` (#731), each flag name is an edit link: under
+ * Attributes it removes the flag, under Available it adds it.
  */
-export function formatDeclaredAttributes(def: ControlDefinition, declared: DeclaredAttribute[]): string {
+export function formatDeclaredAttributes(def: ControlDefinition, declared: DeclaredAttribute[], links?: EditLinkContext): string {
     if (!def.attributes || def.attributes.length === 0) return '';
 
     const accepted = parseAccepted(def);
@@ -156,35 +159,129 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     // two trailing spaces: a markdown line break, so each block stays one paragraph
     if (problems.length > 0) blocks.push(problems.join('  \n'));
 
+    const flags = new Set(accepted.filter(a => a.flag).map(a => a.name));
     const valid = declared.filter(d => acceptedNames.has(d.name));
     if (valid.length > 0) {
-        blocks.push(`**Attributes:** ${valid.map(d => '`' + d.name + '`').join(' ')}`);
+        const names = valid.map(d => links && flags.has(d.name)
+            ? editLink(d.name, 'Remove', removeEdits(d, links))
+            : '`' + d.name + '`');
+        blocks.push(`**Attributes:** ${names.join(' ')}`);
     }
     const setNames = new Set(declared.map(d => d.name));
     const available = accepted.filter(a => a.flag && !setNames.has(a.name)).map(a => a.name).sort();
     if (available.length > 0) {
-        blocks.push(wrapList('**Available:** ', available, AVAILABLE_LINE_WIDTH));
+        const items = available.map(name => ({
+            visible: name,
+            text: links ? editLink(name, 'Add', addEdits(name, def, declared, links)) : name,
+        }));
+        // linked names are drawn as separate chips by a client: no separators needed
+        blocks.push(wrapList('**Available:** ', items, AVAILABLE_LINE_WIDTH, links ? '' : ' ·'));
     }
     return blocks.join('\n\n');
 }
 
-/** `prefix A · B · C`, broken into markdown lines of at most `width` visible characters. */
-function wrapList(prefix: string, names: string[], width: number): string {
+/**
+ * What the attribute edit links need: the document's lines, the line the hover was asked for, and
+ * the declaration's logical line. Link edits are relative to that line, so a client whose line
+ * numbers are offset from the server's (an embed view of a module) still lands on the right text.
+ */
+export interface EditLinkContext {
+    lines: string[];
+    anchorLine: number;
+    logical: LogicalLine;
+}
+
+/** One text edit of a link: lines relative to the anchor, 0-based columns, the original text of lines l..el. */
+interface LinkEdit { l: number; c: number; el: number; ec: number; t: string; o: string[]; }
+
+/** The command a client registers to apply an edit link (#731; VS Code: #739). */
+export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
+
+/**
+ * `[NAME](command:clarion.applyAttributeEdit?<args> "Add NAME — short")`; the title is the client's
+ * tooltip. `args` is `[payload]`, JSON and URI-encoded, with `(` and `)` encoded as well: the
+ * original lines are full of them (`AT(10,10)`), and a raw one can end a markdown link early.
+ */
+function editLink(name: string, verb: 'Add' | 'Remove', edits: LinkEdit[]): string {
+    const short = AttributeService.getInstance().getAttribute(name)?.short;
+    const title = (`${verb} ${name}` + (short ? ` — ${short}` : '')).replace(/"/g, "'");
+    const args = encodeURIComponent(JSON.stringify([{ e: edits }])).replace(/\(/g, '%28').replace(/\)/g, '%29');
+    return `[${name}](command:${ATTRIBUTE_EDIT_COMMAND}?${args} "${title}")`;
+}
+
+function linkEdit(links: EditLinkContext, line: number, col: number, endLine: number, endCol: number, text: string): LinkEdit {
+    return {
+        l: line - links.anchorLine, c: col,
+        el: endLine - links.anchorLine, ec: endCol,
+        t: text,
+        o: links.lines.slice(line, endLine + 1),
+    };
+}
+
+/**
+ * Remove a flag: from its comma to the end of its name. When the name opens a continuation line, the
+ * comma (and the `|`) sit on the line before, so the rest of the name's line joins that line:
+ * `USE(?T), |` + `   READONLY  ! c` becomes `USE(?T)  ! c`.
+ */
+function removeEdits(d: DeclaredAttribute, links: EditLinkContext): LinkEdit[] {
+    return [linkEdit(links, d.comma.line, d.comma.start, d.token.line, d.token.start + d.token.value.length, '')];
+}
+
+/**
+ * Add a flag: replace a partner from the same `exclusive` group in place (VSCROLL becomes HVSCROLL)
+ * and remove any further partner; otherwise append `,NAME` to the end of the declaration's code,
+ * before a comment.
+ */
+function addEdits(name: string, def: ControlDefinition, declared: DeclaredAttribute[], links: EditLinkContext): LinkEdit[] {
+    // every attribute that shares an exclusive group with NAME (HVSCROLL: HSCROLL and VSCROLL)
+    const clashing = new Set((def.exclusive ?? []).filter(g => g.includes(name)).flat());
+    const partners = declared.filter(d => d.name !== name && clashing.has(d.name));
+    if (partners.length > 0) {
+        const [first, ...rest] = partners;
+        const t = first.token;
+        return [
+            linkEdit(links, t.line, t.start, t.line, t.start + t.value.length, name),
+            ...rest.flatMap(d => removeEdits(d, links)),
+        ];
+    }
+    const line = links.logical.endLine;
+    const end = codeEnd(links.lines[line] ?? '');
+    return [linkEdit(links, line, end, line, end, ',' + name)];
+}
+
+/** The column where a line's code ends: before a `!` comment outside quotes, trailing blanks dropped. */
+function codeEnd(text: string): number {
+    let inString = false;
+    let end = text.length;
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === "'") inString = !inString;
+        else if (text[i] === '!' && !inString) { end = i; break; }
+    }
+    return text.slice(0, end).replace(/\s+$/, '').length;
+}
+
+/**
+ * `prefix A · B · C`, broken into markdown lines of at most `width` VISIBLE characters — an item's
+ * text may be a link, its `visible` part is what is measured. Each broken line ends in `separator`.
+ */
+function wrapList(prefix: string, items: { text: string; visible: string }[], width: number, separator: string): string {
     const lines: string[] = [];
     let line = prefix;
     let visible = prefix.replace(/\*/g, '').length;
-    for (let i = 0; i < names.length; i++) {
-        const text = names[i] + (i < names.length - 1 ? ' ·' : '');
+    for (let i = 0; i < items.length; i++) {
+        const sep = i < items.length - 1 ? separator : '';
+        const text = items[i].text + sep;
+        const length = items[i].visible.length + sep.length;
         if (line === prefix) {
             line += text;
-            visible += text.length;
-        } else if (visible + 1 + text.length > width) {
+            visible += length;
+        } else if (visible + 1 + length > width) {
             lines.push(line);
             line = text;
-            visible = text.length;
+            visible = length;
         } else {
             line += ' ' + text;
-            visible += 1 + text.length;
+            visible += 1 + length;
         }
     }
     lines.push(line);

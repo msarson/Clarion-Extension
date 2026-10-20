@@ -16,6 +16,8 @@ export interface AttributeDefinition {
     applicableTo: string[];
     signatures: AttributeSignature[];
     description: string;
+    /** A few words for a tooltip ("hidden until UNHIDE"); flag attributes only, so far. */
+    short?: string;
     propertyEquate: string;
 }
 
