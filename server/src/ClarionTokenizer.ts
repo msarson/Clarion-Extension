@@ -168,6 +168,41 @@ export class ClarionTokenizer {
     }
 
     /**
+     * The terminator line of an OMIT/COMPILE block: the terminator text itself is not code.
+     * Compiler-verified (Clarion 12): inside a MAP's MODULE, `COMPILE('END***',_WIDTH32_)` closed
+     * by the line `END***` builds, so `END***` does not close the MODULE; and a block closed by
+     * `END XYZ` with terminator 'XYZ' builds too, so the rest of the line is still read. Read as
+     * code, `END***` matched EndStatement and closed the MODULE a line early — the MODULE's own
+     * END then closed the MAP, and every declaration after it was misread.
+     *
+     * Returns `line` with the text of each open terminator it contains (outside string literals,
+     * as OmitCompileDetector finds them) blanked to spaces, so columns are unchanged, and removes
+     * those terminators from `open`.
+     */
+    static blankDirectiveTerminators(line: string, open: string[]): string {
+        if (open.length === 0) return line;
+        const withoutStrings = line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length));
+        let result = line;
+        for (let i = open.length - 1; i >= 0; i--) {
+            const at = withoutStrings.indexOf(open[i]);
+            if (at < 0) continue;
+            result = result.slice(0, at) + ' '.repeat(open[i].length) + result.slice(at + open[i].length);
+            open.splice(i, 1);
+        }
+        return result;
+    }
+
+    /** Adds the terminator of each OMIT/COMPILE directive on `line` (not in a comment) to `open`. */
+    static collectDirectiveTerminators(line: string, open: string[]): void {
+        if (!/\b(?:OMIT|COMPILE)\b/i.test(line)) return;
+        const commentAt = line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length)).indexOf('!');
+        const code = commentAt >= 0 ? line.slice(0, commentAt) : line;
+        for (const m of code.matchAll(/\b(?:OMIT|COMPILE)\s*\(\s*'((?:[^']|'')+)'/gi)) {
+            open.push(m[1].replace(/''/g, "'"));
+        }
+    }
+
+    /**
      * #715 — whether a full pass is inside a CODE section when it reaches line `index`: set by the
      * nearest line above that sets it, else outside.
      */
@@ -301,9 +336,12 @@ export class ClarionTokenizer {
         // 🚀 PERF: Track CODE context to skip Structure patterns in execution sections
         let inCodeSection = this.initialInCodeSection;
         let tokensOnCurrentLine = 0;
+        // Terminators of the OMIT/COMPILE blocks opened so far and not yet closed.
+        const openTerminators: string[] = [];
         
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            const line = lines[lineNumber];
+            const line = ClarionTokenizer.blankDirectiveTerminators(lines[lineNumber], openTerminators);
+            ClarionTokenizer.collectDirectiveTerminators(lines[lineNumber], openTerminators);
             if (line.trim() === "") continue; // ✅ Skip blank lines
 
             let position = 0;

@@ -720,6 +720,20 @@ export class TokenCache {
             ? lineText(i)
             : document.getText({ start: { line: i, character: 0 }, end: { line: i, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, '');
         const expandTime = performance.now() - expandStart;
+        // An OMIT/COMPILE directive and its terminator line are read together (the terminator
+        // text is blanked — see ClarionTokenizer.blankDirectiveTerminators), which a span tokenized
+        // on its own cannot do. An edit touching either one, before or after, tokenizes in full.
+        const terminators = this.omitTerminators(cached);
+        const pairsWithDirective = (text: string) => /\b(OMIT|COMPILE)\s*\(/i.test(text) ||
+            terminators.some(t => text.includes(t));
+        for (const [lo, hi] of spans) {
+            for (let l = lo; l <= hi; l++) {
+                if (pairsWithDirective(lineText(l))) return null;
+            }
+            for (let l = lo; l <= Math.min(hi + delta, document.lineCount - 1); l++) {
+                if (pairsWithDirective(newLineAt(l))) return null;
+            }
+        }
         const retokenizedCount = spans.reduce((n, [lo, hi]) => n + Math.max(0, hi + delta - lo + 1), 0);
 
         logger.info(`🚀 Re-tokenizing ${retokenizedCount} lines in ${spans.length} span(s) (${delta >= 0 ? '+' : ''}${delta} lines) - expansion took ${expandTime.toFixed(2)}ms`);
