@@ -1833,7 +1833,7 @@ export class MemberLocatorService {
         const classEnd = classToken.finishesAt;
 
         // A FILE keeps its fields inside its own RECORD, so for a FILE the RECORD is transparent:
-        // its fields are members (`File.Field`) and only its header line is not.
+        // its fields are members (`File.Field`), as is the record itself (`File.Record`).
         const isFileRecord = (t: Token): boolean =>
             structureType === 'FILE' && t.value.toUpperCase() === 'RECORD';
 
@@ -1848,9 +1848,6 @@ export class MemberLocatorService {
                 t.line < classEnd
             )
             .map(t => ({ start: t.line, end: t.finishesAt! }));
-        const recordHeaderLines = new Set(
-            tokens.filter(t => t.type === TokenType.Structure && isFileRecord(t)).map(t => t.line)
-        );
 
         const isInsideNested = (line: number): boolean =>
             nestedRanges.some(r => line > r.start && line < r.end);
@@ -1867,7 +1864,6 @@ export class MemberLocatorService {
             if (token.line <= classToken.line || token.line >= classEnd) continue;
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (isInsideNested(token.line)) continue;
-            if (recordHeaderLines.has(token.line)) continue;
             if (seenLines.has(token.line)) continue;
 
             const raw = docLines[token.line] ?? '';

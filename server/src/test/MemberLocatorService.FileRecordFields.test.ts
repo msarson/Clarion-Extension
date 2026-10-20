@@ -8,7 +8,8 @@
  *
  * Pins:
  *   1. The record's fields are enumerated alongside the keys.
- *   2. The `Record` label is not offered as a member.
+ *   2. The `Record` label is still offered (`Widget.Record` is valid, and the same-document
+ *      #505 path offers it too).
  *   3. A GROUP nested inside the record still hides its own children (only the FILE's own
  *      RECORD is transparent).
  */
@@ -96,9 +97,9 @@ suite('MemberLocatorService - FILE record fields in member enumeration', () => {
         }
     });
 
-    test('the Record label itself is not offered', async () => {
+    test('the Record label is still offered once, as File.Record is valid and #505 offers it', async () => {
         const names = await enumerate();
-        assert.ok(!names.some(n => n.toLowerCase() === 'record'), `got: ${names.join(', ')}`);
+        assert.strictEqual(names.filter(n => n.toLowerCase() === 'record').length, 1, `got: ${names.join(', ')}`);
     });
 
     test('a GROUP inside the record still hides its own children', async () => {
