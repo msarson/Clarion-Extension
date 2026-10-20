@@ -49,12 +49,13 @@ function links(card: string, block: string): CardLink[] {
     const next = card.indexOf('\n\n', start);
     const text = card.slice(start, next < 0 ? undefined : next);
     const result: CardLink[] = [];
-    const re = /\[([A-Z0-9]+)\]\(command:clarion\.applyAttributeEdit\?([^\s()"]+) "([^"]*)"\)/g;
+    // a title may hold markdown-escaped quotes: "Remove TIP('Column \"M\"')"
+    const re = /\[([A-Z0-9]+)\]\(command:clarion\.applyAttributeEdit\?([^\s()"]+) "((?:[^"\\]|\\.)*)"\)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text))) {
         const args = JSON.parse(decodeURIComponent(m[2]));
         assert.ok(Array.isArray(args) && args.length === 1, `args must be [payload]: ${m[2]}`);
-        result.push({ name: m[1], title: m[3], edits: args[0].e });
+        result.push({ name: m[1], title: m[3].replace(/\\(.)/g, '$1'), edits: args[0].e });
     }
     return result;
 }
@@ -108,6 +109,13 @@ suite('Control card: every attribute can be added and removed (#743)', () => {
         // periods become colons, an array element's subscript follows an underscore
         assert.match(await equate('USE(SELF.Find.What)'), /^Remove USE\(SELF\.Find\.What\) — .*\?SELF:Find:What will/);
         assert.match(await equate('USE(Pre:Array[1])'), /\?Pre:Array_1 will/);
+    });
+
+    test('a double quote in the value stays a double quote in the title, escaped for markdown', async () => {
+        const text = program([`           TEXT,AT(10,10,100,20),USE(?A),TIP('Column "M" here')`]);
+        const { card } = await hoverOn(text, 'TEXT,');
+        assert.strictEqual(linkFor(card, 'Attributes', 'TIP').title, `Remove TIP('Column "M" here')`);
+        assert.ok(card.includes(String.raw`"Remove TIP('Column \"M\" here')"`), card);
     });
 
     test('a remove title quotes the source, continuation lines joined', async () => {

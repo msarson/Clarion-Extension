@@ -273,7 +273,8 @@ export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
  * original lines are full of them (`AT(10,10)`), and a raw one can end a markdown link early.
  */
 function editLink(name: string, title: string, edits: LinkEdit[]): string {
-    title = title.replace(/"/g, "'");
+    // markdown escapes, so a value's double quote reads as itself in the tooltip
+    title = title.replace(/[\\"]/g, '\\$&');
     const args = encodeURIComponent(JSON.stringify([{ e: edits }])).replace(/\(/g, '%28').replace(/\)/g, '%29');
     return `[${name}](command:${ATTRIBUTE_EDIT_COMMAND}?${args} "${title}")`;
 }
