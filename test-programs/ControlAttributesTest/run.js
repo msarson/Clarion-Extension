@@ -12,6 +12,9 @@
  *
  *   node test-programs/ControlAttributesTest/run.js --clarion=<Clarion install root> [--controls=TEXT,LIST]
  *
+ * #740: the WINDOW, APPLICATION and REPORT header lines get the same treatment ("headers").
+ * --headers-only reruns just those, keeping the controls of an existing results file.
+ *
  * Writes results-<version>.json and results-<version>.md next to this script.
  */
 const fs = require('fs');
@@ -37,6 +40,8 @@ const CANDIDATES = ('ABOVE ABSOLUTE ALONE ALRT ANGLE AT AUTO AUTOSIZE AVE BELOW 
     'PREVIEW RANGE READONLY REPEAT REQ RESET RESIZE RIGHT ROUND RTF SCROLL SEPARATOR SINGLE SKIP SMOOTH SPREAD STATUS ' +
     'STD STEP STRETCH SUM SYSTEM TALLY THOUS TILED TIMER TIP TOGETHER TOOLBOX TRN UP UPR USE VALUE VCR VERTICAL ' +
     'VSCROLL WALLPAPER WITHNEXT WITHPRIOR WIZARD ZOOM').split(' ');
+// What the structure pages add for a header line (a REPORT's PRE, ...).
+const HEADER_EXTRA = ['PRE', 'ORIENT', 'COPIES', 'DRIVER', 'NAME', 'TO'];
 
 // Arguments to try when an attribute fails bare, most specific first. `?Zz` is a control
 // declared in every window; `Gd` and `Gb` are the DETAIL and the BREAK of the report the
@@ -50,7 +55,7 @@ const SAMPLES = {
     USE: ['(?Uu)', '(Num)'], AT: ['(1,1,10,10)'], DOCUMENT: ["('x')"], CREATE: ["('x')"], OPEN: ["('x')"],
     LINK: ["('x','y')", "('x')"], COMPATIBILITY: ['(1)'], BEVEL: ['(1)', '(1,1)'], DROP: ['(5)'],
     TALLY: ['(Gd)'], RESET: ['(Gb)'], PAGENO: [''], WALLPAPER: ["('x.bmp')"], PALETTE: ['(256)'], STATUS: ['(10)'],
-    CHECK: [''], DECIMAL: ['(1)'], LEFT: ['(1)'], RIGHT: ['(1)'], CENTER: ['(1)'], MAX: ['(1)'], MIN: ['(1)'],
+    PRE: ['(Px)'], CHECK: [''], DECIMAL: ['(1)'], LEFT: ['(1)'], RIGHT: ['(1)'], CENTER: ['(1)'], MAX: ['(1)'], MIN: ['(1)'],
     PAPER: ['(1)'], PREVIEW: ['(Q)'], JOIN: [''], ABOVE: ['(1)'], BELOW: ['(1)'], UP: [''], DOWN: [''],
 };
 const GENERIC = ['(1)', "('x')", '(1,1)', '(Num)', '(1,1,1)', '(Q)', '(?Zz)', "('x',1)", '(Gd)', '(Gb)'];
@@ -73,6 +78,12 @@ const CONTROLS = {
     MENU: ["MENU('m')$A", "  ITEM('i')", 'END'], // inside a MENUBAR
     ITEM: ["ITEM('i')$A"], // inside a MENU inside a MENUBAR
     TOOLBAR: ['TOOLBAR$A', "  BUTTON('b')", 'END'],
+};
+// #740: each structure's header as it is declared on its own; `$A` is where the attribute goes, `$i` the case.
+const HEADERS = {
+    WINDOW: ["H$i WINDOW('w')$A", "    BUTTON('z'),USE(?Zz)", '  END'],
+    APPLICATION: ["H$i APPLICATION('a')$A", '  END'],
+    REPORT: ['H$i REPORT$A', 'Hb$i BREAK(Num)', 'Hd$i DETAIL,AT(,,8000,1000)', "    STRING('z'),USE(?Zz)", '  END', '  END', '  END'],
 };
 // Controls that only exist inside another one: the lines that open and close it.
 const WRAP = {
@@ -118,9 +129,11 @@ function buildBatch(control, where, cases) {
         const [open, close] = WRAP[control] ?? [[], []];
         open.forEach(l => body.push(indent + l));
         const inner = open.length ? '  ' : '';
-        CONTROLS[control].forEach(l => body.push(indent + inner + l.replace('$A', c.text)));
+        (CONTROLS[control] ?? []).forEach(l => body.push(indent + inner + l.replace('$A', c.text)));
         close.forEach(l => body.push(indent + l));
-        if (where === 'WINDOW') {
+        if (where === 'HEADER') {
+            lines.push(...HEADERS[control].map(l => l.replace('$A', c.text).replace(/\$i/g, String(i))));
+        } else if (where === 'WINDOW') {
             // ?Zz is there for VCR(?Zz) to name; it follows the case, so a MENUBAR stays first
             lines.push(`W${i} WINDOW('w'),AT(,,200,100)`, ...body, "    BUTTON('z'),USE(?Zz)", '  END');
         } else {
@@ -161,12 +174,13 @@ function probe(control, where) {
     // one builds. The compiler checks the argument count before it checks whether the control
     // takes the attribute at all, so `Wrong number of parameters` says nothing either way:
     // only `Unknown attribute`, in any round, rejects it.
-    const state = Object.fromEntries(CANDIDATES.map(attr => [attr, {
+    const candidates = where === 'HEADER' ? CANDIDATES.concat(HEADER_EXTRA) : CANDIDATES;
+    const state = Object.fromEntries(candidates.map(attr => [attr, {
         tries: [''].concat(SAMPLES[attr] ?? [], GENERIC.filter(g => !(SAMPLES[attr] ?? []).includes(g))),
         bare: false, sample: null, rejected: false, errors: [],
     }]));
     for (let round = 0; ; round++) {
-        const batch = CANDIDATES.filter(a => {
+        const batch = candidates.filter(a => {
             const s = state[a];
             if (s.rejected || s.sample !== null || round >= s.tries.length) return false;
             return round === 0 || s.tries[round] !== '';
@@ -185,7 +199,7 @@ function probe(control, where) {
         });
     }
     const result = {};
-    for (const a of CANDIDATES) {
+    for (const a of candidates) {
         const s = state[a];
         result[a] = s.rejected ? { kind: 'rejected' }
             : s.bare || s.sample !== null ? { kind: s.bare ? 'flag' : 'value', bare: s.bare, sample: s.sample }
@@ -226,8 +240,11 @@ const only = arg('controls')?.toUpperCase().split(',');
 const version = /Clarion(\d+)/i.exec(fs.readdirSync(path.join(CLARION, 'bin')).find(f => /^Clarion\d+\.exe$/i.test(f)) ?? '')?.[1]
     ?? path.basename(CLARION).replace(/\D+/g, '').slice(0, 2);
 // The install folder's own name only: a full path can name the machine's owner or a client.
-const results = { clarion: path.basename(CLARION), version, controls: {} };
-for (const control of Object.keys(CONTROLS)) {
+const outBase = path.join(__dirname, `results-${version}`);
+const headersOnly = process.argv.includes('--headers-only');
+const results = { clarion: path.basename(CLARION), version, controls: {}, headers: {} };
+if (headersOnly) results.controls = JSON.parse(fs.readFileSync(outBase + '.json', 'utf8')).controls;
+for (const control of headersOnly ? [] : Object.keys(CONTROLS)) {
     if (only && !only.includes(control)) continue;
     results.controls[control] = {};
     for (const where of ['WINDOW', 'REPORT']) {
@@ -242,7 +259,15 @@ for (const control of Object.keys(CONTROLS)) {
     }
 }
 
-const outBase = path.join(__dirname, `results-${version}`);
+for (const structure of only && !headersOnly ? [] : Object.keys(HEADERS)) {
+    const t = Date.now();
+    const r = results.headers[structure] = probe(structure, 'HEADER');
+    const summary = r.valid
+        ? Object.entries(r.attributes).filter(([, v]) => v.kind !== 'rejected').map(([a, v]) => v.kind === 'flag' ? a : v.kind === 'value' ? `${a}()` : `${a}?`).join(' ')
+        : `not valid: ${r.reason}`;
+    console.log(`${structure} header (${Date.now() - t} ms): ${summary}`);
+}
+
 fs.writeFileSync(outBase + '.json', JSON.stringify(results, null, 1) + '\n');
 const md = [`# Control attributes — Clarion ${version}`, '', `Generated by \`run.js\` against \`${path.basename(CLARION)}\`. Flags build bare; \`X()\` builds only with a value; \`X?\` failed every form with an error other than \`Unknown attribute\`. A clash is a pair the compiler rejects together.`, ''];
 for (const [control, byWhere] of Object.entries(results.controls)) {
@@ -254,6 +279,14 @@ for (const [control, byWhere] of Object.entries(results.controls)) {
         for (const c of r.clashes) md.push(`  - clash ${c.pair.join(' + ')}: ${c.error}`);
         for (const [a, v] of Object.entries(r.attributes).filter(([, v]) => v.kind === 'unresolved')) md.push(`  - ${a}?: ${(v.errors ?? []).join(' | ')}`);
     }
+}
+for (const [structure, r] of Object.entries(results.headers)) {
+    if (!r.valid) { md.push(`- **${structure}** header: not valid (${r.reason})`); continue; }
+    const list = Object.entries(r.attributes).filter(([, v]) => v.kind !== 'rejected')
+        .map(([a, v]) => v.kind === 'flag' ? a : v.kind === 'value' ? `${a}()` : `${a}?`);
+    md.push(`- **${structure}** header: ${list.join(' ')}`);
+    for (const c of r.clashes) md.push(`  - clash ${c.pair.join(' + ')}: ${c.error}`);
+    for (const [a, v] of Object.entries(r.attributes).filter(([, v]) => v.kind === 'unresolved')) md.push(`  - ${a}?: ${(v.errors ?? []).join(' | ')}`);
 }
 fs.writeFileSync(outBase + '.md', md.join('\n') + '\n');
 fs.rmSync(work, { recursive: true, force: true });

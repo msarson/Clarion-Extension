@@ -12,6 +12,9 @@ import { PropertyService } from '../utils/PropertyService';
 import { EventService } from '../utils/EventService';
 import { Token } from '../ClarionTokenizer';
 import { TokenType } from '../tokenizer/TokenTypes';
+import { ControlDefinition, ControlService } from '../utils/ControlService';
+import { AttributeService } from '../utils/AttributeService';
+import { controlDefinitionFor, findControlKeyword, findDeclarationKeyword, parseAccepted, readDeclaredAttributes } from '../utils/DeclaredAttributes';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("CompletionProvider");
@@ -58,6 +61,13 @@ export class CompletionProvider {
                 end: { line: position.line, character: position.character }
             });
             if (this.isInCommentOrString(lineText)) return [];
+
+            // #740: after a comma on a control declaration or a WINDOW/APPLICATION/REPORT
+            // header, only an attribute is legal.
+            const attributeCompletions = this.handleAttributeCompletion(lineText, document, position);
+            if (attributeCompletions) return attributeCompletions;
+            // The comma is a trigger for that alone; anywhere else it offers nothing.
+            if (params.context?.triggerCharacter === ',') return [];
 
             // PROP: / PROPPRINT: completion — fires when user types the colon or a partial name after it
             const propCompletions = this.handlePropCompletion(lineText);
@@ -113,6 +123,79 @@ export class CompletionProvider {
             logger.error(`CompletionProvider error: ${err instanceof Error ? err.message : String(err)}`);
             return [];
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Attribute completion (#740)
+    // -------------------------------------------------------------------------
+
+    /**
+     * The attributes that can follow a comma on a control declaration
+     * (`TEXT,AT(...),|`) or on a WINDOW, APPLICATION or REPORT header line: the
+     * compiler-checked list for that control in that structure (#737), less the
+     * ones the declaration already sets. `|` continuation lines are part of the
+     * declaration. Inside brackets (`AT(`, `USE(`) the position is an argument,
+     * not an attribute, and this returns null like any line it does not cover.
+     */
+    private handleAttributeCompletion(
+        lineBeforeCursor: string,
+        document: TextDocument,
+        position: Position
+    ): CompletionItem[] | null {
+        const partial = /[A-Za-z]*$/.exec(lineBeforeCursor)![0];
+        const nameStart = position.character - partial.length;
+        const structure = this.tokenCache.getStructure(document);
+        const logical = structure.getLogicalLine(position.line);
+        if (!logical) return null;
+
+        // The declaration's tokens before the word being typed: the last must be a comma at
+        // bracket depth 0.
+        const before = logical.tokens.filter(t =>
+            (t.line < position.line || (t.line === position.line && t.start < nameStart))
+            && t.type !== TokenType.Comment && t.type !== TokenType.LineContinuation && t.value !== '|');
+        if (before.length === 0 || before[before.length - 1].value !== ',') return null;
+        // A picture with brackets (`STRING(@n(15.2))`) leaves an opening bracket inside the
+        // keyword's token, so a stray closing one is ignored, as readDeclaredAttributes does.
+        let depth = 0;
+        for (const t of before) {
+            if (t.value === '(') depth++;
+            else if (t.value === ')' && depth > 0) depth--;
+        }
+        if (depth !== 0) return null;
+
+        const first = logical.tokens.find(t => t.type !== TokenType.Label);
+        if (!first) return null;
+        const word = (/^\w+/.exec(first.value)?.[0] ?? '').toUpperCase();
+        const controls = ControlService.getInstance();
+        let def: ControlDefinition | undefined;
+        const header = controls.getContainerStructure(word);
+        if (header && findDeclarationKeyword(logical, first.line, first.start)) {
+            def = header.attributes ? header : undefined;
+        } else if (findControlKeyword(logical, first.line, first.start)) {
+            def = controlDefinitionFor(logical, first, structure.getStructureContextAt(first.line));
+        }
+        if (!def) return null;
+
+        // ALRT is set once per key (`ALRT(EnterKey),ALRT(EscKey)`), so it stays on offer.
+        const declared = new Set(readDeclaredAttributes(logical, first)
+            .filter(d => !(d.token.line === position.line && d.token.start === nameStart) && d.name !== 'ALRT')
+            .map(d => d.name));
+        const attributes = AttributeService.getInstance();
+        const typed = partial.toUpperCase();
+        return parseAccepted(def)
+            .filter(a => !declared.has(a.name) && a.name.startsWith(typed))
+            .map(a => {
+                const item: CompletionItem = { label: a.name, kind: CompletionItemKind.Property };
+                const signature = attributes.getAttributeSignature(a.name);
+                if (signature) item.detail = signature;
+                const description = attributes.getAttribute(a.name)?.description;
+                if (description) item.documentation = description;
+                if (!a.flag) {
+                    item.insertText = `${a.name}($1)`;
+                    item.insertTextFormat = InsertTextFormat.Snippet;
+                }
+                return item;
+            });
     }
 
     // -------------------------------------------------------------------------

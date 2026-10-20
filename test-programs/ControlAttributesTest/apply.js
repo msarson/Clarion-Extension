@@ -29,7 +29,8 @@ if (results.length === 0) { console.error('no results-*.json next to this script
 
 /** The list for `control` in `where`, agreed by every version; null when one rejects the control there. */
 function agreed(control, where) {
-    const runs = results.map(r => r.controls[control]?.[where]);
+    // #740: where HEADER is the WINDOW, APPLICATION or REPORT header line itself.
+    const runs = results.map(r => where === 'HEADER' ? r.headers?.[control] : r.controls[control]?.[where]);
     if (runs.some(r => !r || !r.valid)) return null;
     const names = Object.keys(runs[0].attributes);
     const list = [];
@@ -71,6 +72,16 @@ for (const control of controls) {
         if (d?.exclusive) d.exclusive = d.exclusive.filter(group => group.every(a => (d.attributes ?? []).some(x => x.replace('()', '') === a)));
         if (d?.exclusive && d.exclusive.length === 0) delete d.exclusive;
     }
+}
+
+// #740: each structure's header list goes on its containerStructures entry.
+for (const structure of Object.keys(results[0].headers ?? {})) {
+    const list = agreed(structure, 'HEADER');
+    const def = data.containerStructures.find(c => c.name === structure);
+    if (!list || !def) continue;
+    def.attributes = list;
+    if (def.exclusive) def.exclusive = def.exclusive.filter(group => group.every(a => list.some(x => x.replace('()', '') === a)));
+    if (def.exclusive && def.exclusive.length === 0) delete def.exclusive;
 }
 
 // The file's own layout: a key per line, arrays of names on one line, a `params` entry per

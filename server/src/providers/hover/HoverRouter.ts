@@ -9,7 +9,7 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { ControlService } from '../../utils/ControlService';
-import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
+import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems, controlDefinitionFor } from '../../utils/DeclaredAttributes';
 import { LogicalLine } from '../../DocumentStructure';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
@@ -840,14 +840,7 @@ export class HoverRouter {
             getStructureContextAt?(line: number): { inWindow: boolean; inReport: boolean };
         } | undefined
     ): Hover {
-        // STRING and GROUP are data types too: outside a WINDOW, APPLICATION or REPORT the
-        // line is a data declaration, not a control.
-        const context = documentStructure?.getStructureContextAt?.(position.line);
-        if (!context || (!context.inWindow && !context.inReport)) return hover;
-        const inReport = context.inReport;
-        const def = (inReport ? this.controlService.getReportControl(word) : undefined) ?? this.controlService.getControl(word);
-        if (!def?.attributes || !documentStructure?.getLogicalLine) return hover;
-        const logical = documentStructure.getLogicalLine(position.line);
+        const logical = documentStructure?.getLogicalLine?.(position.line);
         if (!logical) return hover;
         const keywordToken = logical.tokens.find(t =>
             t.line === position.line &&
@@ -856,11 +849,8 @@ export class HoverRouter {
         if (!keywordToken) return hover;
         const keyword = findControlKeyword(logical, keywordToken.line, keywordToken.start);
         if (!keyword) return hover;
-        const at = logical.tokens.indexOf(keyword);
-        // The tokenizer reads `STRING(@n9)` as one token; `STRING (@n9)` would be three.
-        const isPicture = /^\w+\(\s*@/.test(keyword.value)
-            || (logical.tokens[at + 1]?.value === '(' && logical.tokens[at + 2]?.value.startsWith('@'));
-        const accepted = isPicture && def.pictureAttributes ? { ...def, attributes: def.pictureAttributes } : def;
+        const accepted = controlDefinitionFor(logical, keyword, documentStructure?.getStructureContextAt?.(position.line));
+        if (!accepted) return hover;
         const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword));
         if (!section) return hover;
         return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };

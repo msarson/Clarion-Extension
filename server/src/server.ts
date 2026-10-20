@@ -564,7 +564,7 @@ connection.onInitialize((params) => {
                     retriggerCharacters: [')']
                 },
                 completionProvider: {
-                    triggerCharacters: ['.', ':', '?'],
+                    triggerCharacters: ['.', ':', '?', ','], // ',' for attribute completion (#740)
                     resolveProvider: false
                 },
                 documentLinkProvider: { resolveProvider: false },

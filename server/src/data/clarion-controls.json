@@ -312,7 +312,7 @@
         { "name": "title", "description": "String constant for the window title bar text (PROP:Text)", "optional": false }
       ],
       "commonAttributes": ["AT", "CENTER", "MDI", "MODAL", "RESIZE", "MAX", "ICON", "FONT", "GRAY", "TIMER", "AUTO", "SYSTEM", "STATUS", "DOUBLE", "NOFRAME", "TOOLBOX", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "DOCK", "DOCKED", "LAYOUT", "MASK", "MSG", "PALETTE", "DROPID", "IMM"],
-      "attributes": ["AT()", "CENTER", "SYSTEM", "MAX", "ICON()", "STATUS()", "HLP()", "CURSOR()", "MDI", "MODAL", "MASK", "FONT()", "GRAY", "TIMER()", "ALRT()", "ICONIZE", "MAXIMIZE", "MSG()", "PALETTE()", "DROPID()", "IMM", "AUTO", "COLOR()", "TOOLBOX", "DOCK()", "DOCKED()", "LAYOUT()", "WALLPAPER()", "TILED", "CENTERED", "HSCROLL", "VSCROLL", "HVSCROLL", "DOUBLE", "NOFRAME", "RESIZE"],
+      "attributes": ["ALRT()", "AT()", "AUTO", "CENTER", "CENTERED", "COLOR()", "CURSOR()", "DOCK()", "DOCKED()", "DOUBLE", "DROPID()", "FONT()", "GRAY", "HLP()", "HSCROLL", "HVSCROLL", "ICON()", "ICONIZE", "IMM", "LAYOUT()", "MASK", "MAX", "MAXIMIZE", "MDI", "MODAL", "MSG()", "NOFRAME", "PALETTE()", "RESIZE", "STATUS", "SYSTEM", "TILED", "TIMER()", "TIP()", "TOOLBOX", "TRN", "VSCROLL", "WALLPAPER()"],
       "exclusive": [["TILED", "CENTERED"], ["HSCROLL", "HVSCROLL"], ["VSCROLL", "HVSCROLL"], ["DOUBLE", "NOFRAME", "RESIZE"]]
     },
     {
@@ -322,13 +322,15 @@
       "params": [
         { "name": "title", "description": "String constant for the MDI frame window title bar text (PROP:Text)", "optional": false }
       ],
-      "commonAttributes": ["AT", "CENTER", "MAX", "ICON", "FONT", "GRAY", "TIMER", "STATUS", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "MASK", "MSG", "PALETTE"]
+      "commonAttributes": ["AT", "CENTER", "MAX", "ICON", "FONT", "GRAY", "TIMER", "STATUS", "MAXIMIZE", "ICONIZE", "COLOR", "HLP", "CURSOR", "ALRT", "MASK", "MSG", "PALETTE"],
+      "attributes": ["ALRT()", "AT()", "AUTO", "CENTER", "CENTERED", "COLOR()", "CURSOR()", "DOUBLE", "FONT()", "HLP()", "HSCROLL", "HVSCROLL", "ICON()", "ICONIZE", "IMM", "LAYOUT()", "MASK", "MAX", "MAXIMIZE", "MSG()", "NOFRAME", "PALETTE()", "RESIZE", "STATUS", "SYSTEM", "TILED", "TIMER()", "TIP()", "VSCROLL", "WALLPAPER()"]
     },
     {
       "name": "REPORT",
       "description": "Declares a report structure for printed output. Contains DETAIL, HEADER, FOOTER, and FORM bands. Processed by a PRINT loop.",
-      "syntax": "label REPORT[, AT(x,y,w,h)][, FONT(name,size)][, PAPER(type)][, ORIENT(n)][, PREVIEW][, THOUS][, PRE(prefix)][, COPIES(n)])",
-      "commonAttributes": ["AT", "FONT", "PAPER", "ORIENT", "PREVIEW", "THOUS", "PRE", "COPIES", "DRIVER", "NAME", "TO", "COLOR"]
+      "syntax": "label REPORT[('jobname')], AT(x,y,w,h)[, FONT(name,size)][, PRE(prefix)][, LANDSCAPE][, PREVIEW(queue)][, PAPER(type)][, COLOR(color)][, THOUS|MM|POINTS]",
+      "commonAttributes": ["AT", "FONT", "PRE", "LANDSCAPE", "PREVIEW", "PAPER", "COLOR", "THOUS", "MM", "POINTS"],
+      "attributes": ["AT()", "COLOR()", "FONT()", "LANDSCAPE", "LAYOUT()", "MM", "PAPER()", "POINTS", "PREVIEW()", "THOUS", "PRE()"]
     }
   ]
 }

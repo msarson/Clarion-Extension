@@ -22442,5 +22442,1428 @@
     "reason": "Expected: <ID> <LINEBREAK> ; END INCLUDE OMIT SECTION COMPILE PRAGMA GROUP OLE OPTION SHEET TAB | Expected: <LINEBREAK> ; BREAK END INCLUDE OMIT SECTION COMPILE PRAGMA DETAIL FOOTER FORM HEADER REAK_NO_RENS | Expected: <LINEBREAK> ; BREAK INCLUDE OMIT SECTION COMPILE PRAGMA DETAIL FOOTER FORM HEADER REAK_NO_RENS"
    }
   }
+ },
+ "headers": {
+  "WINDOW": {
+   "valid": true,
+   "attributes": {
+    "ABOVE": {
+     "kind": "rejected"
+    },
+    "ABSOLUTE": {
+     "kind": "rejected"
+    },
+    "ALONE": {
+     "kind": "rejected"
+    },
+    "ALRT": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(113)"
+    },
+    "ANGLE": {
+     "kind": "rejected"
+    },
+    "AT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1,1,10,10)"
+    },
+    "AUTO": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "AUTOSIZE": {
+     "kind": "rejected"
+    },
+    "AVE": {
+     "kind": "rejected"
+    },
+    "BELOW": {
+     "kind": "rejected"
+    },
+    "BEVEL": {
+     "kind": "rejected"
+    },
+    "BOXED": {
+     "kind": "rejected"
+    },
+    "CAP": {
+     "kind": "rejected"
+    },
+    "CENTER": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "CENTERED": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "CHECK": {
+     "kind": "rejected"
+    },
+    "CLIP": {
+     "kind": "rejected"
+    },
+    "CNT": {
+     "kind": "rejected"
+    },
+    "COLOR": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "COLUMN": {
+     "kind": "rejected"
+    },
+    "COMPATIBILITY": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "CURSOR": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.cur')"
+    },
+    "DECIMAL": {
+     "kind": "rejected"
+    },
+    "DEFAULT": {
+     "kind": "rejected"
+    },
+    "DELAY": {
+     "kind": "rejected"
+    },
+    "DISABLE": {
+     "kind": "rejected"
+    },
+    "DOCK": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(1)"
+    },
+    "DOCKED": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(1)"
+    },
+    "DOCUMENT": {
+     "kind": "rejected"
+    },
+    "DOUBLE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "DOWN": {
+     "kind": "rejected"
+    },
+    "DRAGID": {
+     "kind": "rejected"
+    },
+    "DROP": {
+     "kind": "rejected"
+    },
+    "DROPID": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "('x')"
+    },
+    "EXTEND": {
+     "kind": "rejected"
+    },
+    "FILL": {
+     "kind": "rejected"
+    },
+    "FIRST": {
+     "kind": "rejected"
+    },
+    "FLAT": {
+     "kind": "rejected"
+    },
+    "FONT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "('Arial',10)"
+    },
+    "FORMAT": {
+     "kind": "rejected"
+    },
+    "FROM": {
+     "kind": "rejected"
+    },
+    "FULL": {
+     "kind": "rejected"
+    },
+    "GRAY": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "GRID": {
+     "kind": "rejected"
+    },
+    "HIDE": {
+     "kind": "rejected"
+    },
+    "HLP": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('h')"
+    },
+    "HSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "HVSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "ICON": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.ico')"
+    },
+    "ICONIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "IMM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "INS": {
+     "kind": "rejected"
+    },
+    "JOIN": {
+     "kind": "rejected"
+    },
+    "KEY": {
+     "kind": "rejected"
+    },
+    "LANDSCAPE": {
+     "kind": "rejected"
+    },
+    "LAST": {
+     "kind": "rejected"
+    },
+    "LAYOUT": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "LEFT": {
+     "kind": "rejected"
+    },
+    "LINEWIDTH": {
+     "kind": "rejected"
+    },
+    "LINK": {
+     "kind": "rejected"
+    },
+    "MARK": {
+     "kind": "rejected"
+    },
+    "MASK": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MAX": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(Num)"
+    },
+    "MAXIMIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MDI": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MIN": {
+     "kind": "rejected"
+    },
+    "MM": {
+     "kind": "rejected"
+    },
+    "MODAL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MSG": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('m')"
+    },
+    "NOBAR": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "NOFRAME": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "NOMERGE": {
+     "kind": "rejected"
+    },
+    "NOSHEET": {
+     "kind": "rejected"
+    },
+    "NOTICKS": {
+     "kind": "rejected"
+    },
+    "OPEN": {
+     "kind": "rejected"
+    },
+    "OVR": {
+     "kind": "rejected"
+    },
+    "PAGE": {
+     "kind": "rejected"
+    },
+    "PAGEAFTER": {
+     "kind": "rejected"
+    },
+    "PAGEBEFORE": {
+     "kind": "rejected"
+    },
+    "PAGENO": {
+     "kind": "rejected"
+    },
+    "PALETTE": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(256)"
+    },
+    "PAPER": {
+     "kind": "rejected"
+    },
+    "PASSWORD": {
+     "kind": "rejected"
+    },
+    "POINTS": {
+     "kind": "rejected"
+    },
+    "PREVIEW": {
+     "kind": "rejected"
+    },
+    "RANGE": {
+     "kind": "rejected"
+    },
+    "READONLY": {
+     "kind": "rejected"
+    },
+    "REPEAT": {
+     "kind": "rejected"
+    },
+    "REQ": {
+     "kind": "rejected"
+    },
+    "RESET": {
+     "kind": "rejected"
+    },
+    "RESIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "RIGHT": {
+     "kind": "rejected"
+    },
+    "ROUND": {
+     "kind": "rejected"
+    },
+    "RTF": {
+     "kind": "rejected"
+    },
+    "SCROLL": {
+     "kind": "rejected"
+    },
+    "SEPARATOR": {
+     "kind": "rejected"
+    },
+    "SINGLE": {
+     "kind": "rejected"
+    },
+    "SKIP": {
+     "kind": "rejected"
+    },
+    "SMOOTH": {
+     "kind": "rejected"
+    },
+    "SPREAD": {
+     "kind": "rejected"
+    },
+    "STATUS": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(10)"
+    },
+    "STD": {
+     "kind": "rejected"
+    },
+    "STEP": {
+     "kind": "rejected"
+    },
+    "STRETCH": {
+     "kind": "rejected"
+    },
+    "SUM": {
+     "kind": "rejected"
+    },
+    "SYSTEM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TALLY": {
+     "kind": "rejected"
+    },
+    "THOUS": {
+     "kind": "rejected"
+    },
+    "TILED": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TIMER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(1)"
+    },
+    "TIP": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('t')"
+    },
+    "TOGETHER": {
+     "kind": "rejected"
+    },
+    "TOOLBOX": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TRN": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "UP": {
+     "kind": "rejected"
+    },
+    "UPR": {
+     "kind": "rejected"
+    },
+    "USE": {
+     "kind": "rejected"
+    },
+    "VALUE": {
+     "kind": "rejected"
+    },
+    "VCR": {
+     "kind": "rejected"
+    },
+    "VERTICAL": {
+     "kind": "rejected"
+    },
+    "VSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "WALLPAPER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.bmp')"
+    },
+    "WITHNEXT": {
+     "kind": "rejected"
+    },
+    "WITHPRIOR": {
+     "kind": "rejected"
+    },
+    "WIZARD": {
+     "kind": "rejected"
+    },
+    "ZOOM": {
+     "kind": "rejected"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "ORIENT": {
+     "kind": "rejected"
+    },
+    "COPIES": {
+     "kind": "rejected"
+    },
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "rejected"
+    },
+    "TO": {
+     "kind": "unresolved",
+     "errors": [
+      "TO: Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(1): Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO('x'): Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(1,1): Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Num): Expected: <ID> | Unknown attribute: NUM",
+      "TO(1,1,1): Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Q): Expected: <ID> | Unknown attribute: Q",
+      "TO(?Zz): Expected: <ID> | Unknown attribute: ?ZZ",
+      "TO('x',1): Expected: <ID> | Illegal data type: BUTTON | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Gd): Expected: <ID> | Unknown attribute: GD",
+      "TO(Gb): Expected: <ID> | Unknown attribute: GB"
+     ]
+    }
+   },
+   "clashes": []
+  },
+  "APPLICATION": {
+   "valid": true,
+   "attributes": {
+    "ABOVE": {
+     "kind": "rejected"
+    },
+    "ABSOLUTE": {
+     "kind": "rejected"
+    },
+    "ALONE": {
+     "kind": "rejected"
+    },
+    "ALRT": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(113)"
+    },
+    "ANGLE": {
+     "kind": "rejected"
+    },
+    "AT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1,1,10,10)"
+    },
+    "AUTO": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "AUTOSIZE": {
+     "kind": "rejected"
+    },
+    "AVE": {
+     "kind": "rejected"
+    },
+    "BELOW": {
+     "kind": "rejected"
+    },
+    "BEVEL": {
+     "kind": "rejected"
+    },
+    "BOXED": {
+     "kind": "rejected"
+    },
+    "CAP": {
+     "kind": "rejected"
+    },
+    "CENTER": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "CENTERED": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "CHECK": {
+     "kind": "rejected"
+    },
+    "CLIP": {
+     "kind": "rejected"
+    },
+    "CNT": {
+     "kind": "rejected"
+    },
+    "COLOR": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "COLUMN": {
+     "kind": "rejected"
+    },
+    "COMPATIBILITY": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "CURSOR": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.cur')"
+    },
+    "DECIMAL": {
+     "kind": "rejected"
+    },
+    "DEFAULT": {
+     "kind": "rejected"
+    },
+    "DELAY": {
+     "kind": "rejected"
+    },
+    "DISABLE": {
+     "kind": "rejected"
+    },
+    "DOCK": {
+     "kind": "rejected"
+    },
+    "DOCKED": {
+     "kind": "rejected"
+    },
+    "DOCUMENT": {
+     "kind": "rejected"
+    },
+    "DOUBLE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "DOWN": {
+     "kind": "rejected"
+    },
+    "DRAGID": {
+     "kind": "rejected"
+    },
+    "DROP": {
+     "kind": "rejected"
+    },
+    "DROPID": {
+     "kind": "rejected"
+    },
+    "EXTEND": {
+     "kind": "rejected"
+    },
+    "FILL": {
+     "kind": "rejected"
+    },
+    "FIRST": {
+     "kind": "rejected"
+    },
+    "FLAT": {
+     "kind": "rejected"
+    },
+    "FONT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "('Arial',10)"
+    },
+    "FORMAT": {
+     "kind": "rejected"
+    },
+    "FROM": {
+     "kind": "rejected"
+    },
+    "FULL": {
+     "kind": "rejected"
+    },
+    "GRAY": {
+     "kind": "rejected"
+    },
+    "GRID": {
+     "kind": "rejected"
+    },
+    "HIDE": {
+     "kind": "rejected"
+    },
+    "HLP": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('h')"
+    },
+    "HSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "HVSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "ICON": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.ico')"
+    },
+    "ICONIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "IMM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "INS": {
+     "kind": "rejected"
+    },
+    "JOIN": {
+     "kind": "rejected"
+    },
+    "KEY": {
+     "kind": "rejected"
+    },
+    "LANDSCAPE": {
+     "kind": "rejected"
+    },
+    "LAST": {
+     "kind": "rejected"
+    },
+    "LAYOUT": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "LEFT": {
+     "kind": "rejected"
+    },
+    "LINEWIDTH": {
+     "kind": "rejected"
+    },
+    "LINK": {
+     "kind": "rejected"
+    },
+    "MARK": {
+     "kind": "rejected"
+    },
+    "MASK": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MAX": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(Num)"
+    },
+    "MAXIMIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MDI": {
+     "kind": "rejected"
+    },
+    "MIN": {
+     "kind": "rejected"
+    },
+    "MM": {
+     "kind": "rejected"
+    },
+    "MODAL": {
+     "kind": "rejected"
+    },
+    "MSG": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('m')"
+    },
+    "NOBAR": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "NOFRAME": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "NOMERGE": {
+     "kind": "rejected"
+    },
+    "NOSHEET": {
+     "kind": "rejected"
+    },
+    "NOTICKS": {
+     "kind": "rejected"
+    },
+    "OPEN": {
+     "kind": "rejected"
+    },
+    "OVR": {
+     "kind": "rejected"
+    },
+    "PAGE": {
+     "kind": "rejected"
+    },
+    "PAGEAFTER": {
+     "kind": "rejected"
+    },
+    "PAGEBEFORE": {
+     "kind": "rejected"
+    },
+    "PAGENO": {
+     "kind": "rejected"
+    },
+    "PALETTE": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(256)"
+    },
+    "PAPER": {
+     "kind": "rejected"
+    },
+    "PASSWORD": {
+     "kind": "rejected"
+    },
+    "POINTS": {
+     "kind": "rejected"
+    },
+    "PREVIEW": {
+     "kind": "rejected"
+    },
+    "RANGE": {
+     "kind": "rejected"
+    },
+    "READONLY": {
+     "kind": "rejected"
+    },
+    "REPEAT": {
+     "kind": "rejected"
+    },
+    "REQ": {
+     "kind": "rejected"
+    },
+    "RESET": {
+     "kind": "rejected"
+    },
+    "RESIZE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "RIGHT": {
+     "kind": "rejected"
+    },
+    "ROUND": {
+     "kind": "rejected"
+    },
+    "RTF": {
+     "kind": "rejected"
+    },
+    "SCROLL": {
+     "kind": "rejected"
+    },
+    "SEPARATOR": {
+     "kind": "rejected"
+    },
+    "SINGLE": {
+     "kind": "rejected"
+    },
+    "SKIP": {
+     "kind": "rejected"
+    },
+    "SMOOTH": {
+     "kind": "rejected"
+    },
+    "SPREAD": {
+     "kind": "rejected"
+    },
+    "STATUS": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(10)"
+    },
+    "STD": {
+     "kind": "rejected"
+    },
+    "STEP": {
+     "kind": "rejected"
+    },
+    "STRETCH": {
+     "kind": "rejected"
+    },
+    "SUM": {
+     "kind": "rejected"
+    },
+    "SYSTEM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TALLY": {
+     "kind": "rejected"
+    },
+    "THOUS": {
+     "kind": "rejected"
+    },
+    "TILED": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TIMER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(1)"
+    },
+    "TIP": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('t')"
+    },
+    "TOGETHER": {
+     "kind": "rejected"
+    },
+    "TOOLBOX": {
+     "kind": "rejected"
+    },
+    "TRN": {
+     "kind": "rejected"
+    },
+    "UP": {
+     "kind": "rejected"
+    },
+    "UPR": {
+     "kind": "rejected"
+    },
+    "USE": {
+     "kind": "rejected"
+    },
+    "VALUE": {
+     "kind": "rejected"
+    },
+    "VCR": {
+     "kind": "rejected"
+    },
+    "VERTICAL": {
+     "kind": "rejected"
+    },
+    "VSCROLL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "WALLPAPER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.bmp')"
+    },
+    "WITHNEXT": {
+     "kind": "rejected"
+    },
+    "WITHPRIOR": {
+     "kind": "rejected"
+    },
+    "WIZARD": {
+     "kind": "rejected"
+    },
+    "ZOOM": {
+     "kind": "rejected"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "ORIENT": {
+     "kind": "rejected"
+    },
+    "COPIES": {
+     "kind": "rejected"
+    },
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "rejected"
+    },
+    "TO": {
+     "kind": "unresolved",
+     "errors": [
+      "TO: Expected: <ID>",
+      "TO(1): Expected: <ID>",
+      "TO('x'): Expected: <ID>",
+      "TO(1,1): Expected: <ID>",
+      "TO(Num): Expected: <ID> | Unknown attribute: NUM",
+      "TO(1,1,1): Expected: <ID>",
+      "TO(Q): Expected: <ID> | Unknown attribute: Q",
+      "TO(?Zz): Expected: <ID> | Unknown attribute: ?ZZ",
+      "TO('x',1): Expected: <ID>",
+      "TO(Gd): Expected: <ID> | Unknown attribute: GD",
+      "TO(Gb): Expected: <ID> | Unknown attribute: GB"
+     ]
+    }
+   },
+   "clashes": []
+  },
+  "REPORT": {
+   "valid": true,
+   "attributes": {
+    "ABOVE": {
+     "kind": "rejected"
+    },
+    "ABSOLUTE": {
+     "kind": "rejected"
+    },
+    "ALONE": {
+     "kind": "rejected"
+    },
+    "ALRT": {
+     "kind": "rejected"
+    },
+    "ANGLE": {
+     "kind": "rejected"
+    },
+    "AT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1,1,10,10)"
+    },
+    "AUTO": {
+     "kind": "rejected"
+    },
+    "AUTOSIZE": {
+     "kind": "rejected"
+    },
+    "AVE": {
+     "kind": "rejected"
+    },
+    "BELOW": {
+     "kind": "rejected"
+    },
+    "BEVEL": {
+     "kind": "rejected"
+    },
+    "BOXED": {
+     "kind": "rejected"
+    },
+    "CAP": {
+     "kind": "rejected"
+    },
+    "CENTER": {
+     "kind": "rejected"
+    },
+    "CENTERED": {
+     "kind": "rejected"
+    },
+    "CHECK": {
+     "kind": "rejected"
+    },
+    "CLIP": {
+     "kind": "rejected"
+    },
+    "CNT": {
+     "kind": "rejected"
+    },
+    "COLOR": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "COLUMN": {
+     "kind": "rejected"
+    },
+    "COMPATIBILITY": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "CURSOR": {
+     "kind": "rejected"
+    },
+    "DECIMAL": {
+     "kind": "rejected"
+    },
+    "DEFAULT": {
+     "kind": "rejected"
+    },
+    "DELAY": {
+     "kind": "rejected"
+    },
+    "DISABLE": {
+     "kind": "rejected"
+    },
+    "DOCK": {
+     "kind": "rejected"
+    },
+    "DOCKED": {
+     "kind": "rejected"
+    },
+    "DOCUMENT": {
+     "kind": "rejected"
+    },
+    "DOUBLE": {
+     "kind": "rejected"
+    },
+    "DOWN": {
+     "kind": "rejected"
+    },
+    "DRAGID": {
+     "kind": "rejected"
+    },
+    "DROP": {
+     "kind": "rejected"
+    },
+    "DROPID": {
+     "kind": "rejected"
+    },
+    "EXTEND": {
+     "kind": "rejected"
+    },
+    "FILL": {
+     "kind": "rejected"
+    },
+    "FIRST": {
+     "kind": "rejected"
+    },
+    "FLAT": {
+     "kind": "rejected"
+    },
+    "FONT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "('Arial',10)"
+    },
+    "FORMAT": {
+     "kind": "rejected"
+    },
+    "FROM": {
+     "kind": "rejected"
+    },
+    "FULL": {
+     "kind": "rejected"
+    },
+    "GRAY": {
+     "kind": "rejected"
+    },
+    "GRID": {
+     "kind": "rejected"
+    },
+    "HIDE": {
+     "kind": "rejected"
+    },
+    "HLP": {
+     "kind": "rejected"
+    },
+    "HSCROLL": {
+     "kind": "rejected"
+    },
+    "HVSCROLL": {
+     "kind": "rejected"
+    },
+    "ICON": {
+     "kind": "rejected"
+    },
+    "ICONIZE": {
+     "kind": "rejected"
+    },
+    "IMM": {
+     "kind": "rejected"
+    },
+    "INS": {
+     "kind": "rejected"
+    },
+    "JOIN": {
+     "kind": "rejected"
+    },
+    "KEY": {
+     "kind": "rejected"
+    },
+    "LANDSCAPE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "LAST": {
+     "kind": "rejected"
+    },
+    "LAYOUT": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(0)"
+    },
+    "LEFT": {
+     "kind": "rejected"
+    },
+    "LINEWIDTH": {
+     "kind": "rejected"
+    },
+    "LINK": {
+     "kind": "rejected"
+    },
+    "MARK": {
+     "kind": "rejected"
+    },
+    "MASK": {
+     "kind": "rejected"
+    },
+    "MAX": {
+     "kind": "rejected"
+    },
+    "MAXIMIZE": {
+     "kind": "rejected"
+    },
+    "MDI": {
+     "kind": "rejected"
+    },
+    "MIN": {
+     "kind": "rejected"
+    },
+    "MM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "MODAL": {
+     "kind": "rejected"
+    },
+    "MSG": {
+     "kind": "rejected"
+    },
+    "NOBAR": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "NOFRAME": {
+     "kind": "rejected"
+    },
+    "NOMERGE": {
+     "kind": "rejected"
+    },
+    "NOSHEET": {
+     "kind": "rejected"
+    },
+    "NOTICKS": {
+     "kind": "rejected"
+    },
+    "OPEN": {
+     "kind": "rejected"
+    },
+    "OVR": {
+     "kind": "rejected"
+    },
+    "PAGE": {
+     "kind": "rejected"
+    },
+    "PAGEAFTER": {
+     "kind": "rejected"
+    },
+    "PAGEBEFORE": {
+     "kind": "rejected"
+    },
+    "PAGENO": {
+     "kind": "rejected"
+    },
+    "PALETTE": {
+     "kind": "rejected"
+    },
+    "PAPER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(1)"
+    },
+    "PASSWORD": {
+     "kind": "rejected"
+    },
+    "POINTS": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "PREVIEW": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(Q)"
+    },
+    "RANGE": {
+     "kind": "rejected"
+    },
+    "READONLY": {
+     "kind": "rejected"
+    },
+    "REPEAT": {
+     "kind": "rejected"
+    },
+    "REQ": {
+     "kind": "rejected"
+    },
+    "RESET": {
+     "kind": "rejected"
+    },
+    "RESIZE": {
+     "kind": "rejected"
+    },
+    "RIGHT": {
+     "kind": "rejected"
+    },
+    "ROUND": {
+     "kind": "rejected"
+    },
+    "RTF": {
+     "kind": "rejected"
+    },
+    "SCROLL": {
+     "kind": "rejected"
+    },
+    "SEPARATOR": {
+     "kind": "rejected"
+    },
+    "SINGLE": {
+     "kind": "rejected"
+    },
+    "SKIP": {
+     "kind": "rejected"
+    },
+    "SMOOTH": {
+     "kind": "rejected"
+    },
+    "SPREAD": {
+     "kind": "rejected"
+    },
+    "STATUS": {
+     "kind": "rejected"
+    },
+    "STD": {
+     "kind": "rejected"
+    },
+    "STEP": {
+     "kind": "rejected"
+    },
+    "STRETCH": {
+     "kind": "rejected"
+    },
+    "SUM": {
+     "kind": "rejected"
+    },
+    "SYSTEM": {
+     "kind": "rejected"
+    },
+    "TALLY": {
+     "kind": "rejected"
+    },
+    "THOUS": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
+    "TILED": {
+     "kind": "rejected"
+    },
+    "TIMER": {
+     "kind": "rejected"
+    },
+    "TIP": {
+     "kind": "rejected"
+    },
+    "TOGETHER": {
+     "kind": "rejected"
+    },
+    "TOOLBOX": {
+     "kind": "rejected"
+    },
+    "TRN": {
+     "kind": "rejected"
+    },
+    "UP": {
+     "kind": "rejected"
+    },
+    "UPR": {
+     "kind": "rejected"
+    },
+    "USE": {
+     "kind": "rejected"
+    },
+    "VALUE": {
+     "kind": "rejected"
+    },
+    "VCR": {
+     "kind": "rejected"
+    },
+    "VERTICAL": {
+     "kind": "rejected"
+    },
+    "VSCROLL": {
+     "kind": "rejected"
+    },
+    "WALLPAPER": {
+     "kind": "rejected"
+    },
+    "WITHNEXT": {
+     "kind": "rejected"
+    },
+    "WITHPRIOR": {
+     "kind": "rejected"
+    },
+    "WIZARD": {
+     "kind": "rejected"
+    },
+    "ZOOM": {
+     "kind": "rejected"
+    },
+    "PRE": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(Px)"
+    },
+    "ORIENT": {
+     "kind": "rejected"
+    },
+    "COPIES": {
+     "kind": "rejected"
+    },
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "rejected"
+    },
+    "TO": {
+     "kind": "unresolved",
+     "errors": [
+      "TO: Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(1): Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO('x'): Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(1,1): Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Num): Expected: <ID> | Unknown attribute: NUM",
+      "TO(1,1,1): Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Q): Expected: <ID> | Unknown attribute: Q",
+      "TO(?Zz): Expected: <ID> | Unknown attribute: ?ZZ",
+      "TO('x',1): Expected: <ID> | Illegal data type: NUM | Illegal data type: AT | Unknown attribute: USE | Expected: <ID> <LINEBREAK> ; CODE INCLUDE OMIT SECTION COMPILE PRAGMA GROUP ITEMIZE MAP",
+      "TO(Gd): Expected: <ID> | Unknown attribute: GD",
+      "TO(Gb): Expected: <ID> | Unknown attribute: GB"
+     ]
+    }
+   },
+   "clashes": []
+  }
  }
 }

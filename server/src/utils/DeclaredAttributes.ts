@@ -1,6 +1,6 @@
 import { Token, TokenType } from '../ClarionTokenizer';
 import { LogicalLine } from '../DocumentStructure';
-import { ControlDefinition } from './ControlService';
+import { ControlDefinition, ControlService } from './ControlService';
 import { AttributeService } from './AttributeService';
 
 /** One attribute on a declaration, e.g. `HVSCROLL` or `AT(10,10,100,50)`. */
@@ -67,8 +67,32 @@ export function readDeclaredAttributes(logical: LogicalLine, keyword: Token): De
     return result;
 }
 
+/**
+ * The definition whose `attributes` a control declaration is checked against (#736, #737).
+ * Inside a REPORT the report definition decides: a report's TEXT accepts a different set
+ * (RESIZE, not the scroll bars), and a STRING with a picture (`STRING(@n9)`) takes the totals
+ * a constant one does not (SUM, PAGENO...). Undefined outside a WINDOW, APPLICATION or
+ * REPORT, where STRING and GROUP are data types, and for a control without a list.
+ */
+export function controlDefinitionFor(
+    logical: LogicalLine,
+    keyword: Token,
+    context: { inWindow: boolean; inReport: boolean } | undefined
+): ControlDefinition | undefined {
+    if (!context || (!context.inWindow && !context.inReport)) return undefined;
+    const controls = ControlService.getInstance();
+    const word = /^\w+/.exec(keyword.value)?.[0] ?? keyword.value;
+    const def = (context.inReport ? controls.getReportControl(word) : undefined) ?? controls.getControl(word);
+    if (!def?.attributes) return undefined;
+    const at = logical.tokens.indexOf(keyword);
+    // The tokenizer reads `STRING(@n9)` as one token; `STRING (@n9)` would be three.
+    const isPicture = /^\w+\(\s*@/.test(keyword.value)
+        || (logical.tokens[at + 1]?.value === '(' && logical.tokens[at + 2]?.value.startsWith('@'));
+    return isPicture && def.pictureAttributes ? { ...def, attributes: def.pictureAttributes } : def;
+}
+
 /** `X()` in a definition's `attributes` list takes a value; a bare `X` is a flag. */
-function parseAccepted(def: ControlDefinition): { name: string; flag: boolean }[] {
+export function parseAccepted(def: ControlDefinition): { name: string; flag: boolean }[] {
     return (def.attributes ?? []).map(a => {
         const flag = !a.endsWith('()');
         return { name: (flag ? a : a.slice(0, -2)).toUpperCase(), flag };

@@ -22,11 +22,13 @@ All notable changes to the Clarion Extension are documented here.
 - **Hovering an attribute on a WINDOW header line shows its card.** It also says when the WINDOW does not accept the attribute. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
 - **Hovering IF, LOOP, CASE, EXECUTE, BEGIN or ACCEPT shows what closes it.** The card links to the closing END, period, UNTIL or WHILE, says when the block is never closed, and warns when its END lines up with an enclosing block instead, which usually means a nested block is missing its END. [#734](https://github.com/msarson/Clarion-Extension/pull/734) @geircodes
 - **Hovering a control on its own declaration shows the attributes it sets.** The card lists them, offers the flags the control accepts and does not set yet, and flags an attribute it does not accept. Every WINDOW and REPORT control is covered, with the lists checked against the compiler, so a control in a REPORT and a STRING with a picture are judged by what they actually accept. [#736](https://github.com/msarson/Clarion-Extension/pull/736) @geircodes, [#737](https://github.com/msarson/Clarion-Extension/issues/737)
+- **Completion after a comma on a control or a WINDOW, APPLICATION or REPORT header offers only the attributes it accepts.** The list is the compiler-checked one for that control where it sits, less what the declaration already sets, and an attribute that takes a value is inserted with its brackets. [#740](https://github.com/msarson/Clarion-Extension/issues/740)
 
 #### Diagnostics
 
 - **Code inside an OMIT block no longer pairs with the structures around it.** The structures and ENDs in the body of an unconditional OMIT block are matched on their own, so code that compiles no longer reports a CYCLE outside a LOOP or ACCEPT, or a CASE that is not terminated. [#720](https://github.com/msarson/Clarion-Extension/issues/720) @ClarionLive
 - **An attribute the WINDOW does not accept is flagged on its header line.** `HIDE` or `PRE(...)` there, which the compiler rejects, went unnoticed until the build; HVSCROLL together with HSCROLL or VSCROLL is flagged as well. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
+- **An attribute an APPLICATION or REPORT header does not accept is flagged too.** Their header lists are now checked against the compiler, like the WINDOW's: a REPORT's ORIENT or COPIES, for example, is an unknown attribute. [#740](https://github.com/msarson/Clarion-Extension/issues/740)
 
 ---
 
