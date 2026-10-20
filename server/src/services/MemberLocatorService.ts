@@ -2326,18 +2326,30 @@ export class MemberLocatorService {
         // pre-#310 behavior (first non-TYPE entry wins).
         if (infos.length > 0) {
             this.trace(`findAllMembersInClass "${className}" via SDI last-resort (ambiguous, chain missed)`);
-            return this.enumerateMembersFromSdiInfo(infos, className);
+            return this.enumerateMembersFromSdiInfo(infos, className, docPath);
         }
 
         return [];
     }
 
-    /** Enumerates members from an SDI hit's declaring file (token-based, disk fallback). */
+    /**
+     * Enumerates members from an SDI hit's declaring file (token-based, disk fallback).
+     * #732: with several declarations, the ones `fromFile` can see rank first, as in
+     * resolveSdiDeclaration (#728) - a stray copy of a dictionary include that nothing compiles
+     * otherwise lists its fields for `File.` while hover and F12 name the compiled copy.
+     */
     private async enumerateMembersFromSdiInfo(
         infos: StructureDeclarationInfo[],
-        className: string
+        className: string,
+        fromFile?: string
     ): Promise<MemberEnumItem[]> {
-        const info = infos.find(d => !d.isType) || infos[0];
+        let candidates = infos;
+        if (infos.length > 1 && fromFile) {
+            const frg = FileRelationshipGraph.getInstance();
+            const visible = infos.filter(d => frg.isDeclarationVisibleFrom(d.filePath, fromFile));
+            if (visible.length > 0) candidates = visible;
+        }
+        const info = candidates.find(d => !d.isType) || candidates[0];
         const indexedData = await this.loadDocument(info.filePath);
         if (indexedData) {
             const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | 'FILE' | undefined);
