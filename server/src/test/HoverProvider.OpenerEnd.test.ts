@@ -191,4 +191,14 @@ suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
         assert.ok(/closed by END on line 9\b/.test(text), `expected END on line 9; got: ${text}`);
         assert.ok(!/lined up/.test(text), `the outer LOOP has its own END; got: ${text}`);
     });
+
+    test('the keyword description stays under the card, below the closing END', async () => {
+        const closed = await hoverAt(NESTED, 5, 'IF');
+        const at = closed.indexOf('Initiates a conditional execution structure');
+        assert.ok(at > closed.indexOf('closed by END on line 10'), `expected IF's description below the closing END; got: ${closed}`);
+        const open = await hoverAt(MISSING_INNER_END, 5, 'IF');
+        assert.ok(/not terminated[\s\S]*Initiates a conditional execution structure/.test(open), `expected the description under "not terminated"; got: ${open}`);
+        const loop = await hoverAt(NESTED, 6, 'LOOP');
+        assert.ok(/closed by END on line 9[\s\S]*\S/.test(loop) && loop.split('---').length === 2, `expected one separator then LOOP's description; got: ${loop}`);
+    });
 });

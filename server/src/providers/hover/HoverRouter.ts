@@ -516,10 +516,13 @@ export class HoverRouter {
         if (!opener) return null;
         const keyword = opener.value.toUpperCase();
         const labelText = opener.label ? ` \`${opener.label}\`` : '';
+        // The keyword's own description, kept under the card that replaces the keyword card.
+        const description = this.keywordService.getKeyword(keyword)?.description;
+        const withDescription = (lines: string[]): Hover =>
+            ({ contents: { kind: 'markdown', value: (description ? [...lines, '', '---', '', description] : lines).join('\n') } });
 
         if (opener.finishesAt === undefined) {
-            return { contents: { kind: 'markdown', value:
-                `**${keyword}**${labelText} — not terminated: no END or period closes this ${keyword}.` } };
+            return withDescription([`**${keyword}**${labelText} — not terminated: no END or period closes this ${keyword}.`]);
         }
         if (opener.finishesAt === opener.line || opener.isSingleLineWithContinuation) return null;
 
@@ -541,7 +544,7 @@ export class HoverRouter {
             }
         }
 
-        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+        return withDescription(lines);
     }
 
     /**
