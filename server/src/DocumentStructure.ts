@@ -1823,7 +1823,9 @@ export class DocumentStructure {
                     }
                     // An ITEMIZE with an empty prefix (`Color ITEMIZE,PRE` / `,PRE()`) uses its own
                     // label: its members are `Color:Name`. Without a label there is no prefix.
-                    if (!token.structurePrefix && token.label && token.value.toUpperCase() === 'ITEMIZE') {
+                    // A member labelled `Pre` (a column-0 Label) is not the attribute.
+                    if (!token.structurePrefix && token.label && t.type !== TokenType.Label &&
+                        token.value.toUpperCase() === 'ITEMIZE') {
                         token.structurePrefix = token.label;
                     }
                     break prefixSearch;

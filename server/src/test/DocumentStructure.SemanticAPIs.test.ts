@@ -2029,6 +2029,20 @@ END`;
             assert.strictEqual(fast!.prefixedEquateName, 'Mode:Fast');
         });
 
+        test('labelled ITEMIZE without PRE: a member labelled Pre is not read as the attribute', () => {
+            const code = [
+                'Mode   ITEMIZE',                    // 0 — no PRE: members keep raw names
+                'Pre     EQUATE',                    // 1
+                'Post    EQUATE',                    // 2
+                '       END',                         // 3
+            ].join('\n');
+            const { structure } = buildB(code);
+            const post = structure.findEquate('Post');
+            assert.ok(post, 'Post should be indexed by bare name');
+            assert.strictEqual(post!.prefixedEquateName, undefined);
+            assert.strictEqual(structure.findEquate('Mode:Post'), undefined);
+        });
+
         test('blank-label ITEMIZE with an empty prefix: members keep raw names', () => {
             const code = [
                 '       ITEMIZE,PRE()',              // 0
