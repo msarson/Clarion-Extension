@@ -27,6 +27,9 @@ const logger = LoggerManager.getLogger("HoverRouter");
 logger.setLevel("error");
 const perfLogger = LoggerManager.getLogger("HoverRouter.Perf", "perf");
 
+/** Executable-code blocks whose hover shows the END that closes them. */
+const CODE_BLOCK_OPENERS = new Set(['IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN', 'ACCEPT']);
+
 /**
  * Routes hover requests to appropriate resolvers based on context
  * Replaces nested if/else logic with clear, testable routing
@@ -181,6 +184,11 @@ export class HoverRouter {
         if (upperWord === 'END') {
             const endHover = this.handleEndKeyword(position, tokens, document);
             if (endHover) return endHover;
+        }
+
+        if (CODE_BLOCK_OPENERS.has(upperWord)) {
+            const openerHover = this.handleBlockOpener(position, tokens, document);
+            if (openerHover) return openerHover;
         }
 
         if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
@@ -471,6 +479,84 @@ export class HoverRouter {
         );
         if (!endToken || !endToken.parent) return null;
         return this.buildTerminatorHover(endToken, document, '**END**');
+    }
+
+    /**
+     * Handle hover over an IF / LOOP / CASE / EXECUTE / BEGIN / ACCEPT — the reverse of the END
+     * hover: shows the line of the END (or period) that closes the block, with a link to it.
+     *
+     * Reads `finishesAt` and the terminator's `parent` link, both set by
+     * `DocumentStructure.handleEndStatementForStructure` when it pops the structure stack. That
+     * pairing is the compiler's — an END closes the most recently opened block — so a nested
+     * block missing its END is paired with its container's END. The card says so when that END
+     * is lined up with an enclosing block instead, and says when the opener was never closed.
+     * Returns null for a block closed on its own line (`IF x THEN y.`): the terminator is
+     * already in view.
+     */
+    private handleBlockOpener(
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const opener = tokens.find(t =>
+            t.type === TokenType.Structure &&
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!opener) return null;
+        const keyword = opener.value.toUpperCase();
+        const labelText = opener.label ? ` \`${opener.label}\`` : '';
+
+        if (opener.finishesAt === undefined) {
+            return { contents: { kind: 'markdown', value:
+                `**${keyword}**${labelText} — not terminated: no END or period closes this ${keyword}.` } };
+        }
+        if (opener.finishesAt === opener.line || opener.isSingleLineWithContinuation) return null;
+
+        const terminator = tokens.find(t =>
+            t.line === opener.finishesAt &&
+            t.parent === opener &&
+            (t.type === TokenType.EndStatement || t.value === '.')
+        );
+        const word = terminator?.value === '.' ? 'period' : 'END';
+        const lines: string[] = [
+            `**${keyword}**${labelText} — closed by ${word} on line ${opener.finishesAt + 1}`,
+            '',
+            this.formatter.locationLink(document.uri, opener.finishesAt)
+        ];
+
+        if (terminator && word === 'END') {
+            const outer = this.findEnclosingBlockAlignedWith(document.getText().split(/\r?\n/), opener, terminator);
+            if (outer) {
+                lines.push('', `⚠️ This END is lined up with the ${outer.value.toUpperCase()} on line ${outer.line + 1}, not with this ${keyword} — a block nested inside it may be missing its END.`);
+            }
+        }
+
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+    }
+
+    /**
+     * The enclosing structure an END is lined up with, when it is not lined up with the block it
+     * actually closes — the signature of a nested block missing its END: the parser hands the
+     * container's END to the inner block. Lined up means the END starts at the structure
+     * keyword's column or at its line's indentation. Merely sloppy indentation (an END a column
+     * off, matching nothing) is not reported, nor is an END after other code on its line, nor
+     * any line indented with tabs, whose column means nothing without a tab width.
+     */
+    private findEnclosingBlockAlignedWith(source: string[], opener: Token, end: Token): Token | null {
+        const indentOf = (line: number) => (source[line] ?? '').match(/^\s*/)![0];
+        const endIndent = indentOf(end.line);
+        if (endIndent.length !== end.start || endIndent.includes('\t') || indentOf(opener.line).includes('\t')) return null;
+        const linedUpWith = (s: Token) => {
+            const indent = indentOf(s.line);
+            return !indent.includes('\t') && (end.start === s.start || end.start === indent.length);
+        };
+        if (linedUpWith(opener)) return null;
+        for (let outer = opener.parent; outer; outer = outer.parent) {
+            if (outer.type === TokenType.Structure && linedUpWith(outer)) return outer;
+        }
+        return null;
     }
 
     /**
