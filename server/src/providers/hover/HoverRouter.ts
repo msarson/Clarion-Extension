@@ -514,11 +514,7 @@ export class HoverRouter {
         }
         if (opener.finishesAt === opener.line || opener.isSingleLineWithContinuation) return null;
 
-        const terminator = tokens.find(t =>
-            t.line === opener.finishesAt &&
-            t.parent === opener &&
-            (t.type === TokenType.EndStatement || t.value === '.')
-        );
+        const terminator = this.findTerminator(tokens, opener);
         const word = terminator?.value === '.' ? 'period' : 'END';
         const lines: string[] = [
             `**${keyword}**${labelText} — closed by ${word} on line ${opener.finishesAt + 1}`,
@@ -527,7 +523,7 @@ export class HoverRouter {
         ];
 
         if (terminator && word === 'END') {
-            const outer = this.findEnclosingBlockAlignedWith(document.getText().split(/\r?\n/), opener, terminator);
+            const outer = this.findEnclosingBlockAlignedWith(document.getText().split(/\r?\n/), tokens, opener, terminator);
             if (outer) {
                 lines.push('', `⚠️ This END is lined up with the ${outer.value.toUpperCase()} on line ${outer.line + 1}, not with this ${keyword} — a block nested inside it may be missing its END.`);
             }
@@ -536,25 +532,44 @@ export class HoverRouter {
         return { contents: { kind: 'markdown', value: lines.join('\n') } };
     }
 
+    /** The END or period the parser paired with a structure, if any. */
+    private findTerminator(tokens: Token[], opener: Token): Token | undefined {
+        if (opener.finishesAt === undefined) return undefined;
+        return tokens.find(t =>
+            t.line === opener.finishesAt &&
+            t.parent === opener &&
+            (t.type === TokenType.EndStatement || t.value === '.')
+        );
+    }
+
     /**
-     * The enclosing structure an END is lined up with, when it is not lined up with the block it
-     * actually closes — the signature of a nested block missing its END: the parser hands the
-     * container's END to the inner block. Lined up means the END starts at the structure
-     * keyword's column or at its line's indentation. Merely sloppy indentation (an END a column
-     * off, matching nothing) is not reported, nor is an END after other code on its line, nor
-     * any line indented with tabs, whose column means nothing without a tab width.
+     * The enclosing structure an END is lined up with, when that is the signature of a nested
+     * block missing its END: the parser hands the container's END to the inner block, and the
+     * container is left without an END of its own — never closed, or closed by an END that is
+     * itself lined up further out. Lined up means the END starts at the structure keyword's
+     * column or at its line's indentation.
+     *
+     * Not reported: an END merely indented like the container while the container still has
+     * its own lined-up END (both ENDs are there, one is just indented wrong); sloppy
+     * indentation matching nothing (an END a column off); an END after other code on its line;
+     * and tab-indented lines, whose column means nothing without a tab width.
      */
-    private findEnclosingBlockAlignedWith(source: string[], opener: Token, end: Token): Token | null {
+    private findEnclosingBlockAlignedWith(source: string[], tokens: Token[], opener: Token, end: Token): Token | null {
         const indentOf = (line: number) => (source[line] ?? '').match(/^\s*/)![0];
+        const linedUp = (e: Token, s: Token) => {
+            const endIndent = indentOf(e.line);
+            const indent = indentOf(s.line);
+            return endIndent.length === e.start && !endIndent.includes('\t') && !indent.includes('\t') &&
+                (e.start === s.start || e.start === indent.length);
+        };
         const endIndent = indentOf(end.line);
         if (endIndent.length !== end.start || endIndent.includes('\t') || indentOf(opener.line).includes('\t')) return null;
-        const linedUpWith = (s: Token) => {
-            const indent = indentOf(s.line);
-            return !indent.includes('\t') && (end.start === s.start || end.start === indent.length);
-        };
-        if (linedUpWith(opener)) return null;
+        if (linedUp(end, opener)) return null;
         for (let outer = opener.parent; outer; outer = outer.parent) {
-            if (outer.type === TokenType.Structure && linedUpWith(outer)) return outer;
+            if (outer.type !== TokenType.Structure || !linedUp(end, outer)) continue;
+            const outerEnd = this.findTerminator(tokens, outer);
+            const outerHasOwnEnd = outerEnd !== undefined && (outerEnd.value === '.' || linedUp(outerEnd, outer));
+            return outerHasOwnEnd ? null : outer;
         }
         return null;
     }

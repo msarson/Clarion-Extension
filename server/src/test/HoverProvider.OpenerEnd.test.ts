@@ -60,6 +60,16 @@ const LABELLED = program([
     "    END",                  // 9
 ]);
 
+// Both ENDs are there; the inner one is merely indented like the outer IF, which still has
+// its own lined-up END. Nothing is missing.
+const MISINDENTED_INNER_END = program([
+    "  IF 1 = 1",               // 5
+    "    IF 2 = 2",             // 6
+    "      BREAK",              // 7
+    "  END",                    // 8 — closes the inner IF
+    "  END",                    // 9 — closes the outer IF
+]);
+
 // An END a column off, lined up with no block: sloppy, not a missing END.
 const SLOPPY = program([
     "  IF 1 = 1",               // 5
@@ -94,6 +104,12 @@ suite('IF/LOOP/CASE hover — shows the END that closes it', () => {
         const text = await hoverAt(MISSING_INNER_END, 6, 'IF');
         assert.ok(/closed by END on line 9\b/.test(text), `expected END on line 9; got: ${text}`);
         assert.ok(/lined up with the IF on line 6, not with this IF/.test(text), `expected a warning naming the outer IF; got: ${text}`);
+    });
+
+    test('inner END merely indented like the outer IF, which still has its own END, does not warn', async () => {
+        const text = await hoverAt(MISINDENTED_INNER_END, 6, 'IF');
+        assert.ok(/closed by END on line 9\b/.test(text), `expected END on line 9; got: ${text}`);
+        assert.ok(!/lined up/.test(text), `nothing is missing, so no warning; got: ${text}`);
     });
 
     test('outer IF left open by the missing END says it is not terminated', async () => {
