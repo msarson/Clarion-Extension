@@ -1,4 +1,4 @@
-import { commands, ExtensionContext, Hover, MarkdownString, Position, Range, Selection, Uri, window, workspace, WorkspaceEdit } from 'vscode';
+import { commands, ExtensionContext, Hover, MarkdownString, Position, Range, Selection, SnippetString, Uri, window, workspace, WorkspaceEdit } from 'vscode';
 import { ClientCapabilities, FeatureState, StaticFeature } from 'vscode-languageclient/node';
 import { ATTRIBUTE_EDIT_COMMAND, AttributeEditAnchor, bindAttributeEditLinks, planAttributeEdit } from './attributeEditLinks';
 
@@ -59,6 +59,13 @@ export function registerAttributeEditCommand(context: ExtensionContext): void {
             return false;
         }
         const ranges = plan.edits.map(e => ({ range: new Range(e.startLine, e.startCharacter, e.endLine, e.endCharacter), text: e.text }));
+        if (plan.edits[0].snippet) {
+            // #743: a value attribute goes in as a snippet, the cursor on its first placeholder.
+            // The card stays closed while the value is typed.
+            const target = editor ?? await window.showTextDocument(document);
+            await commands.executeCommand('editor.action.hideHover');
+            return target.insertSnippet(new SnippetString(ranges[0].text), ranges[0].range, { undoStopBefore: true, undoStopAfter: true });
+        }
         let applied: boolean;
         if (editor) {
             applied = await editor.edit(b => { for (const r of ranges) b.replace(r.range, r.text); }, { undoStopBefore: true, undoStopAfter: true });

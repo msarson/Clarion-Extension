@@ -1,7 +1,7 @@
 import { Token, TokenType } from '../ClarionTokenizer';
 import { LogicalLine } from '../DocumentStructure';
 import { ControlDefinition, ControlService } from './ControlService';
-import { AttributeService } from './AttributeService';
+import { AttributeService, attributeSnippet } from './AttributeService';
 
 /** One attribute on a declaration, e.g. `HVSCROLL` or `AT(10,10,100,50)`. */
 export interface DeclaredAttribute {
@@ -11,6 +11,8 @@ export interface DeclaredAttribute {
     token: Token;
     /** The comma (at paren depth 0) that introduces the attribute. */
     comma: Token;
+    /** The attribute's last token: its name, or the `)` that closes its value (#743). */
+    end: Token;
 }
 
 /**
@@ -52,16 +54,21 @@ export function readDeclaredAttributes(logical: LogicalLine, keyword: Token): De
     const result: DeclaredAttribute[] = [];
     let depth = 0;
     let comma: Token | null = null;
+    let current: DeclaredAttribute | null = null;
     for (let i = start + 1; i < tokens.length; i++) {
         const token = tokens[i];
         const value = token.value;
         if (depth === 0 && value === ',') {
             comma = token;
+            current = null;
             continue;
         }
         if (comma) {
-            result.push({ name: value.toUpperCase(), token, comma });
+            current = { name: value.toUpperCase(), token, comma, end: token };
+            result.push(current);
             comma = null;
+        } else if (current) {
+            current.end = token;
         }
         if (value === '(') depth++;
         else if (value === ')' && depth > 0) depth--;
@@ -136,9 +143,11 @@ const AVAILABLE_LINE_WIDTH = 75;
  *   **Attributes:** the valid attributes the declaration carries, by name only — their
  *     values are in the code right above the card,
  *   **Available:** the flags the control accepts that are not set, alphabetical, wrapped.
+ *   **With value:** the attributes that take a value and are not set (ALRT always: one per key).
  * Empty when the definition carries no `attributes` list — the card then keeps its
- * generic "Common Attributes". With `links` (#731), each flag name is an edit link: under
- * Attributes it removes the flag, under Available it adds it.
+ * generic "Common Attributes". With `links` (#731, #743), each name is an edit link: under
+ * Attributes it removes the attribute with its value, under Available it adds the flag, and
+ * under With value it adds the attribute as a snippet to type the value into.
  */
 export function formatDeclaredAttributes(def: ControlDefinition, declared: DeclaredAttribute[], links?: EditLinkContext): string {
     if (!def.attributes || def.attributes.length === 0) return '';
@@ -162,9 +171,9 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     const flags = new Set(accepted.filter(a => a.flag).map(a => a.name));
     const valid = declared.filter(d => acceptedNames.has(d.name));
     if (valid.length > 0) {
-        const names = valid.map(d => links && flags.has(d.name)
-            ? editLink(d.name, 'Remove', removeEdits(d, links))
-            : '`' + d.name + '`');
+        const names = valid.map(d => !links
+            ? '`' + d.name + '`'
+            : editLink(d.name, flags.has(d.name) ? flagTitle('Remove', d.name) : removeTitle(d, links), removeEdits(d, links)));
         blocks.push(`**Attributes:** ${names.join(' ')}`);
     }
     const setNames = new Set(declared.map(d => d.name));
@@ -172,12 +181,70 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     if (available.length > 0) {
         const items = available.map(name => ({
             visible: name,
-            text: links ? editLink(name, 'Add', addEdits(name, def, declared, links)) : name,
+            text: links ? editLink(name, flagTitle('Add', name), addEdits(name, def, declared, links)) : name,
         }));
         // linked names are drawn as separate chips by a client: no separators needed
         blocks.push(wrapList('**Available:** ', items, AVAILABLE_LINE_WIDTH, links ? '' : ' ·'));
     }
+    const withValue = accepted.filter(a => !a.flag && (!setNames.has(a.name) || REPEATABLE.has(a.name))).map(a => a.name).sort();
+    if (withValue.length > 0) {
+        const items = withValue.map(name => ({
+            visible: name,
+            text: links ? editLink(name, `Add ${plainSnippet(attributeSnippet(name))}`, [snippetEdit(name, links)]) : name,
+        }));
+        blocks.push(wrapList('**With value:** ', items, AVAILABLE_LINE_WIDTH, links ? '' : ' ·'));
+    }
     return blocks.join('\n\n');
+}
+
+/** Attributes a declaration can carry more than once: ALRT, one per key. */
+const REPEATABLE = new Set(['ALRT']);
+
+/** Longest attribute text a remove title quotes before it is cut short. */
+const TITLE_TEXT_WIDTH = 60;
+
+/** `Add HIDE — hidden until UNHIDE`: a flag's link title. */
+function flagTitle(verb: 'Add' | 'Remove', name: string): string {
+    const short = AttributeService.getInstance().getAttribute(name)?.short;
+    return `${verb} ${name}` + (short ? ` — ${short}` : '');
+}
+
+/**
+ * `Remove TIP('Save the record')`: the text that goes. Removing USE breaks the code that refers to
+ * the control's field equate, and removing AT moves the control, so their titles say so.
+ */
+function removeTitle(d: DeclaredAttribute, links: EditLinkContext): string {
+    const source = sourceText(d, links.lines);
+    const text = source.length > TITLE_TEXT_WIDTH ? source.slice(0, TITLE_TEXT_WIDTH - 1) + '…' : source;
+    let warning = '';
+    if (d.name === 'USE') {
+        // USE(?Name), or USE(Var[,number][,?Name]): the equate is ?Var unless one is named, with
+        // periods as colons and an array element's subscript after an underscore (?File:Name, ?Arr_1)
+        const args = /^USE\s*\((.*)\)$/i.exec(source)?.[1].split(',').map(a => a.trim()) ?? [];
+        const variable = args[0] ? '?' + args[0].replace(/\./g, ':').replace(/\[\s*(\w+)\s*\]/g, '_$1') : '';
+        const equate = args.find(a => a.startsWith('?')) ?? variable;
+        if (equate) warning = ` — code that refers to ${equate} will no longer compile`;
+    } else if (d.name === 'AT') {
+        warning = ' — the control falls back to the default position and size';
+    }
+    return `Remove ${text}${warning}`;
+}
+
+/** An attribute as written, its continuation lines joined: `FORMAT('20L' & |` + `'30R')` reads `FORMAT('20L' & '30R')`. */
+function sourceText(d: DeclaredAttribute, lines: string[]): string {
+    const parts: string[] = [];
+    for (let line = d.token.line; line <= d.end.line; line++) {
+        const text = lines[line] ?? '';
+        const from = line === d.token.line ? d.token.start : 0;
+        const to = line === d.end.line ? d.end.start + d.end.value.length : codeEnd(text);
+        parts.push(text.slice(from, to).replace(/\|\s*$/, '').trim());
+    }
+    return parts.join(' ');
+}
+
+/** A snippet as the text it inserts when nothing is typed: `TIP('${1:text}')` reads `TIP('text')`. */
+function plainSnippet(snippet: string): string {
+    return snippet.replace(/\$\{\d+:([^}]*)\}/g, '$1').replace(/\$\{\d+\}|\$\d+/g, '');
 }
 
 /**
@@ -191,8 +258,11 @@ export interface EditLinkContext {
     logical: LogicalLine;
 }
 
-/** One text edit of a link: lines relative to the anchor, 0-based columns, the original text of lines l..el. */
-interface LinkEdit { l: number; c: number; el: number; ec: number; t: string; o: string[]; }
+/**
+ * One text edit of a link: lines relative to the anchor, 0-based columns, the original text of lines
+ * l..el. `s` (#743) marks `t` as a VS Code snippet; a snippet edit is the link's only edit.
+ */
+interface LinkEdit { l: number; c: number; el: number; ec: number; t: string; o: string[]; s?: true; }
 
 /** The command a client registers to apply an edit link (#731; VS Code: #739). */
 export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
@@ -202,9 +272,8 @@ export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
  * tooltip. `args` is `[payload]`, JSON and URI-encoded, with `(` and `)` encoded as well: the
  * original lines are full of them (`AT(10,10)`), and a raw one can end a markdown link early.
  */
-function editLink(name: string, verb: 'Add' | 'Remove', edits: LinkEdit[]): string {
-    const short = AttributeService.getInstance().getAttribute(name)?.short;
-    const title = (`${verb} ${name}` + (short ? ` — ${short}` : '')).replace(/"/g, "'");
+function editLink(name: string, title: string, edits: LinkEdit[]): string {
+    title = title.replace(/"/g, "'");
     const args = encodeURIComponent(JSON.stringify([{ e: edits }])).replace(/\(/g, '%28').replace(/\)/g, '%29');
     return `[${name}](command:${ATTRIBUTE_EDIT_COMMAND}?${args} "${title}")`;
 }
@@ -219,12 +288,19 @@ function linkEdit(links: EditLinkContext, line: number, col: number, endLine: nu
 }
 
 /**
- * Remove a flag: from its comma to the end of its name. When the name opens a continuation line, the
- * comma (and the `|`) sit on the line before, so the rest of the name's line joins that line:
- * `USE(?T), |` + `   READONLY  ! c` becomes `USE(?T)  ! c`.
+ * Remove an attribute: from its comma to its end, its value included. When the name opens a
+ * continuation line, the comma (and the `|`) sit on the line before, so the rest of the last line
+ * joins that line: `USE(?T), |` + `   READONLY  ! c` becomes `USE(?T)  ! c`.
  */
 function removeEdits(d: DeclaredAttribute, links: EditLinkContext): LinkEdit[] {
-    return [linkEdit(links, d.comma.line, d.comma.start, d.token.line, d.token.start + d.token.value.length, '')];
+    return [linkEdit(links, d.comma.line, d.comma.start, d.end.line, d.end.start + d.end.value.length, '')];
+}
+
+/** Add a value attribute (#743): `,` and its snippet at the end of the declaration's code. */
+function snippetEdit(name: string, links: EditLinkContext): LinkEdit {
+    const line = links.logical.endLine;
+    const end = codeEnd(links.lines[line] ?? '');
+    return { ...linkEdit(links, line, end, line, end, ',' + attributeSnippet(name)), s: true };
 }
 
 /**

@@ -2,6 +2,7 @@
   "attributes": [
     {
       "name": "AT",
+      "snippet": "AT(${1:x},${2:y},${3:width},${4:height})",
       "applicableTo": [
         "WINDOW",
         "REPORT",
@@ -37,6 +38,7 @@
     },
     {
       "name": "USE",
+      "snippet": "USE(${1:?Name})",
       "applicableTo": [
         "WINDOW",
         "REPORT",
@@ -76,6 +78,7 @@
     },
     {
       "name": "COLOR",
+      "snippet": "COLOR(${1:COLOR:Black})",
       "applicableTo": [
         "WINDOW",
         "REPORT",
@@ -107,6 +110,7 @@
     },
     {
       "name": "FONT",
+      "snippet": "FONT('${1:Segoe UI}',${2:9})",
       "applicableTo": [
         "WINDOW",
         "REPORT",
@@ -255,6 +259,7 @@
     },
     {
       "name": "ICON",
+      "snippet": "ICON(${1:ICON:Save})",
       "applicableTo": [
         "WINDOW",
         "APPLICATION",
@@ -385,6 +390,7 @@
     },
     {
       "name": "FROM",
+      "snippet": "FROM(${1:queue})",
       "applicableTo": [
         "LIST",
         "COMBO",
@@ -403,6 +409,7 @@
     },
     {
       "name": "FORMAT",
+      "snippet": "FORMAT('${1:format}')",
       "applicableTo": [
         "LIST",
         "COMBO"
@@ -437,6 +444,7 @@
     },
     {
       "name": "VALUE",
+      "snippet": "VALUE('${1:on}','${2:off}')",
       "applicableTo": [
         "RADIO",
         "CHECK"
@@ -546,6 +554,7 @@
     },
     {
       "name": "TIP",
+      "snippet": "TIP('${1:text}')",
       "applicableTo": [
         "CONTROL"
       ],
@@ -562,6 +571,7 @@
     },
     {
       "name": "KEY",
+      "snippet": "KEY(${1:F2Key})",
       "applicableTo": [
         "CONTROL"
       ],
@@ -592,6 +602,7 @@
     },
     {
       "name": "MSG",
+      "snippet": "MSG('${1:text}')",
       "applicableTo": [
         "CONTROL",
         "MENU",
@@ -610,6 +621,7 @@
     },
     {
       "name": "HLP",
+      "snippet": "HLP('${1:helpID}')",
       "applicableTo": [
         "WINDOW",
         "CONTROL"
@@ -627,6 +639,7 @@
     },
     {
       "name": "ALRT",
+      "snippet": "ALRT(${1:F2Key})",
       "applicableTo": [
         "WINDOW",
         "BUTTON",
@@ -858,6 +871,7 @@
     },
     {
       "name": "MARK",
+      "snippet": "MARK(${1:variable})",
       "applicableTo": [
         "LIST",
         "COMBO"
@@ -873,6 +887,7 @@
     },
     {
       "name": "DROP",
+      "snippet": "DROP(${1:10})",
       "applicableTo": [
         "LIST",
         "COMBO"
@@ -903,6 +918,7 @@
     },
     {
       "name": "GRID",
+      "snippet": "GRID(${1:COLOR:Gray})",
       "applicableTo": [
         "LIST",
         "COMBO"
@@ -1636,6 +1652,7 @@
     },
     {
       "name": "ANGLE",
+      "snippet": "ANGLE(${1:900})",
       "applicableTo": [
         "STRING"
       ],
@@ -1759,6 +1776,7 @@
     },
     {
       "name": "CURSOR",
+      "snippet": "CURSOR(${1:CURSOR:Hand})",
       "applicableTo": [
         "APPLICATION",
         "WINDOW",
@@ -1823,6 +1841,7 @@
     },
     {
       "name": "DRAGID",
+      "snippet": "DRAGID('${1:signature}')",
       "applicableTo": [
         "LIST",
         "REGION"
@@ -1848,6 +1867,7 @@
     },
     {
       "name": "DROPID",
+      "snippet": "DROPID('${1:signature}')",
       "applicableTo": [
         "CONTROL"
       ],
@@ -2389,6 +2409,7 @@
     },
     {
       "name": "STD",
+      "snippet": "STD(${1:STD:Close})",
       "applicableTo": [
         "BUTTON",
         "ITEM",
@@ -2733,6 +2754,7 @@
     },
     {
       "name": "LAYOUT",
+      "snippet": "LAYOUT(${1:0})",
       "applicableTo": [
         "WINDOW",
         "APPLICATION",

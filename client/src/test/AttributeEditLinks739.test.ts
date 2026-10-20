@@ -119,6 +119,24 @@ suite('Attribute edit links: planning the edit (#739)', () => {
         assert.deepStrictEqual(planAttributeEdit(pastEnd, 1, lineAt), { refused: 'changed' });
     });
 
+    test('#743: an edit marked `s` is a snippet, planned as one', () => {
+        const at = doc[1].indexOf(', |');
+        const plan = planAttributeEdit({ e: [{ l: 0, c: at, el: 0, ec: at, t: ",TIP('${1:text}')", o: [doc[1]], s: true }] }, 1, lineAt);
+        assert.ok('edits' in plan, JSON.stringify(plan));
+        assert.strictEqual(plan.edits[0].snippet, true);
+        assert.strictEqual(plan.edits[0].text, ",TIP('${1:text}')");
+        const flag = planAttributeEdit({ e: [{ l: 0, c: at, el: 0, ec: at, t: ',HIDE', o: [doc[1]] }] }, 1, lineAt);
+        assert.ok('edits' in flag && !flag.edits[0].snippet);
+    });
+
+    test('#743: a snippet comes alone, and `s` must be a boolean', () => {
+        const at = doc[1].indexOf(', |');
+        const snip = { l: 0, c: at, el: 0, ec: at, t: ",TIP('${1:text}')", o: [doc[1]], s: true };
+        const other = { l: 1, c: 0, el: 1, ec: 0, t: 'x', o: [doc[2]] };
+        assert.deepStrictEqual(planAttributeEdit({ e: [snip, other] }, 1, lineAt), { refused: 'malformed' });
+        assert.deepStrictEqual(planAttributeEdit({ e: [{ ...snip, s: 'yes' }] }, 1, lineAt), { refused: 'malformed' });
+    });
+
     test('a malformed payload is refused', () => {
         const ok = { l: 0, c: 0, el: 0, ec: 0, t: '', o: [doc[1]] };
         for (const bad of [

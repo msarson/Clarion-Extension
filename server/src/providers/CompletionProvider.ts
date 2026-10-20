@@ -13,7 +13,7 @@ import { EventService } from '../utils/EventService';
 import { Token } from '../ClarionTokenizer';
 import { TokenType } from '../tokenizer/TokenTypes';
 import { ControlDefinition, ControlService } from '../utils/ControlService';
-import { AttributeService } from '../utils/AttributeService';
+import { AttributeService, attributeSnippet } from '../utils/AttributeService';
 import { controlDefinitionFor, findControlKeyword, findDeclarationKeyword, parseAccepted, readDeclaredAttributes } from '../utils/DeclaredAttributes';
 import LoggerManager from '../logger';
 
@@ -191,7 +191,7 @@ export class CompletionProvider {
                 const description = attributes.getAttribute(a.name)?.description;
                 if (description) item.documentation = description;
                 if (!a.flag) {
-                    item.insertText = `${a.name}($1)`;
+                    item.insertText = attributeSnippet(a.name);
                     item.insertTextFormat = InsertTextFormat.Snippet;
                 }
                 return item;

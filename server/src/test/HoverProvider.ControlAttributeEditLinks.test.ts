@@ -165,10 +165,11 @@ suite('Control card — attribute edit links', () => {
         assert.ok(card.includes('**Available:**'), card);
     });
 
-    test('flags are links — remove under Attributes, add under Available; AT/USE stay plain', async () => {
+    test('flags are links — remove under Attributes, add under Available; AT/USE remove too (#743)', async () => {
         const { card } = await hoverText(program(["      TEXT,AT(10,10,100,50),USE(?T),VSCROLL"]));
         const attributes = card.slice(card.indexOf('**Attributes:**'), card.indexOf('**Available:**'));
-        assert.ok(attributes.includes('`AT`') && attributes.includes('`USE`'), card);
+        assert.ok(linkFor(attributes, 'AT').title.startsWith('Remove AT(10,10,100,50)'), card);
+        assert.ok(linkFor(attributes, 'USE').title.startsWith('Remove USE(?T)'), card);
         assert.strictEqual(linkFor(attributes, 'VSCROLL').title.indexOf('Remove VSCROLL'), 0, card);
         assert.strictEqual(linkFor(card, 'HIDE').title, 'Add HIDE — hidden until UNHIDE', card);
         assert.ok(!card.includes(' · '), 'linked names need no separators: ' + card);

@@ -18,6 +18,11 @@ export interface AttributeDefinition {
     description: string;
     /** A few words for a tooltip ("hidden until UNHIDE"); flag attributes only, so far. */
     short?: string;
+    /**
+     * #743: what attribute completion and the card's With value link insert, a VS Code snippet
+     * (`TIP('${1:text}')`). Without one, attributeSnippet derives it from the first signature.
+     */
+    snippet?: string;
     propertyEquate: string;
 }
 
@@ -201,4 +206,27 @@ export class AttributeService {
 
         return doc;
     }
+}
+
+
+/**
+ * The snippet attribute completion (#740) and the control card (#743) insert for an attribute that
+ * takes a value: the data's own `snippet`, or one placeholder per required parameter of the first
+ * signature (a STRING one quoted), or empty brackets to type in.
+ */
+export function attributeSnippet(name: string): string {
+    const upper = name.toUpperCase();
+    const def = AttributeService.getInstance().getAttribute(upper);
+    if (def?.snippet) return def.snippet;
+    const params = (def?.signatures?.[0]?.params ?? [])
+        .map(p => typeof p === 'string' ? { name: p, optional: false } : p)
+        .filter(p => !p.optional && p.name);
+    if (params.length === 0) return upper + '(${1})';
+    const placeholders = params.map((p, i) => {
+        const words = p.name.replace(/\.\.\.$/, '').trim().split(/\s+/);
+        const label = words[words.length - 1];
+        const hole = '${' + (i + 1) + ':' + label + '}';
+        return words.length > 1 && words[0].toUpperCase() === 'STRING' ? `'${hole}'` : hole;
+    });
+    return `${upper}(${placeholders.join(',')})`;
 }

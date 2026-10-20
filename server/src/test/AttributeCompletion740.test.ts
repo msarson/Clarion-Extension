@@ -84,7 +84,7 @@ suite('Attribute completion on a declaration (#740)', function () {
         const hide = items.find(i => i.label === 'HIDE')!;
         const tip = items.find(i => i.label === 'TIP')!;
         assert.ok(!hide.insertText || hide.insertText === 'HIDE');
-        assert.strictEqual(tip.insertText, 'TIP($1)');
+        assert.strictEqual(tip.insertText, "TIP('${1:text}')"); // #743: the snippet the card's With value link inserts
         assert.strictEqual(tip.insertTextFormat, InsertTextFormat.Snippet);
         assert.ok(hide.documentation, 'carries the attribute description');
     });

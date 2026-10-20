@@ -5,11 +5,13 @@
  * flag names as links:
  *
  *   [NAME](command:clarion.applyAttributeEdit?<encodeURIComponent(JSON.stringify([payload]))> "title")
- *   payload = { e: [{ l, c, el, ec, t, o }] }
+ *   payload = { e: [{ l, c, el, ec, t, o, s? }] }
  *
  * `l`/`el` are lines relative to the hovered line, `c`/`ec` 0-based columns, `t` the new text and
- * `o` the original text of lines l..el. All Clarion knowledge (commas, `|` continuations, clashing
- * attributes) is in the server; the client only checks the original text and applies the edits.
+ * `o` the original text of lines l..el. `s: true` (#743) marks `t` as a VS Code snippet
+ * (`,TIP('${1:text}')`); a snippet edit comes alone. All Clarion knowledge (commas, `|`
+ * continuations, clashing attributes) is in the server; the client only checks the original text
+ * and applies the edits.
  */
 
 export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
@@ -17,7 +19,7 @@ export const ATTRIBUTE_EDIT_COMMAND = 'clarion.applyAttributeEdit';
 /** The hovered document and position, which the payload's relative lines are counted from. */
 export interface AttributeEditAnchor { uri: string; line: number; character: number; }
 
-export interface PlannedEdit { startLine: number; startCharacter: number; endLine: number; endCharacter: number; text: string; }
+export interface PlannedEdit { startLine: number; startCharacter: number; endLine: number; endCharacter: number; text: string; snippet?: boolean; }
 
 export type AttributeEditPlan = { edits: PlannedEdit[] } | { refused: 'malformed' | 'changed' };
 
@@ -59,7 +61,8 @@ export function planAttributeEdit(payload: unknown, anchorLine: number, lineAt: 
     let changed = false;
     for (const e of raw as Record<string, unknown>[]) {
         if (!e || typeof e !== 'object') return { refused: 'malformed' };
-        const { l, c, el, ec, t, o } = e;
+        const { l, c, el, ec, t, o, s } = e;
+        if (s !== undefined && typeof s !== 'boolean') return { refused: 'malformed' };
         if (!Number.isInteger(l) || !Number.isInteger(el) || !isIndex(c) || !isIndex(ec) || typeof t !== 'string') return { refused: 'malformed' };
         const first = (l as number), last = (el as number);
         if (last < first || (last === first && (ec as number) < (c as number))) return { refused: 'malformed' };
@@ -69,8 +72,11 @@ export function planAttributeEdit(payload: unknown, anchorLine: number, lineAt: 
             const line = anchorLine + first + i;
             if (line < 0 || lineAt(line) !== original) changed = true;
         });
-        edits.push({ startLine: anchorLine + first, startCharacter: c as number, endLine: anchorLine + last, endCharacter: ec as number, text: t });
+        edits.push({ startLine: anchorLine + first, startCharacter: c as number, endLine: anchorLine + last, endCharacter: ec as number, text: t, ...(s ? { snippet: true } : {}) });
     }
+
+    // A snippet is inserted on its own: other edits would move the place it goes.
+    if (edits.length > 1 && edits.some(e => e.snippet)) return { refused: 'malformed' };
 
     // VS Code refuses overlapping edits, and the server never sends them.
     const ordered = [...edits].sort((a, b) => a.startLine - b.startLine || a.startCharacter - b.startCharacter);
