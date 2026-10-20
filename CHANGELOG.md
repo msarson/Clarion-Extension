@@ -8,9 +8,23 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.9] - Unreleased
 
-#### Hover
+#### Navigation and hover
 
-- **Hover on a global no longer shows a MAP procedure whose name merely starts with it.** From a member module, hovering a global object or variable such as `Log` in `Log.Write(...)` showed a "Global Procedure" card for an unrelated prototype like `LogViewer` declared in the program's MAP, because the MAP lookup matched any prototype that started with the hovered word. It now matches the whole name, so the global's own card appears; overloaded procedures still resolve. [#716](https://github.com/msarson/Clarion-Extension/issues/716)
+- **Hover on a global no longer shows a MAP procedure whose name merely starts with it.** Hovering `Log` showed the prototype of `LogViewer`; a MAP prototype now matches only its whole name. [#716](https://github.com/msarson/Clarion-Extension/issues/716) @ClarionLive
+- **An OMIT or COMPILE terminator that starts with END no longer closes the structure around it.** A terminator line such as `END***` was read as an END, so a MAP closed early and the globals declared after it were missing from hover and Go to Definition. [#718](https://github.com/msarson/Clarion-Extension/issues/718) @ClarionLive
+- **A word spelled like a control is no longer that control outside a WINDOW.** A variable such as `text` or `Button` outside a WINDOW, APPLICATION or REPORT no longer hovers as the control, and `BOX`, `LINE`, `IMAGE` and `ELLIPSE` in code now show their built-in procedure. [#722](https://github.com/msarson/Clarion-Extension/pull/722) @geircodes
+- **ITEMIZE equates in library files are known by their real names.** An indented `END` now closes the block, a prefix with a colon such as `PRE(IC:RESET)` is read whole, a labelled `ITEMIZE,PRE` names its members after its label, and a member already written with the prefix is not prefixed twice. [#723](https://github.com/msarson/Clarion-Extension/pull/723), [#724](https://github.com/msarson/Clarion-Extension/pull/724) @geircodes
+- **Dot completion on a FILE declared in an include lists its record fields.** `Orders.` offered only the keys and the record label when the FILE came from an INCLUDE; it now offers the fields as well. [#725](https://github.com/msarson/Clarion-Extension/pull/725) @geircodes
+- **Hovering a field named through a FILE no longer shows the line under the cursor.** When a queue or group held a plain field named like a FILE, hovering `Notes` in `Widget.Notes` showed the hovered line itself; it now shows the FILE's field, where Go to Definition goes. [#726](https://github.com/msarson/Clarion-Extension/pull/726) @geircodes
+- **Completion in an included file offers its PROGRAM's globals.** A class header or TYPE file included by a MEMBER module now lists the PROGRAM's prefixed dictionary fields. [#727](https://github.com/msarson/Clarion-Extension/pull/727) @geircodes
+- **Hover and Go to Definition use the include file the program compiles.** A stale copy of a dictionary include left in the project folder no longer wins over the copy the program actually includes. [#728](https://github.com/msarson/Clarion-Extension/pull/728) @geircodes
+- **Go to Definition on the field of `File.Field` works when the FILE is declared in another file.** It now lands on the field inside the dictionary include, the declaration hover names. [#729](https://github.com/msarson/Clarion-Extension/pull/729) @geircodes
+- **Hovering an attribute on a WINDOW header line shows its card.** It also says when the WINDOW does not accept the attribute. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
+
+#### Diagnostics
+
+- **Code inside an OMIT block no longer pairs with the structures around it.** The structures and ENDs in the body of an unconditional OMIT block are matched on their own, so code that compiles no longer reports a CYCLE outside a LOOP or ACCEPT, or a CASE that is not terminated. [#720](https://github.com/msarson/Clarion-Extension/issues/720) @ClarionLive
+- **An attribute the WINDOW does not accept is flagged on its header line.** `HIDE` or `PRE(...)` there, which the compiler rejects, went unnoticed until the build; HVSCROLL together with HSCROLL or VSCROLL is flagged as well. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
 
 ---
 
