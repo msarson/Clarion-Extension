@@ -189,4 +189,41 @@ suite('Control card — the attributes the declaration sets', () => {
         const card = await hoverOn(text, 'Text{');
         assert.ok(!/\*\*Attributes:\*\*|\*\*Available:\*\*/.test(card), card);
     });
+
+    // Compiled on Clarion 10 and 12: RESIZE on a WINDOW's TEXT is "Unknown attribute", and a
+    // bare RTF is "Wrong number of parameters" (it takes a save target, RTF(TEXT:Field)).
+    test('TEXT in a WINDOW: RESIZE (report only) and RTF (takes a value) are not offered', async () => {
+        const card = await hoverOn(TEXT_DECL, 'TEXT,');
+        for (const f of ['RESIZE', 'RTF']) {
+            assert.strictEqual(flagState(card, f), 'absent', `${f}: ${card}`);
+        }
+    });
+
+    const REPORT_DECL = [
+        "  PROGRAM",
+        "",
+        "MyReport REPORT,AT(0,0,8000,10000)",
+        "Detail     DETAIL,AT(,,8000,1000)",
+        "             TEXT,AT(1,1,500,500),USE(Loc:Notes),BOXED,REQ",
+        "           END",
+        "         END",
+        "",
+        "  MAP",
+        "  END",
+        "  CODE",
+        "  RETURN",
+        "",
+    ].join('\n');
+
+    // Compiled on Clarion 10 and 12: a REPORT's TEXT rejects every one of these as
+    // "Unknown attribute", and accepts RESIZE, which a WINDOW's TEXT rejects.
+    test('TEXT in a REPORT: offers only what a report accepts, and flags the rest', async () => {
+        const card = await hoverOn(REPORT_DECL, 'TEXT,');
+        for (const f of ['FLAT', 'FULL', 'HSCROLL', 'VSCROLL', 'HVSCROLL', 'READONLY', 'SCROLL', 'SINGLE']) {
+            assert.strictEqual(flagState(card, f), 'absent', `${f}: ${card}`);
+        }
+        assert.strictEqual(flagState(card, 'RESIZE'), 'unset', card);
+        assert.strictEqual(flagState(card, 'BOXED'), 'set', card);
+        assert.ok(/REQ.*not valid on TEXT/i.test(card), card);
+    });
 });

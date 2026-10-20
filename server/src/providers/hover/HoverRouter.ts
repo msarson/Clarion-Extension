@@ -827,14 +827,20 @@ export class HoverRouter {
      * A control card hovered on the keyword of its own declaration
      * (`TEXT,AT(...),HVSCROLL`) lists that declaration's attributes instead of
      * the generic "Common Attributes". Any other control card is returned as is.
+     * Inside a REPORT the report definition decides: a report's TEXT accepts a
+     * different set (RESIZE, not the scroll bars).
      */
     private withDeclaredAttributes(
         hover: Hover,
         word: string,
         position: { line: number; character: number },
-        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined } | undefined
+        documentStructure: {
+            getLogicalLine?(line: number): LogicalLine | undefined;
+            getStructureContextAt?(line: number): { inReport: boolean };
+        } | undefined
     ): Hover {
-        const def = this.controlService.getControl(word);
+        const inReport = documentStructure?.getStructureContextAt?.(position.line).inReport ?? false;
+        const def = (inReport ? this.controlService.getReportControl(word) : undefined) ?? this.controlService.getControl(word);
         if (!def?.attributes || !documentStructure?.getLogicalLine) return hover;
         const logical = documentStructure.getLogicalLine(position.line);
         if (!logical) return hover;

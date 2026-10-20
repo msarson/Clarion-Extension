@@ -47,7 +47,7 @@
       "description": "Declares a multi-line text control for text input/display",
       "syntax": "TEXT()",
       "commonAttributes": ["AT", "USE", "SCROLL", "SINGLE", "HSCROLL", "VSCROLL", "HVSCROLL", "READONLY"],
-      "attributes": ["AT()", "CURSOR()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "KEY()", "MSG()", "HLP()", "BOXED", "SKIP", "FONT()", "REQ", "FULL", "SCROLL", "ALRT()", "HIDE", "READONLY", "FLAT", "DROPID()", "UPR", "TRN", "RTF", "TIP()", "HSCROLL", "VSCROLL", "HVSCROLL", "LEFT", "RIGHT", "CENTER", "COLOR()", "SINGLE", "RESIZE", "EXTEND()"],
+      "attributes": ["AT()", "CURSOR()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "KEY()", "MSG()", "HLP()", "BOXED", "SKIP", "FONT()", "REQ", "FULL", "SCROLL", "ALRT()", "HIDE", "READONLY", "FLAT", "DROPID()", "UPR", "TRN", "RTF()", "TIP()", "HSCROLL", "VSCROLL", "HVSCROLL", "LEFT", "RIGHT", "CENTER", "COLOR()", "SINGLE"],
       "exclusive": [["HSCROLL", "HVSCROLL"], ["VSCROLL", "HVSCROLL"], ["LEFT", "RIGHT", "CENTER"]]
     },
     {
@@ -160,6 +160,14 @@
     }
   ],
   "reportControls": [
+    {
+      "name": "TEXT",
+      "description": "Declares a multi-line text control for text input/display",
+      "syntax": "TEXT()",
+      "commonAttributes": ["AT", "USE", "BOXED", "RESIZE", "FONT"],
+      "attributes": ["AT()", "USE()", "LAYOUT()", "DISABLE", "IMM", "CAP", "BOXED", "SKIP", "FONT()", "HIDE", "UPR", "TRN", "RTF()", "LEFT", "RIGHT", "CENTER", "COLOR()", "RESIZE", "EXTEND()"],
+      "exclusive": [["LEFT", "RIGHT", "CENTER"]]
+    },
     {
       "name": "STRING",
       "description": "Declares a string control for static text on reports",
