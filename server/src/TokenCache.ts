@@ -1,6 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
-import { DocumentStructure } from './DocumentStructure';
+import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
 
@@ -202,7 +202,7 @@ export class TokenCache {
                 // Reuse that instance — do NOT call process() again on the same token array,
                 // as a second pass corrupts subType assignments (e.g. MapProcedure explosion).
                 const structure = tokenizer.getDocumentStructure() ?? (() => {
-                    const s = new DocumentStructure(tokens, TokenCache.linesIfOmit(document.getText()));
+                    const s = new DocumentStructure(tokens, TokenCache.linesIfOmit(document));
                     s.process();
                     return s;
                 })();
@@ -277,7 +277,7 @@ export class TokenCache {
         // Fallback (should be rare — e.g. tokenizer returned no structure): build once
         // and store on the LIVE entry so repeat calls return the same instance.
         logger.info(`Building fallback DocumentStructure for ${uri} (entry=${!!refreshed}, hasStructure=${!!(refreshed?.structure)})`);
-        const structure = new DocumentStructure(tokens, TokenCache.linesIfOmit(document.getText()));
+        const structure = new DocumentStructure(tokens, TokenCache.linesIfOmit(document));
         structure.process();
         if (refreshed) {
             refreshed.structure = structure;
@@ -577,9 +577,18 @@ export class TokenCache {
         return touchesStructure(false) && touchesStructure(true);
     }
 
-    /** The text's lines when it has an OMIT directive (DocumentStructure reads OMIT bodies from them). */
-    static linesIfOmit(text: string): string[] | undefined {
-        return /\bOMIT\s*\(/i.test(text) ? text.split(/\r?\n/) : undefined;
+    /**
+     * The document's lines when it has an OMIT directive (DocumentStructure reads OMIT bodies from
+     * them). An accessor over the document, not a split of its text: this runs on every edit (#733).
+     */
+    static linesIfOmit(document: TextDocument): SourceLines | undefined {
+        if (!/\bOMIT\s*\(/i.test(document.getText())) return undefined;
+        const length = document.lineCount;
+        return {
+            length,
+            at: line => line < 0 || line >= length ? undefined
+                : document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }).replace(/\r?\n$/, ''),
+        };
     }
 
     /** A line's code: string literals blanked ('' escapes kept inside), the comment removed. */
@@ -806,7 +815,7 @@ export class TokenCache {
         // This modifies tokens in-place - must be done BEFORE caching
         const processStart = performance.now();
         // The source lines let process() read an OMIT body as not code (only needed when there is one).
-        const structure = new DocumentStructure(mergedTokens, TokenCache.linesIfOmit(newText));
+        const structure = new DocumentStructure(mergedTokens, TokenCache.linesIfOmit(document));
         structure.process();
         const processTime = performance.now() - processStart;
         

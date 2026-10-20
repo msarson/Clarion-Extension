@@ -13,6 +13,15 @@ import { firstTokenAfterLine } from './utils/TokenLineIndex';
 import { OmitCompileDetector } from './utils/OmitCompileDetector';
 
 /**
+ * A document's source lines: a split array, or an accessor over the document so a caller on the
+ * per-edit path need not split the whole text (#733). An array satisfies it as it is.
+ */
+export interface SourceLines {
+    readonly length: number;
+    at(line: number): string | undefined;
+}
+
+/**
  * The two structure keywords that can open a block inside a MAP body. Matched
  * EXACTLY, never by prefix (#477): a procedure may legitimately be called
  * `MapFields`, `Mapper` or `ModuleList`, and a prefix test rejects those as if
@@ -189,7 +198,10 @@ export class DocumentStructure {
      */
     private logicalLinesByPhysicalLine: Map<number, LogicalLine> = new Map();
 
-    constructor(private tokens: Token[], private lines?: string[]) {
+    /** Where the Directive tokens are, so the OMIT-body search need not walk every token (#733). */
+    private directiveIndexes: number[] = [];
+
+    constructor(private tokens: Token[], private lines?: SourceLines) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
         this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
@@ -226,7 +238,9 @@ export class DocumentStructure {
         const perfStart = performance.now();
         
         // Index tokens by line for fast line-based lookups
-        for (const token of this.tokens) {
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
+            if (token.type === TokenType.Directive) this.directiveIndexes.push(i);
             if (!this.tokensByLine.has(token.line)) {
                 this.tokensByLine.set(token.line, []);
             }
@@ -654,8 +668,8 @@ export class DocumentStructure {
      */
     private omittedLines(): Uint8Array | undefined {
         const lines = this.lines;
-        if (!lines || !this.tokens.some(t => t.type === TokenType.Directive && t.value.toUpperCase() === 'OMIT')) return undefined;
-        const blocks = OmitCompileDetector.findDirectiveBlocksInLines(this.tokens, lines.length, l => lines[l]);
+        if (!lines || !this.directiveIndexes.some(i => this.tokens[i].value.toUpperCase() === 'OMIT')) return undefined;
+        const blocks = OmitCompileDetector.findDirectiveBlocksInLines(this.tokens, lines.length, l => lines.at(l) ?? '', this.directiveIndexes);
         let flags: Uint8Array | undefined;
         for (const block of blocks) {
             if (block.type !== 'OMIT') continue;
@@ -3088,7 +3102,7 @@ export class DocumentStructure {
      *  approximation from the token stream. */
     private getPhysicalLineText(line: number): string {
         if (this.lines && line < this.lines.length) {
-            return this.lines[line];
+            return this.lines.at(line) ?? '';
         }
         const lineTokens = this.tokensByLine.get(line);
         if (!lineTokens || lineTokens.length === 0) return '';
