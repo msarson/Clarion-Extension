@@ -115,6 +115,7 @@ import { CallHierarchyProvider } from './providers/CallHierarchyProvider';
 import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
+import { readClientFeatures } from './utils/ClientFeatures';
 
 /**
  * #715 item 1 — a request handler that background validation waits for while it runs (hover,
@@ -458,6 +459,8 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+        // Optional client features under capabilities.experimental (attribute edit links on control cards).
+        readClientFeatures(params.capabilities);
 
         // #545 — pull diagnostics, only for a client that asks for them.
         pullDiagnosticsSupported = params.capabilities.textDocument?.diagnostic !== undefined;

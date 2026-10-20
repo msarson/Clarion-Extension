@@ -150,6 +150,7 @@
         "CONTROL"
       ],
       "description": "Specifies the control does not appear when the WINDOW or APPLICATION is first opened. UNHIDE must be used to display it. In a REPORT, the control does not print unless UNHIDE is used.",
+      "short": "hidden until UNHIDE",
       "propertyEquate": "PROP:Hide",
       "signatures": [
         {
@@ -164,6 +165,7 @@
         "CONTROL"
       ],
       "description": "Specifies the control is dimmed (grayed out) when the window is first opened. The control cannot receive focus and does not respond to user input. ENABLE must be used to activate it.",
+      "short": "dimmed, cannot be used",
       "propertyEquate": "PROP:Disable",
       "signatures": [
         {
@@ -184,6 +186,7 @@
         "SPIN"
       ],
       "description": "Sets the window to be centered on screen when first opened. The window is positioned at the center of the screen or MDI parent window client area.",
+      "short": "centered text",
       "propertyEquate": "PROP:Center",
       "signatures": [
         {
@@ -296,6 +299,7 @@
         "CONTROL"
       ],
       "description": "Sets immediate event notification for the control. Changes to the control generate an EVENT:Accepted immediately rather than waiting for the user to press Enter or Tab.",
+      "short": "an event on every keystroke",
       "propertyEquate": "PROP:Immediate",
       "signatures": [
         {
@@ -310,6 +314,7 @@
         "CONTROL"
       ],
       "description": "Sets the control as display-only. The control can receive focus and be tabbed to, but the user cannot edit its contents.",
+      "short": "display only, no input",
       "propertyEquate": "PROP:ReadOnly",
       "signatures": [
         {
@@ -324,6 +329,7 @@
         "CONTROL"
       ],
       "description": "Sets required entry for the control. The user must enter a value in the control before the window can be closed or focus moved to certain other controls.",
+      "short": "entry required",
       "propertyEquate": "PROP:Req",
       "signatures": [
         {
@@ -353,6 +359,7 @@
         "CONTROL"
       ],
       "description": "Sets the control to be skipped when the user presses Tab. The control cannot receive focus through Tab key navigation, but can still receive focus through mouse clicks or SELECT statement.",
+      "short": "the Tab key skips it",
       "propertyEquate": "PROP:Skip",
       "signatures": [
         {
@@ -452,6 +459,7 @@
         "CONTROL"
       ],
       "description": "Adds a horizontal scroll bar to the window or control.",
+      "short": "horizontal scroll bar",
       "propertyEquate": "PROP:HScroll",
       "signatures": [
         {
@@ -467,6 +475,7 @@
         "CONTROL"
       ],
       "description": "Adds a vertical scroll bar to the window or control.",
+      "short": "vertical scroll bar",
       "propertyEquate": "PROP:VScroll",
       "signatures": [
         {
@@ -482,6 +491,7 @@
         "CONTROL"
       ],
       "description": "Adds both horizontal and vertical scroll bars to the window or control.",
+      "short": "both scroll bars",
       "propertyEquate": "PROP:HVScroll",
       "signatures": [
         {
@@ -497,6 +507,7 @@
         "TEXT"
       ],
       "description": "Sets the window border to allow resizing. The user can drag the window edges to change the window size.",
+      "short": "variable height (reports)",
       "propertyEquate": "PROP:Resize",
       "signatures": [
         {
@@ -697,6 +708,7 @@
         "OPTION"
       ],
       "description": "Sets a border around a GROUP of controls. Draws a rectangular border encompassing all controls in the group.",
+      "short": "border around the control",
       "propertyEquate": "PROP:Boxed",
       "signatures": [
         {
@@ -711,6 +723,7 @@
         "CONTROL"
       ],
       "description": "Sets text entry to all capitals. Automatically converts all entered text to uppercase.",
+      "short": "Proper Case input (with MASK)",
       "propertyEquate": "PROP:Cap",
       "signatures": [
         {
@@ -725,6 +738,7 @@
         "CONTROL"
       ],
       "description": "Sets text entry to all uppercase. Similar to CAP, converts entered text to uppercase.",
+      "short": "UPPER CASE input (with MASK)",
       "propertyEquate": "PROP:Upr",
       "signatures": [
         {
@@ -833,6 +847,7 @@
         "SPIN"
       ],
       "description": "Sets buttons to have a flat appearance. Buttons appear flat until the mouse hovers over them.",
+      "short": "flat appearance",
       "propertyEquate": "PROP:Flat",
       "signatures": [
         {
@@ -957,6 +972,7 @@
         "TEXT"
       ],
       "description": "Sets TEXT control for single line entry. Limits text entry to one line only.",
+      "short": "single-line entry",
       "propertyEquate": "PROP:Single",
       "signatures": [
         {
@@ -986,6 +1002,7 @@
         "SPIN"
       ],
       "description": "Enables scrolling for TEXT control. Allows vertical scrolling through text content.",
+      "short": "moves when the window scrolls",
       "propertyEquate": "PROP:Scroll",
       "signatures": [
         {
@@ -1044,6 +1061,7 @@
         "SPIN"
       ],
       "description": "Sets window to full-screen mode. Window occupies the entire display with no borders.",
+      "short": "fills the window where AT omits width/height",
       "propertyEquate": "PROP:Full",
       "signatures": [
         {
@@ -2523,6 +2541,7 @@
         }
       ],
       "description": "Specifies the control displays or prints transparently \u00e2\u20ac\u201d only the pixels needed for each character are drawn, without obliterating the background. Useful for placing text over an IMAGE control. Valid in both Clarion Win32 windows and REPORT structures.",
+      "short": "transparent background",
       "propertyEquate": "PROP:TRN"
     },
     {
