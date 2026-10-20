@@ -9,7 +9,7 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { ControlService } from '../../utils/ControlService';
-import { readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
+import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
 import { LogicalLine } from '../../DocumentStructure';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
@@ -721,7 +721,8 @@ export class HoverRouter {
     ): Hover | null {
         const logical = documentStructure?.getLogicalLine?.(position.line);
         if (!logical) return null;
-        const keyword = logical.tokens.find(t => t.type !== TokenType.Label);
+        const first = logical.tokens.find(t => t.type !== TokenType.Label);
+        const keyword = first && findDeclarationKeyword(logical, first.line, first.start);
         if (!keyword) return null;
         const def = this.controlService.getContainerStructure(keyword.value);
         if (!def?.attributes) return null;

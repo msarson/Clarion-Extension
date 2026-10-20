@@ -12,14 +12,15 @@ export interface DeclaredAttribute {
 }
 
 /**
- * The declaration keyword token (WINDOW, TEXT, BUTTON…) at a position, if it opens its
- * logical line — optionally after a label. The same word anywhere else (an argument, a
- * later attribute) is not a declaration.
+ * The declaration keyword token (WINDOW, APPLICATION…) at a position, if it opens its
+ * logical line after its label. The same word anywhere else (an argument, a later
+ * attribute, `Window{PROP:Alrt,255}` in code) is not a declaration.
  */
 export function findDeclarationKeyword(logical: LogicalLine, line: number, character: number): Token | null {
     const index = logical.tokens.findIndex(t => t.line === line && t.start === character);
-    // A label is never the keyword, even when it is spelled like one (`Window WINDOW(...)`).
-    if (index < 0 || logical.tokens[index].type === TokenType.Label) return null;
+    // A label is never the keyword, even when it is spelled like one (`Window WINDOW(...)`),
+    // and the structure needs one: an unlabelled `Window` opening a line is code.
+    if (index < 1 || logical.tokens[index].type === TokenType.Label) return null;
     for (let i = 0; i < index; i++) {
         if (logical.tokens[i].type !== TokenType.Label) return null;
     }

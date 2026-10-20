@@ -100,6 +100,15 @@ suite('Attributes on a WINDOW header line', () => {
         assert.ok(!/not valid/.test(card), card);
     });
 
+    // Generated code sets a window property by index in the CODE section; the window's
+    // label `Window` is spelled like the keyword, but this line declares nothing.
+    test('an indexed property on a window called `Window` is not read as a header', async () => {
+        const text = program(["Window WINDOW('Test'),AT(,,300,200)"]).replace('  RETURN', '  Window{Prop:Alrt,255} = CtrlShiftP\n  RETURN');
+        assert.deepStrictEqual(diagnosticsFor(text), []);
+        const card = await hoverWord(text, 'Prop:Alrt,255', '255');
+        assert.ok(!/not a known attribute/.test(card), card);
+    });
+
     test('the TEXT control card lists HSCROLL and VSCROLL beside HVSCROLL', async () => {
         const card = await hoverWord(program(
             ["MyWindow WINDOW('Test'),AT(,,300,200)"],
