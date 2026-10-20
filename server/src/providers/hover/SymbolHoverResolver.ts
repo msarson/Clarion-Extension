@@ -51,9 +51,16 @@ export class SymbolHoverResolver {
             const dataTypeHover = this.checkDataType(word, context);
             if (dataTypeHover) return dataTypeHover;
             
-            // Then check control as fallback
-            const controlHover = this.checkControl(word);
-            if (controlHover) return controlHover;
+            // Then check control as fallback — but only inside a WINDOW/APPLICATION/REPORT,
+            // the one place a control can be declared. checkControl is a pure name lookup,
+            // so outside one it turned any word spelled like a control into that control:
+            // `Amount LONG(text)` or `x = text` hovered as the TEXT control, and a variable
+            // labelled `Button` hovered as the BUTTON control. Decline instead and let the
+            // rest of the ladder (attributes, keywords, built-ins, variables) answer.
+            if (context.isInWindowContext) {
+                const controlHover = this.checkControl(word);
+                if (controlHover) return controlHover;
+            }
         } else {
             // Window/control context - check control first
             const controlHover = this.checkControl(word);

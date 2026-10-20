@@ -551,7 +551,13 @@ export class SymbolFinderService {
             const hasDataLabel = lineNameTokens.some(t =>
                 t.type === TokenType.Label || t.type === TokenType.Variable
             );
-            const hasControlStructure = lineNameTokens.some(t => t.type === TokenType.Structure);
+            // A control keyword tokenizes as Structure (TOOLBAR, MENUBAR, SHEET) or as
+            // WindowElement (TEXT, BUTTON, ENTRY, LIST, ...) — HoverRouter's own control
+            // checks accept both. Missing WindowElement here bound an undeclared `text` in
+            // `Amount LONG(text)` to an unlabelled `TEXT,AT(...),USE(Memo)` control in the
+            // same procedure's WINDOW, hovering as "text — USE(Memo), local variable".
+            const hasControlStructure = lineNameTokens.some(t =>
+                t.type === TokenType.Structure || t.type === TokenType.WindowElement);
             varSymbolIsControl = hasControlStructure && !hasDataLabel;
             if (varSymbolIsControl) {
                 logger.info(`⏭️ Symbol "${searchText}" at line ${rawVarSymbol.range.start.line} is a window/report control keyword, not a data declaration — deferring to declaration scan`);
