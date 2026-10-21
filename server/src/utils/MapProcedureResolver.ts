@@ -182,11 +182,17 @@ export class MapProcedureResolver {
      * #362 — the walk's declaration test, extracted so the index fast-path and the
      * walk agree by construction: a MapProcedure/Function token named `nameLower`
      * that sits INSIDE a MODULE block. Returns the 0-based line, or null.
+     * `withinMaps` limits the MODULE blocks to those inside one of these MAP ranges.
      */
-    private findModuleScopedProcDeclLine(tokens: Token[], nameLower: string): number | null {
+    private findModuleScopedProcDeclLine(
+        tokens: Token[],
+        nameLower: string,
+        withinMaps?: Array<{ start: number; end: number }>
+    ): number | null {
         const moduleRanges = tokens
             .filter(t => t.type === TokenType.Structure &&
                 t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
+            .filter(t => !withinMaps || withinMaps.some(m => t.line > m.start && t.line < m.end))
             .map(t => ({ start: t.line, end: t.finishesAt! }));
         if (moduleRanges.length === 0) return null;
         const decl = tokens.find(t =>
@@ -208,6 +214,24 @@ export class MapProcedureResolver {
             t.label?.toLowerCase() === nameLower
         );
         return decl ? decl.line : null;
+    }
+
+    /** The line ranges of a file's MAP structures. */
+    private mapRangesOf(tokens: Token[]): Array<{ start: number; end: number }> {
+        return tokens
+            .filter(t => t.type === TokenType.Structure &&
+                t.value.toUpperCase() === 'MAP' && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+    }
+
+    /**
+     * Cheap pre-check before tokenizing an include that sits outside a MAP: does its text
+     * have a MAP statement at all? MAP is a keyword, never a label, so it is indented.
+     */
+    private fileTextHasMap(filePath: string): boolean {
+        const text = CrossFileResolver.loadExternalFileContent(
+            TokenCache.getInstance(), pathToCanonicalUri(filePath), filePath);
+        return text !== undefined && /^[ \t]+MAP\b/im.test(text);
     }
 
     /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
@@ -253,14 +277,16 @@ export class MapProcedureResolver {
         // can carry MODULE prototype blocks — walking every include of a PROGRAM file
         // (equates, class headers, …) multiplied the walk by an order of magnitude for
         // guaranteed misses. Files reached FROM a MAP include are MAP content
-        // throughout, so the restriction only applies at depth 0.
+        // throughout, so the restriction only applies to map-scoped files (the roots,
+        // and an INC that carries its own MAP — below).
+        //
+        // The one exception: an include OUTSIDE a MAP whose file holds its own MAP
+        // (`MAP / MODULE('SomeLib') / … / END / END` — how a DLL usually ships its
+        // prototypes, included in the global data section). Such a file is only loaded
+        // when a cheap text check finds a MAP in it, so the guard above keeps its cost.
         let mapRanges: Array<{ start: number; end: number }> | null = null;
-        if (mapScopedRoot && depth === 0) {
-            mapRanges = from.tokens
-                .filter(t => t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === 'MAP' && t.finishesAt !== undefined)
-                .map(t => ({ start: t.line, end: t.finishesAt! }));
-            if (mapRanges.length === 0) return null; // no MAP → no MAP includes
+        if (mapScopedRoot) {
+            mapRanges = this.mapRangesOf(from.tokens);
         }
 
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
@@ -292,26 +318,31 @@ export class MapProcedureResolver {
         };
 
         while ((match = includePattern.exec(content)) !== null) {
+            let outsideMap = false;
             if (mapRanges) {
                 const matchLine = offsetToLine(match.index);
-                if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
+                outsideMap = !mapRanges.some(r => matchLine > r.start && matchLine < r.end);
             }
             const incPath = this.resolveIncludeTarget(match[1], fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
+            if (outsideMap && !this.fileTextHasMap(incPath)) continue;
 
             await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);
             if (!inc) continue;
 
-            // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
-                ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
+            // Declaration = MapProcedure/Function token with our name, inside a MODULE block
+            // (for an include outside a MAP: a MODULE block inside the file's own MAP).
+            const declLine = outsideMap
+                ? this.findModuleScopedProcDeclLine(inc.tokens, nameLower, this.mapRangesOf(inc.tokens))
+                : this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
+                    ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
             if (declLine !== null) {
                 logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
                 return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
-            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, false, acceptBarePrototype);
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, outsideMap, acceptBarePrototype);
             if (nested) return nested;
         }
         return null;
