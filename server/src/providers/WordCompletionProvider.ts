@@ -1121,12 +1121,18 @@ export class WordCompletionProvider {
         'VIEW', 'WINDOW',
     ]);
 
-    /** Single-line keywords — no auto-insertion beyond the word itself. */
+    /**
+     * Single-line keywords — no auto-insertion beyond the word itself. A keyword typed in full
+     * must be on offer as itself, or a longer word (END: ENDPAGE, TO: TOOLBAR) sits first and
+     * Enter replaces what was typed (#747). Not here: TRY, CATCH, FINALLY and THROW (Clarion#
+     * only), FUNCTION (legacy).
+     */
     private static readonly PLAIN_KEYWORDS = [
-        'BREAK', 'CYCLE', 'EXIT', 'RETURN',
-        'CODE', 'DATA',
+        'BREAK', 'CYCLE', 'EXIT', 'RETURN', 'GOTO',
+        'CODE', 'DATA', 'END',
+        'PROGRAM', 'PROCEDURE', 'ROUTINE',
         'ELSE', 'ELSIF', 'OF', 'OROF', 'THEN', 'TIMES',
-        'UNTIL', 'WHILE',
+        'TO', 'BY', 'UNTIL', 'WHILE',
         'AND', 'NOT', 'OR', 'XOR',
         'NEW', 'PARENT', 'SELF',
     ];
