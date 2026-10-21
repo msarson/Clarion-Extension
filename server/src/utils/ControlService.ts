@@ -18,12 +18,17 @@ export interface ControlDefinition {
     pictureAttributes?: string[];
     /** Groups of attributes of which at most one may be present (`[HSCROLL, HVSCROLL]`, `[DOUBLE, NOFRAME, RESIZE]`). */
     exclusive?: string[][];
+    /** An attribute the compiler accepts only with another present (#746): `{ ENCRYPT: 'OWNER' }`. */
+    requires?: Record<string, string>;
+    /** Attributes the declaration must carry (#746): a FILE without DRIVER does not compile. */
+    required?: string[];
 }
 
 interface ControlData {
     windowControls: ControlDefinition[];
     reportControls: ControlDefinition[];
     containerStructures: ControlDefinition[];
+    fileStructures?: ControlDefinition[];
 }
 
 export class ControlService {
@@ -31,6 +36,7 @@ export class ControlService {
     private windowControls: Map<string, ControlDefinition> = new Map();
     private reportControls: Map<string, ControlDefinition> = new Map();
     private containerStructures: Map<string, ControlDefinition> = new Map();
+    private fileStructures: Map<string, ControlDefinition> = new Map();
 
     private constructor() {
         this.loadControls();
@@ -62,6 +68,11 @@ export class ControlService {
             // Load container structures (WINDOW, APPLICATION, REPORT)
             for (const ctrl of (controlData.containerStructures ?? [])) {
                 this.containerStructures.set(ctrl.name.toUpperCase(), ctrl);
+            }
+
+            // Load FILE declarations (FILE, KEY, INDEX, MEMO, BLOB) (#746)
+            for (const def of (controlData.fileStructures ?? [])) {
+                this.fileStructures.set(def.name.toUpperCase(), def);
             }
         } catch (error) {
             console.error('Failed to load control definitions:', error);
@@ -150,6 +161,16 @@ export class ControlService {
      */
     public getContainerStructure(name: string): ControlDefinition | undefined {
         return this.containerStructures.get(name.toUpperCase());
+    }
+
+    /**
+     * The definition a labelled declaration's attributes are checked against: a WINDOW,
+     * APPLICATION or REPORT header (#740), or a FILE and the KEY, INDEX, MEMO and BLOB
+     * declarations inside it (#746).
+     */
+    public getDeclarationStructure(name: string): ControlDefinition | undefined {
+        const upper = name.toUpperCase();
+        return this.containerStructures.get(upper) ?? this.fileStructures.get(upper);
     }
 
     /**

@@ -15,6 +15,9 @@
  * #740: the WINDOW, APPLICATION and REPORT header lines get the same treatment ("headers").
  * --headers-only reruns just those, keeping the controls of an existing results file.
  *
+ * #746: a FILE header and the KEY, INDEX, MEMO and BLOB declarations inside a FILE ("files"),
+ * plus the FILE_RULES combinations ("fileRules"). --files-only reruns just those.
+ *
  * Writes results-<version>.json and results-<version>.md next to this script.
  */
 const fs = require('fs');
@@ -85,6 +88,49 @@ const HEADERS = {
     APPLICATION: ["H$i APPLICATION('a')$A", '  END'],
     REPORT: ['H$i REPORT$A', 'Hb$i BREAK(Num)', 'Hd$i DETAIL,AT(,,8000,1000)', "    STRING('z'),USE(?Zz)", '  END', '  END', '  END'],
 };
+// #746: a FILE header and the declarations inside a FILE, each as it is declared on its own. A
+// FILE needs DRIVER, so the header case has it and DRIVER itself is settled by FILE_RULES.
+const FILE_CANDIDATES = ('DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE TYPE THREAD EXTERNAL DLL OEM ' +
+    'DUP NOCASE OPT PRIMARY BINARY STATIC PRIVATE PROTECTED AUTO DIM OVER').split(' ');
+const FILE_SAMPLES = {
+    DRIVER: ["('TOPSPEED')"], NAME: ["('x.tps')"], PRE: ['(P$i)'], OWNER: ["('pw')"], EXTERNAL: ["('x')"], DLL: ['(1)'],
+    DIM: ['(2)'], OVER: ['(Num)'],
+};
+const FILE_GENERIC = ['(1)', "('x')"];
+const FILES = {
+    FILE: ["H$i FILE,DRIVER('TOPSPEED')$A", 'R$i RECORD', 'Fld$i LONG', '  END', '  END'],
+    KEY: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'K$i KEY(P$i:Fld)$A', 'R$i RECORD', 'Fld LONG', '  END', '  END'],
+    INDEX: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'K$i INDEX(P$i:Fld)$A', 'R$i RECORD', 'Fld LONG', '  END', '  END'],
+    MEMO: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'M$i MEMO(100)$A', 'R$i RECORD', 'Fld LONG', '  END', '  END'],
+    BLOB: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'B$i BLOB$A', 'R$i RECORD', 'Fld LONG', '  END', '  END'],
+};
+// Combinations the help describes as required, dependent or contradictory. `structure` names the
+// FILES entry whose `$A` the text replaces; `header` replaces the whole FILE line's attributes.
+const FILE_RULES = [
+    { name: 'FILE with DRIVER (control)', structure: 'FILE', text: '' },
+    { name: 'FILE without DRIVER', header: '' },
+    { name: 'FILE with DRIVER twice', structure: 'FILE', text: ",DRIVER('TOPSPEED')" },
+    { name: 'FILE without RECORD', lines: ["H$i FILE,DRIVER('TOPSPEED')", '  END'] },
+    { name: 'ENCRYPT without OWNER', structure: 'FILE', text: ',ENCRYPT' },
+    { name: 'ENCRYPT with OWNER', structure: 'FILE', text: ",OWNER('pw'),ENCRYPT" },
+    { name: 'DLL without EXTERNAL', structure: 'FILE', text: ',DLL' },
+    { name: 'DLL with EXTERNAL', structure: 'FILE', text: ',EXTERNAL,DLL' },
+    { name: 'EXTERNAL without DLL', structure: 'FILE', text: ',EXTERNAL' },
+    { name: 'EXTERNAL with a member', structure: 'FILE', text: ",EXTERNAL('x')" },
+    { name: 'DLL with a flag', structure: 'FILE', text: ',EXTERNAL,DLL(1)' },
+    { name: 'OWNER with a variable', structure: 'FILE', text: ',OWNER(Notes)' },
+    { name: 'NAME with a variable', structure: 'FILE', text: ',NAME(Notes)' },
+    { name: 'DRIVER with a driver string', structure: 'FILE', lines: ["H$i FILE,DRIVER('TOPSPEED','/x=1')", 'R$i RECORD', 'Fld$i LONG', '  END', '  END'] },
+    { name: 'KEY on two components, one descending', lines: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'K$i KEY(P$i:Fld,-P$i:Two)', 'R$i RECORD', 'Fld LONG', 'Two LONG', '  END', '  END'] },
+    { name: 'KEY PRIMARY with DUP', structure: 'KEY', text: ',PRIMARY,DUP' },
+    { name: 'KEY PRIMARY with OPT', structure: 'KEY', text: ',PRIMARY,OPT' },
+    { name: 'KEY DUP with OPT', structure: 'KEY', text: ',DUP,OPT' },
+    { name: 'KEY without components', lines: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'K$i KEY()', 'R$i RECORD', 'Fld LONG', '  END', '  END'] },
+    { name: 'INDEX without components', lines: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'K$i INDEX()', 'R$i RECORD', 'Fld LONG', '  END', '  END'] },
+    { name: 'MEMO without a size', lines: ["H$i FILE,DRIVER('TOPSPEED'),PRE(P$i)", 'M$i MEMO', 'R$i RECORD', 'Fld LONG', '  END', '  END'] },
+    { name: 'NOSUCHATTR (must fail)', structure: 'FILE', text: ',NOSUCHATTR' },
+];
+
 // Controls that only exist inside another one: the lines that open and close it.
 const WRAP = {
     RADIO: [["OPTION('o')"], ['END']],
@@ -133,6 +179,9 @@ function buildBatch(control, where, cases) {
         close.forEach(l => body.push(indent + l));
         if (where === 'HEADER') {
             lines.push(...HEADERS[control].map(l => l.replace('$A', c.text).replace(/\$i/g, String(i))));
+        } else if (where === 'FILE') {
+            // #746: a case may bring its own lines (a FILE_RULES case); `$A` is empty there
+            lines.push(...(c.lines ?? FILES[control]).map(l => l.replace('$A', c.text ?? '').replace(/\$i/g, String(i))));
         } else if (where === 'WINDOW') {
             // ?Zz is there for VCR(?Zz) to name; it follows the case, so a MENUBAR stays first
             lines.push(`W${i} WINDOW('w'),AT(,,200,100)`, ...body, "    BUTTON('z'),USE(?Zz)", '  END');
@@ -161,7 +210,10 @@ function buildBatch(control, where, cases) {
     return ranges.map(range => [...new Set(errors.filter(e => e.line >= range.from && e.line <= range.to).map(e => e.message))]);
 }
 
-const isUnknown = (messages, attr) => messages.some(m => m.toUpperCase() === `UNKNOWN ATTRIBUTE: ${attr.toUpperCase()}`);
+// #746: a known attribute in the wrong place inside a FILE names the declaration, not the attribute:
+// `Invalid FILE attribute`, `Invalid KEY/INDEX attribute`, `Invalid data declaration attribute` (MEMO, BLOB).
+const isUnknown = (messages, attr) => messages.some(m => m.toUpperCase() === `UNKNOWN ATTRIBUTE: ${attr.toUpperCase()}` ||
+    /^INVALID (FILE|KEY\/INDEX|DATA DECLARATION) ATTRIBUTE$/.test(m.toUpperCase()));
 
 function probe(control, where) {
     // The control alone must build here, and an attribute that does not exist must fail, or
@@ -174,9 +226,11 @@ function probe(control, where) {
     // one builds. The compiler checks the argument count before it checks whether the control
     // takes the attribute at all, so `Wrong number of parameters` says nothing either way:
     // only `Unknown attribute`, in any round, rejects it.
-    const candidates = where === 'HEADER' ? CANDIDATES.concat(HEADER_EXTRA) : CANDIDATES;
+    const candidates = where === 'FILE' ? FILE_CANDIDATES : where === 'HEADER' ? CANDIDATES.concat(HEADER_EXTRA) : CANDIDATES;
+    const samples = where === 'FILE' ? FILE_SAMPLES : SAMPLES;
+    const generic = where === 'FILE' ? FILE_GENERIC : GENERIC;
     const state = Object.fromEntries(candidates.map(attr => [attr, {
-        tries: [''].concat(SAMPLES[attr] ?? [], GENERIC.filter(g => !(SAMPLES[attr] ?? []).includes(g))),
+        tries: [''].concat(samples[attr] ?? [], generic.filter(g => !(samples[attr] ?? []).includes(g))),
         bare: false, sample: null, rejected: false, errors: [],
     }]));
     for (let round = 0; ; round++) {
@@ -214,6 +268,7 @@ const CLASH_GROUPS = [
     ['HSCROLL', 'VSCROLL', 'HVSCROLL'], ['LEFT', 'RIGHT', 'CENTER', 'DECIMAL'], ['ABOVE', 'BELOW', 'LEFT', 'RIGHT'],
     ['UP', 'DOWN'], ['INS', 'OVR'], ['FIRST', 'LAST'], ['CAP', 'UPR'], ['READONLY', 'REQ'], ['HIDE', 'DISABLE'],
     ['SUM', 'CNT', 'AVE', 'MIN', 'MAX'], ['FLAT', 'TRN'], ['NOSHEET', 'WIZARD'], ['CHECK', 'SEPARATOR'],
+    ['PRIMARY', 'DUP', 'OPT'], ['STATIC', 'THREAD'],
 ];
 
 function probeClashes(control, where, accepted) {
@@ -242,9 +297,15 @@ const version = /Clarion(\d+)/i.exec(fs.readdirSync(path.join(CLARION, 'bin')).f
 // The install folder's own name only: a full path can name the machine's owner or a client.
 const outBase = path.join(__dirname, `results-${version}`);
 const headersOnly = process.argv.includes('--headers-only');
-const results = { clarion: path.basename(CLARION), version, controls: {}, headers: {} };
-if (headersOnly) results.controls = JSON.parse(fs.readFileSync(outBase + '.json', 'utf8')).controls;
-for (const control of headersOnly ? [] : Object.keys(CONTROLS)) {
+// #746: --files-only reruns just the FILE phase, keeping the controls and headers already there.
+const filesOnly = process.argv.includes('--files-only');
+const results = { clarion: path.basename(CLARION), version, controls: {}, headers: {}, files: {}, fileRules: [] };
+if (headersOnly || filesOnly) {
+    const previous = JSON.parse(fs.readFileSync(outBase + '.json', 'utf8'));
+    results.controls = previous.controls;
+    if (filesOnly) results.headers = previous.headers;
+}
+for (const control of headersOnly || filesOnly ? [] : Object.keys(CONTROLS)) {
     if (only && !only.includes(control)) continue;
     results.controls[control] = {};
     for (const where of ['WINDOW', 'REPORT']) {
@@ -259,13 +320,34 @@ for (const control of headersOnly ? [] : Object.keys(CONTROLS)) {
     }
 }
 
-for (const structure of only && !headersOnly ? [] : Object.keys(HEADERS)) {
+for (const structure of (only && !headersOnly) || filesOnly ? [] : Object.keys(HEADERS)) {
     const t = Date.now();
     const r = results.headers[structure] = probe(structure, 'HEADER');
     const summary = r.valid
         ? Object.entries(r.attributes).filter(([, v]) => v.kind !== 'rejected').map(([a, v]) => v.kind === 'flag' ? a : v.kind === 'value' ? `${a}()` : `${a}?`).join(' ')
         : `not valid: ${r.reason}`;
     console.log(`${structure} header (${Date.now() - t} ms): ${summary}`);
+}
+
+for (const structure of only && !filesOnly ? [] : Object.keys(FILES)) {
+    const t = Date.now();
+    const r = results.files[structure] = probe(structure, 'FILE');
+    const summary = r.valid
+        ? Object.entries(r.attributes).filter(([, v]) => v.kind !== 'rejected').map(([a, v]) => v.kind === 'flag' ? a : v.kind === 'value' ? `${a}()` : `${a}?`).join(' ')
+        : `not valid: ${r.reason}`;
+    console.log(`${structure} in a FILE (${Date.now() - t} ms): ${summary}`);
+}
+if (!only || filesOnly) {
+    const cases = FILE_RULES.map(rule => ({
+        attr: rule.name,
+        text: rule.text,
+        lines: rule.lines ?? (rule.header !== undefined ? [`H$i FILE${rule.header}`, ...FILES.FILE.slice(1)] : FILES[rule.structure]),
+    }));
+    const errors = buildBatch('FILE', 'FILE', cases);
+    if (errors[0].length) throw new Error(`FILE rules: the control case failed: ${errors[0].join(' | ')}`);
+    if (!isUnknown(errors[errors.length - 1], 'NOSUCHATTR')) throw new Error('FILE rules: the compiler stopped before the end of the batch');
+    results.fileRules = FILE_RULES.map((rule, i) => ({ name: rule.name, builds: errors[i].length === 0, errors: errors[i] }));
+    for (const r of results.fileRules) console.log(`rule ${r.name}: ${r.builds ? 'builds' : r.errors.join(' | ')}`);
 }
 
 fs.writeFileSync(outBase + '.json', JSON.stringify(results, null, 1) + '\n');
@@ -288,6 +370,15 @@ for (const [structure, r] of Object.entries(results.headers)) {
     for (const c of r.clashes) md.push(`  - clash ${c.pair.join(' + ')}: ${c.error}`);
     for (const [a, v] of Object.entries(r.attributes).filter(([, v]) => v.kind === 'unresolved')) md.push(`  - ${a}?: ${(v.errors ?? []).join(' | ')}`);
 }
+for (const [structure, r] of Object.entries(results.files ?? {})) {
+    if (!r.valid) { md.push(`- **${structure}** in a FILE: not valid (${r.reason})`); continue; }
+    const list = Object.entries(r.attributes).filter(([, v]) => v.kind !== 'rejected')
+        .map(([a, v]) => v.kind === 'flag' ? a : v.kind === 'value' ? `${a}()` : `${a}?`);
+    md.push(`- **${structure}** in a FILE: ${list.join(' ')}`);
+    for (const c of r.clashes) md.push(`  - clash ${c.pair.join(' + ')}: ${c.error}`);
+    for (const [a, v] of Object.entries(r.attributes).filter(([, v]) => v.kind === 'unresolved')) md.push(`  - ${a}?: ${(v.errors ?? []).join(' | ')}`);
+}
+for (const r of results.fileRules ?? []) md.push(`- rule: ${r.name}: ${r.builds ? 'builds' : r.errors.join(' | ')}`);
 fs.writeFileSync(outBase + '.md', md.join('\n') + '\n');
 fs.rmSync(work, { recursive: true, force: true });
 console.log(`wrote ${outBase}.json and .md`);

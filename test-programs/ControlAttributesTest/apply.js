@@ -84,6 +84,64 @@ for (const structure of Object.keys(results[0].headers ?? {})) {
     if (def.exclusive && def.exclusive.length === 0) delete def.exclusive;
 }
 
+// #746: the FILE declarations go into fileStructures. The probe tries every data attribute on
+// every declaration, and the compiler takes a few the help never describes there (AUTO on a KEY,
+// DUP and PRIMARY on an INDEX); a declaration offers only what its help page lists and the
+// compiler accepts. A version without a FILE phase (Clarion 11.1 so far) does not vote.
+const FILE_DOCUMENTED = {
+    FILE: 'DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE THREAD EXTERNAL DLL OEM',
+    KEY: 'DUP NOCASE OPT PRIMARY NAME',
+    INDEX: 'NOCASE OPT NAME',
+    MEMO: 'BINARY NAME',
+    BLOB: 'BINARY NAME',
+};
+const FILE_TEXT = {
+    FILE: { description: 'Declares a data file: its driver, its keys and memos, and its RECORD', syntax: 'label FILE,DRIVER(type) [,attributes...]' },
+    KEY: { description: 'Declares a key the file driver keeps up to date on its component fields', syntax: 'label KEY([-]component[,...]) [,attributes...]' },
+    INDEX: { description: 'Declares an index on its component fields, built at run time with BUILD', syntax: 'label INDEX([-]component[,...]) [,attributes...]' },
+    MEMO: { description: 'Declares a variable-length text field of up to 64K, stored outside the record', syntax: 'label MEMO(size) [,attributes...]' },
+    BLOB: { description: 'Declares a variable-length field that may be larger than 64K', syntax: 'label BLOB [,attributes...]' },
+};
+// Rules the compiler enforces, each settled by a pair of FILE_RULES cases: the first must fail and
+// the second build in every version, or the rule is not written.
+const FILE_REQUIRES = [
+    { attribute: 'ENCRYPT', needs: 'OWNER', fails: 'ENCRYPT without OWNER', builds: 'ENCRYPT with OWNER' },
+    { attribute: 'DLL', needs: 'EXTERNAL', fails: 'DLL without EXTERNAL', builds: 'DLL with EXTERNAL' },
+];
+const FILE_REQUIRED = [{ attribute: 'DRIVER', fails: 'FILE without DRIVER', builds: 'FILE with DRIVER (control)' }];
+
+const fileRuns = results.filter(r => r.files && Object.keys(r.files).length);
+const rule = name => fileRuns.map(r => (r.fileRules ?? []).find(x => x.name === name));
+const holds = (fails, builds) => fileRuns.length > 0 && rule(fails).every(x => x && !x.builds) && rule(builds).every(x => x && x.builds);
+if (fileRuns.length) {
+    data.fileStructures = data.fileStructures ?? [];
+    for (const name of Object.keys(FILE_DOCUMENTED)) {
+        const runs = fileRuns.map(r => r.files[name]);
+        if (runs.some(r => !r || !r.valid)) continue;
+        const documented = FILE_DOCUMENTED[name].split(' ');
+        const requires = Object.fromEntries(FILE_REQUIRES.filter(q => holds(q.fails, q.builds)).map(q => [q.attribute, q.needs]));
+        const list = [];
+        for (const attr of Object.keys(runs[0].attributes)) {
+            if (!documented.includes(attr)) continue;
+            const all = runs.map(r => r.attributes[attr]);
+            // an attribute that needs a partner fails alone, so the probe cannot settle it: its rule does
+            if (requires[attr] && name === 'FILE') { list.push(attr); continue; }
+            if (all.some(a => !a || a.kind === 'rejected' || a.kind === 'unresolved')) continue;
+            list.push(all.every(a => a.bare) && !VALUE_ONLY.has(attr) ? attr : `${attr}()`);
+        }
+        let def = data.fileStructures.find(c => c.name === name);
+        if (!def) {
+            def = { name, ...FILE_TEXT[name], commonAttributes: [] };
+            data.fileStructures.push(def);
+        }
+        def.attributes = list;
+        const own = Object.fromEntries(Object.entries(requires).filter(([a, b]) => list.includes(a) && list.some(x => x.replace('()', '') === b)));
+        if (Object.keys(own).length) def.requires = own; else delete def.requires;
+        const required = FILE_REQUIRED.filter(q => name === 'FILE' && holds(q.fails, q.builds)).map(q => q.attribute);
+        if (required.length) def.required = required; else delete def.required;
+    }
+}
+
 // The file's own layout: a key per line, arrays of names on one line, a `params` entry per
 // line, CRLF. New keys go after the existing ones.
 const inline = v => JSON.stringify(v).replace(/","/g, '", "').replace(/\],\[/g, '], [');

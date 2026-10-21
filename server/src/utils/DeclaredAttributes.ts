@@ -108,7 +108,10 @@ export function parseAccepted(def: ControlDefinition): { name: string; flag: boo
     });
 }
 
-/** Problems with a declaration's attributes: not accepted here, unknown, or mutually exclusive. */
+/**
+ * Problems with a declaration's attributes: not accepted here, unknown, mutually exclusive, or
+ * present without the attribute it requires (#746: `ENCRYPT attribute requires OWNER`).
+ */
 export function findAttributeProblems(def: ControlDefinition, declared: DeclaredAttribute[]): { attribute: DeclaredAttribute; message: string }[] {
     const accepted = new Set(parseAccepted(def).map(a => a.name));
     const problems: { attribute: DeclaredAttribute; message: string }[] = [];
@@ -130,6 +133,11 @@ export function findAttributeProblems(def: ControlDefinition, declared: Declared
                 message: `${present.map(p => p.name).join(' and ')} are mutually exclusive`
             });
         }
+    }
+    const setNames = new Set(declared.map(d => d.name));
+    for (const attribute of declared) {
+        const needs = def.requires?.[attribute.name];
+        if (needs && !setNames.has(needs)) problems.push({ attribute, message: `${attribute.name} requires ${needs}` });
     }
     return problems;
 }
@@ -157,12 +165,17 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     const known = AttributeService.getInstance();
     const notValid = declared.filter(d => !acceptedNames.has(d.name) && known.isAttribute(d.name)).map(d => d.name);
     const unknown = declared.filter(d => !acceptedNames.has(d.name) && !known.isAttribute(d.name)).map(d => d.name);
-    const exclusive = findAttributeProblems(def, declared).filter(p => / are mutually exclusive$/.test(p.message));
+    const setNames = new Set(declared.map(d => d.name));
+    const combined = findAttributeProblems(def, declared).filter(p => / are mutually exclusive$| requires \w+$/.test(p.message));
 
     const problems: string[] = [];
     if (notValid.length > 0) problems.push(`⚠ ${notValid.join(', ')}: not valid on ${def.name}`);
     if (unknown.length > 0) problems.push(`⚠ ${unknown.join(', ')}: not a known attribute`);
-    for (const problem of exclusive) problems.push(`⚠ ${problem.message}`);
+    for (const problem of combined) problems.push(`⚠ ${problem.message}`);
+    // a FILE without DRIVER does not compile (#746); there is no attribute to hang it on
+    for (const name of def.required ?? []) {
+        if (!setNames.has(name)) problems.push(`⚠ ${def.name} requires ${name}`);
+    }
 
     const blocks: string[] = [];
     // two trailing spaces: a markdown line break, so each block stays one paragraph
@@ -171,17 +184,17 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     const flags = new Set(accepted.filter(a => a.flag).map(a => a.name));
     const valid = declared.filter(d => acceptedNames.has(d.name));
     if (valid.length > 0) {
-        const names = valid.map(d => !links
+        // a required attribute (a FILE's DRIVER) is listed, never offered for removal
+        const names = valid.map(d => !links || def.required?.includes(d.name)
             ? '`' + d.name + '`'
-            : editLink(d.name, flags.has(d.name) ? flagTitle('Remove', d.name) : removeTitle(d, links), removeEdits(d, links)));
+            : removeLink(d, def, declared, flags, links));
         blocks.push(`**Attributes:** ${names.join(' ')}`);
     }
-    const setNames = new Set(declared.map(d => d.name));
     const available = accepted.filter(a => a.flag && !setNames.has(a.name)).map(a => a.name).sort();
     if (available.length > 0) {
         const items = available.map(name => ({
             visible: name,
-            text: links ? editLink(name, flagTitle('Add', name), addEdits(name, def, declared, links)) : name,
+            text: links ? addLink(name, def, declared, links) : name,
         }));
         // linked names are drawn as separate chips by a client: no separators needed
         blocks.push(wrapList('**Available:** ', items, AVAILABLE_LINE_WIDTH, links ? '' : ' ·'));
@@ -286,6 +299,39 @@ function linkEdit(links: EditLinkContext, line: number, col: number, endLine: nu
         t: text,
         o: links.lines.slice(line, endLine + 1),
     };
+}
+
+/**
+ * The remove link of a set attribute. Removing one that another set attribute requires removes that
+ * one too (#746: OWNER takes ENCRYPT with it), since the declaration would not compile without it.
+ */
+function removeLink(d: DeclaredAttribute, def: ControlDefinition, declared: DeclaredAttribute[], flags: Set<string>, links: EditLinkContext): string {
+    const dependants = declared.filter(x => def.requires?.[x.name] === d.name);
+    const title = (flags.has(d.name) ? flagTitle('Remove', d.name) : removeTitle(d, links))
+        + (dependants.length ? `, and ${dependants.map(x => x.name).join(' and ')}, which requires it` : '');
+    return editLink(d.name, title, [d, ...dependants].flatMap(x => removeEdits(x, links)));
+}
+
+/**
+ * The add link of an available flag. A flag that requires an attribute the declaration does not
+ * set brings it along (#746): `,EXTERNAL,DLL`, or `,OWNER('password'),ENCRYPT` as a snippet with
+ * the partner's value to type in.
+ */
+function addLink(name: string, def: ControlDefinition, declared: DeclaredAttribute[], links: EditLinkContext): string {
+    const needs = def.requires?.[name];
+    if (needs && !declared.some(d => d.name === needs)) {
+        const line = links.logical.endLine;
+        const end = codeEnd(links.lines[line] ?? '');
+        const partnerIsFlag = parseAccepted(def).some(a => a.name === needs && a.flag);
+        if (partnerIsFlag) {
+            return editLink(name, `${flagTitle('Add', name)}, with ${needs}, which it requires`,
+                [linkEdit(links, line, end, line, end, `,${needs},${name}`)]);
+        }
+        const snippet = attributeSnippet(needs);
+        return editLink(name, `${flagTitle('Add', name)}, with ${plainSnippet(snippet)}, which it requires`,
+            [{ ...linkEdit(links, line, end, line, end, `,${snippet},${name}`), s: true }]);
+    }
+    return editLink(name, flagTitle('Add', name), addEdits(name, def, declared, links));
 }
 
 /**

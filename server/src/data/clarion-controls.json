@@ -332,5 +332,44 @@
       "commonAttributes": ["AT", "FONT", "PRE", "LANDSCAPE", "PREVIEW", "PAPER", "COLOR", "THOUS", "MM", "POINTS"],
       "attributes": ["AT()", "COLOR()", "FONT()", "LANDSCAPE", "LAYOUT()", "MM", "PAPER()", "POINTS", "PREVIEW()", "THOUS", "PRE()"]
     }
+  ],
+  "fileStructures": [
+    {
+      "name": "FILE",
+      "description": "Declares a data file: its driver, its keys and memos, and its RECORD",
+      "syntax": "label FILE,DRIVER(type) [,attributes...]",
+      "commonAttributes": [],
+      "attributes": ["DRIVER()", "NAME()", "PRE()", "CREATE", "RECLAIM", "OWNER()", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "OEM"],
+      "requires": {"ENCRYPT":"OWNER", "DLL":"EXTERNAL"},
+      "required": ["DRIVER"]
+    },
+    {
+      "name": "KEY",
+      "description": "Declares a key the file driver keeps up to date on its component fields",
+      "syntax": "label KEY([-]component[,...]) [,attributes...]",
+      "commonAttributes": [],
+      "attributes": ["NAME()", "DUP", "NOCASE", "OPT", "PRIMARY"]
+    },
+    {
+      "name": "INDEX",
+      "description": "Declares an index on its component fields, built at run time with BUILD",
+      "syntax": "label INDEX([-]component[,...]) [,attributes...]",
+      "commonAttributes": [],
+      "attributes": ["NAME()", "NOCASE", "OPT"]
+    },
+    {
+      "name": "MEMO",
+      "description": "Declares a variable-length text field of up to 64K, stored outside the record",
+      "syntax": "label MEMO(size) [,attributes...]",
+      "commonAttributes": [],
+      "attributes": ["NAME()", "BINARY"]
+    },
+    {
+      "name": "BLOB",
+      "description": "Declares a variable-length field that may be larger than 64K",
+      "syntax": "label BLOB [,attributes...]",
+      "commonAttributes": [],
+      "attributes": ["NAME()", "BINARY"]
+    }
   ]
 }

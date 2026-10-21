@@ -131,7 +131,8 @@ export class CompletionProvider {
 
     /**
      * The attributes that can follow a comma on a control declaration
-     * (`TEXT,AT(...),|`) or on a WINDOW, APPLICATION or REPORT header line: the
+     * (`TEXT,AT(...),|`), on a WINDOW, APPLICATION or REPORT header line, or on a FILE,
+     * KEY, INDEX, MEMO or BLOB declaration (#746): the
      * compiler-checked list for that control in that structure (#737), less the
      * ones the declaration already sets. `|` continuation lines are part of the
      * declaration. Inside brackets (`AT(`, `USE(`) the position is an argument,
@@ -168,7 +169,7 @@ export class CompletionProvider {
         const word = (/^\w+/.exec(first.value)?.[0] ?? '').toUpperCase();
         const controls = ControlService.getInstance();
         let def: ControlDefinition | undefined;
-        const header = controls.getContainerStructure(word);
+        const header = controls.getDeclarationStructure(word);
         if (header && findDeclarationKeyword(logical, first.line, first.start)) {
             def = header.attributes ? header : undefined;
         } else if (findControlKeyword(logical, first.line, first.start)) {

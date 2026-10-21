@@ -191,12 +191,13 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
  * WINDOW/APPLICATION header lines have no control context, so the loop above never
  * checks them. Check them against the structure's `attributes` list instead (a
  * structure without one is not checked): the Clarion 11.1 compiler rejects
- * `MyWindow WINDOW('T'),HIDE` with "unknown attribute HIDE".
+ * `MyWindow WINDOW('T'),HIDE` with "unknown attribute HIDE". FILE, KEY, INDEX, MEMO and
+ * BLOB declarations are checked the same way (#746), including ENCRYPT without OWNER.
  */
 function validateHeaderAttributes(tokens: Token[], structure: DocumentStructure): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     for (const token of tokens) {
-        const def = controlService.getContainerStructure(token.value);
+        const def = controlService.getDeclarationStructure(/^\w+/.exec(token.value)?.[0] ?? token.value);
         if (!def?.attributes) continue;
         const logical = structure.getLogicalLine(token.line);
         if (!logical || !findDeclarationKeyword(logical, token.line, token.start)) continue;

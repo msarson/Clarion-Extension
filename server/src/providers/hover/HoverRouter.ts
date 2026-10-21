@@ -35,6 +35,8 @@ const perfLogger = LoggerManager.getLogger("HoverRouter.Perf", "perf");
 
 /** Executable-code blocks whose hover shows the END that closes them. */
 const CODE_BLOCK_OPENERS = new Set(['IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN', 'ACCEPT']);
+/** The FILE declarations whose keyword gets an attribute card (#746). */
+const FILE_DECLARATIONS = new Set(['FILE', 'KEY', 'INDEX', 'MEMO', 'BLOB']);
 
 /**
  * Routes hover requests to appropriate resolvers based on context
@@ -211,6 +213,11 @@ export class HoverRouter {
         if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
             const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure, document);
             if (containerHover) return containerHover;
+        }
+
+        if (FILE_DECLARATIONS.has(upperWord)) {
+            const fileHover = this.handleFileDeclarationKeyword(position, documentStructure, document);
+            if (fileHover) return fileHover;
         }
 
         if (upperWord === 'VIEW') {
@@ -906,8 +913,39 @@ export class HoverRouter {
     }
 
     /**
-     * An attribute on a WINDOW/APPLICATION header (`MyWindow WINDOW('T'),AT(...),HIDE`):
-     * its attribute card, plus a warning when the structure does not accept it.
+     * A FILE declaration hovered on its keyword (#746): `Customer FILE,DRIVER(...)`, or the KEY,
+     * INDEX, MEMO or BLOB keyword of a declaration inside it. The card lists that declaration's
+     * attributes from its compiler-checked list, as a control card does, links included. The
+     * label keeps its own card (the file summary), and the same word anywhere else is not a
+     * declaration.
+     */
+    private handleFileDeclarationKeyword(
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined },
+        document: { uri: string; getText(): string }
+    ): Hover | null {
+        const logical = documentStructure.getLogicalLine?.(position.line);
+        if (!logical) return null;
+        const hovered = logical.tokens.find(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        const declaration = hovered && findDeclarationKeyword(logical, hovered.line, hovered.start);
+        if (!declaration) return null;
+        const keyword = (/^\w+/.exec(declaration.value)?.[0] ?? '').toUpperCase();
+        const def = FILE_DECLARATIONS.has(keyword) ? this.controlService.getDeclarationStructure(keyword) : undefined;
+        if (!def?.attributes) return null;
+        const section = formatDeclaredAttributes(def, readDeclaredAttributes(logical, declaration), this.editLinkContext(document, position, logical));
+        const label = logical.tokens[0].value;
+        const lines = [`**${label} ${keyword}** — ${def.description}`];
+        if (section) lines.push('', section);
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+    }
+
+    /**
+     * An attribute on a WINDOW/APPLICATION header (`MyWindow WINDOW('T'),AT(...),HIDE`), or on a
+     * FILE, KEY, INDEX, MEMO or BLOB declaration (#746): its attribute card, plus a warning when
+     * the declaration does not accept it.
      */
     private handleHeaderAttribute(
         word: string,
@@ -919,7 +957,7 @@ export class HoverRouter {
         const first = logical.tokens.find(t => t.type !== TokenType.Label);
         const keyword = first && findDeclarationKeyword(logical, first.line, first.start);
         if (!keyword) return null;
-        const def = this.controlService.getContainerStructure(keyword.value);
+        const def = this.controlService.getDeclarationStructure(/^\w+/.exec(keyword.value)?.[0] ?? keyword.value);
         if (!def?.attributes) return null;
         const declared = readDeclaredAttributes(logical, keyword);
         const hit = declared.find(d =>

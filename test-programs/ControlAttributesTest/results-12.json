@@ -23861,5 +23861,585 @@
    },
    "clashes": []
   }
- }
+ },
+ "files": {
+  "FILE": {
+   "valid": true,
+   "attributes": {
+    "DRIVER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('TOPSPEED')"
+    },
+    "NAME": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.tps')"
+    },
+    "PRE": {
+     "kind": "value",
+     "bare": false,
+     "sample": "(P$i)"
+    },
+    "CREATE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "RECLAIM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "OWNER": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('pw')"
+    },
+    "ENCRYPT": {
+     "kind": "unresolved",
+     "errors": [
+      "ENCRYPT: ENCRYPT attribute requires OWNER",
+      "ENCRYPT(1): ENCRYPT attribute requires OWNER",
+      "ENCRYPT('x'): ENCRYPT attribute requires OWNER"
+     ]
+    },
+    "BINDABLE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "TYPE": {
+     "kind": "rejected"
+    },
+    "THREAD": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "EXTERNAL": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "('x')"
+    },
+    "DLL": {
+     "kind": "unresolved",
+     "errors": [
+      "DLL: DLL attribute requires EXTERNAL attribute",
+      "DLL(1): DLL attribute requires EXTERNAL attribute",
+      "DLL('x'): Expression must be constant"
+     ]
+    },
+    "OEM": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "DUP": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "OPT": {
+     "kind": "rejected"
+    },
+    "PRIMARY": {
+     "kind": "rejected"
+    },
+    "BINARY": {
+     "kind": "rejected"
+    },
+    "STATIC": {
+     "kind": "rejected"
+    },
+    "PRIVATE": {
+     "kind": "rejected"
+    },
+    "PROTECTED": {
+     "kind": "rejected"
+    },
+    "AUTO": {
+     "kind": "rejected"
+    },
+    "DIM": {
+     "kind": "rejected"
+    },
+    "OVER": {
+     "kind": "rejected"
+    }
+   },
+   "clashes": []
+  },
+  "KEY": {
+   "valid": true,
+   "attributes": {
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.tps')"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "RECLAIM": {
+     "kind": "rejected"
+    },
+    "OWNER": {
+     "kind": "rejected"
+    },
+    "ENCRYPT": {
+     "kind": "rejected"
+    },
+    "BINDABLE": {
+     "kind": "rejected"
+    },
+    "TYPE": {
+     "kind": "rejected"
+    },
+    "THREAD": {
+     "kind": "rejected"
+    },
+    "EXTERNAL": {
+     "kind": "rejected"
+    },
+    "DLL": {
+     "kind": "rejected"
+    },
+    "OEM": {
+     "kind": "rejected"
+    },
+    "DUP": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "NOCASE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "OPT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "PRIMARY": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "BINARY": {
+     "kind": "rejected"
+    },
+    "STATIC": {
+     "kind": "rejected"
+    },
+    "PRIVATE": {
+     "kind": "rejected"
+    },
+    "PROTECTED": {
+     "kind": "rejected"
+    },
+    "AUTO": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "DIM": {
+     "kind": "rejected"
+    },
+    "OVER": {
+     "kind": "rejected"
+    }
+   },
+   "clashes": []
+  },
+  "INDEX": {
+   "valid": true,
+   "attributes": {
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.tps')"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "RECLAIM": {
+     "kind": "rejected"
+    },
+    "OWNER": {
+     "kind": "rejected"
+    },
+    "ENCRYPT": {
+     "kind": "rejected"
+    },
+    "BINDABLE": {
+     "kind": "rejected"
+    },
+    "TYPE": {
+     "kind": "rejected"
+    },
+    "THREAD": {
+     "kind": "rejected"
+    },
+    "EXTERNAL": {
+     "kind": "rejected"
+    },
+    "DLL": {
+     "kind": "rejected"
+    },
+    "OEM": {
+     "kind": "rejected"
+    },
+    "DUP": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "NOCASE": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "OPT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "PRIMARY": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "BINARY": {
+     "kind": "rejected"
+    },
+    "STATIC": {
+     "kind": "rejected"
+    },
+    "PRIVATE": {
+     "kind": "rejected"
+    },
+    "PROTECTED": {
+     "kind": "rejected"
+    },
+    "AUTO": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "DIM": {
+     "kind": "rejected"
+    },
+    "OVER": {
+     "kind": "rejected"
+    }
+   },
+   "clashes": []
+  },
+  "MEMO": {
+   "valid": true,
+   "attributes": {
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.tps')"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "RECLAIM": {
+     "kind": "rejected"
+    },
+    "OWNER": {
+     "kind": "rejected"
+    },
+    "ENCRYPT": {
+     "kind": "rejected"
+    },
+    "BINDABLE": {
+     "kind": "rejected"
+    },
+    "TYPE": {
+     "kind": "rejected"
+    },
+    "THREAD": {
+     "kind": "rejected"
+    },
+    "EXTERNAL": {
+     "kind": "rejected"
+    },
+    "DLL": {
+     "kind": "rejected"
+    },
+    "OEM": {
+     "kind": "rejected"
+    },
+    "DUP": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "OPT": {
+     "kind": "rejected"
+    },
+    "PRIMARY": {
+     "kind": "rejected"
+    },
+    "BINARY": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "STATIC": {
+     "kind": "rejected"
+    },
+    "PRIVATE": {
+     "kind": "rejected"
+    },
+    "PROTECTED": {
+     "kind": "rejected"
+    },
+    "AUTO": {
+     "kind": "rejected"
+    },
+    "DIM": {
+     "kind": "rejected"
+    },
+    "OVER": {
+     "kind": "rejected"
+    }
+   },
+   "clashes": []
+  },
+  "BLOB": {
+   "valid": true,
+   "attributes": {
+    "DRIVER": {
+     "kind": "rejected"
+    },
+    "NAME": {
+     "kind": "value",
+     "bare": false,
+     "sample": "('x.tps')"
+    },
+    "PRE": {
+     "kind": "rejected"
+    },
+    "CREATE": {
+     "kind": "rejected"
+    },
+    "RECLAIM": {
+     "kind": "rejected"
+    },
+    "OWNER": {
+     "kind": "rejected"
+    },
+    "ENCRYPT": {
+     "kind": "rejected"
+    },
+    "BINDABLE": {
+     "kind": "rejected"
+    },
+    "TYPE": {
+     "kind": "rejected"
+    },
+    "THREAD": {
+     "kind": "rejected"
+    },
+    "EXTERNAL": {
+     "kind": "rejected"
+    },
+    "DLL": {
+     "kind": "rejected"
+    },
+    "OEM": {
+     "kind": "rejected"
+    },
+    "DUP": {
+     "kind": "rejected"
+    },
+    "NOCASE": {
+     "kind": "rejected"
+    },
+    "OPT": {
+     "kind": "rejected"
+    },
+    "PRIMARY": {
+     "kind": "rejected"
+    },
+    "BINARY": {
+     "kind": "flag",
+     "bare": true,
+     "sample": "(1)"
+    },
+    "STATIC": {
+     "kind": "rejected"
+    },
+    "PRIVATE": {
+     "kind": "rejected"
+    },
+    "PROTECTED": {
+     "kind": "rejected"
+    },
+    "AUTO": {
+     "kind": "rejected"
+    },
+    "DIM": {
+     "kind": "rejected"
+    },
+    "OVER": {
+     "kind": "rejected"
+    }
+   },
+   "clashes": []
+  }
+ },
+ "fileRules": [
+  {
+   "name": "FILE with DRIVER (control)",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "FILE without DRIVER",
+   "builds": false,
+   "errors": [
+    "FILE must have DRIVER attribute"
+   ]
+  },
+  {
+   "name": "FILE with DRIVER twice",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "FILE without RECORD",
+   "builds": false,
+   "errors": [
+    "Expected: <ID> <LINEBREAK> ; INCLUDE OMIT SECTION COMPILE PRAGMA RECORD"
+   ]
+  },
+  {
+   "name": "ENCRYPT without OWNER",
+   "builds": false,
+   "errors": [
+    "ENCRYPT attribute requires OWNER"
+   ]
+  },
+  {
+   "name": "ENCRYPT with OWNER",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "DLL without EXTERNAL",
+   "builds": false,
+   "errors": [
+    "DLL attribute requires EXTERNAL attribute"
+   ]
+  },
+  {
+   "name": "DLL with EXTERNAL",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "EXTERNAL without DLL",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "EXTERNAL with a member",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "DLL with a flag",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "OWNER with a variable",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "NAME with a variable",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "DRIVER with a driver string",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "KEY on two components, one descending",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "KEY PRIMARY with DUP",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "KEY PRIMARY with OPT",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "KEY DUP with OPT",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "KEY without components",
+   "builds": false,
+   "errors": [
+    "KEY must have components"
+   ]
+  },
+  {
+   "name": "INDEX without components",
+   "builds": true,
+   "errors": []
+  },
+  {
+   "name": "MEMO without a size",
+   "builds": false,
+   "errors": [
+    "Wrong number of parameters"
+   ]
+  },
+  {
+   "name": "NOSUCHATTR (must fail)",
+   "builds": false,
+   "errors": [
+    "Invalid FILE attribute"
+   ]
+  }
+ ]
 }
