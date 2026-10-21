@@ -85,6 +85,10 @@ export class CompletionProvider {
             const doCompletions = this.handleDoRoutineCompletion(lineText, document, position);
             if (doCompletions) return doCompletions;
 
+            // After a label inside a FILE, before its RECORD, only a FILE member is legal (#749)
+            const fileMemberCompletions = this.handleFileMemberCompletion(lineText, document, position);
+            if (fileMemberCompletions) return fileMemberCompletions;
+
             // Member access is not abandoned once the line stops ending in '.'.
             // At a letter-ending position like `SELF.Th` / `oKanban.Ini` the cursor is
             // still inside a member reference — resolve the chain before the last dot and
@@ -197,6 +201,52 @@ export class CompletionProvider {
                 }
                 return item;
             });
+    }
+
+    // -------------------------------------------------------------------------
+    // FILE member completion (#749)
+    // -------------------------------------------------------------------------
+
+    /**
+     * After a label on a line between a FILE's header and its RECORD (`MyKey K`), the
+     * declarations a FILE holds there: KEY, INDEX, MEMO, BLOB and RECORD. Compiled on Clarion
+     * 10 and 12, nothing else is legal there (a field is `Illegal data type`), and none of them
+     * after the RECORD or inside it. KEY, INDEX and MEMO insert their brackets with the cursor
+     * inside (#748). Null anywhere else, so the word list answers as before.
+     */
+    private handleFileMemberCompletion(
+        lineBeforeCursor: string,
+        document: TextDocument,
+        position: Position
+    ): CompletionItem[] | null {
+        const typed = /^[A-Za-z_][\w:]*\s+([A-Za-z]*)$/.exec(lineBeforeCursor);
+        if (!typed) return null;
+        const tokens = this.tokenCache.getTokens(document);
+        const isStructure = (t: Token, name: string) =>
+            t.type === TokenType.Structure && t.value.toUpperCase() === name && t.finishesAt !== undefined;
+        const file = tokens.find(t => isStructure(t, 'FILE') && t.line < position.line && position.line < t.finishesAt!);
+        if (!file) return null;
+        const record = tokens.find(t => isStructure(t, 'RECORD') && t.line > file.line && t.line < file.finishesAt!);
+        if (record && position.line > record.line) return null;
+
+        const partial = typed[1].toUpperCase();
+        const controls = ControlService.getInstance();
+        const items: CompletionItem[] = [];
+        for (const name of ['KEY', 'INDEX', 'MEMO', 'BLOB']) {
+            const def = controls.getDeclarationStructure(name);
+            if (!def || !name.startsWith(partial)) continue;
+            const item: CompletionItem = { label: name, kind: CompletionItemKind.Keyword, detail: def.syntax, documentation: def.description };
+            if (def.params?.length) {
+                const first = def.params[0];
+                item.insertText = `${name}(\${1${first.optional ? '' : ':' + first.name}})`;
+                item.insertTextFormat = InsertTextFormat.Snippet;
+            }
+            items.push(item);
+        }
+        if ('RECORD'.startsWith(partial)) {
+            items.push({ label: 'RECORD', kind: CompletionItemKind.Keyword, detail: 'label RECORD [,PRE(prefix)] [,NAME(name)]', documentation: "Declares the FILE's record structure: its fields, ended by END" });
+        }
+        return items;
     }
 
     // -------------------------------------------------------------------------

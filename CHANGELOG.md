@@ -39,6 +39,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Typing END and pressing Enter no longer turns it into ENDPAGE.** Completion now offers END, BY, TO, GOTO, ROUTINE, PROGRAM and PROCEDURE as keywords, so the word as typed comes first instead of a longer one such as ENDPAGE, BYTES or TOOLBAR. Hover no longer describes BNOT, an operator Clarion does not have. [#747](https://github.com/msarson/Clarion-Extension/issues/747)
 - **Signature help inside a KEY, INDEX or MEMO declaration shows that declaration.** Typing `MyKey KEY(` in a FILE showed the window control's `KEY(keycode)` attribute; it now shows the key's components, an INDEX its optional components, and a MEMO its required length. The KEY and ALRT attributes on a control describe their keycode instead of a placeholder. [#748](https://github.com/msarson/Clarion-Extension/issues/748)
+- **Completion after a label inside a FILE offers only what a FILE holds there.** Before the RECORD it offers KEY, INDEX, MEMO, BLOB and RECORD, instead of the window control attribute KEY and built-ins such as KEYBOARD; KEY, INDEX and MEMO come with their brackets. [#749](https://github.com/msarson/Clarion-Extension/issues/749)
 
 ---
 
