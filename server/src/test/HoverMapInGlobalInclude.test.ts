@@ -136,6 +136,35 @@ suite('Hover — MAP inside a globally included file', () => {
         assert.strictEqual(hit!.declLine, 4, 'lands on the Log_SetChannel prototype');
     });
 
+    test('a globally included file with a MAP is not tokenized when its text does not name the procedure', async () => {
+        writeFixture('otherapigi.inc', [
+            '  MAP',
+            "    MODULE('OtherLib')",
+            '      Other_Call(), LONG, PROC',
+            '    END',
+            '  END',
+        ]);
+        writeFixture('mainothergi.clw', [
+            '  PROGRAM',
+            "  INCLUDE('otherapigi.inc'),ONCE",
+            "  INCLUDE('logapigi.inc'),ONCE",
+            '  MAP',
+            '  END',
+            '  CODE',
+        ]);
+        const doc = openDoc('mainothergi.clw');
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const resolver = new MapProcedureResolver();
+        const loaded: string[] = [];
+        const original = (resolver as any).loadDocForWalk.bind(resolver);
+        (resolver as any).loadDocForWalk = async (p: string) => { loaded.push(path.basename(p).toLowerCase()); return original(p); };
+
+        const hit = await resolver.findDeclarationInMapIncludes('Log_Open', doc, tokens);
+
+        assert.ok(hit && hit.doc.uri.toLowerCase().endsWith('logapigi.inc'), 'the file that names it answers');
+        assert.ok(!loaded.includes('otherapigi.inc'), `otherapigi.inc must not be loaded, loaded: ${loaded.join(', ')}`);
+    });
+
     test('a MODULE in a globally included file without a MAP is still not a prototype source', async () => {
         writeFixture('nomapgi.inc', [
             "  MODULE('LogLib')",

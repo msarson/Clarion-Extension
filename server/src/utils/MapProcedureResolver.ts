@@ -62,6 +62,16 @@ interface MapDeclWalkHit { docUri: string; declLine: number; }
 const mapDeclWalkCache = new Map<string, MapDeclWalkHit | null>();
 let mapDeclWalkEpoch = -1;
 
+/**
+ * Per-file text facts for an include outside a MAP (outsideMapTextFacts), same epoch
+ * invalidation. The walk cache above is per procedure name, so without this every new
+ * name (the unresolved-call diagnostic asks for each one) re-read the text of every
+ * include outside a MAP. `lowerText` is kept only for a file that has a MAP.
+ */
+interface OutsideMapTextFacts { hasMap: boolean; hasInclude: boolean; lowerText?: string; }
+const outsideMapTextCache = new Map<string, OutsideMapTextFacts>();
+let outsideMapTextEpoch = -1;
+
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
     private crossFileCache?: any; // CrossFileCache type (optional to avoid circular dependency)
@@ -250,13 +260,33 @@ export class MapProcedureResolver {
     }
 
     /**
-     * Cheap pre-check before tokenizing an include that sits outside a MAP: does its text
-     * have a MAP statement at all? MAP is a keyword, never a label, so it is indented.
+     * Cheap pre-check before tokenizing an include that sits outside a MAP. Only a file
+     * with a MAP statement can declare anything (MAP is a keyword, never a label, so it
+     * is indented), and it can answer for `nameLower` only if its text names it or it
+     * has INCLUDEs of its own for the walk to follow. A large API header with a MAP is
+     * therefore tokenized only when a call to one of its procedures is looked up.
      */
-    private fileTextHasMap(filePath: string): boolean {
-        const text = CrossFileResolver.loadExternalFileContent(
-            TokenCache.getInstance(), pathToCanonicalUri(filePath), filePath);
-        return text !== undefined && /^[ \t]+MAP\b/im.test(text);
+    private outsideMapIncludeMayDeclare(filePath: string, nameLower: string): boolean {
+        const epoch = getCrossFileEpoch();
+        if (epoch !== outsideMapTextEpoch) {
+            outsideMapTextCache.clear();
+            outsideMapTextEpoch = epoch;
+        }
+        const key = filePath.toLowerCase();
+        let facts = outsideMapTextCache.get(key);
+        if (!facts) {
+            const text = CrossFileResolver.loadExternalFileContent(
+                TokenCache.getInstance(), pathToCanonicalUri(filePath), filePath);
+            const hasMap = text !== undefined && /^[ \t]+MAP\b/im.test(text);
+            facts = {
+                hasMap,
+                hasInclude: hasMap && /INCLUDE\s*\(/i.test(text!),
+                lowerText: hasMap ? text!.toLowerCase() : undefined
+            };
+            outsideMapTextCache.set(key, facts);
+        }
+        if (!facts.hasMap) return false;
+        return facts.hasInclude || facts.lowerText!.includes(nameLower);
     }
 
     /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
@@ -308,7 +338,8 @@ export class MapProcedureResolver {
         // The one exception: an include OUTSIDE a MAP whose file holds its own MAP
         // (`MAP / MODULE('SomeLib') / … / END / END` — how a DLL usually ships its
         // prototypes, included in the global data section). Such a file is only loaded
-        // when a cheap text check finds a MAP in it, so the guard above keeps its cost.
+        // when a cheap text check finds a MAP in it and the name (or INCLUDEs to follow),
+        // so the guard above keeps its cost.
         let mapRanges: Array<{ start: number; end: number }> | null = null;
         if (mapScopedRoot) {
             mapRanges = this.mapRangesOf(from.tokens);
@@ -350,7 +381,7 @@ export class MapProcedureResolver {
             }
             const incPath = this.resolveIncludeTarget(match[1], fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
-            if (outsideMap && !this.fileTextHasMap(incPath)) continue;
+            if (outsideMap && !this.outsideMapIncludeMayDeclare(incPath, nameLower)) continue;
 
             await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);
