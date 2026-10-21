@@ -97,9 +97,26 @@ const FILE_DOCUMENTED = {
 };
 const FILE_TEXT = {
     FILE: { description: 'Declares a data file: its driver, its keys and memos, and its RECORD', syntax: 'label FILE,DRIVER(type) [,attributes...]' },
-    KEY: { description: 'Declares a key the file driver keeps up to date on its component fields', syntax: 'label KEY([-]component[,...]) [,attributes...]' },
-    INDEX: { description: 'Declares an index on its component fields, built at run time with BUILD', syntax: 'label INDEX([-]component[,...]) [,attributes...]' },
-    MEMO: { description: 'Declares a variable-length text field of up to 64K, stored outside the record', syntax: 'label MEMO(size) [,attributes...]' },
+    // #748: the brackets' own parameters, for signature help. The compiler needs a KEY's components
+    // (`KEY must have components`) and a MEMO's length; `INDEX()` builds, its components given to BUILD.
+    KEY: {
+        description: 'Declares a key the file driver keeps up to date on its component fields', syntax: 'label KEY([-]component[,...]) [,attributes...]',
+        params: [
+            { name: 'component', description: 'A field of the RECORD; a leading - sorts on it descending', optional: false },
+            { name: 'component...', description: 'Further fields, most significant first', optional: true },
+        ],
+    },
+    INDEX: {
+        description: 'Declares an index on its component fields, built at run time with BUILD', syntax: 'label INDEX([-]component[,...]) [,attributes...]',
+        params: [
+            { name: 'component', description: 'A field of the RECORD; a leading - sorts on it descending. With none, BUILD names them', optional: true },
+            { name: 'component...', description: 'Further fields, most significant first', optional: true },
+        ],
+    },
+    MEMO: {
+        description: 'Declares a variable-length text field of up to 64K, stored outside the record', syntax: 'label MEMO(length) [,attributes...]',
+        params: [{ name: 'length', description: 'The maximum length in bytes, up to 65,536', optional: false }],
+    },
     BLOB: { description: 'Declares a variable-length field that may be larger than 64K', syntax: 'label BLOB [,attributes...]' },
 };
 // Rules the compiler enforces, each settled by a pair of FILE_RULES cases: the first must fail and
@@ -129,16 +146,16 @@ if (fileRuns.length) {
             if (all.some(a => !a || a.kind === 'rejected' || a.kind === 'unresolved')) continue;
             list.push(all.every(a => a.bare) && !VALUE_ONLY.has(attr) ? attr : `${attr}()`);
         }
-        let def = data.fileStructures.find(c => c.name === name);
-        if (!def) {
-            def = { name, ...FILE_TEXT[name], commonAttributes: [] };
-            data.fileStructures.push(def);
-        }
+        // fileStructures is generated whole: each entry is rebuilt from FILE_TEXT and the results
+        const def = { name, description: FILE_TEXT[name].description, syntax: FILE_TEXT[name].syntax, commonAttributes: [] };
+        if (FILE_TEXT[name].params) def.params = FILE_TEXT[name].params;
         def.attributes = list;
         const own = Object.fromEntries(Object.entries(requires).filter(([a, b]) => list.includes(a) && list.some(x => x.replace('()', '') === b)));
-        if (Object.keys(own).length) def.requires = own; else delete def.requires;
+        if (Object.keys(own).length) def.requires = own;
         const required = FILE_REQUIRED.filter(q => name === 'FILE' && holds(q.fails, q.builds)).map(q => q.attribute);
-        if (required.length) def.required = required; else delete def.required;
+        if (required.length) def.required = required;
+        const at = data.fileStructures.findIndex(c => c.name === name);
+        if (at >= 0) data.fileStructures[at] = def; else data.fileStructures.push(def);
     }
 }
 

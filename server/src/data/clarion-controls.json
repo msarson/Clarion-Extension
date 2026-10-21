@@ -348,6 +348,10 @@
       "description": "Declares a key the file driver keeps up to date on its component fields",
       "syntax": "label KEY([-]component[,...]) [,attributes...]",
       "commonAttributes": [],
+      "params": [
+        { "name": "component", "description": "A field of the RECORD; a leading - sorts on it descending", "optional": false },
+        { "name": "component...", "description": "Further fields, most significant first", "optional": true }
+      ],
       "attributes": ["NAME()", "DUP", "NOCASE", "OPT", "PRIMARY"]
     },
     {
@@ -355,13 +359,20 @@
       "description": "Declares an index on its component fields, built at run time with BUILD",
       "syntax": "label INDEX([-]component[,...]) [,attributes...]",
       "commonAttributes": [],
+      "params": [
+        { "name": "component", "description": "A field of the RECORD; a leading - sorts on it descending. With none, BUILD names them", "optional": true },
+        { "name": "component...", "description": "Further fields, most significant first", "optional": true }
+      ],
       "attributes": ["NAME()", "NOCASE", "OPT"]
     },
     {
       "name": "MEMO",
       "description": "Declares a variable-length text field of up to 64K, stored outside the record",
-      "syntax": "label MEMO(size) [,attributes...]",
+      "syntax": "label MEMO(length) [,attributes...]",
       "commonAttributes": [],
+      "params": [
+        { "name": "length", "description": "The maximum length in bytes, up to 65,536", "optional": false }
+      ],
       "attributes": ["NAME()", "BINARY"]
     },
     {

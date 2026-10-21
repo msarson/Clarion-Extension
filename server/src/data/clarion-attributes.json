@@ -582,7 +582,7 @@
           "params": [
             "keycode"
           ],
-          "description": "Sets param1"
+          "description": "The key that selects the control and runs it: a keycode or keycode EQUATE such as F2Key or CtrlX"
         }
       ]
     },
@@ -658,7 +658,7 @@
           "params": [
             "keycode"
           ],
-          "description": "Sets param1"
+          "description": "The key that generates EVENT:AlertKey: a keycode or keycode EQUATE such as F10Key or MouseLeft; repeat ALRT for more keys"
         }
       ]
     },
