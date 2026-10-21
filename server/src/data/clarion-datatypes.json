@@ -323,36 +323,29 @@
     {
       "name": "MEMO",
       "category": "special",
-      "description": "Variable-length text field for large text data",
-      "syntax": "label MEMO[(max_length)] [,attributes...]",
+      "description": "Variable-length text field of a FILE, stored outside the record",
+      "syntax": "label MEMO(length) [,BINARY] [,NAME(name)]",
       "parameters": [
         {
-          "name": "max_length",
+          "name": "length",
           "type": "numeric",
-          "optional": true,
-          "description": "Maximum length in bytes. If omitted, defaults to 64K"
+          "optional": false,
+          "description": "Maximum length in bytes, up to 64K. Required: a bare MEMO does not compile"
         }
       ],
-      "attributes": ["NAME", "EXTERNAL", "DLL"],
-      "size": "Variable-length (up to max_length)",
-      "notes": "Used for large text fields. Must be last field in RECORD if over 64K. File driver support required"
+      "attributes": ["NAME", "BINARY"],
+      "size": "Variable-length (up to length)",
+      "notes": "Declared inside a FILE, before its RECORD. Its buffer is allocated when the FILE is opened. BINARY marks it as holding binary data. File driver support required"
     },
     {
       "name": "BLOB",
       "category": "special",
-      "description": "Binary Large Object for variable-length binary data",
-      "syntax": "label BLOB [(max_length)] [,attributes...]",
-      "parameters": [
-        {
-          "name": "max_length",
-          "type": "numeric",
-          "optional": true,
-          "description": "Maximum length in bytes. Can exceed 64K if supported by file driver"
-        }
-      ],
-      "attributes": ["NAME", "EXTERNAL", "DLL"],
-      "size": "Variable-length (up to max_length)",
-      "notes": "Used for large binary data (images, documents). Must be last field in RECORD if over 64K"
+      "description": "Variable-length field of a FILE that may be larger than 64K",
+      "syntax": "label BLOB [,BINARY] [,NAME(name)]",
+      "parameters": [],
+      "attributes": ["NAME", "BINARY"],
+      "size": "Variable-length (set at run time through PROP:Size)",
+      "notes": "Declared inside a FILE, before its RECORD. It takes no length: BLOB(100) does not compile. Memory is allocated as needed once the FILE is open. File driver support required"
     },
     {
       "name": "ANY",
@@ -419,9 +412,9 @@
       "name": "FILE",
       "category": "complex",
       "description": "Declares a file structure for data storage",
-      "syntax": "label FILE [,DRIVER('driver')] [,PRE(prefix)] [,attributes...]",
+      "syntax": "label FILE,DRIVER('driver') [,PRE(prefix)] [,attributes...]",
       "parameters": [],
-      "attributes": ["DRIVER", "PRE", "NAME", "CREATE", "OWNER", "ENCRYPT", "RECLAIM", "BINDABLE", "EXTERNAL", "THREAD"],
+      "attributes": ["DRIVER", "NAME", "PRE", "CREATE", "RECLAIM", "OWNER", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "OEM"],
       "size": "N/A (file structure)",
       "notes": "File declaration with DRIVER, RECORD, and KEY sections. DRIVER specifies file type (TOPSPEED, ASCII, BASIC, DOS, etc.). Contains RECORD for fields and KEY for indexes. Must specify DRIVER attribute."
     },
@@ -614,7 +607,24 @@
       ],
       "attributes": ["DUP", "NOCASE", "OPT", "PRIMARY", "NAME"],
       "size": "N/A (FILE structure)",
-      "notes": "Declared inside a FILE, before its RECORD. A KEY forbids duplicate entries unless DUP is given; an INDEX is the unsorted equivalent. Used as the first argument of a VIEW's JOIN, and as the argument to SET/NEXT for ordered access."
+      "notes": "Declared inside a FILE, before its RECORD. A KEY forbids duplicate entries unless DUP is given, and the file driver keeps it up to date as records change; an INDEX is the static equivalent, built at run time. Used as the first argument of a VIEW's JOIN, and as the argument to SET/NEXT for ordered access."
+    },
+    {
+      "name": "INDEX",
+      "category": "complex",
+      "description": "Declares a static index into a FILE, built at run time with BUILD",
+      "syntax": "label INDEX([[-]component[,component...]]) [,attributes...]",
+      "parameters": [
+        {
+          "name": "component",
+          "type": "field_reference",
+          "optional": true,
+          "description": "A field of the FILE's RECORD, in sort-major order; a minus sign sorts it descending. With none (INDEX()), BUILD names the components at run time."
+        }
+      ],
+      "attributes": ["NOCASE", "OPT", "NAME"],
+      "size": "N/A (FILE structure)",
+      "notes": "Declared inside a FILE, before its RECORD. Unlike a KEY it is not kept up to date as records change: BUILD it before using it for SET/NEXT."
     }
   ]
 }
