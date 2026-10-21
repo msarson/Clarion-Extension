@@ -123,11 +123,8 @@ export class MapProcedureResolver {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-        if (memberToken?.referencedFile) {
-            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, currentPath);
-            if (parentPath) startPaths.push(parentPath);
-        }
+        const parentPath = await this.memberParentPathOf(tokens, currentPath);
+        if (parentPath) startPaths.push(parentPath);
 
         // #362 — index-first POSITIVE fast-path. If the procedure index (built by a
         // cheap regex scan, a superset of the reachable includes) knows this proc
@@ -215,6 +212,34 @@ export class MapProcedureResolver {
         );
         return decl ? decl.line : null;
     }
+
+    /**
+     * The MEMBER parent of a module: its literal MEMBER header, or the header of the
+     * include shim that is its first statement (TokenHelper.findShimIncludeToken —
+     * `INCLUDE('Member.clw')` whose file holds the MEMBER line), followed up to
+     * MAX_SHIM_HOPS shims deep.
+     */
+    private async memberParentPathOf(tokens: Token[], filePath: string): Promise<string | null> {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= MapProcedureResolver.MAX_SHIM_HOPS; hop++) {
+            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+            if (memberToken?.referencedFile) {
+                return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(memberToken.referencedFile), filePath);
+            }
+            const shim = TokenHelper.findShimIncludeToken(tokens);
+            if (!shim?.referencedFile) return null;
+            const shimPath = this.resolveIncludeTarget(shim.referencedFile, filePath);
+            if (!shimPath || visited.has(shimPath.toLowerCase())) return null;
+            visited.add(shimPath.toLowerCase());
+            const shimFile = await this.loadDocForWalk(shimPath);
+            if (!shimFile) return null;
+            tokens = shimFile.tokens;
+            filePath = shimPath;
+        }
+        return null;
+    }
+
+    private static readonly MAX_SHIM_HOPS = 3;
 
     /** The line ranges of a file's MAP structures. */
     private mapRangesOf(tokens: Token[]): Array<{ start: number; end: number }> {

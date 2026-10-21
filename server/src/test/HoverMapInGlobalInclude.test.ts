@@ -13,6 +13,8 @@
  *   logapigi.inc  MAP / MODULE('LogLib') / Log_SetChannel(...) / END / END
  *   usagegi.clw   MEMBER('maingi.clw') module calling Log_SetChannel
  *   selfgi.clw    MEMBER module that includes logapigi.inc itself, outside its MAP
+ *   shimgi.clw    MEMBER('maingi.clw') — an include shim
+ *   viashimgi.clw module whose first statement is INCLUDE('shimgi.clw')
  */
 
 import * as assert from 'assert';
@@ -77,6 +79,17 @@ suite('Hover — MAP inside a globally included file', () => {
             '  CODE',
             '  Log_SetChannel(0)',
         ]);
+        // MEMBER via an INCLUDE shim: the module's first statement includes a file whose
+        // own first statement is the MEMBER header.
+        writeFixture('shimgi.clw', [
+            "  MEMBER('maingi.clw')",
+        ]);
+        writeFixture('viashimgi.clw', [
+            "  INCLUDE('shimgi.clw')",
+            'Third PROCEDURE()',
+            '  CODE',
+            '  Log_SetChannel(1)',
+        ]);
     });
 
     suiteTeardown(() => {
@@ -98,6 +111,15 @@ suite('Hover — MAP inside a globally included file', () => {
     test('hover at the call site works when the module itself includes the file', async () => {
         const doc = openDoc('selfgi.clw');
         const result = await new HoverProvider().provideHover(doc, { line: 6, character: 6 });
+
+        assert.ok(result, 'hover must resolve at the call site');
+        const text = JSON.stringify(result!.contents);
+        assert.ok(text.includes('Log_SetChannel'), `hover must describe Log_SetChannel, got: ${text.slice(0, 300)}`);
+    });
+
+    test('hover at the call site reaches the parent through a MEMBER include shim', async () => {
+        const doc = openDoc('viashimgi.clw');
+        const result = await new HoverProvider().provideHover(doc, { line: 3, character: 6 });
 
         assert.ok(result, 'hover must resolve at the call site');
         const text = JSON.stringify(result!.contents);
