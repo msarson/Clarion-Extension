@@ -192,8 +192,24 @@ suite('Header card: WINDOW, APPLICATION and REPORT list their attributes like a 
     });
 
     test('the label and a WINDOW in code keep their own cards', async () => {
-        const text = program([WINDOW_HEADER]);
-        const label = (await hoverOn(text, 'MyWindow WINDOW')).card;
-        assert.ok(!block(label, 'Available'), label);
+        // A generated app labels its window `Window`, the same word as the keyword, so the
+        // label and every use of it in code reach the header branch too (#745).
+        clientFeatures.attributeEditLinks = true;
+        const text = [
+            '  PROGRAM', '',
+            "Window WINDOW('Test'),AT(,,300,200),GRAY,SYSTEM",
+            "      BUTTON('OK'),AT(10,10,40,14),USE(?OK)",
+            '    END', '',
+            '  MAP', '  END', '  CODE',
+            '  OPEN(Window)',
+            "  Window{PROP:Text} = 'x'",
+            '  RETURN', ''
+        ].join('\n');
+        const header = (await hoverOn(text, "WINDOW('Test')")).card;
+        assert.ok(block(header, 'Available'), `the keyword gets the lists: ${header}`);
+        for (const needle of ['Window WINDOW', 'Window)', 'Window{']) {
+            const card = (await hoverOn(text, needle)).card;
+            assert.ok(!block(card, 'Available') && !card.includes('command:'), `${needle}: ${card}`);
+        }
     });
 });
