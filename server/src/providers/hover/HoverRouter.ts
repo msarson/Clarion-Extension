@@ -9,7 +9,7 @@ import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
 import { ControlService } from '../../utils/ControlService';
-import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems, controlDefinitionFor } from '../../utils/DeclaredAttributes';
+import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems, controlDefinitionFor, EditLinkContext } from '../../utils/DeclaredAttributes';
 import { LogicalLine } from '../../DocumentStructure';
 import { clientFeatures } from '../../utils/ClientFeatures';
 import { isGeneratedFile } from '../../utils/GeneratedFile';
@@ -209,7 +209,7 @@ export class HoverRouter {
         }
 
         if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
-            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure);
+            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure, document);
             if (containerHover) return containerHover;
         }
 
@@ -367,7 +367,11 @@ export class HoverRouter {
         keyword: string,
         position: { line: number; character: number },
         tokens: Token[],
-        documentStructure: { getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined }
+        documentStructure: {
+            getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined;
+            getLogicalLine?(line: number): LogicalLine | undefined;
+        },
+        document?: { uri: string; getText(): string }
     ): Hover | null {
         // Find the Structure token at this cursor position whose value matches the keyword.
         const containerToken = tokens.find(t =>
@@ -405,7 +409,13 @@ export class HoverRouter {
             lines.push(meta.join(' · '));
         }
 
-        if (desc.attributes.length) {
+        // The header's attributes as on a control card (set / available / with value), from its
+        // compiler-checked list; without one, the attributes the summary above did not show.
+        const section = this.headerAttributeSection(containerToken, position, documentStructure, document);
+        if (section) {
+            lines.push('');
+            lines.push(section);
+        } else if (desc.attributes.length) {
             lines.push('');
             lines.push(`**Attributes:** ${desc.attributes.map(a => `\`${a}\``).join(', ')}`);
         }
@@ -854,15 +864,45 @@ export class HoverRouter {
         if (!keyword) return hover;
         const accepted = controlDefinitionFor(logical, keyword, documentStructure?.getStructureContextAt?.(position.line));
         if (!accepted) return hover;
-        // A client that applies attribute edit links gets the flag names as links (#731), except
-        // in a generated module: the next generate would undo the edit, as with rename (#549).
-        const links = clientFeatures.attributeEditLinks &&
-            !isGeneratedFile(decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'))
-            ? { lines: document.getText().split(/\r?\n/), anchorLine: position.line, logical }
-            : undefined;
+        const links = this.editLinkContext(document, position, logical);
         const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword), links);
         if (!section) return hover;
         return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };
+    }
+
+    /**
+     * A client that applies attribute edit links gets a declaration card's names as links (#731),
+     * except in a generated module: the next generate would undo the edit, as with rename (#549).
+     */
+    private editLinkContext(
+        document: { uri: string; getText(): string },
+        position: { line: number; character: number },
+        logical: LogicalLine
+    ): EditLinkContext | undefined {
+        return clientFeatures.attributeEditLinks &&
+            !isGeneratedFile(decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'))
+            ? { lines: document.getText().split(/\r?\n/), anchorLine: position.line, logical }
+            : undefined;
+    }
+
+    /**
+     * The attribute section of a WINDOW / APPLICATION / REPORT header card: the header's own
+     * compiler-checked list (#740) formatted as on a control card, links included. Empty when the
+     * hovered keyword does not open its declaration or the structure has no list.
+     */
+    private headerAttributeSection(
+        keyword: Token,
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined },
+        document: { uri: string; getText(): string } | undefined
+    ): string {
+        const logical = documentStructure.getLogicalLine?.(keyword.line);
+        if (!logical || !document) return '';
+        const declaration = findDeclarationKeyword(logical, keyword.line, keyword.start);
+        if (!declaration) return '';
+        const def = this.controlService.getContainerStructure(declaration.value);
+        if (!def?.attributes) return '';
+        return formatDeclaredAttributes(def, readDeclaredAttributes(logical, declaration), this.editLinkContext(document, position, logical));
     }
 
     /**
