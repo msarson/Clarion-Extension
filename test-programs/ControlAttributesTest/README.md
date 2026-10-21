@@ -23,7 +23,7 @@ node test-programs/ControlAttributesTest/apply.js --check    # exit 1 when the d
 - **Clashes:** pairs that look like alternatives (HSCROLL/HVSCROLL, LEFT/RIGHT/CENTER, INS/OVR, ...) are built together.
 - **Speed:** a full run is about 60 builds a version, about five minutes.
 
-Results: [Clarion 10](results-10.md) (10.0.12567), [Clarion 11.1](results-11.md) (11.1.13855, run by @geircodes) and [Clarion 12](results-12.md) (12.0.14204). `apply.js` keeps an attribute only when every results file accepts it, so the card never offers what an older compiler rejects. To add another version, run `run.js` against it and then `apply.js`. The server test `HoverProvider.ControlAttributeCard.test.ts` fails until the data file matches the results again. The FILE phase has been run on Clarion 10 and 12 only; a results file without one does not vote on the FILE lists, so Clarion 11.1 needs a `--files-only` run.
+Results: [Clarion 10](results-10.md) (10.0.12567), [Clarion 11.1](results-11.md) (11.1.13855, run by @geircodes) and [Clarion 12](results-12.md) (12.0.14204). `apply.js` keeps an attribute only when every results file accepts it, so the card never offers what an older compiler rejects. To add another version, run `run.js` against it and then `apply.js`. The server test `HoverProvider.ControlAttributeCard.test.ts` fails until the data file matches the results again. The FILE phase has been run on Clarion 10 and 12, which agree; 11.1 treats FILE declarations as they do, so it has no FILE run, and a results file without one does not vote on the FILE lists.
 
 ## What the compiler says
 
