@@ -14,6 +14,8 @@ export interface HoverContext {
     hasLabelBefore: boolean;
     isInWindowContext: boolean;
     isFollowedByIdentifier: boolean;
+    /** In executable code, outside NEW( ): a word spelled like a data type is a name there (#752). */
+    isNameInCode?: boolean;
 }
 
 /**
@@ -92,6 +94,11 @@ export class SymbolHoverResolver {
         // is the right answer, and this lookup runs first — so decline and let it
         // through, or a SHEET's `,JOIN` would describe a relational join.
         if (prefersAttributeMeaning(word, context)) {
+            return null;
+        }
+        // #752: `Key = Memo` in code names two variables, not the KEY and MEMO data types; decline
+        // and let variable resolution answer, as #722 does for a word spelled like a control
+        if (context.isNameInCode) {
             return null;
         }
         if (this.dataTypeService.hasDataType(word)) {

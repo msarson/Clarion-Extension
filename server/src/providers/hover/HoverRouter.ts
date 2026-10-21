@@ -142,7 +142,9 @@ export class HoverRouter {
             }
 
             // 8. Handle data types and controls
-            const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
+            const symbolHover = this.symbolResolver.resolve(word, {
+                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode: this.isNameInCode(context),
+            });
             mark('symbol');
             if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure, document);
 
@@ -910,6 +912,30 @@ export class HoverRouter {
         const def = this.controlService.getContainerStructure(declaration.value);
         if (!def?.attributes) return '';
         return formatDeclaredAttributes(def, readDeclaredAttributes(logical, declaration), this.editLinkContext(document, position, logical));
+    }
+
+    /**
+     * Whether the hovered word sits in executable code where a data type cannot (#752). In a CODE
+     * section a data type names a type only as the operand of NEW (`Ref &= NEW(LONG)`, and
+     * `NEW LONG`, which builds too); anywhere else there, `Key` or `Memo` is a variable, whatever
+     * the data type it is spelled like.
+     */
+    private isNameInCode(context: HoverContext): boolean {
+        const { position, tokens, currentScope, line, wordRange } = context;
+        if (/\bNEW\s*\(?\s*$/i.test(line.slice(0, wordRange.start.character))) return false;
+        if (currentScope) {
+            if (currentScope.executionMarker) return position.line > currentScope.executionMarker.line;
+            // a ROUTINE without DATA has no CODE marker: its whole body is code
+            return currentScope.subType === TokenType.Routine && position.line > currentScope.line;
+        }
+        // Outside every procedure: the PROGRAM's own CODE section, which the structure records on
+        // no token. The nearest CODE above is the PROGRAM's when no procedure or routine owns it.
+        let code: Token | undefined;
+        for (const t of tokens) {
+            if (t.line >= position.line) break;
+            if (t.type === TokenType.ExecutionMarker && t.value.toUpperCase() === 'CODE') code = t;
+        }
+        return !!code && !tokens.some(t => t.executionMarker === code);
     }
 
     /**
