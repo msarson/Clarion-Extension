@@ -40,6 +40,10 @@ All notable changes to the Clarion Extension are documented here.
 - **An attribute an APPLICATION or REPORT header does not accept is flagged too.** Their header lists are now checked against the compiler, like the WINDOW's: a REPORT's ORIENT or COPIES, for example, is an unknown attribute. [#740](https://github.com/msarson/Clarion-Extension/issues/740)
 - **An attribute a FILE, KEY, INDEX, MEMO or BLOB declaration does not accept is flagged.** The lists are checked against the compiler, so TYPE on a FILE or DUP on a MEMO is a warning, and so is ENCRYPT without OWNER or DLL without EXTERNAL, which the compiler rejects. [#746](https://github.com/msarson/Clarion-Extension/issues/746)
 
+#### Performance
+
+- **Looking up a procedure through the MAP includes no longer redoes its work for every name.** Each INCLUDE's location and each file's prototypes are worked out once instead of once per procedure, so the lookups behind call-site hover, Go to Implementation and the unresolved-call warning answer a further name in a fraction of a millisecond. [#756](https://github.com/msarson/Clarion-Extension/issues/756)
+
 #### Editing
 
 - **Typing END and pressing Enter no longer turns it into ENDPAGE.** Completion now offers END, BY, TO, GOTO, ROUTINE, PROGRAM and PROCEDURE as keywords, so the word as typed comes first instead of a longer one such as ENDPAGE, BYTES or TOOLBAR. Hover no longer describes BNOT, an operator Clarion does not have. [#747](https://github.com/msarson/Clarion-Extension/issues/747)
