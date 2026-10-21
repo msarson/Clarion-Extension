@@ -16,6 +16,8 @@ export interface HoverContext {
     isFollowedByIdentifier: boolean;
     /** In executable code, outside NEW( ): a word spelled like a data type is a name there (#752). */
     isNameInCode?: boolean;
+    /** Opens a parameter of a prototype (`PROCEDURE(LONG pX)`): a data type there is the parameter's type (#753). */
+    opensParameter?: boolean;
 }
 
 /**
@@ -43,7 +45,9 @@ export class SymbolHoverResolver {
         // (much narrower) built-in-data-type check. Skip straight to downstream
         // variable resolution instead of guessing.
         if (context.isFollowedByIdentifier) {
-            return null;
+            // #753: a parameter is written the same way (`PROCEDURE(LONG pX)`), and there the
+            // word is the parameter's type: offer the data type alone, never a control
+            return context.opensParameter ? this.checkDataType(word, context) : null;
         }
 
         const checkDataTypeFirst = context.hasLabelBefore || !context.isInWindowContext;

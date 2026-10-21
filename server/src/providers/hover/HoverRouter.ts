@@ -144,6 +144,7 @@ export class HoverRouter {
             // 8. Handle data types and controls
             const symbolHover = this.symbolResolver.resolve(word, {
                 hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode: this.isNameInCode(context),
+                opensParameter: this.opensParameter(context),
             });
             mark('symbol');
             if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure, document);
@@ -936,6 +937,28 @@ export class HoverRouter {
             if (t.type === TokenType.ExecutionMarker && t.value.toUpperCase() === 'CODE') code = t;
         }
         return !!code && !tokens.some(t => t.executionMarker === code);
+    }
+
+    /**
+     * Whether the hovered word opens a parameter of a prototype (#753): inside its brackets, right
+     * after `(`, `,`, `*`, `<` or `&` (`PROCEDURE(LONG pX, *STRING pS, <BYTE pB>)`), or opening a
+     * `|` continuation line of the list. A data type there is the parameter's type.
+     */
+    private opensParameter(context: HoverContext): boolean {
+        const { line, wordRange, document, position } = context;
+        const before = line.slice(0, wordRange.start.character);
+        let depth = 0;
+        let inString = false;
+        for (const ch of before) {
+            if (ch === "'") inString = !inString;
+            else if (!inString && ch === '(') depth++;
+            else if (!inString && ch === ')' && depth > 0) depth--;
+        }
+        if (depth > 0) return /[(,<*&]\s*$/.test(before);
+        // a continuation line: the list opened on a line above that ends in `|`
+        if (!/^\s*[<*&]?\s*$/.test(before) || position.line === 0) return false;
+        const above = document.getText({ start: { line: position.line - 1, character: 0 }, end: { line: position.line, character: 0 } });
+        return /\|\s*(!.*)?\r?\n?$/.test(above);
     }
 
     /**
