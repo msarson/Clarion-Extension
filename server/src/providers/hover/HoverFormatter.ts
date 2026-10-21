@@ -109,13 +109,14 @@ export class HoverFormatter {
      */
     formatParameter(name: string, info: ParameterInfo, scope: Token, documentUri?: string): Hover {
         // #617: the declaring PROCEDURE line as a link, like every other declaration card.
+        // The procedure is the scope token's label; its value is the PROCEDURE keyword itself.
         const where = documentUri ? this.locationLink(documentUri, info.line) : `line ${info.line + 1}`;
         const markdown = [
             `**Parameter:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `${scope.value}, ${where}`
+            `${scope.label ?? scope.value}, ${where}`
         ].join('\n');
 
         return {
