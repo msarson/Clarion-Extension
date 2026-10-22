@@ -135,6 +135,16 @@ const warnedUnexpandedMacros = new Set<string>();
  * failure being reported. The condition is once-guarded, user-impacting and
  * actionable, so it earns the channel that is actually on.
  */
+/**
+ * #766 — a red-file path as written: trimmed, and without a surrounding pair of double
+ * quotes. The help quotes directories that hold spaces, and writes
+ * `{include %REDDIR%\oldname.red }` with a space before the brace.
+ */
+function unquoteRedPath(raw: string): string {
+  const p = raw.trim();
+  return p.length >= 2 && p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1).trim() : p;
+}
+
 function warnUnexpandedMacroOnce(macroName: string, redFile: string): void {
   const key = `${macroName.toLowerCase()}|${redFile}`;
   if (warnedUnexpandedMacros.has(key)) return;
@@ -507,7 +517,7 @@ export class RedirectionFileParserServer {
           // multi-include non-determinism. See `docs/audits/include-chaining-audit-3f9f91c8.md`.
           const includeMatch = trimmed.match(/\{include\s+([^}]+)\}/i);
           if (includeMatch && includeMatch[1]) {
-            let includePath = this.resolveMacro(includeMatch[1], redFileToParse);
+            let includePath = this.resolveMacro(unquoteRedPath(includeMatch[1]), redFileToParse);
             includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
             logger.info(`Processing include: ${includePath} from ${redFileToParse}`);
             this.parseRedFileRecursive(includePath, entries, false);
@@ -635,7 +645,7 @@ export class RedirectionFileParserServer {
         if (trimmed.startsWith("{include")) {
           const includeMatch = trimmed.match(/\{include\s+([^}]+)\}/i);
           if (includeMatch && includeMatch[1]) {
-            let includePath = this.resolveMacro(includeMatch[1], redFileToParse);
+            let includePath = this.resolveMacro(unquoteRedPath(includeMatch[1]), redFileToParse);
             includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
             logger.info(`Processing include: ${includePath} from ${redFileToParse}`);
 
@@ -713,6 +723,7 @@ export class RedirectionFileParserServer {
         stopsSearch = true;
         p = p.slice(0, -1).trim();
       }
+      p = unquoteRedPath(p);
       if (p.length > 0) {
         let resolved = this.resolveMacro(p, redFile);
         if (resolved.endsWith('|')) {

@@ -50,6 +50,7 @@ All notable changes to the Clarion Extension are documented here.
 
 - **A Clarion version registered under your own name is no longer called "no longer registered".** The check behind that message counted only versions named `Clarion ...`, so a solution remembering a custom-named version did not load until the version was picked again, although the version picker listed it. [#764](https://github.com/msarson/Clarion-Extension/issues/764)
 - **A redirection file named by its full path is found.** A Clarion version whose Redirection File is set to a full path, rather than a file name in its bin folder, had no redirection file read at all, so shared includes, classes and equates did not resolve. [#765](https://github.com/msarson/Clarion-Extension/issues/765)
+- **Quoted paths in a redirection file are read.** A directory or `{include}` path in double quotes, as the help recommends for paths with spaces, kept its quotes and was never found, and so did an `{include ... }` written with a space before the brace. [#766](https://github.com/msarson/Clarion-Extension/issues/766)
 - **The Open Solution dialog starts where your solutions are.** It opened in the folder of the file being edited, often a project's SRC sub-folder; it now starts at the current solution's folder, else the most recently opened one's, else the workspace folder. [#762](https://github.com/msarson/Clarion-Extension/issues/762)
 
 #### Editing
