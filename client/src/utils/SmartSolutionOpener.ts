@@ -118,24 +118,24 @@ export class SmartSolutionOpener {
                         true // skipSave — we save explicitly below
                     );
 
-                    const success = await SettingsStorageManager.saveSolutionSettings(
+                    // #767 — a failed save doesn't stop the open: saveSolutionSettings has said
+                    // why, and the selection is in force for this session.
+                    await SettingsStorageManager.saveSolutionSettings(
                         solutionPath,
                         existingSettings.propertiesFile,
                         existingSettings.version,
                         configuration
                     );
 
-                    if (success) {
-                        // Set environment variable and context
-                        process.env.CLARION_SOLUTION_FILE = solutionPath;
-                        await commands.executeCommand("setContext", "clarion.solutionOpen", true);
+                    // Set environment variable and context
+                    process.env.CLARION_SOLUTION_FILE = solutionPath;
+                    await commands.executeCommand("setContext", "clarion.solutionOpen", true);
 
-                        window.showInformationMessage(
-                            `Clarion Solution Opened: ${path.basename(solutionPath)}`
-                        );
+                    window.showInformationMessage(
+                        `Clarion Solution Opened: ${path.basename(solutionPath)}`
+                    );
 
-                        return true;
-                    }
+                    return true;
                 } else {
                     logger.warn(`⚠️ Existing settings are stale: ${validation.reason}`);
                     window.showWarningMessage(`Settings need to be updated: ${validation.reason}`);
@@ -233,18 +233,15 @@ export class SmartSolutionOpener {
 
             logger.info("✅ Global variables updated");
 
-            // Step 6: Save settings using smart storage manager
-            const success = await SettingsStorageManager.saveSolutionSettings(
+            // Step 6: Save settings using smart storage manager. #767 — a failed save used to
+            // return here, so the solution never opened and every file lost its project. The
+            // selection is already in force; saveSolutionSettings has said why it couldn't save.
+            await SettingsStorageManager.saveSolutionSettings(
                 solutionPath,
                 selectedInstallation.propertiesPath,
                 selectedCompiler,
                 selectedConfig
             );
-
-            if (!success) {
-                window.showErrorMessage("Failed to save solution settings");
-                return false;
-            };
 
             // Step 7: Add to global solution history
             const folderPath = path.dirname(solutionPath);

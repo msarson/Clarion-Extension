@@ -52,6 +52,7 @@ All notable changes to the Clarion Extension are documented here.
 - **A redirection file named by its full path is found.** A Clarion version whose Redirection File is set to a full path, rather than a file name in its bin folder, had no redirection file read at all, so shared includes, classes and equates did not resolve. [#765](https://github.com/msarson/Clarion-Extension/issues/765)
 - **Quoted paths in a redirection file are read.** A directory or `{include}` path in double quotes, as the help recommends for paths with spaces, kept its quotes and was never found, and so did an `{include ... }` written with a space before the brace. [#766](https://github.com/msarson/Clarion-Extension/issues/766)
 - **The Open Solution dialog starts where your solutions are.** It opened in the folder of the file being edited, often a project's SRC sub-folder; it now starts at the current solution's folder, else the most recently opened one's, else the workspace folder. [#762](https://github.com/msarson/Clarion-Extension/issues/762)
+- **A solution opens even when its settings can't be saved.** When the folder's `.vscode\settings.json` had an error, VS Code refused to save the solution's settings and the solution never opened, so no file had its project, shared includes did not resolve, and every reopen asked for the version again. The solution now opens for the session, and the warning names the settings file to fix and offers to open it. [#767](https://github.com/msarson/Clarion-Extension/issues/767)
 
 #### Editing
 
