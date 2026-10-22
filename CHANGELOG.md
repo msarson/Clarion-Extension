@@ -39,6 +39,7 @@ All notable changes to the Clarion Extension are documented here.
 - **An attribute the WINDOW does not accept is flagged on its header line.** `HIDE` or `PRE(...)` there, which the compiler rejects, went unnoticed until the build; HVSCROLL together with HSCROLL or VSCROLL is flagged as well. [#730](https://github.com/msarson/Clarion-Extension/pull/730) @geircodes
 - **An attribute an APPLICATION or REPORT header does not accept is flagged too.** Their header lists are now checked against the compiler, like the WINDOW's: a REPORT's ORIENT or COPIES, for example, is an unknown attribute. [#740](https://github.com/msarson/Clarion-Extension/issues/740)
 - **An attribute a FILE, KEY, INDEX, MEMO or BLOB declaration does not accept is flagged.** The lists are checked against the compiler, so TYPE on a FILE or DUP on a MEMO is a warning, and so is ENCRYPT without OWNER or DLL without EXTERNAL, which the compiler rejects. [#746](https://github.com/msarson/Clarion-Extension/issues/746)
+- **A parameter named like a control no longer draws an attribute warning.** In `DeclApply PROCEDURE(STRING Text),LONG,PRIVATE` the `Text` was taken for a TEXT control, so the valid `PRIVATE` read as "not applicable to TEXT"; `VIRTUAL` after a `Button` parameter did the same. [#759](https://github.com/msarson/Clarion-Extension/issues/759)
 
 #### Performance
 

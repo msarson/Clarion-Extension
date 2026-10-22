@@ -531,6 +531,22 @@ export class DocumentStructure {
     }
 
     /**
+     * True when `token` opens its line, optionally after a label — where a control
+     * declaration's keyword sits (`TEXT,AT(...)`, `Lbl BUTTON(...)`). The same word later
+     * on the line is a parameter or an argument: the `Text` in
+     * `DeclApply PROCEDURE(STRING Text),PRIVATE` is no TEXT control. Mirrors
+     * findControlKeyword in DeclaredAttributes. (#759)
+     */
+    private opensItsLine(token: Token): boolean {
+        const lineTokens = this.tokensByLine.get(token.line) || [];
+        for (const t of lineTokens) {
+            if (t === token) return true;
+            if (t.type !== TokenType.Label) return false;
+        }
+        return false;
+    }
+
+    /**
      * True when `line` ends with a `|` line-continuation — i.e. the following
      * physical line is a continuation of this one. Used by getControlContextAt to
      * walk only the unbroken continuation chain above the cursor (rather than a
@@ -574,8 +590,10 @@ export class DocumentStructure {
                     // Check if it's a known control type — but NOT when the token is
                     // the suffix of a `Prefix:Suffix` compound (e.g. `Region` in
                     // `CREATE:Region`), which is an EQUATE constant, not a control
-                    // declaration. (#179)
-                    if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
+                    // declaration (#179), nor when it does not open its line, e.g. a
+                    // parameter named `Text` (#759).
+                    if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token) &&
+                        this.opensItsLine(token)) {
                         controlToken = token;
                         break;
                     }
@@ -606,8 +624,10 @@ export class DocumentStructure {
                         token.type === TokenType.Structure) {
                         const upperValue = token.value.toUpperCase();
                         // Skip `Prefix:Suffix` compound suffixes (e.g. `Region` in
-                        // `CREATE:Region`) — an EQUATE constant, not a control. (#179)
-                        if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
+                        // `CREATE:Region`) — an EQUATE constant, not a control (#179) —
+                        // and a word that does not open its line (#759).
+                        if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token) &&
+                            this.opensItsLine(token)) {
                             controlToken = token;
                             break;
                         }
