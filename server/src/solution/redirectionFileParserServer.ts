@@ -307,8 +307,10 @@ export class RedirectionFileParserServer {
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
-    const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    // #765: resolve, not join — the version's red file name may be a full path, which
+    // the IDE (.NET Path.Combine) keeps as it is.
+    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
+    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
     let redFileToParse = "";
     try {
@@ -367,8 +369,8 @@ export class RedirectionFileParserServer {
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
-    const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
+    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
     try {
       // Use async file existence check

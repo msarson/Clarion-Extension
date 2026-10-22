@@ -383,7 +383,7 @@ export class FileRelationshipGraph {
             const redMtimes = new Set<string>();
             for (const project of sm.solution.projects) {
                 try {
-                    const redPath = path.join(project.path, serverSettings.redirectionFile);
+                    const redPath = path.resolve(project.path, serverSettings.redirectionFile);
                     redMtimes.add(`${this.normalizePath(redPath)}:${fs.statSync(redPath).mtimeMs}`);
                 } catch { /* project without a local red file — covered by the setting itself */ }
             }

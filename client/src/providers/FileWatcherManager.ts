@@ -101,7 +101,7 @@ export async function createSolutionFileWatchers(
             }
 
             // Create watchers for redirection files in this project (deduplicated by dir)
-            const projectRedFile = path.join(project.path, globalSettings.redirectionFile);
+            const projectRedFile = path.resolve(project.path, globalSettings.redirectionFile);
 
             if (!watchedRedFiles.has(projectRedFile) && fs.existsSync(projectRedFile)) {
                 watchedRedFiles.add(projectRedFile);
@@ -157,7 +157,7 @@ export async function createSolutionFileWatchers(
     }
 
     // Also watch the global redirection file if it exists
-    const globalRedFile = path.join(globalSettings.redirectionPath, globalSettings.redirectionFile);
+    const globalRedFile = path.resolve(globalSettings.redirectionPath, globalSettings.redirectionFile);
 
     if (fs.existsSync(globalRedFile)) {
         const globalRedWatcher = workspace.createFileSystemWatcher(globalRedFile);
