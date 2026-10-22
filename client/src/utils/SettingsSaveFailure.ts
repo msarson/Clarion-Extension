@@ -21,8 +21,8 @@ export function settingsSaveFailureNotice(
     const settingsFile = candidate && exists(candidate) ? candidate : undefined;
     const fix = settingsFile ? `Check ${settingsFile} for an error. ` : '';
     return {
-        message: `"${path.basename(solutionFile)}" is open for this session, but its Clarion settings couldn't be saved, ` +
-            `so you'll be asked for them again next time. ${fix}VS Code said: ${vsCodeMessage}`,
+        message: `"${path.basename(solutionFile)}" is open, but its Clarion settings couldn't be saved to the folder. ` +
+            `The extension will remember them itself until they can be. ${fix}VS Code said: ${vsCodeMessage}`,
         settingsFile,
     };
 }

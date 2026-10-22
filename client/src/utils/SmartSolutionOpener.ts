@@ -8,6 +8,7 @@ import { readActiveConfigFromSlnCache } from './SlnCacheUtils';
 import { chooseConfiguration, explicitConfigurationFor } from './ConfigurationPrecedence';
 import { resolveValidConfiguration } from './ConfigurationValidator';
 import { validateRememberedSettings } from './SolutionFallbackPolicy';
+import { unsavedSettingsForSolution } from './UnsavedSolutionSettings';
 import LoggerManager from './LoggerManager';
 import { PathUtils } from '../PathUtils';
 import * as path from 'path';
@@ -25,11 +26,11 @@ export class SmartSolutionOpener {
     /**
      * Attempts to load existing settings for a solution from the solutions array
      */
-    private static getExistingSolutionSettings(solutionPath: string): {
+    private static async getExistingSolutionSettings(solutionPath: string): Promise<{
         propertiesFile: string;
         version: string;
         configuration: string;
-    } | null {
+    } | null> {
         try {
             if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
                 return null;
@@ -50,6 +51,12 @@ export class SmartSolutionOpener {
             );
 
             if (!existingSolution) {
+                // #768 — a selection the folder's settings.json couldn't hold is in the history.
+                const unsaved = unsavedSettingsForSolution(await GlobalSolutionHistory.getReferences(), solutionPath);
+                if (unsaved) {
+                    logger.info(`✅ Found settings the folder couldn't save, in the solution history: ${solutionPath}`);
+                    return unsaved;
+                }
                 logger.info(`ℹ️ No existing settings found for: ${solutionPath}`);
                 return null;
             }
@@ -74,7 +81,7 @@ export class SmartSolutionOpener {
             logger.info(`📂 Opening detected solution: ${solutionPath}`);
 
             // Step 1: Check if we have existing valid settings for this solution
-            const existingSettings = this.getExistingSolutionSettings(solutionPath);
+            const existingSettings = await this.getExistingSolutionSettings(solutionPath);
             
             if (existingSettings) {
                 const validation = validateRememberedSettings(
@@ -245,7 +252,8 @@ export class SmartSolutionOpener {
 
             // Step 7: Add to global solution history
             const folderPath = path.dirname(solutionPath);
-            await GlobalSolutionHistory.addSolution(solutionPath, folderPath);
+            await GlobalSolutionHistory.addSolution(solutionPath, folderPath,
+                selectedInstallation.propertiesPath, selectedCompiler, selectedConfig);
             logger.info("✅ Added to global solution history");
 
             // Step 8: Set environment variable for server

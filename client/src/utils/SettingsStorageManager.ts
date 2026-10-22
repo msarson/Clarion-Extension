@@ -10,6 +10,7 @@ import {
     withoutRecordedVersion,
 } from './SolutionVersionMemory';
 import { settingsSaveFailureNotice } from './SettingsSaveFailure';
+import { GlobalSolutionHistory } from './GlobalSolutionHistory';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -186,12 +187,21 @@ export class SettingsStorageManager {
                 - version: ${version}
                 - configuration: ${configuration}`);
 
+            await GlobalSolutionHistory.markSettingsSaved(solutionFile); // #768
             return true;
         } catch (error) {
             logger.error("❌ Error saving solution settings:", error);
             const errorMsg = error instanceof Error ? error.message : String(error);
+            const folder = workspace.workspaceFolders?.[0]?.uri.fsPath;
+            // #768 — the folder can't hold the selection, so the extension's own history does,
+            // until a save succeeds: the folder reopens it and the next open doesn't ask again.
+            try {
+                await GlobalSolutionHistory.addSolution(solutionFile, folder ?? path.dirname(solutionFile), propertiesFile, version, configuration, true);
+            } catch (historyError) {
+                logger.error("❌ Error remembering unsaved solution settings:", historyError);
+            }
             // #767 — not awaited: the solution goes on opening while the notice is up.
-            const notice = settingsSaveFailureNotice(solutionFile, workspace.workspaceFolders?.[0]?.uri.fsPath, errorMsg, fs.existsSync);
+            const notice = settingsSaveFailureNotice(solutionFile, folder, errorMsg, fs.existsSync);
             const openFile = 'Open settings.json';
             void window.showWarningMessage(notice.message, ...(notice.settingsFile ? [openFile] : [])).then(choice => {
                 if (choice === openFile && notice.settingsFile) {
