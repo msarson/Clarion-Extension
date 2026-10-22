@@ -46,6 +46,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Looking up a procedure through the MAP includes no longer redoes its work for every name.** Each INCLUDE's location and each file's prototypes are worked out once instead of once per procedure, so the lookups behind call-site hover, Go to Implementation and the unresolved-call warning answer a further name in a fraction of a millisecond. [#756](https://github.com/msarson/Clarion-Extension/issues/756)
 
+#### Configuration and build
+
+- **A Clarion version registered under your own name is no longer called "no longer registered".** The check behind that message counted only versions named `Clarion ...`, so a solution remembering a custom-named version did not load until the version was picked again, although the version picker listed it. [#764](https://github.com/msarson/Clarion-Extension/issues/764)
+
 #### Editing
 
 - **Typing END and pressing Enter no longer turns it into ENDPAGE.** Completion now offers END, BY, TO, GOTO, ROUTINE, PROGRAM and PROCEDURE as keywords, so the word as typed comes first instead of a longer one such as ENDPAGE, BYTES or TOOLBAR. Hover no longer describes BNOT, an operator Clarion does not have. [#747](https://github.com/msarson/Clarion-Extension/issues/747)
