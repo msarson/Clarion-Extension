@@ -27,6 +27,23 @@ const VALIDATABLE_CONTROLS = new Set([
 ]);
 
 /**
+ * The lines below each WINDOW, APPLICATION and REPORT header, through its END: a `.`
+ * closing the structure on a control's line leaves that control inside. An unterminated
+ * structure (still being typed) runs to the end of the file. (#760)
+ */
+function windowOrReportBodies(tokens: Token[]): [number, number][] {
+    const bodies: [number, number][] = [];
+    for (const t of tokens) {
+        if (t.type !== TokenType.Structure) continue;
+        const kw = t.value.toUpperCase();
+        if (kw === 'WINDOW' || kw === 'APPLICATION' || kw === 'REPORT') {
+            bodies.push([t.line, t.finishesAt ?? Number.MAX_SAFE_INTEGER]);
+        }
+    }
+    return bodies;
+}
+
+/**
  * Warns when a known attribute is used on a control type that doesn't support it.
  * Only fires for attributes the tokenizer classifies as TokenType.Attribute and
  * that are present in clarion-attributes.json — unknown tokens are silently ignored.
@@ -45,6 +62,8 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
         structure = new DocumentStructure(tokens);
         structure.process();
     }
+
+    let bodies: [number, number][] | undefined;
 
     // Index-based loop (not `for ... of`) so the #175 compound-label-suffix guard
     // can look at neighboring tokens in O(1) per check rather than O(N) per
@@ -152,6 +171,13 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
 
         const controlType = ctx.controlType.toUpperCase();
         if (!VALIDATABLE_CONTROLS.has(controlType)) continue; // Ambiguous context — skip
+
+        // A control is only declared inside a WINDOW, APPLICATION or REPORT. Elsewhere a
+        // control word opening its line is a prototype or method named like one, e.g.
+        // `BOX(SIGNED x,...),NAME('Cla$BOX')` in a MAP's MODULE. (#760)
+        bodies ??= windowOrReportBodies(tokens);
+        const controlLine = ctx.controlToken?.line ?? token.line;
+        if (!bodies.some(([start, end]) => controlLine > start && controlLine <= end)) continue;
 
         // Paren-nesting guard (shared with HoverRouter — see AttributeContextGuards.ts):
         // skip Attribute tokens that sit inside the argument parentheses of a
