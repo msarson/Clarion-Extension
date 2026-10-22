@@ -15,6 +15,7 @@ import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache } from '../utils/SlnCacheUtils';
 import { chooseConfiguration, explicitConfigurationFor, configurationAtLoad } from '../utils/ConfigurationPrecedence';
 import { readIdePreferences, pushConfigurationToIde } from './ClarionIdePreferences'; // #664
+import { solutionDialogStartFolder } from './SolutionDialogStart'; // #762
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -180,6 +181,15 @@ export async function openSolutionFromList(
     }
 }
 
+/** #762 — the Open Solution dialog's start folder, not the active editor's (a project's SRC). */
+async function solutionDialogDefaultUri(): Promise<Uri | undefined> {
+    const folder = solutionDialogStartFolder(
+        globalSolutionFile || undefined,
+        await GlobalSolutionHistory.getReferences(),
+        workspace.workspaceFolders?.[0]?.uri.fsPath);
+    return folder ? Uri.file(folder) : undefined;
+}
+
 /**
  * Opens a Clarion solution with full configuration
  * @param context - Extension context
@@ -208,6 +218,7 @@ export async function openClarionSolution(
         // ✅ If no folder is open, let user pick solution and we'll open its folder
         if (!workspace.workspaceFolders) {
             const solutionUris = await window.showOpenDialog({
+                defaultUri: await solutionDialogDefaultUri(),
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
@@ -321,6 +332,7 @@ export async function openClarionSolution(
         
         // Ask the user to select a new .sln file
         const selectedFileUri = await vscodeWindow.showOpenDialog({
+            defaultUri: await solutionDialogDefaultUri(),
             canSelectFiles: true,
             canSelectFolders: false,
             openLabel: "Select Clarion Solution (.sln)",
