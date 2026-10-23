@@ -59,8 +59,9 @@ const RVD_MEMO_BUCKET = 'rvdmemo';
 // #654: part of the persisted signature. The mtime gate proves a memo's INPUTS are unchanged, not
 // that the rules that produced it are: an upgraded server otherwise reuses an older build's answer
 // for every file not edited since. Bump it whenever how a receiver type or a class's members are
-// resolved changes. (2: a local CLASS label is the class itself, not its parent's type.)
-const RVD_RESOLUTION_RULES = 2;
+// resolved changes. (2: a local CLASS label is the class itself, not its parent's type.
+// 3: #778, a member prototype continued with `|` is read whole.)
+const RVD_RESOLUTION_RULES = 3;
 // One disk-load attempt per doc content (rvdDocKey); bounded for hygiene.
 const rvdDiskSeedAttempted = new Set<string>();
 
@@ -311,6 +312,25 @@ function getCodeBlockRanges(
         }
 
         ranges.push({ start: codeStart, end: procEnd, selfClassName });
+    }
+
+    // #778: the PROGRAM's own CODE belongs to no procedure, so the loop above never adds it. It
+    // runs to the line before the first procedure or routine that follows it.
+    const claimed = new Set(tokens.filter(t => t.executionMarker).map(t => t.executionMarker!.line));
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type !== TokenType.ExecutionMarker || t.value.toUpperCase() !== 'CODE' || claimed.has(t.line)) continue;
+        let end = tokens[tokens.length - 1].line;
+        for (let k = i + 1; k < tokens.length; k++) {
+            const n = tokens[k];
+            // An implementation, not a call: `Later(1, 2)` is a Function token too.
+            if (n.type === TokenType.Routine ||
+                (n.type === TokenType.Procedure && (n.subType === TokenType.GlobalProcedure || n.subType === TokenType.MethodImplementation))) {
+                end = n.line - 1;
+                break;
+            }
+        }
+        if (end > t.line) ranges.push({ start: t.line + 1, end, selfClassName: null });
     }
 
     return ranges;

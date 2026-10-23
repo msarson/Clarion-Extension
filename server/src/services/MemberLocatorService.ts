@@ -21,7 +21,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration } from '../utils/ClassMemberScan';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations } from '../utils/ClassMemberScan';
 import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -1927,13 +1927,17 @@ export class MemberLocatorService {
             if (isInsideNested(token.line)) continue;
             if (seenLines.has(token.line)) continue;
 
+            // #778: a line continuing the one above (`|`) is the rest of a prototype, not a member
+            if (token.line > 0 && ClarionTokenizer.endsWithContinuation(docLines[token.line - 1] ?? '')) continue;
+
             const raw = docLines[token.line] ?? '';
             const memberMatch = raw.match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/);
             if (!memberMatch) continue;
             seenLines.add(token.line);
 
             const name = memberMatch[1];
-            const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+            const declMatch = withContinuations(docLines, token.line).match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/) ?? memberMatch;
+            const typeStr = (declMatch[2] || '').replace(/!.*$/, '').trim();
             const access = detectMemberAccess(raw);
             const kind: 'method' | 'property' = /^(?:PROCEDURE|FUNCTION)\b/i.test(typeStr) ? 'method' : 'property'; // #247
 
@@ -1994,13 +1998,19 @@ export class MemberLocatorService {
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
             if (isInsideNested(token.line)) continue;
+            // #778: a line continuing the one above (`|`) is the rest of a prototype, not a member
+            if (token.line > 0 && ClarionTokenizer.endsWithContinuation(docLines[token.line - 1] ?? '')) continue;
 
             const memberLine = docLines[token.line] ?? '';
-            const afterMember = memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart();
+            // #778: a prototype continued with `|` is read whole
+            const decl = withContinuations(docLines, token.line);
+            const afterMember = decl === memberLine
+                ? memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart()
+                : decl.replace(/^\s*[A-Za-z_][\w:]*\s+/, '');
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
             if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                declParamCount = countParametersInDeclaration(memberLine);
+                declParamCount = countParametersInDeclaration(decl);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
