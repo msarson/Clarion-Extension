@@ -191,7 +191,7 @@ export class ClarionTokenizer {
             }
             if (ch === "'") { inString = true; last = ch; continue; }
             if (ch === '!') break;
-            if (ch !== ' ' && ch !== '\t') last = ch;
+            if (ch !== ' ' && ch !== '\t' && ch !== '\r') last = ch; // #775: a CRLF line split on '\n' keeps its '\r'
         }
         return last === '|';
     }
