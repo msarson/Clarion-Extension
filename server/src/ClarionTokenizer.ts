@@ -769,54 +769,48 @@ export class ClarionTokenizer {
                         }
                         
                         this.tokens.push(newToken);
-                        // 🌈 Special handling for COLOR(...)
-                        if (tokenType === TokenType.Function && match[0].toUpperCase() === "COLOR") {
-                            // Look ahead for '(' and extract the contents
-                            const parenStart = line.indexOf("(", position);
+                        // 🌈 Special handling for COLOR(...) and (#776) FILL(...): each colour argument
+                        // becomes a ColorValue token at its own column, for the editor's swatches.
+                        const colorKeyword = match[0].trim().toUpperCase();
+                        if ((tokenType === TokenType.Function && colorKeyword === "COLOR") ||
+                            (tokenType === TokenType.Attribute && colorKeyword === "FILL")) {
+                            // The '(' must follow the keyword: a bare FILL takes no colour.
+                            const afterKeyword = newToken.start + trimmedValue.length;
+                            const parenStart = /^\s*\(/.test(line.substring(afterKeyword)) ? line.indexOf("(", afterKeyword) : -1;
                             if (parenStart > -1) {
+                                const rawParams: string[] = [];
                                 let parenDepth = 1;
-                                let currentPos = parenStart + 1;
-                                let paramString = "";
-
-                                while (currentPos < line.length && parenDepth > 0) {
+                                let paramStart = parenStart + 1;
+                                for (let currentPos = parenStart + 1; currentPos < line.length && parenDepth > 0; currentPos++) {
                                     const char = line[currentPos];
                                     if (char === "(") parenDepth++;
                                     else if (char === ")") parenDepth--;
-
-                                    if (parenDepth > 0) {
-                                        paramString += char;
+                                    if ((char === "," && parenDepth === 1) || parenDepth === 0) {
+                                        const raw = line.substring(paramStart, currentPos);
+                                        const param = raw.trim();
+                                        if (param) {
+                                            rawParams.push(param);
+                                            const isEquate = /^COLOR:[A-Za-z0-9]+$/i.test(param);
+                                            const isRGBHex = /^(-)?([0-9A-F]+)H$/i.test(param);
+                                            if (isEquate || isRGBHex) {
+                                                const paramColumn = paramStart + raw.indexOf(param);
+                                                this.tokens.push({
+                                                    type: TokenType.ColorValue,
+                                                    value: param,
+                                                    line: lineNumber,
+                                                    start: paramColumn,
+                                                    maxLabelLength: 0
+                                                });
+                                                if (TOKENIZER_TRACE) logger.info(`🌈 ${colorKeyword} param tokenized: ${param} ${paramColumn}`);
+                                            }
+                                        }
+                                        paramStart = currentPos + 1;
                                     }
-                                    currentPos++;
-                                }
-
-                                // Split param string into arguments
-                                const rawParams = paramString.split(",").map(s => s.trim()).filter(Boolean);
-                                // Store parsed COLOR(...) arguments
-                                newToken.colorParams = [];
-
-                                for (const param of rawParams) {
-                                    const isEquate = /^COLOR:[A-Za-z0-9]+$/i.test(param);
-                                    const isRGBHex = /^(-)?([0-9A-F]+)H$/i.test(param);
-
-                                    if (isEquate || isRGBHex) {
-                                        this.tokens.push({
-                                            type: TokenType.ColorValue,
-                                            value: param,
-                                            line: lineNumber,
-                                            start: column, // You could refine this based on match position
-                                            maxLabelLength: 0
-                                        });
-                                        
-                                        if (TOKENIZER_TRACE) logger.info(`🌈 COLOR param tokenized: ${param} ${column}`);
-                                        
-                                    }
-
-                                    newToken.colorParams.push(param);
                                 }
 
                                 // Store as custom metadata
                                 newToken.colorParams = rawParams;
-                                if (TOKENIZER_TRACE) logger.info(`🎨 Parsed COLOR params at line ${lineNumber}: ${rawParams.join(", ")}`);
+                                if (TOKENIZER_TRACE) logger.info(`🎨 Parsed ${colorKeyword} params at line ${lineNumber}: ${rawParams.join(", ")}`);
                             }
                         }
                         else if (TOKENIZER_TRACE && match[0].toUpperCase() === "COLOR") {

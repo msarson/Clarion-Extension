@@ -139,12 +139,9 @@ export class ClarionColorResolver {
                         alpha: 1
                     };
 
-                    const originalLine = document.getText(Range.create(
-                        Position.create(token.line, 0),
-                        Position.create(token.line + 1, 0)
-                    ));
-
-                    const charOffset = originalLine.indexOf(token.value); // First match of color literal on line
+                    // #776: the tokenizer records each colour's own column, so the same colour in
+                    // COLOR and FILL on one line gets a swatch at each (indexOf found the first only).
+                    const charOffset = token.start;
                     const startPos: Position = { line: token.line, character: charOffset };
                     const endPos: Position = { line: token.line, character: charOffset + token.value.length };
 
