@@ -4,6 +4,13 @@ import { serverSettings } from '../serverSettings';
 const norm = (p: string) => path.normalize(p).toLowerCase();
 
 /**
+ * #770 — bump whenever how a file name resolves changes, so every disk cache built under the old
+ * rules is discarded: its files and the install are unchanged, so nothing else would tell it apart.
+ * 1: redirection masks with a prefix or `?` (#769).
+ */
+export const RESOLUTION_RULES = 1;
+
+/**
  * #568 — one string for the Clarion install that file resolution runs under: the version, the
  * redirection file and its directory, the macros (%ROOT% and friends) and the libsrc paths. Two
  * environments with the same key resolve every file name the same way, so the disk caches of
@@ -14,6 +21,7 @@ export function resolutionEnvironmentKey(): string {
         .map(([k, v]) => `${k.toLowerCase()}=${norm(String(v))}`)
         .sort();
     return [
+        `rules:${RESOLUTION_RULES}`,
         `version:${(serverSettings.clarionVersion ?? '').toLowerCase()}`,
         `red:${(serverSettings.redirectionFile ?? '').toLowerCase()}`,
         `reddir:${(serverSettings.redirectionPaths ?? []).filter(Boolean).map(norm).join(';')}`,
