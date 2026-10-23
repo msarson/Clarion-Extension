@@ -106,6 +106,12 @@
         }
       ],
       "description": "Specifies display or print color. The color parameter specifies background color (PROP:Background). The selectedFore and selectedBack parameters specify colors for selected text on controls that can receive focus. The last two parameters are optional and not valid in REPORT.",
+      "controlDescriptions": {
+        "BOX": "Specifies the color of the box's border (PROP:Color). Without COLOR the box has no border. FILL sets the color inside it.",
+        "ELLIPSE": "Specifies the color of the ellipse's border (PROP:Color). FILL sets the color inside it.",
+        "REGION": "Specifies the color of the region's border (PROP:Color). Without COLOR the region has no border. FILL sets the color inside it.",
+        "LINE": "Specifies the color of the line (PROP:Color)."
+      },
       "propertyEquate": "PROP:Color"
     },
     {

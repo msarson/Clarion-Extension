@@ -842,7 +842,7 @@ export class HoverRouter {
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Attribute parameter count: ${paramCount}`);
 
-        return this.formatter.formatAttribute(word, attribute, paramCount);
+        return this.formatter.formatAttribute(word, attribute, paramCount, controlContext.controlType);
     }
 
     /**
@@ -1019,7 +1019,7 @@ export class HoverRouter {
         const attribute = this.attributeService.getAttribute(hit.name);
         let value = '';
         if (attribute) {
-            const card = this.formatter.formatAttribute(hit.name, attribute, null).contents as MarkupContent;
+            const card = this.formatter.formatAttribute(hit.name, attribute, null, def.name ?? keyword.value).contents as MarkupContent;
             value = card.value;
         }
         const problems = findAttributeProblems(def, declared).filter(p => p.attribute === hit);

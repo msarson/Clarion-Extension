@@ -23,6 +23,11 @@ export interface AttributeDefinition {
      * (`TIP('${1:text}')`). Without one, attributeSnippet derives it from the first signature.
      */
     snippet?: string;
+    /**
+     * #777: the description on a particular control, by control keyword, where the attribute
+     * means something else there (COLOR is the border of a BOX, not its background).
+     */
+    controlDescriptions?: Record<string, string>;
     propertyEquate: string;
 }
 

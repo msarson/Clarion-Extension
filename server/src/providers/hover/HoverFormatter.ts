@@ -759,7 +759,7 @@ export class HoverFormatter {
     /**
      * Constructs hover information for a Clarion attribute with parameter count matching
      */
-    formatAttribute(attributeName: string, attribute: any, paramCount: number | null): Hover {
+    formatAttribute(attributeName: string, attribute: any, paramCount: number | null, controlType?: string | null): Hover {
         if (!attribute) {
             return {
                 contents: {
@@ -782,7 +782,9 @@ export class HoverFormatter {
 
         let content = `**Attribute: ${attribute.name}**\n\n`;
         
-        content += `${attribute.description}\n\n`;
+        // #777: an attribute that means something else on this control says so (COLOR on a BOX).
+        const onControl = controlType ? attribute.controlDescriptions?.[controlType.toUpperCase()] : undefined;
+        content += `${onControl ?? attribute.description}\n\n`;
         
         if (paramCount !== null && matchingSignatures.length < attribute.signatures.length) {
             content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;
