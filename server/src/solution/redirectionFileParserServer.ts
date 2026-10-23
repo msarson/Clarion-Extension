@@ -45,6 +45,37 @@ export interface RedirectionEntry {
 }
 
 /**
+ * #769 — a filemask is "a file name or a file mask using the standard OS wild card characters:
+ * * and ?" (Redirection File help topic), matched against the whole name, case-insensitively.
+ * `*.*` matches every name, as it does in the IDE.
+ */
+export function matchesFileMask(mask: string, filename: string): boolean {
+  if (mask === '*.*') return true;
+  let re = maskPatterns.get(mask);
+  if (!re) {
+    const pattern = mask.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    re = new RegExp(`^${pattern}$`, 'i');
+    maskPatterns.set(mask, re);
+  }
+  return re.test(filename);
+}
+
+/** Compiled masks: findFile tests every entry's mask on every lookup. */
+const maskPatterns = new Map<string, RegExp>();
+
+/**
+ * #769 — whether a mask can match some file with the extension (`.inc` or `inc`): `*.inc` and
+ * `ab*.inc` can, `ab*.clw` cannot. A mask without a dot can only when it ends in `*`.
+ */
+export function maskCanMatchExtension(mask: string, extension: string): boolean {
+  if (mask === '*.*') return true;
+  const ext = extension.replace(/^\./, '');
+  const dot = mask.lastIndexOf('.');
+  if (dot === -1) return mask.endsWith('*');
+  return matchesFileMask(mask.substring(dot + 1), ext);
+}
+
+/**
  * Returns true when the given redirection entry's section is either `Common`
  * (always active regardless of build configuration) OR matches the active
  * build configuration. Comparison is case-insensitive — real-world `.red`
@@ -1161,19 +1192,6 @@ export class RedirectionFileParserServer {
    * @returns True if the filename matches the mask
    */
   private matchesMask(mask: string, filename: string): boolean {
-    if (mask === "*.*") return true;
-    
-    // Cache the processed mask for better performance
-    const maskLower = mask.toLowerCase();
-    const filenameLower = filename.toLowerCase();
-    
-    // Handle the common case of extension matching (e.g., "*.clw")
-    if (maskLower.startsWith("*.")) {
-      const ext = maskLower.substring(1); // Get ".clw"
-      return filenameLower.endsWith(ext);
-    }
-    
-    // Handle other mask patterns
-    return filenameLower.endsWith(maskLower.replace("*", ""));
+    return matchesFileMask(mask, filename);
   }
 }

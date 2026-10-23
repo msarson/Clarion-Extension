@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as xml2js from 'xml2js';
 import LoggerManager from '../logger';
-import { RedirectionEntry, RedirectionFileParserServer, matchesActiveConfiguration } from './redirectionFileParserServer';
+import { RedirectionEntry, RedirectionFileParserServer, matchesActiveConfiguration, maskCanMatchExtension } from './redirectionFileParserServer';
 import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
@@ -453,7 +453,7 @@ export class ClarionProjectServer {
         
         // Process matching entries
         for (const entry of matchingEntries) {
-            if (entry.extension.toLowerCase() === normalizedExt || entry.extension === "*.*") {
+            if (maskCanMatchExtension(entry.extension, normalizedExt.substring(2))) { // #769: ab*.inc too
                 logger.info(`📂 Processing entry: ${entry.extension} from section ${entry.section}`);
 
                 // Relative paths in any .red — including {include}-d files — anchor on
