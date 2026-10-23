@@ -1024,7 +1024,7 @@ export class HoverRouter {
         }
         const problems = findAttributeProblems(def, declared).filter(p => p.attribute === hit);
         for (const problem of problems) {
-            value = `⚠ ${problem.message}\n\n` + value;
+            value = `${problem.alternative ? 'ℹ' : '⚠'} ${problem.message}\n\n` + value;
         }
         return value ? { contents: { kind: 'markdown', value: value.trimEnd() } } : null;
     }

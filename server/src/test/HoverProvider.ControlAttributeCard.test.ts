@@ -153,11 +153,13 @@ suite('Control card — the attributes the declaration sets', () => {
         assert.ok(!card.includes('?Go'), card);
     });
 
-    test('TEXT: mutually exclusive flags are flagged', async () => {
+    // #738: both compile, so the card notes the alternatives (ℹ) rather than warning (⚠).
+    test('TEXT: alternative flags are noted, not warned about', async () => {
         const card = await hoverOn(program([
             "           TEXT,AT(10,10,100,50),USE(Loc:Notes),HSCROLL,HVSCROLL",
         ]), 'TEXT,');
-        assert.ok(/HSCROLL.*HVSCROLL.*exclusive|exclusive.*HSCROLL.*HVSCROLL/i.test(card), card);
+        assert.ok(card.includes('ℹ HSCROLL and HVSCROLL are alternatives: the help gives one of them, though both compile'), card);
+        assert.ok(!/⚠|exclusive/.test(card), card);
     });
 
     // HSCROLL and VSCROLL together are fine (HVSCROLL is just the shorter form); only HVSCROLL

@@ -230,14 +230,14 @@ function validateHeaderAttributes(tokens: Token[], structure: DocumentStructure)
         for (const problem of findAttributeProblems(def, readDeclaredAttributes(logical, token))) {
             const at = problem.attribute.token;
             diagnostics.push({
-                severity: DiagnosticSeverity.Warning,
+                severity: problem.alternative ? DiagnosticSeverity.Hint : DiagnosticSeverity.Warning, // #738
                 range: {
                     start: { line: at.line, character: at.start },
                     end: { line: at.line, character: at.start + at.value.length },
                 },
                 message: problem.message,
                 source: 'clarion',
-                code: 'invalid-attribute-context',
+                code: problem.alternative ? 'alternative-attributes' : 'invalid-attribute-context',
             });
         }
     }

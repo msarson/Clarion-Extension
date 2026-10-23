@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Hover } from 'vscode-languageserver-protocol';
+import { DiagnosticSeverity, Hover } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
 import { ClarionTokenizer } from '../ClarionTokenizer';
 import { validateAttributeApplicability } from '../providers/diagnostics/AttributeDiagnostics';
@@ -14,9 +14,10 @@ import { validateAttributeApplicability } from '../providers/diagnostics/Attribu
  * The header line has no control context, so attribute validation skipped it and an
  * attribute hover there found nothing. The Clarion 11.1 compiler rejects some attributes
  * that look plausible on a WINDOW — `HIDE` and `PRE(...)` both fail with "unknown
- * attribute" — and HVSCROLL clashes with HSCROLL or VSCROLL (HSCROLL with VSCROLL is
- * fine). The WINDOW entry in clarion-controls.json now lists the attributes it accepts
- * (`attributes`) and the clashing pairs (`exclusive`); the header is checked against them.
+ * attribute". HVSCROLL with HSCROLL or VSCROLL compiles, but the help lists them as
+ * alternatives, so that is a hint (#738; HSCROLL with VSCROLL is fine). The WINDOW entry in
+ * clarion-controls.json lists the attributes it accepts (`attributes`) and the alternatives
+ * (`exclusive`); the header is checked against them.
  */
 
 let tmpRoot: string;
@@ -82,10 +83,21 @@ suite('Attributes on a WINDOW header line', () => {
         assert.deepStrictEqual(diags, []);
     });
 
-    test('HSCROLL with VSCROLL is fine; HVSCROLL with either one is a clash', () => {
+    // #738: the compiler accepts every one of these pairs (C10 and C12), so they are a hint that
+    // the help lists them as alternatives, not a warning that the code is wrong.
+    test('HSCROLL with VSCROLL is fine; HVSCROLL with either one is a hint, not a warning', () => {
         assert.deepStrictEqual(diagnosticsFor(program(["MyWindow WINDOW('Test'),AT(,,300,200),HSCROLL,VSCROLL"])), []);
-        assert.deepStrictEqual(diagnosticsFor(program(["MyWindow WINDOW('Test'),AT(,,300,200),VSCROLL,HVSCROLL"])).map(d => d.message),
-            ['VSCROLL and HVSCROLL are mutually exclusive']);
+        const text = program(["MyWindow WINDOW('Test'),AT(,,300,200),VSCROLL,HVSCROLL"]);
+        const diags = validateAttributeApplicability(new ClarionTokenizer(text).tokenize(), docFor(text));
+        assert.deepStrictEqual(diags.map(d => [d.message, d.severity, d.code]),
+            [['VSCROLL and HVSCROLL are alternatives: the help gives one of them, though both compile', DiagnosticSeverity.Hint, 'alternative-attributes']]);
+    });
+
+    test('#738: DOUBLE with NOFRAME is a hint, not a warning', () => {
+        const text = program(["MyWindow WINDOW('Test'),AT(,,300,200),DOUBLE,NOFRAME"]);
+        const diags = validateAttributeApplicability(new ClarionTokenizer(text).tokenize(), docFor(text));
+        assert.deepStrictEqual(diags.map(d => d.severity), [DiagnosticSeverity.Hint]);
+        assert.ok(!/mutually exclusive/.test(String(diags[0].message)), String(diags[0].message));
     });
 
     test('hover on a WINDOW\'s HIDE shows the attribute and says it is not valid there', async () => {

@@ -108,13 +108,18 @@ export function parseAccepted(def: ControlDefinition): { name: string; flag: boo
     });
 }
 
+/** A problem with one attribute. `alternative`: a hint, not an error (#738). */
+export interface AttributeProblem { attribute: DeclaredAttribute; message: string; alternative?: boolean }
+
 /**
- * Problems with a declaration's attributes: not accepted here, unknown, mutually exclusive, or
- * present without the attribute it requires (#746: `ENCRYPT attribute requires OWNER`).
+ * Problems with a declaration's attributes: not accepted here, unknown, or present without the
+ * attribute it requires (#746: `ENCRYPT attribute requires OWNER`). Two from one `exclusive` group
+ * are only an `alternative`: the help lists them as alternatives, but the compiler accepts every
+ * such pair (C10 and C12, #738).
  */
-export function findAttributeProblems(def: ControlDefinition, declared: DeclaredAttribute[]): { attribute: DeclaredAttribute; message: string }[] {
+export function findAttributeProblems(def: ControlDefinition, declared: DeclaredAttribute[]): AttributeProblem[] {
     const accepted = new Set(parseAccepted(def).map(a => a.name));
-    const problems: { attribute: DeclaredAttribute; message: string }[] = [];
+    const problems: AttributeProblem[] = [];
     for (const attribute of declared) {
         if (accepted.has(attribute.name)) continue;
         const known = AttributeService.getInstance().isAttribute(attribute.name);
@@ -130,7 +135,8 @@ export function findAttributeProblems(def: ControlDefinition, declared: Declared
         if (present.length > 1) {
             problems.push({
                 attribute: present[1],
-                message: `${present.map(p => p.name).join(' and ')} are mutually exclusive`
+                message: `${present.map(p => p.name).join(' and ')} are alternatives: the help gives one of them, though both compile`,
+                alternative: true
             });
         }
     }
@@ -166,12 +172,12 @@ export function formatDeclaredAttributes(def: ControlDefinition, declared: Decla
     const notValid = declared.filter(d => !acceptedNames.has(d.name) && known.isAttribute(d.name)).map(d => d.name);
     const unknown = declared.filter(d => !acceptedNames.has(d.name) && !known.isAttribute(d.name)).map(d => d.name);
     const setNames = new Set(declared.map(d => d.name));
-    const combined = findAttributeProblems(def, declared).filter(p => / are mutually exclusive$| requires \w+$/.test(p.message));
+    const combined = findAttributeProblems(def, declared).filter(p => p.alternative || / requires \w+$/.test(p.message));
 
     const problems: string[] = [];
     if (notValid.length > 0) problems.push(`⚠ ${notValid.join(', ')}: not valid on ${def.name}`);
     if (unknown.length > 0) problems.push(`⚠ ${unknown.join(', ')}: not a known attribute`);
-    for (const problem of combined) problems.push(`⚠ ${problem.message}`);
+    for (const problem of combined) problems.push(`${problem.alternative ? 'ℹ' : '⚠'} ${problem.message}`);
     // a FILE without DRIVER does not compile (#746); there is no attribute to hang it on
     for (const name of def.required ?? []) {
         if (!setNames.has(name)) problems.push(`⚠ ${def.name} requires ${name}`);
