@@ -1,7 +1,7 @@
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { extractClassName } from './ClassNameUtils';
+import { chainTargetClass, extractClassName } from './ClassNameUtils';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
 import { resolveEnclosingClassName } from './EnclosingClassResolver';
@@ -97,7 +97,9 @@ export class ChainedPropertyResolver {
         const ownerLabel = owner.kind === 'class' ? owner.name : `inline structure at ${owner.file}:${owner.line}`;
         logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${ownerLabel}"`);
         const result = owner.kind === 'class'
+            // #779: `SELF.IFace` leads to the INTERFACE the class implements
             ? await this.memberLocator.findMemberInClass(owner.name, memberName, document, paramCount)
+                ?? await this.memberLocator.findMemberInInterface(owner.name, memberName, document, paramCount)
             : await this.findFieldInInlineStructure(owner, memberName);
 
         if (result) {
@@ -239,7 +241,7 @@ export class ChainedPropertyResolver {
                 continue;
             }
 
-            const nextClass = extractClassName(memberInfo.type);
+            const nextClass = chainTargetClass(memberInfo);
             if (!nextClass) {
                 logger.info(`ChainedPropertyResolver: type "${memberInfo.type}" of "${segmentName}" is not navigable`);
                 return null;

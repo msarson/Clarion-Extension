@@ -391,6 +391,9 @@ export class MemberLocatorService {
 
         const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
         if (inBody) return inBody;
+        // #779: `SELF.IFace` in a chain names the INTERFACE the class implements, as in the tiers (#773)
+        const implemented = await this.findImplementedInterface(className, memberName, document, docPath);
+        if (implemented) return implemented;
         const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
         const parent = extractParentName(declLine);
         return parent ? this.findMemberInClass(parent, memberName, document, paramCount) : null;
