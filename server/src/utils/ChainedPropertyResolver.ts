@@ -44,13 +44,9 @@ export class ChainedPropertyResolver {
     /**
      * Extracts the rightmost member-access chain from a full line prefix.
      *
-     * Anchors on SELF/PARENT when one is present, so an assignment expression
-     * like "SELF.Order.X &= SELF.Primary" yields only "SELF.Primary" (the
-     * rightmost chain).
-     *
-     * Without such an anchor the rightmost run of dot-separated identifiers is
-     * taken instead, so a chain rooted on an ordinary typed variable survives
-     * whatever statement context sits to its left ("rc = Obj.Prop" -> "Obj.Prop",
+     * The rightmost run of dot-separated identifiers is taken, so "SELF.Order.X
+     * &= SELF.Primary" yields "SELF.Primary", and a chain rooted on an ordinary
+     * typed variable survives whatever statement context sits to its left ("rc = Obj.Prop" -> "Obj.Prop",
      * "Foo(Obj.Prop" -> "Obj.Prop"). Callers gate the chained-resolution path on
      * the result being a pure chain, so leaving that context attached silently
      * routes a multi-segment access to the single-segment fallback, where it
@@ -62,11 +58,15 @@ export class ChainedPropertyResolver {
      * rather than mangled.
      */
     public static extractChain(rawBeforeDot: string): string {
+        const chain = rawBeforeDot.match(/[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/);
+        // #774: a complete chain at the end wins over a SELF further left, which belongs to an
+        // earlier operand ("SELF.List {PROP:Text} = glo" -> "glo"). The anchor is kept for a
+        // chain broken by a subscript ("SELF.Q[i].Field"), where the regex sees only "Field".
+        if (chain && rawBeforeDot.charAt(chain.index! - 1) !== '.') return chain[0];
         const matches = [...rawBeforeDot.matchAll(/\b(self|parent)\b/gi)];
         if (matches.length > 0) {
             return rawBeforeDot.substring(matches[matches.length - 1].index!);
         }
-        const chain = rawBeforeDot.match(/[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/);
         return chain ? chain[0] : rawBeforeDot;
     }
 
