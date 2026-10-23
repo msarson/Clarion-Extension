@@ -179,6 +179,23 @@ export class ClarionTokenizer {
      * as OmitCompileDetector finds them) blanked to spaces, so columns are unchanged, and removes
      * those terminators from `open`.
      */
+    /** #771 — the line ends with the '|' continuation (outside a string, before any comment). */
+    static endsWithContinuation(line: string): boolean {
+        let inString = false;
+        let last = '';
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inString) {
+                if (ch === "'") inString = false; // '' re-enters on the next character
+                continue;
+            }
+            if (ch === "'") { inString = true; last = ch; continue; }
+            if (ch === '!') break;
+            if (ch !== ' ' && ch !== '\t') last = ch;
+        }
+        return last === '|';
+    }
+
     static blankDirectiveTerminators(line: string, open: string[]): string {
         if (open.length === 0) return line;
         const withoutStrings = line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length));
@@ -338,11 +355,15 @@ export class ClarionTokenizer {
         let tokensOnCurrentLine = 0;
         // Terminators of the OMIT/COMPILE blocks opened so far and not yet closed.
         const openTerminators: string[] = [];
-        
+        // #771: the previous line ended with '|', so this line continues its statement.
+        let previousLineContinues = false;
+
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = ClarionTokenizer.blankDirectiveTerminators(lines[lineNumber], openTerminators);
             ClarionTokenizer.collectDirectiveTerminators(lines[lineNumber], openTerminators);
             if (line.trim() === "") continue; // ✅ Skip blank lines
+            const continuesStatement = previousLineContinues;
+            previousLineContinues = ClarionTokenizer.endsWithContinuation(line);
 
             let position = 0;
             tokensOnCurrentLine = 0; // Reset for new line
@@ -556,6 +577,13 @@ export class ClarionTokenizer {
                                     structName === 'VIEW';
                                 if (requiresLabel && position === 0) {
                                     if (TOKENIZER_TRACE) logger.debug(`⏭️ Skipping structure keyword '${structName}' (${match[0]}) at column 0 - a Clarion label always starts at column 0, so this word is being used as a label`);
+                                    continue; // Try next structure pattern
+                                }
+
+                                // #771: MODULE opens a structure only as the first word of a statement.
+                                // At the start of a continuation line it is an attribute of the statement
+                                // being continued (a CLASS's MODULE('file.clw')).
+                                if (structName === 'MODULE' && continuesStatement && tokensOnCurrentLine === 0) {
                                     continue; // Try next structure pattern
                                 }
 
