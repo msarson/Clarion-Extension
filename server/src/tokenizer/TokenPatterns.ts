@@ -66,7 +66,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // EndStatement is ordered after Number, and `obj.field` still fails the lookahead.
     [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=[\s;.!]|$)|(\.)(?=[\s;.!]|$)/i,
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
-    [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
+    // #772: `*?` is the untyped variable-parameter; `?` followed by a name is a field equate
+    [TokenType.PointerParameter]: /\*\s*(?:\b[A-Za-z_][A-Za-z0-9_]*\b|\?(?![A-Za-z_]))/i,
     // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
     // anonymous-control marker (e.g. `BUTTON('OK'),USE(?)`); `?Name` is a named
     // field equate. Compound `?Prefix:Suffix` names (#174) are captured as ONE

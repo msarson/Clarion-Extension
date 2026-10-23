@@ -33,6 +33,7 @@ All notable changes to the Clarion Extension are documented here.
 - **The MEMO, BLOB, KEY and FILE data-type cards agree with the compiler, and INDEX has one.** A BLOB no longer shows a length, a MEMO's length is required, MEMO and BLOB list NAME and BINARY instead of EXTERNAL and DLL and no longer claim to sit in the RECORD, and FILE lists DLL and OEM. [#750](https://github.com/msarson/Clarion-Extension/issues/750)
 - **A control with a numeric picture is read correctly.** `ENTRY(@n5)` showed as `ENTRY(@n5))` in the outline and breadcrumbs, and its card listed none of the attributes it sets: the picture took the control's closing bracket. [#744](https://github.com/msarson/Clarion-Extension/issues/744)
 - **Hover and Go to Definition work on `SELF.InterfaceName`.** In a class that IMPLEMENTS an interface, `SELF.IHasProgress` names the class's own implementation of it. Hover showed nothing there and F12 went nowhere; both now go to the INTERFACE, including one an ancestor implements. [#773](https://github.com/msarson/Clarion-Extension/issues/773)
+- **Untyped variable-parameters keep their `*` in the outline, and `?` and `*?` have hover cards.** A prototype such as `memcpy(*?, *?, UNSIGNED),*?` showed `(?, ?, UNSIGNED), ?`, but `*?` (passed by address) and `?` (passed by value) are different types. [#772](https://github.com/msarson/Clarion-Extension/issues/772)
 
 #### Diagnostics
 
