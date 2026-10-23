@@ -12,7 +12,7 @@
 import { tokensWithPrefix, includeTokens } from '../utils/TokenIndexes';
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Token, TokenType } from '../ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
 import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
@@ -530,6 +530,13 @@ export class MemberLocatorService {
         if (fromHierarchy) {
             this.trace(`findMemberInClass hit parent chain file="${fromHierarchy.file}" line=${fromHierarchy.line}`);
             return fromHierarchy;
+        }
+
+        // #773: SELF.IHasProgress names the class's own implementation of an interface it implements
+        const implemented = await this.findImplementedInterface(className, memberName, document, docPath);
+        if (implemented) {
+            this.trace(`findMemberInClass hit IMPLEMENTS interface file="${implemented.file}" line=${implemented.line}`);
+            return implemented;
         }
 
         const ownerClass = this.deriveOwnerClassFromMethodName(className, document);
@@ -1435,6 +1442,60 @@ export class MemberLocatorService {
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;
+    }
+
+    /**
+     * #773 — `memberName` is an interface named in IMPLEMENTS on the class or one of its ancestors:
+     * `SELF.IHasProgress` is the class's implementation of IHasProgress. Resolves to the INTERFACE
+     * declaration: from the index, else the implementing class's file, else the current document.
+     */
+    private async findImplementedInterface(className: string, memberName: string, document: TextDocument, docPath: string): Promise<MemberInfo | null> {
+        const wanted = memberName.toLowerCase();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info) return null;
+            const header = this.declarationHeader(info);
+            const names = [...header.matchAll(/\bIMPLEMENTS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/gi)].map(m => m[1]);
+            const iface = names.find(n => n.toLowerCase() === wanted);
+            if (!iface) continue;
+
+            await this.ensureIndexBuilt();
+            const indexed = this.sdi.findFor(iface, docPath).find(d => d.structureType === 'INTERFACE');
+            const found = indexed
+                ?? this.interfaceDeclarationIn(iface, info.filePath)
+                ?? this.interfaceDeclarationIn(iface, docPath, document.getText());
+            if (!found) return null;
+            return {
+                type: 'INTERFACE', className: iface, line: found.line, file: `file:///${found.filePath.replace(/\\/g, '/')}`,
+                signature: found.lineContent.trim(), isInterface: true, structureType: 'INTERFACE'
+            };
+        }
+        return null;
+    }
+
+    /** #773 — a declaration's first line and its `|` continuation lines, joined. */
+    private declarationHeader(info: StructureDeclarationInfo): string {
+        // every miss asks: read the file only when the first line can lead to an IMPLEMENTS
+        if (!ClarionTokenizer.endsWithContinuation(info.lineContent)) return info.lineContent;
+        let lines: string[];
+        try { lines = fs.readFileSync(info.filePath, 'utf-8').split(/\r?\n/); } catch { return info.lineContent; }
+        const parts: string[] = [];
+        for (let i = info.line; i < lines.length; i++) {
+            parts.push(lines[i]);
+            if (!ClarionTokenizer.endsWithContinuation(lines[i])) break;
+        }
+        return parts.join(' ').replace(/\|/g, ' ');
+    }
+
+    /** #773 — `Name INTERFACE` declared in the file (its text, or read from disk). */
+    private interfaceDeclarationIn(name: string, filePath: string, text?: string): { filePath: string; line: number; lineContent: string } | null {
+        let content = text;
+        if (content === undefined) {
+            try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return null; }
+        }
+        const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+INTERFACE\\b`, 'i');
+        const lines = content.split(/\r?\n/);
+        const line = lines.findIndex(l => pattern.test(l));
+        return line < 0 ? null : { filePath, line, lineContent: lines[line] };
     }
 
     private async collectImplementedInterfaceMethodsUpChain(

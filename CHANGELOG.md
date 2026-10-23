@@ -32,6 +32,7 @@ All notable changes to the Clarion Extension are documented here.
 - **A parameter's card names the procedure that declares it.** The line linking to the declaration read `PROCEDURE, file:line` for every parameter; it now reads `Compute, file:line`, or `Counter.Add, …` in a method. [#755](https://github.com/msarson/Clarion-Extension/pull/755) @geircodes
 - **The MEMO, BLOB, KEY and FILE data-type cards agree with the compiler, and INDEX has one.** A BLOB no longer shows a length, a MEMO's length is required, MEMO and BLOB list NAME and BINARY instead of EXTERNAL and DLL and no longer claim to sit in the RECORD, and FILE lists DLL and OEM. [#750](https://github.com/msarson/Clarion-Extension/issues/750)
 - **A control with a numeric picture is read correctly.** `ENTRY(@n5)` showed as `ENTRY(@n5))` in the outline and breadcrumbs, and its card listed none of the attributes it sets: the picture took the control's closing bracket. [#744](https://github.com/msarson/Clarion-Extension/issues/744)
+- **Hover and Go to Definition work on `SELF.InterfaceName`.** In a class that IMPLEMENTS an interface, `SELF.IHasProgress` names the class's own implementation of it. Hover showed nothing there and F12 went nowhere; both now go to the INTERFACE, including one an ancestor implements. [#773](https://github.com/msarson/Clarion-Extension/issues/773)
 
 #### Diagnostics
 
