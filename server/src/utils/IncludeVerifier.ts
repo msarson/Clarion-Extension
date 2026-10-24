@@ -382,11 +382,19 @@ export class IncludeVerifier {
         fingerprint: string
     ): Promise<Set<string>> {
         const disk = loadIncludeIndex<string[]>('reachableset', baseFilePath.toLowerCase());
-        if (disk && await includeIndexFresh(disk, fingerprint)) {
+        if (disk && await includeIndexFresh(disk, fingerprint) && !(await this.anyNowResolves(disk.unresolved, baseFilePath))) {
             this.reachableSetDiskReuseCount++;
             return new Set(disk.payload);
         }
         return this.buildReachableIncludeNameSet(directIncludes, baseFilePath, fingerprint);
+    }
+
+    /** #770 — an include that did not resolve when the set was built resolves now. */
+    private async anyNowResolves(unresolved: Array<{ fileName: string; baseDir: string }> | undefined, baseFilePath: string): Promise<boolean> {
+        for (const u of unresolved ?? []) {
+            if (await this.resolveIncludePath(u.fileName, u.baseDir, baseFilePath)) return true;
+        }
+        return false;
     }
 
     private async buildReachableIncludeNameSet(
@@ -399,6 +407,7 @@ export class IncludeVerifier {
         // #366: every chain file walked + its mtime, so a warm start can validate and
         // reuse the persisted set instead of re-walking the include universe.
         const contributing = new Map<string, number>();
+        const unresolved: Array<{ fileName: string; baseDir: string }> = [];
         const baseDir = path.dirname(baseFilePath);
         const visited = new Set<string>();
         const queue: Array<{ fileName: string; baseDir: string }> = directIncludes.map(inc => ({ fileName: inc.fileName, baseDir }));
@@ -420,7 +429,10 @@ export class IncludeVerifier {
             // #329: the whole chain resolves through the ROOT file's project —
             // redirection follows the compile unit, not each intermediate file.
             const incPath = await this.resolveIncludePath(fileName, dir, baseFilePath);
-            if (!incPath) continue;
+            if (!incPath) {
+                unresolved.push({ fileName, baseDir: dir }); // #770
+                continue;
+            }
             // #366: record this contributing file + mtime for the disk cache's drift check.
             try { contributing.set(incPath, (await fs.promises.stat(incPath)).mtimeMs); } catch { /* unreadable → skip */ }
 
@@ -442,6 +454,7 @@ export class IncludeVerifier {
                 signature: fingerprint,
                 contributing: Object.fromEntries(contributing),
                 payload: [...set],
+                unresolved,
             });
         }
 

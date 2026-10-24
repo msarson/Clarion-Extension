@@ -679,7 +679,7 @@ export class MethodOverloadResolver {
      * duplicates by comparing pre- and post-normalization shapes.
      */
     private extractParameterTypes(signature: string, applyComplexRefNormalization: boolean = true): string[] {
-        const match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
+        const match = ClarionPatterns.matchPrototypeParams(signature);
         if (!match) return [];
 
         const paramList = match[1].trim();
@@ -773,9 +773,10 @@ export class MethodOverloadResolver {
         // Rule 6 (#121): `*` is implicit for complex types — `*Foo` ≡ `Foo` when Foo
         // is NOT scalar. Scalar `*X` ≠ `X` discriminator preserved (rule 4).
         // Skip when caller needs raw form (isComplexRefDuplicate rule-2/rule-3 disambiguation).
+        // `*?` is an untyped reference, not a complex type: it keeps its `*` (#761).
         if (applyComplexRefNormalization && result.startsWith('*')) {
             const base = result.slice(1).trim();
-            if (base && !this.isStringType(base) && !this.isNumericType(base)) {
+            if (base && base !== '?' && !this.isStringType(base) && !this.isNumericType(base)) {
                 return base;
             }
         }
@@ -889,18 +890,19 @@ export class MethodOverloadResolver {
      *   - Any position pair has a non-scalar type (complex types like
      *     classes/groups/queues are distinguishable per rule 6 + Mark's
      *     `SetValue(StringTheory)` distinguisher).
-     *   - Any position pair has a reference marker (`*LONG`, `*STRING`) —
+     *   - Any position pair has a reference marker (`*LONG`, `*STRING`, `*?`) —
      *     the fe254d6f scalar by-ref discriminator distinguishes those.
+     *
+     * The untyped value parameter `?` counts as scalar: `P(?)` / `P(LONG)` is rejected
+     * by the compiler, while `P(*?)` / `P(LONG)` builds (Clarion 10 and 12, #761).
      */
     public areScalarPair(sigA: string, sigB: string): boolean {
         const typesA = this.extractParameterTypes(sigA);
         const typesB = this.extractParameterTypes(sigB);
         if (typesA.length === 0 || typesA.length !== typesB.length) return false;
+        const isScalar = (t: string) => t === '?' || this.isStringType(t) || this.isNumericType(t);
         for (let i = 0; i < typesA.length; i++) {
-            const a = typesA[i];
-            const b = typesB[i];
-            if (!(this.isStringType(a) || this.isNumericType(a))) return false;
-            if (!(this.isStringType(b) || this.isNumericType(b))) return false;
+            if (!isScalar(typesA[i]) || !isScalar(typesB[i])) return false;
         }
         return true;
     }

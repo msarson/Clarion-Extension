@@ -15,6 +15,8 @@ import LoggerManager from '../utils/LoggerManager';
 import { readActiveConfigFromSlnCache } from '../utils/SlnCacheUtils';
 import { chooseConfiguration, explicitConfigurationFor, configurationAtLoad } from '../utils/ConfigurationPrecedence';
 import { readIdePreferences, pushConfigurationToIde } from './ClarionIdePreferences'; // #664
+import { solutionDialogStartFolder } from './SolutionDialogStart'; // #762
+import { SmartSolutionOpener } from '../utils/SmartSolutionOpener'; // #780
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -27,9 +29,10 @@ logger.setLevel("error");
  * (or falls back to the folder itself), saves the solution to global history so it
  * survives the reload, then opens the target workspace/folder.
  *
- * @returns true if a folder/workspace switch was initiated (caller must return — VS Code
- *          will reload and re-activate the extension), false if the solution is already
- *          in the current workspace (caller should proceed with normal initialization).
+ * @returns true if a folder/workspace switch was initiated or the user cancelled choosing its
+ *          version (caller must return — VS Code will reload and re-activate the extension),
+ *          false if the solution is already in the current workspace (caller should proceed
+ *          with normal initialization).
  */
 async function switchToSolutionWorkspaceIfNeeded(
     solutionFilePath: string,
@@ -48,14 +51,24 @@ async function switchToSolutionWorkspaceIfNeeded(
 
     logger.info(`🔄 Solution is in a different folder: ${solutionFolder} (current: ${currentFolderNorm || 'none'})`);
 
+    // #780 — the history entry is all the restarted window has to load the solution with. It used
+    // to fall back to the current solution's globals, recording another solution's version and
+    // configuration for this one. Without explicit settings, choose them for this solution now.
+    const selection = propertiesFile && version
+        ? { propertiesFile, version, configuration: configuration ?? '' }
+        : await SmartSolutionOpener.selectionForFolderSwitch(solutionFilePath);
+    if (!selection) {
+        window.showInformationMessage("Solution selection canceled.");
+        return true; // nothing to switch to; the caller stops
+    }
+
     // Save to global history BEFORE switching so it's remembered after the reload.
-    // Prefer explicitly-passed settings; fall back to current globals.
     await GlobalSolutionHistory.addSolution(
         solutionFilePath,
         solutionFolder,
-        propertiesFile ?? globalClarionPropertiesFile ?? undefined,
-        version ?? globalClarionVersion ?? undefined,
-        configuration ?? globalSettings.configuration ?? undefined
+        selection.propertiesFile,
+        selection.version,
+        selection.configuration || undefined
     );
     logger.info(`✅ Saved solution to global history before folder switch`);
 
@@ -180,6 +193,15 @@ export async function openSolutionFromList(
     }
 }
 
+/** #762 — the Open Solution dialog's start folder, not the active editor's (a project's SRC). */
+async function solutionDialogDefaultUri(): Promise<Uri | undefined> {
+    const folder = solutionDialogStartFolder(
+        globalSolutionFile || undefined,
+        await GlobalSolutionHistory.getReferences(),
+        workspace.workspaceFolders?.[0]?.uri.fsPath);
+    return folder ? Uri.file(folder) : undefined;
+}
+
 /**
  * Opens a Clarion solution with full configuration
  * @param context - Extension context
@@ -208,6 +230,7 @@ export async function openClarionSolution(
         // ✅ If no folder is open, let user pick solution and we'll open its folder
         if (!workspace.workspaceFolders) {
             const solutionUris = await window.showOpenDialog({
+                defaultUri: await solutionDialogDefaultUri(),
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
@@ -223,16 +246,25 @@ export async function openClarionSolution(
             const solutionPath = solutionUris[0].fsPath;
             const solutionFolder = path.dirname(solutionPath);
             
+            // #780 — pick the version now: recorded without one, the restarted window could not
+            // load the solution and opened as a plain folder.
+            const selection = await SmartSolutionOpener.selectionForFolderSwitch(solutionPath);
+            if (!selection) {
+                window.showInformationMessage("Solution selection canceled.");
+                return;
+            }
+
             // ✅ Add to global history BEFORE opening folder so it's remembered after reload
-            await GlobalSolutionHistory.addSolution(solutionPath, solutionFolder);
+            await GlobalSolutionHistory.addSolution(solutionPath, solutionFolder,
+                selection.propertiesFile, selection.version, selection.configuration);
             logger.info(`✅ Added solution to global history before opening folder`);
-            
+
             // Open the folder containing the solution
             logger.info(`📂 Opening folder: ${solutionFolder}`);
             await commands.executeCommand('vscode.openFolder', Uri.file(solutionFolder), false);
-            
-            // VS Code will reload with the folder open, and the extension will activate
-            // The solution will be detected and shown in the solution view
+
+            // VS Code will reload with the folder open, and the extension will activate and
+            // restore the solution from the history entry.
             return;
         }
 
@@ -321,6 +353,7 @@ export async function openClarionSolution(
         
         // Ask the user to select a new .sln file
         const selectedFileUri = await vscodeWindow.showOpenDialog({
+            defaultUri: await solutionDialogDefaultUri(),
             canSelectFiles: true,
             canSelectFolders: false,
             openLabel: "Select Clarion Solution (.sln)",
@@ -336,8 +369,8 @@ export async function openClarionSolution(
         solutionFilePath = selectedFileUri[0].fsPath;
         logger.info(`📂 Selected new Clarion solution: ${solutionFilePath}`);
 
-        // If the solution is in a different folder/workspace, switch to it and reload.
-        // Settings (properties file, version) will be prompted again after the reload.
+        // If the solution is in a different folder/workspace, switch to it and reload, with the
+        // version and configuration chosen for it first (#780).
         if (await switchToSolutionWorkspaceIfNeeded(solutionFilePath)) {
             return; // VS Code is reloading with the new workspace
         }

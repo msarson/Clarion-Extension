@@ -160,7 +160,10 @@ export function registeredVersionNamesFromXml(xml: string): string[] {
         if (depth === 1) {
             const nameAttr = /\bname="([^"]+)"/.exec(m[1] ?? '');
             const name = nameAttr?.[1];
-            if (name && /^Clarion\b/i.test(name) && !/^Clarion\.NET\b/i.test(name) && !names.includes(name)) names.push(name);
+            // #764: every entry but Clarion.NET, the loader's rule (ClarionInstallationDetector
+            // .parseCompilerVersions). Requiring a "Clarion" prefix dropped custom-named
+            // versions, so a solution remembering one read as stale.
+            if (name && !name.includes('Clarion.NET') && !names.includes(name)) names.push(name);
         }
         if (!selfClosing) depth++;
     }

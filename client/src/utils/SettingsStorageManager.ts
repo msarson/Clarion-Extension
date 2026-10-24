@@ -1,4 +1,4 @@
-import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext, WorkspaceConfiguration } from 'vscode';
+import { workspace, ConfigurationTarget, window, WorkspaceFolder, ExtensionContext, WorkspaceConfiguration, Uri } from 'vscode';
 import { ClarionSettingsStore, SettingsWriteTarget, saveActiveConfiguration, saveSolutionSelection, sameSolutionFile, targetForKey, clearSolutionSetting, removeSolutionEntry } from './SolutionSettingsScope';
 import LoggerManager from './LoggerManager';
 import { ClarionSolutionSettings } from '../globals';
@@ -9,7 +9,10 @@ import {
     withRecordedVersion,
     withoutRecordedVersion,
 } from './SolutionVersionMemory';
+import { settingsSaveFailureNotice } from './SettingsSaveFailure';
+import { GlobalSolutionHistory } from './GlobalSolutionHistory';
 import * as path from 'path';
+import * as fs from 'fs';
 
 const logger = LoggerManager.getLogger("SettingsStorageManager");
 logger.setLevel("error"); // Production: Only log errors
@@ -151,7 +154,6 @@ export class SettingsStorageManager {
                 .some(key => targetForKey(store, key) === 'WorkspaceFolder');
             if (headedForFolder) {
                 const vscodeDir = path.join(workspaceFolder, '.vscode');
-                const fs = require('fs');
                 if (!fs.existsSync(vscodeDir)) {
                     fs.mkdirSync(vscodeDir, { recursive: true });
                     logger.info(`✅ Created .vscode directory: ${vscodeDir}`);
@@ -185,11 +187,27 @@ export class SettingsStorageManager {
                 - version: ${version}
                 - configuration: ${configuration}`);
 
+            await GlobalSolutionHistory.markSettingsSaved(solutionFile); // #768
             return true;
         } catch (error) {
             logger.error("❌ Error saving solution settings:", error);
             const errorMsg = error instanceof Error ? error.message : String(error);
-            window.showErrorMessage(`Failed to save solution settings: ${errorMsg}`);
+            const folder = workspace.workspaceFolders?.[0]?.uri.fsPath;
+            // #768 — the folder can't hold the selection, so the extension's own history does,
+            // until a save succeeds: the folder reopens it and the next open doesn't ask again.
+            try {
+                await GlobalSolutionHistory.addSolution(solutionFile, folder ?? path.dirname(solutionFile), propertiesFile, version, configuration, true);
+            } catch (historyError) {
+                logger.error("❌ Error remembering unsaved solution settings:", historyError);
+            }
+            // #767 — not awaited: the solution goes on opening while the notice is up.
+            const notice = settingsSaveFailureNotice(solutionFile, folder, errorMsg, fs.existsSync);
+            const openFile = 'Open settings.json';
+            void window.showWarningMessage(notice.message, ...(notice.settingsFile ? [openFile] : [])).then(choice => {
+                if (choice === openFile && notice.settingsFile) {
+                    void window.showTextDocument(Uri.file(notice.settingsFile));
+                }
+            });
             return false;
         }
     }

@@ -230,12 +230,6 @@
       "category": "Operator"
     },
     {
-      "name": "BNOT",
-      "syntax": "BNOT expr",
-      "description": "Bitwise NOT operator. Returns an integer with every bit of the operand inverted (one's complement).",
-      "category": "Operator"
-    },
-    {
       "name": "BSHIFT",
       "syntax": "BSHIFT(value, count)",
       "description": "Bitwise shift operator. Positive count shifts left; negative count shifts right. Result is an integer of the same width as value.",

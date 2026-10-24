@@ -12,15 +12,16 @@
 import { tokensWithPrefix, includeTokens } from '../utils/TokenIndexes';
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { Token, TokenType } from '../ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
 import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
 import { TokenCache } from '../TokenCache';
+import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration } from '../utils/ClassMemberScan';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations } from '../utils/ClassMemberScan';
 import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -390,6 +391,9 @@ export class MemberLocatorService {
 
         const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
         if (inBody) return inBody;
+        // #779: `SELF.IFace` in a chain names the INTERFACE the class implements, as in the tiers (#773)
+        const implemented = await this.findImplementedInterface(className, memberName, document, docPath);
+        if (implemented) return implemented;
         const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
         const parent = extractParentName(declLine);
         return parent ? this.findMemberInClass(parent, memberName, document, paramCount) : null;
@@ -529,6 +533,13 @@ export class MemberLocatorService {
         if (fromHierarchy) {
             this.trace(`findMemberInClass hit parent chain file="${fromHierarchy.file}" line=${fromHierarchy.line}`);
             return fromHierarchy;
+        }
+
+        // #773: SELF.IHasProgress names the class's own implementation of an interface it implements
+        const implemented = await this.findImplementedInterface(className, memberName, document, docPath);
+        if (implemented) {
+            this.trace(`findMemberInClass hit IMPLEMENTS interface file="${implemented.file}" line=${implemented.line}`);
+            return implemented;
         }
 
         const ownerClass = this.deriveOwnerClassFromMethodName(className, document);
@@ -671,10 +682,18 @@ export class MemberLocatorService {
         const infos = this.sdi.findFor(typeName, fromFile); // #571
         if (infos.length === 0) return null;
 
+        // Visibility ranks first: the project index holds every include file in the folder, so a
+        // stray copy of a dictionary include that nothing compiles sits in the SAME directory as
+        // the real one, and the directory tiebreak below cannot tell them apart. Only the order
+        // changes - with nothing known to be visible, the tiebreak decides as before.
+        const frg = fromFile ? FileRelationshipGraph.getInstance() : undefined;
+        const visible = frg && fromFile ? infos.filter(d => frg.isDeclarationVisibleFrom(d.filePath, fromFile)) : [];
+        const candidates = visible.length > 0 ? visible : infos;
+
         const preferred = preferDir
-            ? infos.find(d => path.dirname(d.filePath).toLowerCase() === preferDir.toLowerCase())
+            ? candidates.find(d => path.dirname(d.filePath).toLowerCase() === preferDir.toLowerCase())
             : undefined;
-        const info = preferred ?? infos.find(d => !d.isType) ?? infos[0];
+        const info = preferred ?? candidates.find(d => !d.isType) ?? candidates[0];
 
         const loaded = await this.loadDocument(info.filePath);
         if (!loaded) return null;
@@ -1428,6 +1447,60 @@ export class MemberLocatorService {
         return impls;
     }
 
+    /**
+     * #773 — `memberName` is an interface named in IMPLEMENTS on the class or one of its ancestors:
+     * `SELF.IHasProgress` is the class's implementation of IHasProgress. Resolves to the INTERFACE
+     * declaration: from the index, else the implementing class's file, else the current document.
+     */
+    private async findImplementedInterface(className: string, memberName: string, document: TextDocument, docPath: string): Promise<MemberInfo | null> {
+        const wanted = memberName.toLowerCase();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info) return null;
+            const header = this.declarationHeader(info);
+            const names = [...header.matchAll(/\bIMPLEMENTS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/gi)].map(m => m[1]);
+            const iface = names.find(n => n.toLowerCase() === wanted);
+            if (!iface) continue;
+
+            await this.ensureIndexBuilt();
+            const indexed = this.sdi.findFor(iface, docPath).find(d => d.structureType === 'INTERFACE');
+            const found = indexed
+                ?? this.interfaceDeclarationIn(iface, info.filePath)
+                ?? this.interfaceDeclarationIn(iface, docPath, document.getText());
+            if (!found) return null;
+            return {
+                type: 'INTERFACE', className: iface, line: found.line, file: `file:///${found.filePath.replace(/\\/g, '/')}`,
+                signature: found.lineContent.trim(), isInterface: true, structureType: 'INTERFACE'
+            };
+        }
+        return null;
+    }
+
+    /** #773 — a declaration's first line and its `|` continuation lines, joined. */
+    private declarationHeader(info: StructureDeclarationInfo): string {
+        // every miss asks: read the file only when the first line can lead to an IMPLEMENTS
+        if (!ClarionTokenizer.endsWithContinuation(info.lineContent)) return info.lineContent;
+        let lines: string[];
+        try { lines = fs.readFileSync(info.filePath, 'utf-8').split(/\r?\n/); } catch { return info.lineContent; }
+        const parts: string[] = [];
+        for (let i = info.line; i < lines.length; i++) {
+            parts.push(lines[i]);
+            if (!ClarionTokenizer.endsWithContinuation(lines[i])) break;
+        }
+        return parts.join(' ').replace(/\|/g, ' ');
+    }
+
+    /** #773 — `Name INTERFACE` declared in the file (its text, or read from disk). */
+    private interfaceDeclarationIn(name: string, filePath: string, text?: string): { filePath: string; line: number; lineContent: string } | null {
+        let content = text;
+        if (content === undefined) {
+            try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return null; }
+        }
+        const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+INTERFACE\\b`, 'i');
+        const lines = content.split(/\r?\n/);
+        const line = lines.findIndex(l => pattern.test(l));
+        return line < 0 ? null : { filePath, line, lineContent: lines[line] };
+    }
+
     private async collectImplementedInterfaceMethodsUpChain(
         className: string,
         document: TextDocument,
@@ -1812,7 +1885,7 @@ export class MemberLocatorService {
         doc: TextDocument,
         className: string,
         filePath: string,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE' = 'CLASS'
     ): MemberEnumItem[] {
         const classToken = tokens.find(t =>
             t.type === TokenType.Structure &&
@@ -1823,11 +1896,17 @@ export class MemberLocatorService {
         if (!classToken || classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
+        // A FILE keeps its fields inside its own RECORD, so for a FILE the RECORD is transparent:
+        // its fields are members (`File.Field`), as is the record itself (`File.Record`).
+        const isFileRecord = (t: Token): boolean =>
+            structureType === 'FILE' && t.value.toUpperCase() === 'RECORD';
+
         // Ranges of nested GROUP/QUEUE/RECORD structures inside this class — skip their contents
         const nestedRanges = tokens
             .filter(t =>
                 t.type === TokenType.Structure &&
                 ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                !isFileRecord(t) &&
                 t.finishesAt !== undefined &&
                 t.line > classToken.line &&
                 t.line < classEnd
@@ -1851,13 +1930,17 @@ export class MemberLocatorService {
             if (isInsideNested(token.line)) continue;
             if (seenLines.has(token.line)) continue;
 
+            // #778: a line continuing the one above (`|`) is the rest of a prototype, not a member
+            if (token.line > 0 && ClarionTokenizer.endsWithContinuation(docLines[token.line - 1] ?? '')) continue;
+
             const raw = docLines[token.line] ?? '';
             const memberMatch = raw.match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/);
             if (!memberMatch) continue;
             seenLines.add(token.line);
 
             const name = memberMatch[1];
-            const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+            const declMatch = withContinuations(docLines, token.line).match(/^\s*([A-Za-z_][\w:]*)\s+(.+?)(\s*!.*)?$/) ?? memberMatch;
+            const typeStr = (declMatch[2] || '').replace(/!.*$/, '').trim();
             const access = detectMemberAccess(raw);
             const kind: 'method' | 'property' = /^(?:PROCEDURE|FUNCTION)\b/i.test(typeStr) ? 'method' : 'property'; // #247
 
@@ -1918,13 +2001,19 @@ export class MemberLocatorService {
             if (token.type !== TokenType.Label && token.type !== TokenType.Variable) continue;
             if (token.value.toLowerCase() !== memberName.toLowerCase()) continue;
             if (isInsideNested(token.line)) continue;
+            // #778: a line continuing the one above (`|`) is the rest of a prototype, not a member
+            if (token.line > 0 && ClarionTokenizer.endsWithContinuation(docLines[token.line - 1] ?? '')) continue;
 
             const memberLine = docLines[token.line] ?? '';
-            const afterMember = memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart();
+            // #778: a prototype continued with `|` is read whole
+            const decl = withContinuations(docLines, token.line);
+            const afterMember = decl === memberLine
+                ? memberLine.substring(Math.max(0, token.start + token.value.length)).trimStart()
+                : decl.replace(/^\s*[A-Za-z_][\w:]*\s+/, '');
             const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
             let declParamCount = 0;
             if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                declParamCount = countParametersInDeclaration(memberLine);
+                declParamCount = countParametersInDeclaration(decl);
             }
             candidates.push({ type, line: token.line, paramCount: declParamCount, signature: memberLine.trim() });
         }
@@ -2260,7 +2349,15 @@ export class MemberLocatorService {
         // keep the scoped chain walk so the closest declaration wins; several copies of the
         // same filename are resolved in redirection order — see the branch below.
         await this.ensureIndexBuilt();
-        const infos = this.sdi.findFor(className, docPath); // #571
+        const indexed = this.sdi.findFor(className, docPath); // #571
+        // #732: with several declaring files, the ones the document can reach (itself, or its
+        // PROGRAM) are the ones the compiler sees - as resolveSdiDeclaration ranks them for hover
+        // and F12 (#728). A stray copy of an include that nothing compiles drops out; with nothing
+        // known to be visible, every declaration stays a candidate as before.
+        const visible = indexed.length > 1
+            ? indexed.filter(d => FileRelationshipGraph.getInstance().isDeclarationVisibleFrom(d.filePath, docPath))
+            : [];
+        const infos = visible.length > 0 ? visible : indexed;
         const distinctFiles = new Set(infos.map(d => d.filePath.toLowerCase()));
         if (distinctFiles.size === 1) {
             const fromSdi = await this.enumerateMembersFromSdiInfo(infos, className);
@@ -2325,7 +2422,7 @@ export class MemberLocatorService {
         const info = infos.find(d => !d.isType) || infos[0];
         const indexedData = await this.loadDocument(info.filePath);
         if (indexedData) {
-            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);
+            const indexedMembers = this.extractMembersFromTokens(indexedData.tokens, indexedData.doc, className, info.filePath, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | 'FILE' | undefined);
             if (indexedMembers.length > 0) return indexedMembers;
         }
         return scanClassBodyForAllMembers(info.filePath, className, info.structureType as 'CLASS' | 'GROUP' | 'QUEUE' | undefined);

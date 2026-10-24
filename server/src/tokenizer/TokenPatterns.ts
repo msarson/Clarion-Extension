@@ -66,7 +66,8 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // EndStatement is ordered after Number, and `obj.field` still fails the lookahead.
     [TokenType.EndStatement]: /^\s*(END)\b|^\s*(\.)(?=[\s;.!]|$)|(\.)(?=[\s;.!]|$)/i,
     [TokenType.FunctionArgumentParameter]: /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/i,  // Captures anything inside ()
-    [TokenType.PointerParameter]: /\*\s*\b[A-Za-z_][A-Za-z0-9_]*\b/i,
+    // #772: `*?` is the untyped variable-parameter; `?` followed by a name is a field equate
+    [TokenType.PointerParameter]: /\*\s*(?:\b[A-Za-z_][A-Za-z0-9_]*\b|\?(?![A-Za-z_]))/i,
     // FieldEquateLabel — `?` followed by an optional identifier. Bare `?` is the
     // anonymous-control marker (e.g. `BUTTON('OK'),USE(?)`); `?Name` is a named
     // field equate. Compound `?Prefix:Suffix` names (#174) are captured as ONE
@@ -80,7 +81,9 @@ export const tokenPatterns: Partial<Record<TokenType, RegExp>> = {
     // ✅ ELSE, ELSIF, OF, OROF should not match after : or . (though unlikely, be safe)
     [TokenType.ConditionalContinuation]: /(?<![:\w.])\b(?:ELSE|ELSIF|OROF|OF)\b/i,  // ✅ OROF must come before OF to match correctly
     [TokenType.Keyword]: /(?<![:\w.])\b(?:RETURN|THEN|UNTIL|WHILE|EXIT|NEW|PROCEDURE|FUNCTION|ROUTINE|PROC|BREAK|CYCLE|KEY)\b/i, // ✅ Added negative lookbehind and FUNCTION
-    [TokenType.PictureFormat]: /(@N[^\s,]*|@[Ee][^\s,]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
+    // #744: a numeric picture keeps its own brackets (@N(10.2), negative in brackets) but stops at
+    // a closing one it did not open: in ENTRY(@n5) that bracket is the control's.
+    [TokenType.PictureFormat]: /(@N(?:[^\s,()]|\([^\s,()]*\)?)*|@[Ee][^\s,()]*|@S\d+|@D\d{1,2}[.\-_'`<>]?\d{0,2}B?|@T\d{1,2}[.\-_'`]?[B]?|@[Pp][^Pp\n]+[Pp]B?|@[Kk][^Kk\n]+[Kk]B?)/i,
     [TokenType.ExecutionMarker]: /\b(?:CODE|DATA)\b/i,
     [TokenType.Type]: /\b(?:BYTE|SHORT|USHORT|LONG|ULONG|REAL|SREAL|DECIMAL|PDECIMAL|STRING|CSTRING|PSTRING|DATE|TIME|ASTRING|ANY|BSTRING|MEMO|SIGNED|UNSIGNED)(?=\(|\s|,|$)/i,
     [TokenType.TypeAnnotation]: /:\s*(?:byte|short|ushort|long|ulong|real|sreal|decimal|pdecimal|string|cstring|pstring|date|time)\b/i,

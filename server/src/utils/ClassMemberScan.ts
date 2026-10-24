@@ -16,6 +16,32 @@ import * as path from 'path';
 import { ClarionPatterns } from './ClarionPatterns';
 import { ProcedureUtils } from './ProcedureUtils';
 import { pathToCanonicalUri } from './UriUtils';
+import { ClarionTokenizer } from '../ClarionTokenizer';
+
+/**
+ * A member's declaration with its `|` continuation lines joined in (the `|` dropped), so a
+ * prototype such as `Init PROCEDURE(REAL pBasis, |` / `STRING pState),DERIVED` is read whole:
+ * from its first line alone the parameter list never closes and `REAL` reads as the return
+ * type (found with #778).
+ */
+export function withContinuations(lines: string[], k: number): string {
+    if (!ClarionTokenizer.endsWithContinuation(lines[k])) return lines[k];
+    const parts: string[] = [];
+    let l = k;
+    for (; l < lines.length && ClarionTokenizer.endsWithContinuation(lines[l]); l++) {
+        // endsWithContinuation: the last character before any comment (outside strings) is the `|`
+        let inString = false;
+        let end = lines[l].length;
+        for (let i = 0; i < lines[l].length; i++) {
+            const ch = lines[l][i];
+            if (ch === "'") inString = !inString;
+            else if (ch === '!' && !inString) { end = i; break; }
+        }
+        parts.push(lines[l].substring(0, end).trimEnd().slice(0, -1).trim());
+    }
+    if (l < lines.length) parts.push(lines[l].trim());
+    return parts.join(' ');
+}
 
 /**
  * The kind of structure a member was found in. Carried on MemberInfo so a
@@ -111,7 +137,8 @@ export function scanClassBodyForAllMembers(
                 if (!memberMatch) continue;
 
                 const name = memberMatch[1];
-                const typeStr = (memberMatch[2] || '').replace(/!.*$/, '').trim();
+                const declMatch = withContinuations(lines, k).match(/^(\w+)\s+(.+?)(\s*!.*)?$/) ?? memberMatch;
+                const typeStr = (declMatch[2] || '').replace(/!.*$/, '').trim();
                 const access = detectMemberAccess(raw);
                 // #247: PROCEDURE ≡ FUNCTION — both declare methods.
                 const kind: 'method' | 'property' = ProcedureUtils.startsWithProcedureKeyword(typeStr) ? 'method' : 'property';
@@ -199,11 +226,12 @@ export function scanClassBodyForMember(
 
                 const memberMatch = memberLine.match(new RegExp(`^\\s*(${memberName})\\s+`, 'i'));
                 if (memberMatch) {
-                    const afterMember = memberLine.substring(memberMatch[0].length).trim();
+                    const decl = withContinuations(lines, k); // a prototype continued with `|` (#778)
+                    const afterMember = decl.replace(/^\s*\w+\s+/, '').trim();
                     const type = (afterMember.split(/\s*!/).shift() || afterMember).trim() || 'Unknown';
                     let declParamCount = 0;
                     if (ProcedureUtils.startsWithProcedureKeyword(type)) { // #247: PROCEDURE ≡ FUNCTION
-                        declParamCount = countParamsInDecl(memberLine);
+                        declParamCount = countParamsInDecl(decl);
                     }
                     candidates.push({ type, line: k, paramCount: declParamCount, signature: memberLine.trim() });
                 }

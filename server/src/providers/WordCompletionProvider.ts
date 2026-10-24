@@ -884,8 +884,16 @@ export class WordCompletionProvider {
      * module found no PROGRAM at all and got none of its globals. Same rule as the hover and
      * definition paths (SymbolFinderService / MemberLocatorService.resolveMemberHeaderToken):
      * only the first statement is consulted, redirection first, bounded hops.
+     *
+     * A file with no MEMBER at all - an included class header or TYPE file - belongs to the
+     * PROGRAM of the modules that include it (FileRelationshipGraph.resolveProgramViaIncluders).
      */
     private resolveProgramPath(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
+        return this.resolveProgramViaMember(tokens, filePath, graph)
+            ?? graph.resolveProgramViaIncluders(filePath);
+    }
+
+    private resolveProgramViaMember(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
         const visited = new Set<string>();
         for (let hop = 0; hop <= WordCompletionProvider.MAX_SHIM_HOPS; hop++) {
             const raw = (graph.isBuilt ? graph.getProgramFile(filePath) : undefined)
@@ -1113,12 +1121,18 @@ export class WordCompletionProvider {
         'VIEW', 'WINDOW',
     ]);
 
-    /** Single-line keywords — no auto-insertion beyond the word itself. */
+    /**
+     * Single-line keywords — no auto-insertion beyond the word itself. A keyword typed in full
+     * must be on offer as itself, or a longer word (END: ENDPAGE, TO: TOOLBAR) sits first and
+     * Enter replaces what was typed (#747). Not here: TRY, CATCH, FINALLY and THROW (Clarion#
+     * only), FUNCTION (legacy).
+     */
     private static readonly PLAIN_KEYWORDS = [
-        'BREAK', 'CYCLE', 'EXIT', 'RETURN',
-        'CODE', 'DATA',
+        'BREAK', 'CYCLE', 'EXIT', 'RETURN', 'GOTO',
+        'CODE', 'DATA', 'END',
+        'PROGRAM', 'PROCEDURE', 'ROUTINE',
         'ELSE', 'ELSIF', 'OF', 'OROF', 'THEN', 'TIMES',
-        'UNTIL', 'WHILE',
+        'TO', 'BY', 'UNTIL', 'WHILE',
         'AND', 'NOT', 'OR', 'XOR',
         'NEW', 'PARENT', 'SELF',
     ];

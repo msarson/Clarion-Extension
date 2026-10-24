@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from './LoggerManager';
 import { PathUtils } from '../PathUtils';
+import { mergeReference } from './UnsavedSolutionSettings';
 
 const logger = LoggerManager.getLogger("GlobalSolutionHistory");
 logger.setLevel("error");
@@ -16,6 +17,9 @@ export interface SolutionReference {
     propertiesFile?: string;      // e.g., "C:\\...\\ClarionProperties.xml"
     version?: string;             // e.g., "Clarion11"
     configuration?: string;       // e.g., "Release"
+    // #768 — true when VS Code refused to write these settings to the folder's settings.json,
+    // so this entry is the only record of them; cleared by the next successful save.
+    settingsUnsaved?: boolean;
 }
 
 const MAX_RECENT_SOLUTIONS = 20;
@@ -34,14 +38,17 @@ export class GlobalSolutionHistory {
     /**
      * Add or update a solution reference in the global history.
      * Pass propertiesFile/version/configuration to persist full settings so they
-     * survive cross-workspace switches and can be restored on re-open.
+     * survive cross-workspace switches and can be restored on re-open. Settings left out
+     * keep what was stored (#768). `settingsUnsaved` marks a selection the folder's
+     * settings.json could not hold.
      */
     static async addSolution(
         solutionFile: string,
         folderPath: string,
         propertiesFile?: string,
         version?: string,
-        configuration?: string
+        configuration?: string,
+        settingsUnsaved?: boolean
     ): Promise<void> {
         if (!this.context) {
             logger.test("GlobalSolutionHistory not initialized");
@@ -57,11 +64,13 @@ export class GlobalSolutionHistory {
             lastOpened: new Date(),
             propertiesFile: propertiesFile || undefined,
             version: version || undefined,
-            configuration: configuration || undefined
+            configuration: configuration || undefined,
+            settingsUnsaved
         };
 
         // Get existing references
         const references = await this.getReferences();
+        const existing = references.find(ref => PathUtils.equalPath(ref.solutionFile, solutionFile));
 
         // Remove any existing reference to this solution (to update timestamp)
         const filtered = references.filter(ref =>
@@ -69,7 +78,7 @@ export class GlobalSolutionHistory {
         );
 
         // Add to the beginning (most recent first)
-        filtered.unshift(reference);
+        filtered.unshift(mergeReference(existing, reference));
 
         // Limit to MAX_RECENT_SOLUTIONS
         const limited = filtered.slice(0, MAX_RECENT_SOLUTIONS);
@@ -79,6 +88,19 @@ export class GlobalSolutionHistory {
         
         logger.info(`✅ Added solution to global history: ${solutionFile}`);
         logger.info(`📊 Total solutions in history: ${limited.length}`);
+    }
+
+    /**
+     * #768 — the folder's settings.json holds this solution's settings again: clear the
+     * flag. Leaves the entry's place and timestamp alone.
+     */
+    static async markSettingsSaved(solutionFile: string): Promise<void> {
+        if (!this.context) return;
+        const references = await this.getReferences();
+        if (!references.some(ref => ref.settingsUnsaved && PathUtils.equalPath(ref.solutionFile, solutionFile))) return;
+        await this.context.globalState.update(GLOBAL_STATE_KEY, references.map(ref =>
+            PathUtils.equalPath(ref.solutionFile, solutionFile) ? { ...ref, settingsUnsaved: undefined } : ref));
+        logger.info(`✅ Settings saved to the folder again: ${solutionFile}`);
     }
 
     /**

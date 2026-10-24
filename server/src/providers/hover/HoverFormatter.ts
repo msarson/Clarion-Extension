@@ -1,5 +1,5 @@
 import { Hover, Location } from 'vscode-languageserver-protocol';
-import { Token, TokenType } from '../../ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from '../../ClarionTokenizer';
 import { ScopeAnalyzer } from '../../utils/ScopeAnalyzer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../../TokenCache';
@@ -109,13 +109,14 @@ export class HoverFormatter {
      */
     formatParameter(name: string, info: ParameterInfo, scope: Token, documentUri?: string): Hover {
         // #617: the declaring PROCEDURE line as a link, like every other declaration card.
+        // The procedure is the scope token's label; its value is the PROCEDURE keyword itself.
         const where = documentUri ? this.locationLink(documentUri, info.line) : `line ${info.line + 1}`;
         const markdown = [
             `**Parameter:** \`${name}\``,
             ``,
             `**Type:** \`${info.type}\``,
             ``,
-            `${scope.value}, ${where}`
+            `${scope.label ?? scope.value}, ${where}`
         ].join('\n');
 
         return {
@@ -596,7 +597,14 @@ export class HoverFormatter {
                 declLocationStr = this.locationLink(mapDecl.uri, mapDecl.range.start.line);
 
                 if (mapLine && !isAtMapDeclaration) {
-                    parts.push(`\`\`\`clarion\n${mapLine.trim()}\n\`\`\``);
+                    // #775: a prototype continued with `|` shows every line, indented as written.
+                    const indent = mapLine.search(/\S/);
+                    const shown = [mapLine.trim()];
+                    for (let l = mapDecl.range.start.line; l + 1 < mapLines.length && ClarionTokenizer.endsWithContinuation(mapLines[l]); l++) {
+                        const next = mapLines[l + 1].replace(/\s+$/, '');
+                        shown.push(next.substring(Math.min(indent, next.search(/\S|$/))));
+                    }
+                    parts.push(`\`\`\`clarion\n${shown.join('\n')}\n\`\`\``);
                 }
             } catch (error) {
                 logger.error(`Error reading MAP declaration: ${error}`);
@@ -751,7 +759,7 @@ export class HoverFormatter {
     /**
      * Constructs hover information for a Clarion attribute with parameter count matching
      */
-    formatAttribute(attributeName: string, attribute: any, paramCount: number | null): Hover {
+    formatAttribute(attributeName: string, attribute: any, paramCount: number | null, controlType?: string | null): Hover {
         if (!attribute) {
             return {
                 contents: {
@@ -774,7 +782,9 @@ export class HoverFormatter {
 
         let content = `**Attribute: ${attribute.name}**\n\n`;
         
-        content += `${attribute.description}\n\n`;
+        // #777: an attribute that means something else on this control says so (COLOR on a BOX).
+        const onControl = controlType ? attribute.controlDescriptions?.[controlType.toUpperCase()] : undefined;
+        content += `${onControl ?? attribute.description}\n\n`;
         
         if (paramCount !== null && matchingSignatures.length < attribute.signatures.length) {
             content += `_Showing signature(s) matching ${paramCount} parameter(s)_\n\n`;

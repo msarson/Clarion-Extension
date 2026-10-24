@@ -4,8 +4,11 @@ import { Token, TokenType } from '../../ClarionTokenizer';
 import { DocumentStructure } from '../../DocumentStructure';
 import { AttributeService } from '../../utils/AttributeService';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs } from '../../utils/AttributeContextGuards';
+import { ControlService } from '../../utils/ControlService';
+import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
 
 const attributeService = AttributeService.getInstance();
+const controlService = ControlService.getInstance();
 
 /**
  * Controls that are unambiguously window/report elements (TokenType.WindowElement).
@@ -22,6 +25,23 @@ const VALIDATABLE_CONTROLS = new Set([
     'IMAGE', 'LINE', 'BOX', 'ELLIPSE', 'PANEL', 'PROGRESS',
     'REGION', 'PROMPT', 'SPIN', 'ITEM',
 ]);
+
+/**
+ * The lines below each WINDOW, APPLICATION and REPORT header, through its END: a `.`
+ * closing the structure on a control's line leaves that control inside. An unterminated
+ * structure (still being typed) runs to the end of the file. (#760)
+ */
+function windowOrReportBodies(tokens: Token[]): [number, number][] {
+    const bodies: [number, number][] = [];
+    for (const t of tokens) {
+        if (t.type !== TokenType.Structure) continue;
+        const kw = t.value.toUpperCase();
+        if (kw === 'WINDOW' || kw === 'APPLICATION' || kw === 'REPORT') {
+            bodies.push([t.line, t.finishesAt ?? Number.MAX_SAFE_INTEGER]);
+        }
+    }
+    return bodies;
+}
 
 /**
  * Warns when a known attribute is used on a control type that doesn't support it.
@@ -42,6 +62,8 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
         structure = new DocumentStructure(tokens);
         structure.process();
     }
+
+    let bodies: [number, number][] | undefined;
 
     // Index-based loop (not `for ... of`) so the #175 compound-label-suffix guard
     // can look at neighboring tokens in O(1) per check rather than O(N) per
@@ -150,6 +172,13 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
         const controlType = ctx.controlType.toUpperCase();
         if (!VALIDATABLE_CONTROLS.has(controlType)) continue; // Ambiguous context — skip
 
+        // A control is only declared inside a WINDOW, APPLICATION or REPORT. Elsewhere a
+        // control word opening its line is a prototype or method named like one, e.g.
+        // `BOX(SIGNED x,...),NAME('Cla$BOX')` in a MAP's MODULE. (#760)
+        bodies ??= windowOrReportBodies(tokens);
+        const controlLine = ctx.controlToken?.line ?? token.line;
+        if (!bodies.some(([start, end]) => controlLine > start && controlLine <= end)) continue;
+
         // Paren-nesting guard (shared with HoverRouter — see AttributeContextGuards.ts):
         // skip Attribute tokens that sit inside the argument parentheses of a
         // PRECEDING attribute in this same control's declaration — e.g. the `Filter`
@@ -180,6 +209,38 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
         });
     }
 
+    diagnostics.push(...validateHeaderAttributes(tokens, structure));
+    return diagnostics;
+}
+
+/**
+ * WINDOW/APPLICATION header lines have no control context, so the loop above never
+ * checks them. Check them against the structure's `attributes` list instead (a
+ * structure without one is not checked): the Clarion 11.1 compiler rejects
+ * `MyWindow WINDOW('T'),HIDE` with "unknown attribute HIDE". FILE, KEY, INDEX, MEMO and
+ * BLOB declarations are checked the same way (#746), including ENCRYPT without OWNER.
+ */
+function validateHeaderAttributes(tokens: Token[], structure: DocumentStructure): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    for (const token of tokens) {
+        const def = controlService.getDeclarationStructure(/^\w+/.exec(token.value)?.[0] ?? token.value);
+        if (!def?.attributes) continue;
+        const logical = structure.getLogicalLine(token.line);
+        if (!logical || !findDeclarationKeyword(logical, token.line, token.start)) continue;
+        for (const problem of findAttributeProblems(def, readDeclaredAttributes(logical, token))) {
+            const at = problem.attribute.token;
+            diagnostics.push({
+                severity: problem.alternative ? DiagnosticSeverity.Hint : DiagnosticSeverity.Warning, // #738
+                range: {
+                    start: { line: at.line, character: at.start },
+                    end: { line: at.line, character: at.start + at.value.length },
+                },
+                message: problem.message,
+                source: 'clarion',
+                code: problem.alternative ? 'alternative-attributes' : 'invalid-attribute-context',
+            });
+        }
+    }
     return diagnostics;
 }
 

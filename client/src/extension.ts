@@ -38,6 +38,7 @@ import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
 import * as SolutionInitializer from './solution/SolutionInitializer';
 import { setConfiguration } from './config/ConfigurationManager';
 import * as ActivationManager from './activation/ActivationManager';
+import { registerAttributeEditCommand } from './hover/AttributeEditCommand';
 // #273 — the initialization indicator is now a Clarion-scoped language status item driven by the
 // solution-load lifecycle (SolutionInitializer), not painted unconditionally on activation. So a
 // non-Clarion (or solution-free) folder shows nothing; per-file language features are unaffected.
@@ -71,6 +72,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
             if (shouldClearForTask({ name: t.name, source: t.source, groupId: t.group?.id })) buildResults.clear();
         })
     );
+
+    // #739 — the control card's attribute edit links run this command.
+    registerAttributeEditCommand(context);
 
     // Route all client-side logger output to the Output window
     const clientOutputChannel = window.createOutputChannel("Clarion Extension (Client)");

@@ -6,6 +6,8 @@ import { ClarionExtensionCommands } from './ClarionExtensionCommands';
 import LoggerManager from './utils/LoggerManager';
 import * as path from 'path';
 import { SettingsStorageManager } from './utils/SettingsStorageManager';
+import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
+import { unsavedSolutionForFolder } from './utils/UnsavedSolutionSettings';
 const logger = LoggerManager.getLogger("Globals");
 logger.setLevel("error");
 
@@ -597,6 +599,20 @@ export const globalSettings = {
             clarionPropertiesFile = solution.propertiesFile;
             clarionVersion = solution.version;
             clarionConfiguration = solution.configuration;
+        }
+
+        // #768 — the folder's settings.json couldn't hold its solution (VS Code refused the
+        // write), so the selection lives in the solution history, flagged. Reopen it from there.
+        if (!solutionFile) {
+            const unsaved = unsavedSolutionForFolder(
+                await GlobalSolutionHistory.getReferences(), workspace.workspaceFolders[0].uri.fsPath, fs.existsSync);
+            if (unsaved?.propertiesFile && unsaved.version) {
+                logger.info(`✅ No solution in the folder settings; reopening the one they couldn't save: ${unsaved.solutionFile}`);
+                solutionFile = unsaved.solutionFile;
+                clarionPropertiesFile = unsaved.propertiesFile;
+                clarionVersion = unsaved.version;
+                clarionConfiguration = unsaved.configuration || clarionConfiguration;
+            }
         }
 
         logger.info(`🔍 Read from workspace settings:

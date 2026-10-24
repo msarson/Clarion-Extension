@@ -82,7 +82,9 @@ export class DottedAccessResolver {
                 return field ? { receiverKind: kind, receiverClass: owner.className, member: field } : null;
             }
             className = owner.name;
-            member = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount);
+            // #779: `SELF.IFace` leads to the INTERFACE the class implements
+            member = await this.memberLocator.findMemberInClass(className, memberName, document, paramCount)
+                ?? await this.memberLocator.findMemberInInterface(className, memberName, document, paramCount);
         } else {
             const r = await this.memberLocator.resolveReceiverAt(receiver, document, line);
             if (r) {

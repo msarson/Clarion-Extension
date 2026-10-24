@@ -10,7 +10,7 @@ import { validateUndeclaredVariables } from '../providers/diagnostics/Undeclared
  *
  * ─── Root cause (confirmed via tokenizer probe) ─────────────────────────────
  *
- * Operator keywords `OR`, `AND`, `XOR`, `BAND`, `BOR`, `BXOR`, `BNOT`, `BSHIFT`,
+ * Operator keywords `OR`, `AND`, `XOR`, `BAND`, `BOR`, `BXOR`, `BSHIFT`,
  * `TO`, `BY`, `NOT` (etc.) tokenize as `TokenType.Variable` (no specific pattern
  * in `TokenPatterns.ts`; fall through to Variable default). The undeclared-variable
  * diagnostic walker at `UndeclaredVariableDiagnostics.ts:181/338/352` filters
@@ -19,13 +19,13 @@ import { validateUndeclaredVariables } from '../providers/diagnostics/Undeclared
  *
  * Notably, `NOT` is ALREADY registered in `clarion-keywords.json` but STILL
  * fires today — confirming the bug is the missing filter call, not the registry
- * contents. (Registry expansion for OR/AND/XOR/BAND/BOR/BXOR/BNOT/BSHIFT is
+ * contents. (Registry expansion for OR/AND/XOR/BAND/BOR/BXOR/BSHIFT is
  * the OTHER half of the 2-part fix.)
  *
  * ─── Phase B fix (Alice) ────────────────────────────────────────────────────
  *
  * Part 1: Expand `server/src/data/clarion-keywords.json` with:
- *   OR, AND, XOR, BAND, BOR, BXOR, BNOT, BSHIFT (category: "Operator")
+ *   OR, AND, XOR, BAND, BOR, BXOR, BSHIFT (category: "Operator")
  *   Plus normalise existing operator entries (NOT) to the same category.
  *
  * Part 2: Add `KeywordService.isKeyword(t.value)` filter to 3 call sites in

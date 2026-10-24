@@ -1,6 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer, Token } from './ClarionTokenizer';
-import { DocumentStructure } from './DocumentStructure';
+import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
 
@@ -202,7 +202,7 @@ export class TokenCache {
                 // Reuse that instance — do NOT call process() again on the same token array,
                 // as a second pass corrupts subType assignments (e.g. MapProcedure explosion).
                 const structure = tokenizer.getDocumentStructure() ?? (() => {
-                    const s = new DocumentStructure(tokens);
+                    const s = new DocumentStructure(tokens, TokenCache.linesIfOmit(document));
                     s.process();
                     return s;
                 })();
@@ -277,7 +277,7 @@ export class TokenCache {
         // Fallback (should be rare — e.g. tokenizer returned no structure): build once
         // and store on the LIVE entry so repeat calls return the same instance.
         logger.info(`Building fallback DocumentStructure for ${uri} (entry=${!!refreshed}, hasStructure=${!!(refreshed?.structure)})`);
-        const structure = new DocumentStructure(tokens);
+        const structure = new DocumentStructure(tokens, TokenCache.linesIfOmit(document));
         structure.process();
         if (refreshed) {
             refreshed.structure = structure;
@@ -577,6 +577,20 @@ export class TokenCache {
         return touchesStructure(false) && touchesStructure(true);
     }
 
+    /**
+     * The document's lines when it has an OMIT directive (DocumentStructure reads OMIT bodies from
+     * them). An accessor over the document, not a split of its text: this runs on every edit (#733).
+     */
+    static linesIfOmit(document: TextDocument): SourceLines | undefined {
+        if (!/\bOMIT\s*\(/i.test(document.getText())) return undefined;
+        const length = document.lineCount;
+        return {
+            length,
+            at: line => line < 0 || line >= length ? undefined
+                : document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }).replace(/\r?\n$/, ''),
+        };
+    }
+
     /** A line's code: string literals blanked ('' escapes kept inside), the comment removed. */
     static codePart(line: string): string {
         return line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length)).replace(/!.*$/, '');
@@ -720,6 +734,20 @@ export class TokenCache {
             ? lineText(i)
             : document.getText({ start: { line: i, character: 0 }, end: { line: i, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, '');
         const expandTime = performance.now() - expandStart;
+        // An OMIT/COMPILE directive and its terminator line are read together (the terminator
+        // text is blanked — see ClarionTokenizer.blankDirectiveTerminators), which a span tokenized
+        // on its own cannot do. An edit touching either one, before or after, tokenizes in full.
+        const terminators = this.omitTerminators(cached);
+        const pairsWithDirective = (text: string) => /\b(OMIT|COMPILE)\s*\(/i.test(text) ||
+            terminators.some(t => text.includes(t));
+        for (const [lo, hi] of spans) {
+            for (let l = lo; l <= hi; l++) {
+                if (pairsWithDirective(lineText(l))) return null;
+            }
+            for (let l = lo; l <= Math.min(hi + delta, document.lineCount - 1); l++) {
+                if (pairsWithDirective(newLineAt(l))) return null;
+            }
+        }
         const retokenizedCount = spans.reduce((n, [lo, hi]) => n + Math.max(0, hi + delta - lo + 1), 0);
 
         logger.info(`🚀 Re-tokenizing ${retokenizedCount} lines in ${spans.length} span(s) (${delta >= 0 ? '+' : ''}${delta} lines) - expansion took ${expandTime.toFixed(2)}ms`);
@@ -786,7 +814,8 @@ export class TokenCache {
         // Process tokens through DocumentStructure to set subtypes (MapProcedure, etc.)
         // This modifies tokens in-place - must be done BEFORE caching
         const processStart = performance.now();
-        const structure = new DocumentStructure(mergedTokens);
+        // The source lines let process() read an OMIT body as not code (only needed when there is one).
+        const structure = new DocumentStructure(mergedTokens, TokenCache.linesIfOmit(document));
         structure.process();
         const processTime = performance.now() - processStart;
         

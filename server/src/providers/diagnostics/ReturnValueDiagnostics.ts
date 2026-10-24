@@ -1,11 +1,11 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
-import { extractReturnType } from '../../utils/AttributeKeywords';
+import { extractReturnType, isDataType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
 import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate } from '../../utils/ClassMemberScan';
-import { extractClassName, nearestClassLabel } from '../../utils/ClassNameUtils';
+import { chainTargetClass, extractClassName, nearestClassLabel } from '../../utils/ClassNameUtils';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
 import { DocumentStructure } from '../../DocumentStructure';
@@ -59,8 +59,9 @@ const RVD_MEMO_BUCKET = 'rvdmemo';
 // #654: part of the persisted signature. The mtime gate proves a memo's INPUTS are unchanged, not
 // that the rules that produced it are: an upgraded server otherwise reuses an older build's answer
 // for every file not edited since. Bump it whenever how a receiver type or a class's members are
-// resolved changes. (2: a local CLASS label is the class itself, not its parent's type.)
-const RVD_RESOLUTION_RULES = 2;
+// resolved changes. (2: a local CLASS label is the class itself, not its parent's type.
+// 3: #778, a member prototype continued with `|` is read whole.)
+const RVD_RESOLUTION_RULES = 3;
 // One disk-load attempt per doc content (rvdDocKey); bounded for hygiene.
 const rvdDiskSeedAttempted = new Set<string>();
 
@@ -246,6 +247,42 @@ function rvdDeclarationsHash(tokens: Token[], docLines: string[]): { hash: numbe
     return { hash, length };
 }
 
+/**
+ * #775 — what a procedure declaration says about its return, read across `|` continuation
+ * lines: `RegisterEXE (LONG addr, |` / `*FRM_EXEInit dat),NAME('_RegisterEXE')` returns nothing.
+ * Reading the first line only missed the `)` that closes the parameters, and the `LONG` of
+ * `LONG addr` was taken as the return type.
+ *
+ * `hasParams` is true when a parameter list closes; `proc` when PROC or DERIVED is present;
+ * `returnType` is the first data type outside any parentheses (after the parameters, or among
+ * the attributes of a declaration with none), or null.
+ */
+function declarationReturn(tokens: Token[], i: number): { hasParams: boolean; proc: boolean; returnType: string | null } {
+    let line = tokens[i].line;
+    let depth = 0;
+    let hasParams = false;
+    let inAttributes = false;   // past the first top-level comma: a later `(` opens an attribute's arguments
+    let proc = false;
+    let returnType: string | null = null;
+    for (let k = i + 1; k < tokens.length; k++) {
+        const t = tokens[k];
+        if (t.line !== line) {
+            if (tokens[k - 1].type !== TokenType.LineContinuation) break;
+            line = t.line;
+        }
+        if (t.type === TokenType.LineContinuation) continue;
+        const upper = t.value.toUpperCase();
+        if (upper === 'PROC' || upper === 'DERIVED') proc = true;
+        if (t.value === '(') { if (depth++ === 0 && !inAttributes) hasParams = true; }
+        else if (t.value === ')') depth--;
+        else if (t.value === ',' && depth === 0) inAttributes = true;
+        else if (depth === 0 && !returnType && (t.type === TokenType.Type || t.type === TokenType.Label) && isDataType(t.value)) {
+            returnType = t.value;
+        }
+    }
+    return { hasParams, proc, returnType };
+}
+
 function getCodeBlockRanges(
     tokens: Token[]
 ): { start: number; end: number; selfClassName: string | null }[] {
@@ -275,6 +312,25 @@ function getCodeBlockRanges(
         }
 
         ranges.push({ start: codeStart, end: procEnd, selfClassName });
+    }
+
+    // #778: the PROGRAM's own CODE belongs to no procedure, so the loop above never adds it. It
+    // runs to the line before the first procedure or routine that follows it.
+    const claimed = new Set(tokens.filter(t => t.executionMarker).map(t => t.executionMarker!.line));
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type !== TokenType.ExecutionMarker || t.value.toUpperCase() !== 'CODE' || claimed.has(t.line)) continue;
+        let end = tokens[tokens.length - 1].line;
+        for (let k = i + 1; k < tokens.length; k++) {
+            const n = tokens[k];
+            // An implementation, not a call: `Later(1, 2)` is a Function token too.
+            if (n.type === TokenType.Routine ||
+                (n.type === TokenType.Procedure && (n.subType === TokenType.GlobalProcedure || n.subType === TokenType.MethodImplementation))) {
+                end = n.line - 1;
+                break;
+            }
+        }
+        if (end > t.line) ranges.push({ start: t.line + 1, end, selfClassName: null });
     }
 
     return ranges;
@@ -376,7 +432,6 @@ function validateCrossFilePlainCalls(
             otherTokens = loaded.tokens;
         }
         if (!otherTokens) continue;
-        const otherByLine = tokensByLine(otherTokens); // #711
 
         for (let i = 0; i < otherTokens.length; i++) {
             const t = otherTokens[i];
@@ -385,41 +440,11 @@ function validateCrossFilePlainCalls(
             const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
             if (!name || excluded.has(name) || localMapNames.has(name)) continue;
 
-            const lineTokens = otherByLine.get(t.line) ?? [];
-            if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            let startIdx = i;
-            {
-                // Skip past the parameter list '(...)' regardless of whether the declaration
-                // uses the explicit PROCEDURE keyword (type=Procedure) or the shorthand form
-                // (type=Label, e.g. `PQClear(Long pResult),Raw,C,...`). Without this, the
-                // parameter type (e.g. Long) is mistaken for a return type.
-                let depth = 0;
-                for (let k = i; k < otherTokens.length && otherTokens[k].line === t.line; k++) {
-                    if (otherTokens[k].value === '(') depth++;
-                    else if (otherTokens[k].value === ')') {
-                        depth--;
-                        if (depth === 0) { startIdx = k + 1; break; }
-                    }
-                }
-            }
-
-            // Guard: startIdx must still be on the same line as the procedure declaration.
-            // If the ')' was the last token on the line, startIdx points to the next line —
-            // extractReturnType would then use that next line as its anchor and falsely pick
-            // up the return type of the following declaration.
-            if (startIdx >= otherTokens.length || otherTokens[startIdx].line !== t.line) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            const returnType = extractReturnType(otherTokens, startIdx, true);
-            if (!returnType) {
+            // The parameter list is skipped whether the declaration uses the PROCEDURE keyword
+            // or the shorthand form (`PQClear(Long pResult),Raw,C,...`), so a parameter type is
+            // never mistaken for a return type; #775: across `|` continuation lines too.
+            const { proc, returnType } = declarationReturn(otherTokens, i);
+            if (proc || !returnType) {
                 excluded.add(name);
                 warnableProcs.delete(name);
                 continue;
@@ -788,36 +813,9 @@ export function validateDiscardedReturnValuesForPlainCalls(
             const name = (t.label ?? t.value.split('(')[0].trim()).toUpperCase();
             if (!name || excluded.has(name)) continue;
 
-            const lineTokens = byLine.get(t.line) ?? [];
-            if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            let startIdx = i;
-            {
-                // Skip past the parameter list '(...)' regardless of token type.
-                // See the same fix in validateCrossFilePlainCalls for the rationale.
-                let depth = 0;
-                for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
-                    if (tokens[k].value === '(') depth++;
-                    else if (tokens[k].value === ')') {
-                        depth--;
-                        if (depth === 0) { startIdx = k + 1; break; }
-                    }
-                }
-            }
-
-            // Guard: startIdx must still be on the same declaration line.
-            if (startIdx >= tokens.length || tokens[startIdx].line !== t.line) {
-                excluded.add(name);
-                warnableProcs.delete(name);
-                continue;
-            }
-
-            const returnType = extractReturnType(tokens, startIdx, true);
-            if (!returnType) {
+            // See validateCrossFilePlainCalls: the parameter list is skipped, across `|` lines (#775).
+            const { proc, returnType } = declarationReturn(tokens, i);
+            if (proc || !returnType) {
                 excluded.add(name);
                 warnableProcs.delete(name);
                 continue;
@@ -836,27 +834,14 @@ export function validateDiscardedReturnValuesForPlainCalls(
         const name = (t.label ?? '').toUpperCase();
         if (!name || excluded.has(name)) continue;
 
-        const lineTokens = byLine.get(t.line) ?? [];
-        if (lineTokens.some(tok => ['PROC', 'DERIVED'].includes(tok.value.toUpperCase()))) {
+        // The return type follows the parameter list, which may continue onto later lines (#775).
+        const { hasParams, proc, returnType } = declarationReturn(tokens, i);
+        if (proc) {
             excluded.add(name);
             warnableProcs.delete(name);
             continue;
         }
-
-        // Find the closing ')' of the parameter list then check for a return type
-        let afterIdx = -1;
-        let depth = 0;
-        for (let k = i; k < tokens.length && tokens[k].line === t.line; k++) {
-            if (tokens[k].value === '(') depth++;
-            else if (tokens[k].value === ')') {
-                depth--;
-                if (depth === 0) { afterIdx = k + 1; break; }
-            }
-        }
-        if (afterIdx === -1 || afterIdx >= tokens.length || tokens[afterIdx].line !== t.line) continue;
-
-        const returnType = extractReturnType(tokens, afterIdx, true);
-        if (!returnType) continue;
+        if (!hasParams || !returnType) continue;
         if (!excluded.has(name)) warnableProcs.set(name, returnType);
     }
 
@@ -1292,7 +1277,7 @@ export async function validateDiscardedReturnValues(
                 chainBroken = true;
                 break;
             }
-            const nextClass = extractClassName(segMemberInfo.type);
+            const nextClass = chainTargetClass(segMemberInfo);
             if (!nextClass) {
                 logger.debug(`🔍 Line ${lineIdx + 1}: chain segment "${segmentName}" type "${segMemberInfo.type}" is not navigable`);
                 chainBroken = true;

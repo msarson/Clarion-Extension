@@ -16,7 +16,7 @@ import { DocumentStructure } from '../DocumentStructure';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
-import { ControlService } from '../utils/ControlService';
+import { ControlService, ControlDefinition } from '../utils/ControlService';
 import { DataTypeService } from '../utils/DataTypeService';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -86,9 +86,14 @@ export class SignatureHelpProvider {
                 // This is a class method call (self.Method or variable.Method)
                 signatures = await this.getClassMethodSignatures(prefix, methodName, document, position.line, tokens);
             } else {
+                // #748: the brackets of a KEY, INDEX or MEMO declaration hold its own parameters, not
+                // the KEY attribute of a control
+                const declarationSig = this.getFileDeclarationSignature(line, methodName);
                 // Check if it's a built-in function with signatures
-                const builtinSigs = this.getBuiltinSignatures(methodName);
-                if (builtinSigs.length > 0) {
+                const builtinSigs = declarationSig ? [] : this.getBuiltinSignatures(methodName);
+                if (declarationSig) {
+                    signatures = [declarationSig];
+                } else if (builtinSigs.length > 0) {
                     signatures = builtinSigs;
                 } else {
                     // Check if it's an attribute with signatures
@@ -828,7 +833,23 @@ export class SignatureHelpProvider {
      * Creates a SignatureInformation object for a container structure (WINDOW, APPLICATION)
      */
     private getContainerStructureSignature(name: string): SignatureInformation | null {
-        const ctrl = this.controlService.getContainerStructure(name);
+        return this.declarationSignature(this.controlService.getContainerStructure(name));
+    }
+
+    /**
+     * The signature of a KEY, INDEX or MEMO declaration (#748), when the open bracket is that
+     * declaration's own: its keyword follows the label in column 1 (`MyKey KEY(`). The same word
+     * as an attribute (`BUTTON('x'),KEY(`) is not a declaration and keeps the attribute's signature.
+     */
+    private getFileDeclarationSignature(lineBeforeCursor: string, name: string): SignatureInformation | null {
+        const upper = name.toUpperCase();
+        if (upper !== 'KEY' && upper !== 'INDEX' && upper !== 'MEMO') return null;
+        if (!new RegExp(`^[A-Za-z_][\\w:]*\\s+${upper}\\s*\\(`, 'i').test(lineBeforeCursor)) return null;
+        return this.declarationSignature(this.controlService.getDeclarationStructure(upper));
+    }
+
+    /** A declaration's bracket parameters as a signature: `KEY(component, [component...])`. */
+    private declarationSignature(ctrl: ControlDefinition | undefined): SignatureInformation | null {
         if (!ctrl || !ctrl.params || ctrl.params.length === 0) return null;
 
         const parameters: ParameterInformation[] = ctrl.params.map(p => ({

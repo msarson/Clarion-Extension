@@ -1,7 +1,7 @@
 import { Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { extractClassName } from './ClassNameUtils';
+import { chainTargetClass, extractClassName } from './ClassNameUtils';
 import { TokenCache } from '../TokenCache';
 import { TokenHelper } from './TokenHelper';
 import { resolveEnclosingClassName } from './EnclosingClassResolver';
@@ -44,13 +44,9 @@ export class ChainedPropertyResolver {
     /**
      * Extracts the rightmost member-access chain from a full line prefix.
      *
-     * Anchors on SELF/PARENT when one is present, so an assignment expression
-     * like "SELF.Order.X &= SELF.Primary" yields only "SELF.Primary" (the
-     * rightmost chain).
-     *
-     * Without such an anchor the rightmost run of dot-separated identifiers is
-     * taken instead, so a chain rooted on an ordinary typed variable survives
-     * whatever statement context sits to its left ("rc = Obj.Prop" -> "Obj.Prop",
+     * The rightmost run of dot-separated identifiers is taken, so "SELF.Order.X
+     * &= SELF.Primary" yields "SELF.Primary", and a chain rooted on an ordinary
+     * typed variable survives whatever statement context sits to its left ("rc = Obj.Prop" -> "Obj.Prop",
      * "Foo(Obj.Prop" -> "Obj.Prop"). Callers gate the chained-resolution path on
      * the result being a pure chain, so leaving that context attached silently
      * routes a multi-segment access to the single-segment fallback, where it
@@ -62,11 +58,15 @@ export class ChainedPropertyResolver {
      * rather than mangled.
      */
     public static extractChain(rawBeforeDot: string): string {
+        const chain = rawBeforeDot.match(/[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/);
+        // #774: a complete chain at the end wins over a SELF further left, which belongs to an
+        // earlier operand ("SELF.List {PROP:Text} = glo" -> "glo"). The anchor is kept for a
+        // chain broken by a subscript ("SELF.Q[i].Field"), where the regex sees only "Field".
+        if (chain && rawBeforeDot.charAt(chain.index! - 1) !== '.') return chain[0];
         const matches = [...rawBeforeDot.matchAll(/\b(self|parent)\b/gi)];
         if (matches.length > 0) {
             return rawBeforeDot.substring(matches[matches.length - 1].index!);
         }
-        const chain = rawBeforeDot.match(/[A-Za-z_][A-Za-z0-9_:]*(?:\.[A-Za-z_][A-Za-z0-9_:]*)*$/);
         return chain ? chain[0] : rawBeforeDot;
     }
 
@@ -97,7 +97,9 @@ export class ChainedPropertyResolver {
         const ownerLabel = owner.kind === 'class' ? owner.name : `inline structure at ${owner.file}:${owner.line}`;
         logger.info(`ChainedPropertyResolver: looking for final member "${memberName}" in "${ownerLabel}"`);
         const result = owner.kind === 'class'
+            // #779: `SELF.IFace` leads to the INTERFACE the class implements
             ? await this.memberLocator.findMemberInClass(owner.name, memberName, document, paramCount)
+                ?? await this.memberLocator.findMemberInInterface(owner.name, memberName, document, paramCount)
             : await this.findFieldInInlineStructure(owner, memberName);
 
         if (result) {
@@ -239,7 +241,7 @@ export class ChainedPropertyResolver {
                 continue;
             }
 
-            const nextClass = extractClassName(memberInfo.type);
+            const nextClass = chainTargetClass(memberInfo);
             if (!nextClass) {
                 logger.info(`ChainedPropertyResolver: type "${memberInfo.type}" of "${segmentName}" is not navigable`);
                 return null;

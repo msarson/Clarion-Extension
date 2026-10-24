@@ -8,6 +8,11 @@ import { RoutineHoverResolver } from './RoutineHoverResolver';
 import { ContextualHoverHandler } from './ContextualHoverHandler';
 import { BuiltinFunctionService } from '../../utils/BuiltinFunctionService';
 import { AttributeService } from '../../utils/AttributeService';
+import { ControlService } from '../../utils/ControlService';
+import { findDeclarationKeyword, findControlKeyword, readDeclaredAttributes, formatDeclaredAttributes, findAttributeProblems, controlDefinitionFor, EditLinkContext } from '../../utils/DeclaredAttributes';
+import { LogicalLine } from '../../DocumentStructure';
+import { clientFeatures } from '../../utils/ClientFeatures';
+import { isGeneratedFile } from '../../utils/GeneratedFile';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
 import { PropertyService } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
@@ -19,6 +24,7 @@ import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
+import { tokensOnLine } from '../../utils/TokenLineIndex';
 import { BranchInfo } from '../../tokenizer/TokenTypes';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -26,6 +32,11 @@ import LoggerManager from '../../logger';
 const logger = LoggerManager.getLogger("HoverRouter");
 logger.setLevel("error");
 const perfLogger = LoggerManager.getLogger("HoverRouter.Perf", "perf");
+
+/** Executable-code blocks whose hover shows the END that closes them. */
+const CODE_BLOCK_OPENERS = new Set(['IF', 'LOOP', 'CASE', 'EXECUTE', 'BEGIN', 'ACCEPT']);
+/** The FILE declarations whose keyword gets an attribute card (#746). */
+const FILE_DECLARATIONS = new Set(['FILE', 'KEY', 'INDEX', 'MEMO', 'BLOB']);
 
 /**
  * Routes hover requests to appropriate resolvers based on context
@@ -41,6 +52,7 @@ export class HoverRouter {
     private argClassifier = new CallSiteArgumentClassifier();
     private argTypeResolver = new ArgumentTypeResolver();
     private overloadResolver = new MethodOverloadResolver();
+    private controlService = ControlService.getInstance();
 
     constructor(
         private procedureResolver: ProcedureHoverResolver,
@@ -130,9 +142,17 @@ export class HoverRouter {
             }
 
             // 8. Handle data types and controls
-            const symbolHover = this.symbolResolver.resolve(word, { hasLabelBefore, isInWindowContext, isFollowedByIdentifier });
+            const symbolHover = this.symbolResolver.resolve(word, {
+                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode: this.isNameInCode(context),
+                opensParameter: this.opensParameter(context),
+            });
             mark('symbol');
-            if (symbolHover) return symbolHover;
+            if (symbolHover) return this.withDeclaredAttributes(symbolHover, word, position, documentStructure, document);
+
+            // 8.5 Attributes on a WINDOW/APPLICATION header line — no control context
+            // there, so step 9 never sees them.
+            const headerAttributeHover = this.handleHeaderAttribute(word, position, documentStructure);
+            if (headerAttributeHover) return headerAttributeHover;
 
             // 9. Handle attributes
             const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
@@ -183,14 +203,24 @@ export class HoverRouter {
             if (endHover) return endHover;
         }
 
+        if (CODE_BLOCK_OPENERS.has(upperWord)) {
+            const openerHover = this.handleBlockOpener(position, tokens, document);
+            if (openerHover) return openerHover;
+        }
+
         if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
             const branchHover = this.handleBranchKeyword(upperWord, position, tokens, document);
             if (branchHover) return branchHover;
         }
 
         if (upperWord === 'WINDOW' || upperWord === 'APPLICATION' || upperWord === 'REPORT') {
-            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure);
+            const containerHover = this.handleContainerKeyword(upperWord, position, tokens, documentStructure, document);
             if (containerHover) return containerHover;
+        }
+
+        if (FILE_DECLARATIONS.has(upperWord)) {
+            const fileHover = this.handleFileDeclarationKeyword(position, documentStructure, document);
+            if (fileHover) return fileHover;
         }
 
         if (upperWord === 'VIEW') {
@@ -347,7 +377,11 @@ export class HoverRouter {
         keyword: string,
         position: { line: number; character: number },
         tokens: Token[],
-        documentStructure: { getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined }
+        documentStructure: {
+            getWindowDescriptor(t: Token): import('../../tokenizer/WindowDescriptorParser').WindowDescriptor | undefined;
+            getLogicalLine?(line: number): LogicalLine | undefined;
+        },
+        document?: { uri: string; getText(): string }
     ): Hover | null {
         // Find the Structure token at this cursor position whose value matches the keyword.
         const containerToken = tokens.find(t =>
@@ -385,7 +419,13 @@ export class HoverRouter {
             lines.push(meta.join(' · '));
         }
 
-        if (desc.attributes.length) {
+        // The header's attributes as on a control card (set / available / with value), from its
+        // compiler-checked list; without one, the attributes the summary above did not show.
+        const section = this.headerAttributeSection(containerToken, position, documentStructure, document);
+        if (section) {
+            lines.push('');
+            lines.push(section);
+        } else if (desc.attributes.length) {
             lines.push('');
             lines.push(`**Attributes:** ${desc.attributes.map(a => `\`${a}\``).join(', ')}`);
         }
@@ -471,6 +511,110 @@ export class HoverRouter {
         );
         if (!endToken || !endToken.parent) return null;
         return this.buildTerminatorHover(endToken, document, '**END**');
+    }
+
+    /**
+     * Handle hover over an IF / LOOP / CASE / EXECUTE / BEGIN / ACCEPT — the reverse of the END
+     * hover: shows the line of the END (or period) that closes the block, with a link to it.
+     *
+     * Reads `finishesAt` and the terminator's `parent` link, both set by
+     * `DocumentStructure.handleEndStatementForStructure` when it pops the structure stack. That
+     * pairing is the compiler's — an END closes the most recently opened block — so a nested
+     * block missing its END is paired with its container's END. The card says so when that END
+     * is lined up with an enclosing block instead, and says when the opener was never closed.
+     * Returns null for a block closed on its own line (`IF x THEN y.`): the terminator is
+     * already in view.
+     */
+    private handleBlockOpener(
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const opener = tokensOnLine(tokens, position.line).find(t =>
+            t.type === TokenType.Structure &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (!opener) return null;
+        const keyword = opener.value.toUpperCase();
+        const labelText = opener.label ? ` \`${opener.label}\`` : '';
+        // The keyword's own description, kept under the card that replaces the keyword card.
+        const description = this.keywordService.getKeyword(keyword)?.description;
+        const withDescription = (lines: string[]): Hover =>
+            ({ contents: { kind: 'markdown', value: (description ? [...lines, '', '---', '', description] : lines).join('\n') } });
+
+        if (opener.finishesAt === undefined) {
+            return withDescription([`**${keyword}**${labelText} — not terminated: no END or period closes this ${keyword}.`]);
+        }
+        if (opener.finishesAt === opener.line || opener.isSingleLineWithContinuation) return null;
+
+        const terminator = this.findTerminator(tokens, opener);
+        const word = terminator?.value === '.' ? 'period'
+            : terminator?.type === TokenType.EndStatement ? 'END'
+            : terminator ? terminator.value.toUpperCase()
+            : 'END';
+        const lines: string[] = [
+            `**${keyword}**${labelText} — closed by ${word} on line ${opener.finishesAt + 1}`,
+            '',
+            this.formatter.locationLink(document.uri, opener.finishesAt)
+        ];
+
+        if (terminator && word === 'END') {
+            const outer = this.findEnclosingBlockAlignedWith(document, tokens, opener, terminator);
+            if (outer) {
+                lines.push('', `⚠️ This END is lined up with the ${outer.value.toUpperCase()} on line ${outer.line + 1}, not with this ${keyword} — a block nested inside it may be missing its END.`);
+            }
+        }
+
+        return withDescription(lines);
+    }
+
+    /**
+     * The END or period the parser paired with a structure, if any; for a LOOP ended by UNTIL or
+     * WHILE (`DocumentStructure.handleLoopTerminator`, which links no parent), that keyword.
+     */
+    private findTerminator(tokens: Token[], opener: Token): Token | undefined {
+        if (opener.finishesAt === undefined) return undefined;
+        const onLine = tokensOnLine(tokens, opener.finishesAt);
+        return onLine.find(t => t.parent === opener && (t.type === TokenType.EndStatement || t.value === '.'))
+            ?? onLine.find(t => t.type === TokenType.Keyword && /^(UNTIL|WHILE)$/i.test(t.value));
+    }
+
+    /**
+     * The enclosing structure an END is lined up with, when that is the signature of a nested
+     * block missing its END: the parser hands the container's END to the inner block, and the
+     * container is left without an END of its own — never closed, or closed by an END that is
+     * itself lined up further out. Lined up means the END starts at the structure keyword's
+     * column or at its line's indentation.
+     *
+     * Not reported: an END merely indented like the container while the container still has
+     * its own lined-up END (both ENDs are there, one is just indented wrong); sloppy
+     * indentation matching nothing (an END a column off); an END after other code on its line;
+     * and tab-indented lines, whose column means nothing without a tab width. A container
+     * closed by an END after other code on its line (`END ; END`) has its own END: its column
+     * is not judged either.
+     */
+    private findEnclosingBlockAlignedWith(document: any, tokens: Token[], opener: Token, end: Token): Token | null {
+        const indentOf = (line: number) =>
+            (document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }) as string).match(/^[ \t]*/)![0];
+        const judged = (e: Token) => {
+            const endIndent = indentOf(e.line);
+            return endIndent.length === e.start && !endIndent.includes('\t');
+        };
+        const linedUp = (e: Token, s: Token) => {
+            const indent = indentOf(s.line);
+            return judged(e) && !indent.includes('\t') && (e.start === s.start || e.start === indent.length);
+        };
+        if (!judged(end) || indentOf(opener.line).includes('\t')) return null;
+        if (linedUp(end, opener)) return null;
+        for (let outer = opener.parent; outer; outer = outer.parent) {
+            if (outer.type !== TokenType.Structure || !linedUp(end, outer)) continue;
+            const outerEnd = this.findTerminator(tokens, outer);
+            const outerHasOwnEnd = outerEnd !== undefined &&
+                (outerEnd.value === '.' || !judged(outerEnd) || linedUp(outerEnd, outer));
+            return outerHasOwnEnd ? null : outer;
+        }
+        return null;
     }
 
     /**
@@ -698,7 +842,191 @@ export class HoverRouter {
         const paramCount = this.countFunctionParameters(line, word, wordRange, document);
         logger.info(`Attribute parameter count: ${paramCount}`);
 
-        return this.formatter.formatAttribute(word, attribute, paramCount);
+        return this.formatter.formatAttribute(word, attribute, paramCount, controlContext.controlType);
+    }
+
+    /**
+     * A control card hovered on the keyword of its own declaration
+     * (`TEXT,AT(...),HVSCROLL`) lists that declaration's attributes instead of
+     * the generic "Common Attributes". Any other control card is returned as is.
+     * Inside a REPORT the report definition decides: a report's TEXT accepts a
+     * different set (RESIZE, not the scroll bars), and a STRING with a picture
+     * (`STRING(@n9)`) takes the totals a constant one does not (SUM, PAGENO...).
+     */
+    private withDeclaredAttributes(
+        hover: Hover,
+        word: string,
+        position: { line: number; character: number },
+        documentStructure: {
+            getLogicalLine?(line: number): LogicalLine | undefined;
+            getStructureContextAt?(line: number): { inWindow: boolean; inReport: boolean };
+        } | undefined,
+        document: { uri: string; getText(): string }
+    ): Hover {
+        const logical = documentStructure?.getLogicalLine?.(position.line);
+        if (!logical) return hover;
+        const keywordToken = logical.tokens.find(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        if (!keywordToken) return hover;
+        const keyword = findControlKeyword(logical, keywordToken.line, keywordToken.start);
+        if (!keyword) return hover;
+        const accepted = controlDefinitionFor(logical, keyword, documentStructure?.getStructureContextAt?.(position.line));
+        if (!accepted) return hover;
+        const links = this.editLinkContext(document, position, logical);
+        const section = formatDeclaredAttributes(accepted, readDeclaredAttributes(logical, keyword), links);
+        if (!section) return hover;
+        return { contents: { kind: 'markdown', value: this.controlService.getControlDocumentation(word, section) } };
+    }
+
+    /**
+     * A client that applies attribute edit links gets a declaration card's names as links (#731),
+     * except in a generated module: the next generate would undo the edit, as with rename (#549).
+     */
+    private editLinkContext(
+        document: { uri: string; getText(): string },
+        position: { line: number; character: number },
+        logical: LogicalLine
+    ): EditLinkContext | undefined {
+        return clientFeatures.attributeEditLinks &&
+            !isGeneratedFile(decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'))
+            ? { lines: document.getText().split(/\r?\n/), anchorLine: position.line, logical }
+            : undefined;
+    }
+
+    /**
+     * The attribute section of a WINDOW / APPLICATION / REPORT header card: the header's own
+     * compiler-checked list (#740) formatted as on a control card, links included. Empty when the
+     * hovered keyword does not open its declaration or the structure has no list.
+     */
+    private headerAttributeSection(
+        keyword: Token,
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined },
+        document: { uri: string; getText(): string } | undefined
+    ): string {
+        const logical = documentStructure.getLogicalLine?.(keyword.line);
+        if (!logical || !document) return '';
+        const declaration = findDeclarationKeyword(logical, keyword.line, keyword.start);
+        if (!declaration) return '';
+        const def = this.controlService.getContainerStructure(declaration.value);
+        if (!def?.attributes) return '';
+        return formatDeclaredAttributes(def, readDeclaredAttributes(logical, declaration), this.editLinkContext(document, position, logical));
+    }
+
+    /**
+     * Whether the hovered word sits in executable code where a data type cannot (#752). In a CODE
+     * section a data type names a type only as the operand of NEW (`Ref &= NEW(LONG)`, and
+     * `NEW LONG`, which builds too); anywhere else there, `Key` or `Memo` is a variable, whatever
+     * the data type it is spelled like.
+     */
+    private isNameInCode(context: HoverContext): boolean {
+        const { position, tokens, currentScope, line, wordRange } = context;
+        if (/\bNEW\s*\(?\s*$/i.test(line.slice(0, wordRange.start.character))) return false;
+        if (currentScope) {
+            if (currentScope.executionMarker) return position.line > currentScope.executionMarker.line;
+            // a ROUTINE without DATA has no CODE marker: its whole body is code
+            return currentScope.subType === TokenType.Routine && position.line > currentScope.line;
+        }
+        // Outside every procedure: the PROGRAM's own CODE section, which the structure records on
+        // no token. The nearest CODE above is the PROGRAM's when no procedure or routine owns it.
+        let code: Token | undefined;
+        for (const t of tokens) {
+            if (t.line >= position.line) break;
+            if (t.type === TokenType.ExecutionMarker && t.value.toUpperCase() === 'CODE') code = t;
+        }
+        return !!code && !tokens.some(t => t.executionMarker === code);
+    }
+
+    /**
+     * Whether the hovered word opens a parameter of a prototype (#753): inside its brackets, right
+     * after `(`, `,`, `*`, `<` or `&` (`PROCEDURE(LONG pX, *STRING pS, <BYTE pB>)`), or opening a
+     * `|` continuation line of the list. A data type there is the parameter's type.
+     */
+    private opensParameter(context: HoverContext): boolean {
+        const { line, wordRange, document, position } = context;
+        const before = line.slice(0, wordRange.start.character);
+        let depth = 0;
+        let inString = false;
+        for (const ch of before) {
+            if (ch === "'") inString = !inString;
+            else if (!inString && ch === '(') depth++;
+            else if (!inString && ch === ')' && depth > 0) depth--;
+        }
+        if (depth > 0) return /[(,<*&]\s*$/.test(before);
+        // a continuation line: the list opened on a line above that ends in `|`
+        if (!/^\s*[<*&]?\s*$/.test(before) || position.line === 0) return false;
+        const above = document.getText({ start: { line: position.line - 1, character: 0 }, end: { line: position.line, character: 0 } });
+        return /\|\s*(!.*)?\r?\n?$/.test(above);
+    }
+
+    /**
+     * A FILE declaration hovered on its keyword (#746): `Customer FILE,DRIVER(...)`, or the KEY,
+     * INDEX, MEMO or BLOB keyword of a declaration inside it. The card lists that declaration's
+     * attributes from its compiler-checked list, as a control card does, links included. The
+     * label keeps its own card (the file summary), and the same word anywhere else is not a
+     * declaration.
+     */
+    private handleFileDeclarationKeyword(
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined },
+        document: { uri: string; getText(): string }
+    ): Hover | null {
+        const logical = documentStructure.getLogicalLine?.(position.line);
+        if (!logical) return null;
+        const hovered = logical.tokens.find(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        const declaration = hovered && findDeclarationKeyword(logical, hovered.line, hovered.start);
+        if (!declaration) return null;
+        const keyword = (/^\w+/.exec(declaration.value)?.[0] ?? '').toUpperCase();
+        const def = FILE_DECLARATIONS.has(keyword) ? this.controlService.getDeclarationStructure(keyword) : undefined;
+        if (!def?.attributes) return null;
+        const section = formatDeclaredAttributes(def, readDeclaredAttributes(logical, declaration), this.editLinkContext(document, position, logical));
+        const label = logical.tokens[0].value;
+        const lines = [`**${label} ${keyword}** — ${def.description}`];
+        if (section) lines.push('', section);
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+    }
+
+    /**
+     * An attribute on a WINDOW/APPLICATION header (`MyWindow WINDOW('T'),AT(...),HIDE`), or on a
+     * FILE, KEY, INDEX, MEMO or BLOB declaration (#746): its attribute card, plus a warning when
+     * the declaration does not accept it.
+     */
+    private handleHeaderAttribute(
+        word: string,
+        position: { line: number; character: number },
+        documentStructure: { getLogicalLine?(line: number): LogicalLine | undefined } | undefined
+    ): Hover | null {
+        const logical = documentStructure?.getLogicalLine?.(position.line);
+        if (!logical) return null;
+        const first = logical.tokens.find(t => t.type !== TokenType.Label);
+        const keyword = first && findDeclarationKeyword(logical, first.line, first.start);
+        if (!keyword) return null;
+        const def = this.controlService.getDeclarationStructure(/^\w+/.exec(keyword.value)?.[0] ?? keyword.value);
+        if (!def?.attributes) return null;
+        const declared = readDeclaredAttributes(logical, keyword);
+        const hit = declared.find(d =>
+            d.name === word.toUpperCase() &&
+            d.token.line === position.line &&
+            position.character >= d.token.start &&
+            position.character <= d.token.start + d.token.value.length);
+        if (!hit) return null;
+
+        const attribute = this.attributeService.getAttribute(hit.name);
+        let value = '';
+        if (attribute) {
+            const card = this.formatter.formatAttribute(hit.name, attribute, null, def.name ?? keyword.value).contents as MarkupContent;
+            value = card.value;
+        }
+        const problems = findAttributeProblems(def, declared).filter(p => p.attribute === hit);
+        for (const problem of problems) {
+            value = `${problem.alternative ? 'ℹ' : '⚠'} ${problem.message}\n\n` + value;
+        }
+        return value ? { contents: { kind: 'markdown', value: value.trimEnd() } } : null;
     }
 
     /**

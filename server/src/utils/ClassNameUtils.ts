@@ -60,6 +60,16 @@ function classLabelsNamed(tokens: Token[], className: string): Token[] {
 }
 
 /**
+ * #779: the class a member of a chain leads to. `SELF.IFace` (#773) is the INTERFACE the class
+ * implements, returned with the type `INTERFACE` and the interface as its className; a walk that
+ * read the type went on with a class named INTERFACE.
+ */
+export function chainTargetClass(member: { type: string; className: string; isInterface?: boolean }): string | null {
+    if (member.isInterface && /^INTERFACE\b/i.test(member.type.trim())) return member.className;
+    return extractClassName(member.type);
+}
+
+/**
  * Extracts the navigable class/type name from a declared type, or null when the type is a
  * Clarion primitive and there is nothing to navigate to.
  */

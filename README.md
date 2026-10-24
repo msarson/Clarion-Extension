@@ -89,15 +89,16 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.8 (2026-10-04)
+### 1.0.9 (2026-10-24)
 
-A follow-up to 1.0.7 for large generated modules.
+Hover cards that edit declarations, and solutions with their own versions and redirection layouts.
 
-- Diagnostics after an edit are ready in about a third of the time on a large module: on a 61,000-line generated module, about 2.3 s instead of about 7 s on the same machine.
-- Fixed: a discarded-return-value warning could keep judging a call by a variable's old type after its declaration changed.
-- Hover, completion and Go to Definition run ahead of the background check that follows an edit or opens a module, so the occasional multi-second hover is gone.
+- Hovering a control, a WINDOW, APPLICATION or REPORT header, or a FILE, KEY, INDEX, MEMO or BLOB declaration lists the attributes it sets, offers the ones it accepts, and adds or removes one with a click; completion after a comma offers only those attributes, and one the compiler rejects is flagged.
+- Hovering IF, LOOP, CASE, EXECUTE, BEGIN or ACCEPT shows what closes it, and warns when its END lines up with an enclosing block.
+- Custom-named Clarion versions, redirection files named by full path, quoted paths and masks such as `ab*.inc` all resolve, and a solution opened from another folder, or whose settings can't be saved, still opens.
+- Fixes for hover and Go to Definition on `SELF.InterfaceName`, member chains, ITEMIZE equates and prototypes in library includes, and for false discarded-return and indistinguishable-overload warnings.
 
-**Earlier:** 1.0.7 (2026-10-03) fixed the extension reading a module wrongly after some edits and made the hover after an edit much quicker on large modules, including ones that are a single giant procedure; 1.0.6 (2026-10-03) made hover, Go to Definition, Go to Implementation, Find All References and completion agree on what a name is, had Build and Run follow the configuration actually in force, and kept hover fast in very large modules. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.8 (2026-10-04) made diagnostics after an edit about three times quicker on large modules and let hover, completion and Go to Definition run ahead of the background check; 1.0.7 (2026-10-03) fixed the extension reading a module wrongly after some edits and made the hover after an edit much quicker on large modules. [Full changelog](CHANGELOG.md).
 
 ---
 
@@ -137,7 +138,7 @@ Thanks to everyone who has helped improve the Clarion Language Extension through
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/geircodes"><img src="https://avatars.githubusercontent.com/u/127224049?v=4?s=100" width="100px;" alt="geircodes"/><br /><sub><b>geircodes</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/commits?author=geircodes" title="Code">💻</a> <a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3Ageircodes" title="Bug reports">🐛</a> <a href="#ideas-geircodes" title="Ideas, Planning, & Feedback">🤔</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Chahton"><img src="https://avatars.githubusercontent.com/u/10942054?v=4?s=100" width="100px;" alt="Edin Čahtarević"/><br /><sub><b>Edin Čahtarević</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AChahton" title="Bug reports">🐛</a> <a href="#ideas-Chahton" title="Ideas, Planning, & Feedback">🤔</a> <a href="#userTesting-Chahton" title="User Testing">📓</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ClarionLive"><img src="https://avatars.githubusercontent.com/u/2301791?v=4?s=100" width="100px;" alt="ClarionLive"/><br /><sub><b>ClarionLive</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AClarionLive" title="Bug reports">🐛</a> <a href="#ideas-ClarionLive" title="Ideas, Planning, & Feedback">🤔</a> <a href="#userTesting-ClarionLive" title="User Testing">📓</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ClarionLive"><img src="https://avatars.githubusercontent.com/u/2301791?v=4?s=100" width="100px;" alt="ClarionLive"/><br /><sub><b>ClarionLive</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AClarionLive" title="Bug reports">🐛</a> <a href="#ideas-ClarionLive" title="Ideas, Planning, & Feedback">🤔</a> <a href="#userTesting-ClarionLive" title="User Testing">📓</a> <a href="https://github.com/msarson/Clarion-Extension/commits?author=ClarionLive" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://celeron533.github.io/"><img src="https://avatars.githubusercontent.com/u/3608762?v=4?s=100" width="100px;" alt="Allen Zhu"/><br /><sub><b>Allen Zhu</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/commits?author=celeron533" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://fushnisoft.com"><img src="https://avatars.githubusercontent.com/u/1259015?v=4?s=100" width="100px;" alt="Brahn Partridge"/><br /><sub><b>Brahn Partridge</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/commits?author=fushnisoft" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/MarkGoldberg"><img src="https://avatars.githubusercontent.com/u/4584617?v=4?s=100" width="100px;" alt="Mark Goldberg"/><br /><sub><b>Mark Goldberg</b></sub></a><br /><a href="https://github.com/msarson/Clarion-Extension/issues?q=author%3AMarkGoldberg" title="Bug reports">🐛</a></td>

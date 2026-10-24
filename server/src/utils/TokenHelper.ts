@@ -639,6 +639,23 @@ export class TokenHelper {
      * The bare `?` anonymous-control marker (`BUTTON('OK'),USE(?)`) is excluded:
      * it names nothing, so there is no control to resolve.
      */
+    /**
+     * #772 — `?` (untyped value-parameter) or `*?` (untyped variable-parameter) under the cursor, in
+     * a parameter list or as a return type: after `(` or `,`. Not the `?` of `USE(?)`, which marks
+     * an unnamed control.
+     */
+    public static getUntypedParameterTokenAt(tokens: Token[], lineText: string, line: number, character: number): Token | null {
+        for (const t of tokensOnLine(tokens, line)) {
+            const untyped = (t.type === TokenType.FieldEquateLabel && t.value === '?')
+                || (t.type === TokenType.PointerParameter && /^\*\s*\?$/.test(t.value));
+            if (!untyped || character < t.start || character > t.start + t.value.length) continue;
+            const before = lineText.slice(0, t.start);
+            if (!/[(,]\s*$/.test(before) || /\bUSE\s*\(\s*$/i.test(before)) return null;
+            return t;
+        }
+        return null;
+    }
+
     public static getFieldEquateTokenAt(tokens: Token[], line: number, character: number): Token | null {
         for (const t of tokensOnLine(tokens, line)) { // #711
             if (t.type !== TokenType.FieldEquateLabel) continue;

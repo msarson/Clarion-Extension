@@ -6,6 +6,7 @@ import { setLanguageClient, getClientReadyPromise } from '../LanguageClientManag
 import { StructureViewProvider } from '../views/StructureViewProvider';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
+import { attributeEditLinksFeature, trustAttributeEditLinks } from '../hover/AttributeEditCommand';
 
 const logger = LoggerManager.getLogger("LanguageServerManager");
 logger.setLevel("error");
@@ -92,6 +93,12 @@ export async function startLanguageServer(
                 workspace.createFileSystemWatcher(projectFileWatcherPattern)
             ],
         },
+        // #739 — the control card's attribute edit links need the hovered position and a trusted
+        // card to run; see hover/AttributeEditCommand.ts.
+        middleware: {
+            provideHover: async (document, position, token, next) =>
+                trustAttributeEditLinks(await next(document, position, token), document.uri, position),
+        },
         // #341: the provideDefinition middleware that lived here intercepted F12
         // on any `X PROCEDURE` line with a naive textual first-MAP scan (no MODULE
         // blocks, no signatures) and BYPASSED the server, which handles
@@ -117,6 +124,7 @@ export async function startLanguageServer(
     logger.info(`📄 Configured Language Client for extensions: ${lookupExtensions.join(', ')}`);
 
     const client = new LanguageClient("ClarionLanguageServer", "Clarion Language Server", serverOptions, clientOptions);
+    client.registerFeature(attributeEditLinksFeature); // #739
 
     // Start the language client. In vscode-languageclient@8, start() returns a Promise that
     // resolves once the client is ready (the @7 onReady() + Disposable-return API was removed);

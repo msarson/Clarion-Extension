@@ -187,4 +187,15 @@ suite('ChainedPropertyResolver.extractChain', () => {
         // The fallback must not shadow SELF handling when both could match.
         assert.strictEqual(ChainedPropertyResolver.extractChain('rc = SELF.Owner'), 'SELF.Owner');
     });
+
+    test('#774: a SELF further left does not swallow the chain at the end', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('SELF.List {PROP:Text} = glo'), 'glo');
+        assert.strictEqual(ChainedPropertyResolver.extractChain('SELF.W $ SELF.List = glo.UI'), 'glo.UI');
+        assert.strictEqual(ChainedPropertyResolver.extractChain('SELF.Q &= PARENT.Q + Obj.Prop'), 'Obj.Prop');
+    });
+
+    test('#774: a chain broken by a subscript still anchors on SELF', () => {
+        assert.strictEqual(ChainedPropertyResolver.extractChain('x = SELF.Q[i].Field'), 'SELF.Q[i].Field');
+        assert.strictEqual(ChainedPropertyResolver.extractChain('ADDRESS(SELF'), 'SELF');
+    });
 });

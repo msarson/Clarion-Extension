@@ -185,6 +185,15 @@ export class HoverProvider {
                 // unrelated EQUATE or keyword of that name) or, with the cursor on the
                 // `?` itself, returns an empty range and no hover at all. Resolving from
                 // the token keeps both cases on the control.
+                // #772 — `?` and `*?` in a prototype: the untyped parameters. Token-based for the
+                // same reason as the field equate below: `?` is not a word character.
+                const untyped = TokenHelper.getUntypedParameterTokenAt(preTokens, document.getText({
+                    start: { line: position.line, character: 0 }, end: { line: position.line + 1, character: 0 }
+                }), position.line, position.character);
+                if (untyped) {
+                    return this.buildUntypedParameterHover(untyped);
+                }
+
                 const feqToken = TokenHelper.getFieldEquateTokenAt(preTokens, position.line, position.character);
                 if (feqToken) {
                     // Deliberately terminal: a `?Name` resolving to no control in scope
@@ -1105,6 +1114,30 @@ export class HoverProvider {
      * absolute path, or a not-found note. Shares FileDefinitionResolver with
      * F12 so both surfaces always agree on which physical file wins.
      */
+    /** #772 — the card for `?` and `*?` (Prototype Parameter Lists help topic). */
+    private buildUntypedParameterHover(token: Token): Hover {
+        const variable = token.value.startsWith('*');
+        const value = variable
+            ? [
+                '**\\*?** — untyped variable-parameter',
+                '',
+                "Passed by address: the parameter is the caller's variable, so a change to it changes that variable. " +
+                'Inside the procedure it has the type of the variable passed in, fixed for the whole call. ' +
+                'Arrays cannot be passed. With RAW, for a library not written in Clarion, it is passed as a C `void *`.',
+            ]
+            : [
+                '**?** — untyped value-parameter',
+                '',
+                'Passed by value. It takes the base type (LONG, DECIMAL, STRING or REAL) of the value passed, or of ' +
+                'whatever was last assigned to it, so its type can change inside the procedure. Arrays cannot be passed. ' +
+                'As a return type, the procedure returns an untyped value.',
+            ];
+        return {
+            contents: { kind: 'markdown', value: value.join('\n') },
+            range: Range.create(token.line, token.start, token.line, token.start + token.value.length)
+        };
+    }
+
     private async buildFileRefHover(fileRefStr: Token, tokens: Token[], document: TextDocument): Promise<Hover | null> {
         const filename = fileRefStr.value.replace(/^['"]|['"]$/g, '');
         if (!filename) return null;

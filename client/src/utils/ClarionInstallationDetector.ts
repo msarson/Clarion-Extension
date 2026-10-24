@@ -91,7 +91,7 @@ export class ClarionInstallationDetector {
                 try {
                     const compilerVersions = await this.parseCompilerVersions(propertiesPath);
                     
-                    logger.info(`✅ Parsed ${compilerVersions.length} compiler version(s) for ${version}: ${compilerVersions.join(', ')}`);
+                    logger.info(`✅ Parsed ${compilerVersions.length} compiler version(s) for ${version}: ${compilerVersions.map(c => c.name).join(", ")}`);
                     
                     if (compilerVersions.length > 0) {
                         installations.push({
@@ -111,7 +111,7 @@ export class ClarionInstallationDetector {
             
             logger.info(`🎯 Total installations detected: ${installations.length}`);
             installations.forEach(inst => {
-                logger.info(`   - Version ${inst.ideVersion}: ${inst.compilerVersions.join(', ')}`);
+                logger.info(`   - Version ${inst.ideVersion}: ${inst.compilerVersions.map(c => c.name).join(", ")}`);
             });
 
             // Promote ideVersion if a higher sibling folder exists with no ClarionProperties.xml.

@@ -42,6 +42,20 @@ describe('registeredVersionNamesFromXml (#535)', () => {
         assert.deepStrictEqual(registeredVersionNamesFromXml(PROPERTIES_XML), ['Clarion 12.0.14313', 'Clarion 11.1.13855']);
     });
 
+    // #764 — a version the user registered under their own name is still a version; only
+    // the loader's rule applies (every entry but Clarion.NET), or the picker offers a
+    // version this check then calls stale.
+    it('lists custom-named versions too, as the version loader does (#764)', () => {
+        const xml = `<ClarionProperties><Properties name="Clarion.Versions">
+    <Properties name="Clarion 11.1.13855"><Properties name="RedirectionFile" /></Properties>
+    <Properties name="MySystem C11"><Properties name="RedirectionFile" /></Properties>
+    <Properties name="Clarion.NET 4.0.13855" />
+    <Properties name="Legacy C6"><IsClarion62 value="True" /></Properties>
+  </Properties></ClarionProperties>`;
+        assert.deepStrictEqual(registeredVersionNamesFromXml(xml), ['Clarion 11.1.13855', 'MySystem C11', 'Legacy C6']);
+        assert.strictEqual(rememberedSolutionState('C:\\Dev\\app.sln', 'C:\\p.xml', 'MySystem C11', registeredVersionNamesFromXml(xml)), 'ready');
+    });
+
     it('returns an empty list when there is no Clarion.Versions block', () => {
         assert.deepStrictEqual(registeredVersionNamesFromXml('<ClarionProperties><Properties name="Clarion.Dictionary" /></ClarionProperties>'), []);
     });

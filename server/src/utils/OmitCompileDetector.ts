@@ -81,12 +81,26 @@ export class OmitCompileDetector {
      * 🚀 PERF: Make this public so callers can compute once and reuse
      */
     public static findDirectiveBlocks(tokens: Token[], document: TextDocument): DirectiveBlock[] {
+        return this.findDirectiveBlocksInLines(tokens, document.lineCount, lineNum => document.getText({
+            start: { line: lineNum, character: 0 },
+            end: { line: lineNum, character: 1000 }
+        }));
+    }
+
+    /**
+     * findDirectiveBlocks over the document's lines rather than a TextDocument — for
+     * DocumentStructure, which has the tokens and the source lines but no document.
+     */
+    public static findDirectiveBlocksInLines(tokens: Token[], lineCount: number, lineText: (line: number) => string, directiveIndexes?: number[]): DirectiveBlock[] {
         const blocks: DirectiveBlock[] = [];
 
-        // Pass 1: collect OMIT/COMPILE directive positions from tokens
+        // Pass 1: collect OMIT/COMPILE directive positions from tokens (only the Directive tokens,
+        // when the caller already knows where they are)
         const pendingBlocks: Array<{ type: 'OMIT' | 'COMPILE', terminator: string, startLine: number }> = [];
 
-        for (let i = 0; i < tokens.length; i++) {
+        const count = directiveIndexes ? directiveIndexes.length : tokens.length;
+        for (let n = 0; n < count; n++) {
+            const i = directiveIndexes ? directiveIndexes[n] : n;
             const token = tokens[i];
             if (token.type !== TokenType.Directive) continue;
 
@@ -130,13 +144,14 @@ export class OmitCompileDetector {
         // appears only inside quotes (e.g. MESSAGE('***')) does NOT close the block.
         // Clarion strings are single-quoted; '' is an escaped single quote inside a string.
         const activeBlocks = [...pendingBlocks];
-        const lineCount = document.lineCount;
+        // #733: this runs on every edit, so start after the first directive, and strip strings
+        // only from a line that holds a terminator (stripping cannot create one that has no quote).
+        const firstLine = Math.min(...pendingBlocks.map(b => b.startLine)) + 1;
+        const quoted = pendingBlocks.some(b => b.terminator.includes("'"));
 
-        for (let lineNum = 0; lineNum < lineCount && activeBlocks.length > 0; lineNum++) {
-            const rawLine = document.getText({
-                start: { line: lineNum, character: 0 },
-                end: { line: lineNum, character: 1000 }
-            });
+        for (let lineNum = firstLine; lineNum < lineCount && activeBlocks.length > 0; lineNum++) {
+            const rawLine = lineText(lineNum);
+            if (!quoted && !activeBlocks.some(b => rawLine.includes(b.terminator))) continue;
             // Strip string literals (handles '' escaped quotes inside strings)
             const lineWithoutStrings = rawLine.replace(/'([^']|'')*'/g, "''");
 

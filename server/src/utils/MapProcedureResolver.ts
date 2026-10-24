@@ -62,6 +62,45 @@ interface MapDeclWalkHit { docUri: string; declLine: number; }
 const mapDeclWalkCache = new Map<string, MapDeclWalkHit | null>();
 let mapDeclWalkEpoch = -1;
 
+/**
+ * Per-file text facts for an include outside a MAP (outsideMapTextFacts), same epoch
+ * invalidation. The walk cache above is per procedure name, so without this every new
+ * name (the unresolved-call diagnostic asks for each one) re-read the text of every
+ * include outside a MAP. `lowerText` is kept only for a file that has a MAP.
+ */
+interface OutsideMapTextFacts { hasMap: boolean; hasInclude: boolean; lowerText?: string; }
+const outsideMapTextCache = new Map<string, OutsideMapTextFacts>();
+let outsideMapTextEpoch = -1;
+
+/**
+ * #756 — resolveIncludeTarget results (from-file + name → path or null), same epoch invalidation:
+ * the epoch moves when a file is created, deleted or changed on disk and when the configuration
+ * changes, which is everything an INCLUDE's resolution depends on. Each walk resolved every
+ * INCLUDE again with existsSync, two thirds of a lookup on a large generated module.
+ */
+const includeTargetCache = new Map<string, string | null>();
+let includeTargetEpoch = -1;
+
+/**
+ * #756 — what the walk needs from one file, worked out once per token array instead of once per
+ * procedure name: its MAP ranges, the prototype names it declares (first line wins, as the token
+ * order did), and its INCLUDEs. Keyed by the token array, so an edited buffer (new tokens) is
+ * summarized afresh and nothing stale is served.
+ */
+interface WalkRange { start: number; end: number; }
+interface FileWalkSummary {
+    mapRanges: WalkRange[];
+    /** MapProcedure/Function tokens inside a MODULE block, by label and by value. */
+    moduleDecl: Map<string, number>;
+    /** The same, for MODULE blocks inside this file's own MAPs (an include outside a MAP, #754). */
+    moduleDeclInMaps: Map<string, number>;
+    /** A prototype outside any MODULE block (acceptBarePrototype). */
+    bareDecl: Map<string, number>;
+    /** The file's INCLUDEs in text order; read from the text on first use. */
+    includes?: Array<{ fileName: string; insideMap: boolean }>;
+}
+const walkSummaries = new WeakMap<Token[], FileWalkSummary>();
+
 export class MapProcedureResolver {
     private scopeAnalyzer: ScopeAnalyzer;
     private crossFileCache?: any; // CrossFileCache type (optional to avoid circular dependency)
@@ -123,11 +162,8 @@ export class MapProcedureResolver {
         const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
         const startPaths: string[] = [currentPath];
 
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-        if (memberToken?.referencedFile) {
-            const parentPath = this.resolveIncludeTarget(memberToken.referencedFile, currentPath);
-            if (parentPath) startPaths.push(parentPath);
-        }
+        const parentPath = await this.memberParentPathOf(tokens, currentPath);
+        if (parentPath) startPaths.push(parentPath);
 
         // #362 — index-first POSITIVE fast-path. If the procedure index (built by a
         // cheap regex scan, a superset of the reachable includes) knows this proc
@@ -182,19 +218,12 @@ export class MapProcedureResolver {
      * #362 — the walk's declaration test, extracted so the index fast-path and the
      * walk agree by construction: a MapProcedure/Function token named `nameLower`
      * that sits INSIDE a MODULE block. Returns the 0-based line, or null.
+     * `withinOwnMaps` limits the MODULE blocks to those inside the file's own MAPs (#754).
+     * Read from the file's walk summary (#756).
      */
-    private findModuleScopedProcDeclLine(tokens: Token[], nameLower: string): number | null {
-        const moduleRanges = tokens
-            .filter(t => t.type === TokenType.Structure &&
-                t.value.toUpperCase() === 'MODULE' && t.finishesAt !== undefined)
-            .map(t => ({ start: t.line, end: t.finishesAt! }));
-        if (moduleRanges.length === 0) return null;
-        const decl = tokens.find(t =>
-            (t.subType === TokenType.MapProcedure || t.type === TokenType.Function) &&
-            (t.label?.toLowerCase() === nameLower || t.value.toLowerCase() === nameLower) &&
-            moduleRanges.some(r => t.line > r.start && t.line < r.end)
-        );
-        return decl ? decl.line : null;
+    private findModuleScopedProcDeclLine(tokens: Token[], nameLower: string, withinOwnMaps = false): number | null {
+        const summary = this.summaryOf(tokens);
+        return (withinOwnMaps ? summary.moduleDeclInMaps : summary.moduleDecl).get(nameLower) ?? null;
     }
 
     /**
@@ -203,18 +232,149 @@ export class MapProcedureResolver {
      * INTERFACE has a method subtype and is excluded.
      */
     private findBareProcDeclLine(tokens: Token[], nameLower: string): number | null {
-        const decl = tokens.find(t =>
-            (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MapProcedure) &&
-            t.label?.toLowerCase() === nameLower
-        );
-        return decl ? decl.line : null;
+        return this.summaryOf(tokens).bareDecl.get(nameLower) ?? null;
     }
 
-    /** Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328). */
+    /**
+     * #756 — a file's walk summary (see FileWalkSummary), built on first use for this token array.
+     * A declaration is a MapProcedure/Function token, by label or value, strictly inside a MODULE
+     * block; `moduleDeclInMaps` counts only MODULE blocks strictly inside one of the file's MAPs.
+     * The first token in order wins a name, as the token searches this replaces did.
+     */
+    private summaryOf(tokens: Token[]): FileWalkSummary {
+        const known = walkSummaries.get(tokens);
+        if (known) return known;
+        const ranges = (keyword: string): WalkRange[] => tokens
+            .filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === keyword && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        const mapRanges = ranges('MAP');
+        const modules = ranges('MODULE');
+        const inside = (line: number, within: WalkRange[]) => within.some(r => line > r.start && line < r.end);
+        const modulesInMaps = modules.filter(m => inside(m.start, mapRanges));
+        const moduleDecl = new Map<string, number>();
+        const moduleDeclInMaps = new Map<string, number>();
+        const bareDecl = new Map<string, number>();
+        const add = (to: Map<string, number>, name: string | undefined, line: number) => {
+            if (name) {
+                const key = name.toLowerCase();
+                if (!to.has(key)) to.set(key, line);
+            }
+        };
+        for (const t of tokens) {
+            if ((t.subType === TokenType.MapProcedure || t.type === TokenType.Function) && modules.length > 0 && inside(t.line, modules)) {
+                add(moduleDecl, t.label, t.line);
+                add(moduleDecl, t.value, t.line);
+                if (inside(t.line, modulesInMaps)) {
+                    add(moduleDeclInMaps, t.label, t.line);
+                    add(moduleDeclInMaps, t.value, t.line);
+                }
+            }
+            if (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MapProcedure) add(bareDecl, t.label, t.line);
+        }
+        const summary: FileWalkSummary = { mapRanges, moduleDecl, moduleDeclInMaps, bareDecl };
+        walkSummaries.set(tokens, summary);
+        return summary;
+    }
+
+    /** #756 — a file's INCLUDEs in text order, each marked inside or outside the file's MAPs. Read once per summary. */
+    private includesOf(summary: FileWalkSummary, content: string): Array<{ fileName: string; insideMap: boolean }> {
+        if (summary.includes) return summary.includes;
+        const lineStarts = [0];
+        for (let i = content.indexOf('\n'); i !== -1; i = content.indexOf('\n', i + 1)) lineStarts.push(i + 1);
+        const offsetToLine = (offset: number): number => {
+            let lo = 0, hi = lineStarts.length - 1;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (lineStarts[mid] <= offset) lo = mid; else hi = mid - 1;
+            }
+            return lo;
+        };
+        const includes: Array<{ fileName: string; insideMap: boolean }> = [];
+        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
+        let match: RegExpExecArray | null;
+        while ((match = includePattern.exec(content)) !== null) {
+            const line = offsetToLine(match.index);
+            includes.push({ fileName: match[1], insideMap: summary.mapRanges.some(r => line > r.start && line < r.end) });
+        }
+        summary.includes = includes;
+        return includes;
+    }
+
+    /**
+     * The MEMBER parent of a module: its literal MEMBER header, or the header of the
+     * include shim that is its first statement (TokenHelper.findShimIncludeToken —
+     * `INCLUDE('Member.clw')` whose file holds the MEMBER line), followed up to
+     * MAX_SHIM_HOPS shims deep.
+     */
+    private async memberParentPathOf(tokens: Token[], filePath: string): Promise<string | null> {
+        const visited = new Set<string>();
+        for (let hop = 0; hop <= MapProcedureResolver.MAX_SHIM_HOPS; hop++) {
+            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+            if (memberToken?.referencedFile) {
+                return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(memberToken.referencedFile), filePath);
+            }
+            const shim = TokenHelper.findShimIncludeToken(tokens);
+            if (!shim?.referencedFile) return null;
+            const shimPath = this.resolveIncludeTarget(shim.referencedFile, filePath);
+            if (!shimPath || visited.has(shimPath.toLowerCase())) return null;
+            visited.add(shimPath.toLowerCase());
+            const shimFile = await this.loadDocForWalk(shimPath);
+            if (!shimFile) return null;
+            tokens = shimFile.tokens;
+            filePath = shimPath;
+        }
+        return null;
+    }
+
+    private static readonly MAX_SHIM_HOPS = 3;
+
+    /**
+     * Cheap pre-check before tokenizing an include that sits outside a MAP. Only a file
+     * with a MAP statement can declare anything (MAP is a keyword, never a label, so it
+     * is indented), and it can answer for `nameLower` only if its text names it or it
+     * has INCLUDEs of its own for the walk to follow. A large API header with a MAP is
+     * therefore tokenized only when a call to one of its procedures is looked up.
+     */
+    private outsideMapIncludeMayDeclare(filePath: string, nameLower: string): boolean {
+        const epoch = getCrossFileEpoch();
+        if (epoch !== outsideMapTextEpoch) {
+            outsideMapTextCache.clear();
+            outsideMapTextEpoch = epoch;
+        }
+        const key = filePath.toLowerCase();
+        let facts = outsideMapTextCache.get(key);
+        if (!facts) {
+            const text = CrossFileResolver.loadExternalFileContent(
+                TokenCache.getInstance(), pathToCanonicalUri(filePath), filePath);
+            const hasMap = text !== undefined && /^[ \t]+MAP\b/im.test(text);
+            facts = {
+                hasMap,
+                hasInclude: hasMap && /INCLUDE\s*\(/i.test(text!),
+                lowerText: hasMap ? text!.toLowerCase() : undefined
+            };
+            outsideMapTextCache.set(key, facts);
+        }
+        if (!facts.hasMap) return false;
+        return facts.hasInclude || facts.lowerText!.includes(nameLower);
+    }
+
+    /**
+     * Same-dir → redirection resolution for an INCLUDE/MEMBER filename (owner-first, #328),
+     * memoized per cross-file epoch (#756).
+     */
     private resolveIncludeTarget(fileName: string, fromPath: string): string | null {
+        const epoch = getCrossFileEpoch();
+        if (epoch !== includeTargetEpoch) {
+            includeTargetCache.clear();
+            includeTargetEpoch = epoch;
+        }
+        const key = `${fromPath.toLowerCase()}|${fileName.toLowerCase()}`;
+        const known = includeTargetCache.get(key);
+        if (known !== undefined) return known;
         const sameDir = pathUtil.join(pathUtil.dirname(fromPath), fileName);
-        if (fsSync.existsSync(sameDir)) return sameDir;
-        return resolveViaProjectRedirection(fileName, fromPath);
+        const resolved = fsSync.existsSync(sameDir) ? sameDir : resolveViaProjectRedirection(fileName, fromPath);
+        includeTargetCache.set(key, resolved);
+        return resolved;
     }
 
     /** Load a file's document + tokens, via CrossFileCache when available. */
@@ -253,20 +413,17 @@ export class MapProcedureResolver {
         // can carry MODULE prototype blocks — walking every include of a PROGRAM file
         // (equates, class headers, …) multiplied the walk by an order of magnitude for
         // guaranteed misses. Files reached FROM a MAP include are MAP content
-        // throughout, so the restriction only applies at depth 0.
-        let mapRanges: Array<{ start: number; end: number }> | null = null;
-        if (mapScopedRoot && depth === 0) {
-            mapRanges = from.tokens
-                .filter(t => t.type === TokenType.Structure &&
-                    t.value.toUpperCase() === 'MAP' && t.finishesAt !== undefined)
-                .map(t => ({ start: t.line, end: t.finishesAt! }));
-            if (mapRanges.length === 0) return null; // no MAP → no MAP includes
-        }
-
-        const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
-        const content = from.document.getText();
+        // throughout, so the restriction only applies to map-scoped files (the roots,
+        // and an INC that carries its own MAP — below).
+        //
+        // The one exception: an include OUTSIDE a MAP whose file holds its own MAP
+        // (`MAP / MODULE('SomeLib') / … / END / END` — how a DLL usually ships its
+        // prototypes, included in the global data section). Such a file is only loaded
+        // when a cheap text check finds a MAP in it and the name (or INCLUDEs to follow),
+        // so the guard above keeps its cost.
+        // #756 — the file's INCLUDEs and MAP ranges come from its walk summary, worked out once.
+        const includes = this.includesOf(this.summaryOf(from.tokens), from.document.getText());
         const nameLower = procName.toLowerCase();
-        let match: RegExpExecArray | null;
 
         // #361 — the inner loop below loads (and, cold, tokenizes) EVERY include of
         // this file with no yield between them; a big NetTalk chain blocked the event
@@ -274,44 +431,28 @@ export class MapProcedureResolver {
         // editor stays responsive even on a cold, slow walk.
         const timeSlice = makeTimeSlicer();
 
-        // Offset→line lookup for the MAP-range filter (built once, binary-searched).
-        let lineStarts: number[] | null = null;
-        if (mapRanges) {
-            lineStarts = [0];
-            for (let i = content.indexOf('\n'); i !== -1; i = content.indexOf('\n', i + 1)) {
-                lineStarts.push(i + 1);
-            }
-        }
-        const offsetToLine = (offset: number): number => {
-            let lo = 0, hi = lineStarts!.length - 1;
-            while (lo < hi) {
-                const mid = (lo + hi + 1) >> 1;
-                if (lineStarts![mid] <= offset) lo = mid; else hi = mid - 1;
-            }
-            return lo;
-        };
-
-        while ((match = includePattern.exec(content)) !== null) {
-            if (mapRanges) {
-                const matchLine = offsetToLine(match.index);
-                if (!mapRanges.some(r => matchLine > r.start && matchLine < r.end)) continue;
-            }
-            const incPath = this.resolveIncludeTarget(match[1], fromPath);
+        for (const include of includes) {
+            const outsideMap = mapScopedRoot && !include.insideMap;
+            const incPath = this.resolveIncludeTarget(include.fileName, fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
+            if (outsideMap && !this.outsideMapIncludeMayDeclare(incPath, nameLower)) continue;
 
             await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);
             if (!inc) continue;
 
-            // Declaration = MapProcedure/Function token with our name, inside a MODULE block.
-            const declLine = this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
-                ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
+            // Declaration = MapProcedure/Function token with our name, inside a MODULE block
+            // (for an include outside a MAP: a MODULE block inside the file's own MAP).
+            const declLine = outsideMap
+                ? this.findModuleScopedProcDeclLine(inc.tokens, nameLower, /* withinOwnMaps */ true)
+                : this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
+                    ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
             if (declLine !== null) {
                 logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
                 return { doc: inc.document, tokens: inc.tokens, declLine };
             }
 
-            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, false, acceptBarePrototype);
+            const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, outsideMap, acceptBarePrototype);
             if (nested) return nested;
         }
         return null;
@@ -619,11 +760,13 @@ export class MapProcedureResolver {
             const tokensInMap = pass.tokensFor(mapToken);
             logger.info(`📋 Found ${tokensInMap.length} total tokens in MAP (${pass.label})`);
 
-            // Look for MapProcedure tokens or Function tokens matching our procedure name
+            // Look for MapProcedure tokens or Function tokens matching our procedure name.
+            // The WHOLE name: an indented prototype's value is its name, so a prefix test
+            // let `Log` match `LogViewer` and outrank the real global `Log` in hover.
             for (const t of tokensInMap) {
                 const isMatch = (t.subType === TokenType.MapProcedure && 
                                  (t.label?.toLowerCase() === procName.toLowerCase() || 
-                                  t.value.toLowerCase().startsWith(procName.toLowerCase()))) ||
+                                  t.value.toLowerCase() === procName.toLowerCase())) ||
                                 (t.type === TokenType.Function && 
                                  t.value.toLowerCase() === procName.toLowerCase());
                 

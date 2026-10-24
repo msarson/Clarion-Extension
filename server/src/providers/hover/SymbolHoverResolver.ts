@@ -14,6 +14,10 @@ export interface HoverContext {
     hasLabelBefore: boolean;
     isInWindowContext: boolean;
     isFollowedByIdentifier: boolean;
+    /** In executable code, outside NEW( ): a word spelled like a data type is a name there (#752). */
+    isNameInCode?: boolean;
+    /** Opens a parameter of a prototype (`PROCEDURE(LONG pX)`): a data type there is the parameter's type (#753). */
+    opensParameter?: boolean;
 }
 
 /**
@@ -41,7 +45,9 @@ export class SymbolHoverResolver {
         // (much narrower) built-in-data-type check. Skip straight to downstream
         // variable resolution instead of guessing.
         if (context.isFollowedByIdentifier) {
-            return null;
+            // #753: a parameter is written the same way (`PROCEDURE(LONG pX)`), and there the
+            // word is the parameter's type: offer the data type alone, never a control
+            return context.opensParameter ? this.checkDataType(word, context) : null;
         }
 
         const checkDataTypeFirst = context.hasLabelBefore || !context.isInWindowContext;
@@ -51,9 +57,16 @@ export class SymbolHoverResolver {
             const dataTypeHover = this.checkDataType(word, context);
             if (dataTypeHover) return dataTypeHover;
             
-            // Then check control as fallback
-            const controlHover = this.checkControl(word);
-            if (controlHover) return controlHover;
+            // Then check control as fallback — but only inside a WINDOW/APPLICATION/REPORT,
+            // the one place a control can be declared. checkControl is a pure name lookup,
+            // so outside one it turned any word spelled like a control into that control:
+            // `Amount LONG(text)` or `x = text` hovered as the TEXT control, and a variable
+            // labelled `Button` hovered as the BUTTON control. Decline instead and let the
+            // rest of the ladder (attributes, keywords, built-ins, variables) answer.
+            if (context.isInWindowContext) {
+                const controlHover = this.checkControl(word);
+                if (controlHover) return controlHover;
+            }
         } else {
             // Window/control context - check control first
             const controlHover = this.checkControl(word);
@@ -85,6 +98,11 @@ export class SymbolHoverResolver {
         // is the right answer, and this lookup runs first — so decline and let it
         // through, or a SHEET's `,JOIN` would describe a relational join.
         if (prefersAttributeMeaning(word, context)) {
+            return null;
+        }
+        // #752: `Key = Memo` in code names two variables, not the KEY and MEMO data types; decline
+        // and let variable resolution answer, as #722 does for a word spelled like a control
+        if (context.isNameInCode) {
             return null;
         }
         if (this.dataTypeService.hasDataType(word)) {

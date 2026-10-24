@@ -10,6 +10,16 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 import { firstTokenAfterLine } from './utils/TokenLineIndex';
+import { OmitCompileDetector } from './utils/OmitCompileDetector';
+
+/**
+ * A document's source lines: a split array, or an accessor over the document so a caller on the
+ * per-edit path need not split the whole text (#733). An array satisfies it as it is.
+ */
+export interface SourceLines {
+    readonly length: number;
+    at(line: number): string | undefined;
+}
 
 /**
  * The two structure keywords that can open a block inside a MAP body. Matched
@@ -188,7 +198,10 @@ export class DocumentStructure {
      */
     private logicalLinesByPhysicalLine: Map<number, LogicalLine> = new Map();
 
-    constructor(private tokens: Token[], private lines?: string[]) {
+    /** Where the Directive tokens are, so the OMIT-body search need not walk every token (#733). */
+    private directiveIndexes: number[] = [];
+
+    constructor(private tokens: Token[], private lines?: SourceLines) {
         // 🚀 PERFORMANCE: Build indexes first for fast lookups
         this.buildIndexes();
         this.maxLabelWidth = this.processLabels();
@@ -225,7 +238,9 @@ export class DocumentStructure {
         const perfStart = performance.now();
         
         // Index tokens by line for fast line-based lookups
-        for (const token of this.tokens) {
+        for (let i = 0; i < this.tokens.length; i++) {
+            const token = this.tokens[i];
+            if (token.type === TokenType.Directive) this.directiveIndexes.push(i);
             if (!this.tokensByLine.has(token.line)) {
                 this.tokensByLine.set(token.line, []);
             }
@@ -516,6 +531,22 @@ export class DocumentStructure {
     }
 
     /**
+     * True when `token` opens its line, optionally after a label — where a control
+     * declaration's keyword sits (`TEXT,AT(...)`, `Lbl BUTTON(...)`). The same word later
+     * on the line is a parameter or an argument: the `Text` in
+     * `DeclApply PROCEDURE(STRING Text),PRIVATE` is no TEXT control. Mirrors
+     * findControlKeyword in DeclaredAttributes. (#759)
+     */
+    private opensItsLine(token: Token): boolean {
+        const lineTokens = this.tokensByLine.get(token.line) || [];
+        for (const t of lineTokens) {
+            if (t === token) return true;
+            if (t.type !== TokenType.Label) return false;
+        }
+        return false;
+    }
+
+    /**
      * True when `line` ends with a `|` line-continuation — i.e. the following
      * physical line is a continuation of this one. Used by getControlContextAt to
      * walk only the unbroken continuation chain above the cursor (rather than a
@@ -559,8 +590,10 @@ export class DocumentStructure {
                     // Check if it's a known control type — but NOT when the token is
                     // the suffix of a `Prefix:Suffix` compound (e.g. `Region` in
                     // `CREATE:Region`), which is an EQUATE constant, not a control
-                    // declaration. (#179)
-                    if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
+                    // declaration (#179), nor when it does not open its line, e.g. a
+                    // parameter named `Text` (#759).
+                    if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token) &&
+                        this.opensItsLine(token)) {
                         controlToken = token;
                         break;
                     }
@@ -591,8 +624,10 @@ export class DocumentStructure {
                         token.type === TokenType.Structure) {
                         const upperValue = token.value.toUpperCase();
                         // Skip `Prefix:Suffix` compound suffixes (e.g. `Region` in
-                        // `CREATE:Region`) — an EQUATE constant, not a control. (#179)
-                        if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token)) {
+                        // `CREATE:Region`) — an EQUATE constant, not a control (#179) —
+                        // and a word that does not open its line (#759).
+                        if (this.isControlKeyword(upperValue) && !this.isCompoundNameSuffix(token) &&
+                            this.opensItsLine(token)) {
                             controlToken = token;
                             break;
                         }
@@ -645,11 +680,68 @@ export class DocumentStructure {
         return ControlService.getInstance().isControl(keyword);
     }
 
+    /**
+     * Which lines are the body of an unconditional OMIT block (after the directive, before the
+     * terminator line), as a per-line flag; undefined when there are none or no source lines were
+     * given. Same blocks as OmitCompileDetector: a conditional OMIT/COMPILE cannot be evaluated
+     * here and stays live, and the terminator line stays live (its other text is code).
+     */
+    private omittedLines(): Uint8Array | undefined {
+        const lines = this.lines;
+        if (!lines || !this.directiveIndexes.some(i => this.tokens[i].value.toUpperCase() === 'OMIT')) return undefined;
+        const blocks = OmitCompileDetector.findDirectiveBlocksInLines(this.tokens, lines.length, l => lines.at(l) ?? '', this.directiveIndexes);
+        let flags: Uint8Array | undefined;
+        for (const block of blocks) {
+            if (block.type !== 'OMIT') continue;
+            const end = block.endLine ?? lines.length;
+            for (let line = block.startLine + 1; line < end; line++) {
+                (flags ??= new Uint8Array(lines.length))[line] = 1;
+            }
+        }
+        return flags;
+    }
+
+    /**
+     * Inside an OMIT body, the structures open when the body began: an END or WHILE/UNTIL in the
+     * body cannot close them. 0 outside an OMIT body.
+     */
+    private omitFloor = 0;
+
+    /**
+     * Leaves an OMIT body: a structure it opened and left open is closed with the body, on its
+     * last line, and the floor is lifted.
+     */
+    private leaveOmitBody(lastLine: number, mapDepth: number): void {
+        while (this.structureStack.length > this.omitFloor) this.structureStack.pop()!.finishesAt = lastLine;
+        this.insideClassOrInterfaceOrMapDepth = mapDepth;
+        this.omitFloor = 0;
+    }
+
     public process(): void {
         // Issue #233: any cached scope resolver is stale once we re-derive structure.
         this._scopeResolver = undefined;
+        const omitted = this.omittedLines();
+        this.omitFloor = 0;
+        // The MAP/CLASS depth when the current OMIT body began; undefined outside one.
+        let mapDepthAtOmit: number | undefined;
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
+
+            // An unconditional OMIT body is not code: its structures and ENDs pair with each other
+            // and never with the code around it. Compiler-verified (Clarion 12): an IF opened in an
+            // OMIT body whose `.` sits just past the terminator line leaves that `.` to the IF
+            // around the block. Read as code, the omitted IF took the `.`, the outer IF took the
+            // next END, and every structure above it closed one END late (an ACCEPT never closed,
+            // so every CYCLE in it was "outside of a LOOP or ACCEPT"). The structures around the
+            // body stay on the stack, so a prototype omitted inside a MAP still reads as one.
+            const inOmit = omitted !== undefined && omitted[token.line] === 1;
+            if (inOmit && mapDepthAtOmit === undefined) {
+                mapDepthAtOmit = this.insideClassOrInterfaceOrMapDepth;
+                this.omitFloor = this.structureStack.length;
+            } else if (!inOmit && mapDepthAtOmit !== undefined) {
+                this.leaveOmitBody(this.tokens[i - 1].line, mapDepthAtOmit);
+                mapDepthAtOmit = undefined;
+            }
 
             // ✅ Always prioritize structure tokens first.
             // TokenType.Procedure is included for idempotency: handleProcedureToken
@@ -718,6 +810,9 @@ export class DocumentStructure {
                 }
             }
             
+        }
+        if (mapDepthAtOmit !== undefined) {
+            this.leaveOmitBody(this.tokens[this.tokens.length - 1].line, mapDepthAtOmit);
         }
         
         // Resolve file references for all tokens that have them
@@ -1177,7 +1272,11 @@ export class DocumentStructure {
             }
 
             if (pre) {
-                t.prefixedEquateName = `${pre}:${t.value}`;
+                // A member already spelled with the prefix keeps its name (`BtnState:Normal`
+                // under `BtnState ITEMIZE,PRE()`), it is not prefixed a second time.
+                t.prefixedEquateName = t.value.toUpperCase().startsWith(pre.toUpperCase() + ':')
+                    ? t.value
+                    : `${pre}:${t.value}`;
                 this.equateIndex.set(t.prefixedEquateName.toUpperCase(), t);
             }
             // Always index by the raw label too — callers may look up either form.
@@ -1756,6 +1855,13 @@ export class DocumentStructure {
                             if (DOCSTRUCT_TRACE) logger.info(`📌 Found structure prefix: ${prefixValue} for ${token.value} at Line ${token.line}`);
                         }
                     }
+                    // An ITEMIZE with an empty prefix (`Color ITEMIZE,PRE` / `,PRE()`) uses its own
+                    // label: its members are `Color:Name`. Without a label there is no prefix.
+                    // A member labelled `Pre` (a column-0 Label) is not the attribute.
+                    if (!token.structurePrefix && token.label && t.type !== TokenType.Label &&
+                        token.value.toUpperCase() === 'ITEMIZE') {
+                        token.structurePrefix = token.label;
+                    }
                     break prefixSearch;
                 }
             }
@@ -2012,7 +2118,7 @@ export class DocumentStructure {
         // wrong loop, treats the header condition as a terminator, and closes the
         // inner loop on its own line. (#178)
         let loopIndex = -1;
-        for (let i = this.structureStack.length - 1; i >= 0; i--) {
+        for (let i = this.structureStack.length - 1; i >= this.omitFloor; i--) {
             if (this.structureStack[i].value.toUpperCase() === 'LOOP') {
                 loopIndex = i;
                 break;
@@ -2090,7 +2196,8 @@ export class DocumentStructure {
         
         // This END/period terminates a structure from the stack
         // Simply pop the last opened structure - Clarion uses explicit END markers, not indentation
-        const lastStructure = this.structureStack.pop();
+        // In an OMIT body, an END with nothing of the body's own left to close closes nothing.
+        const lastStructure = this.structureStack.length > this.omitFloor ? this.structureStack.pop() : undefined;
         if (lastStructure) {
             lastStructure.finishesAt = token.line;
             
@@ -3015,7 +3122,7 @@ export class DocumentStructure {
      *  approximation from the token stream. */
     private getPhysicalLineText(line: number): string {
         if (this.lines && line < this.lines.length) {
-            return this.lines[line];
+            return this.lines.at(line) ?? '';
         }
         const lineTokens = this.tokensByLine.get(line);
         if (!lineTokens || lineTokens.length === 0) return '';

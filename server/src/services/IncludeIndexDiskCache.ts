@@ -30,6 +30,11 @@ export interface IncludeIndexEnvelope<P> {
     /** Every file whose CONTENT fed the payload → its mtimeMs at build time. */
     contributing: Record<string, number>;
     payload: P;
+    /**
+     * #770 — names that did not resolve during the build, with the directory they were looked
+     * up from. Nothing past them was walked, so the caller must rebuild once one resolves.
+     */
+    unresolved?: Array<{ fileName: string; baseDir: string }>;
 }
 
 function cacheFile(bucket: string, key: string): string {

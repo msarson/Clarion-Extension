@@ -168,6 +168,58 @@ export class ClarionTokenizer {
     }
 
     /**
+     * The terminator line of an OMIT/COMPILE block: the terminator text itself is not code.
+     * Compiler-verified (Clarion 12): inside a MAP's MODULE, `COMPILE('END***',_WIDTH32_)` closed
+     * by the line `END***` builds, so `END***` does not close the MODULE; and a block closed by
+     * `END XYZ` with terminator 'XYZ' builds too, so the rest of the line is still read. Read as
+     * code, `END***` matched EndStatement and closed the MODULE a line early — the MODULE's own
+     * END then closed the MAP, and every declaration after it was misread.
+     *
+     * Returns `line` with the text of each open terminator it contains (outside string literals,
+     * as OmitCompileDetector finds them) blanked to spaces, so columns are unchanged, and removes
+     * those terminators from `open`.
+     */
+    /** #771 — the line ends with the '|' continuation (outside a string, before any comment). */
+    static endsWithContinuation(line: string): boolean {
+        let inString = false;
+        let last = '';
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (inString) {
+                if (ch === "'") inString = false; // '' re-enters on the next character
+                continue;
+            }
+            if (ch === "'") { inString = true; last = ch; continue; }
+            if (ch === '!') break;
+            if (ch !== ' ' && ch !== '\t' && ch !== '\r') last = ch; // #775: a CRLF line split on '\n' keeps its '\r'
+        }
+        return last === '|';
+    }
+
+    static blankDirectiveTerminators(line: string, open: string[]): string {
+        if (open.length === 0) return line;
+        const withoutStrings = line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length));
+        let result = line;
+        for (let i = open.length - 1; i >= 0; i--) {
+            const at = withoutStrings.indexOf(open[i]);
+            if (at < 0) continue;
+            result = result.slice(0, at) + ' '.repeat(open[i].length) + result.slice(at + open[i].length);
+            open.splice(i, 1);
+        }
+        return result;
+    }
+
+    /** Adds the terminator of each OMIT/COMPILE directive on `line` (not in a comment) to `open`. */
+    static collectDirectiveTerminators(line: string, open: string[]): void {
+        if (!/\b(?:OMIT|COMPILE)\b/i.test(line)) return;
+        const commentAt = line.replace(/'([^']|'')*'/g, m => ' '.repeat(m.length)).indexOf('!');
+        const code = commentAt >= 0 ? line.slice(0, commentAt) : line;
+        for (const m of code.matchAll(/\b(?:OMIT|COMPILE)\s*\(\s*'((?:[^']|'')+)'/gi)) {
+            open.push(m[1].replace(/''/g, "'"));
+        }
+    }
+
+    /**
      * #715 — whether a full pass is inside a CODE section when it reaches line `index`: set by the
      * nearest line above that sets it, else outside.
      */
@@ -301,10 +353,17 @@ export class ClarionTokenizer {
         // 🚀 PERF: Track CODE context to skip Structure patterns in execution sections
         let inCodeSection = this.initialInCodeSection;
         let tokensOnCurrentLine = 0;
-        
+        // Terminators of the OMIT/COMPILE blocks opened so far and not yet closed.
+        const openTerminators: string[] = [];
+        // #771: the previous line ended with '|', so this line continues its statement.
+        let previousLineContinues = false;
+
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            const line = lines[lineNumber];
+            const line = ClarionTokenizer.blankDirectiveTerminators(lines[lineNumber], openTerminators);
+            ClarionTokenizer.collectDirectiveTerminators(lines[lineNumber], openTerminators);
             if (line.trim() === "") continue; // ✅ Skip blank lines
+            const continuesStatement = previousLineContinues;
+            previousLineContinues = ClarionTokenizer.endsWithContinuation(line);
 
             let position = 0;
             tokensOnCurrentLine = 0; // Reset for new line
@@ -521,6 +580,13 @@ export class ClarionTokenizer {
                                     continue; // Try next structure pattern
                                 }
 
+                                // #771: MODULE opens a structure only as the first word of a statement.
+                                // At the start of a continuation line it is an attribute of the statement
+                                // being continued (a CLASS's MODULE('file.clw')).
+                                if (structName === 'MODULE' && continuesStatement && tokensOnCurrentLine === 0) {
+                                    continue; // Try next structure pattern
+                                }
+
                                 // ✅ CRITICAL FIX: Check if structure keyword is inside optional parameters or qualified identifiers or parameter lists
                                 // This prevents matching keywords that are:
                                 // - Part of qualified identifiers like nts:case or obj.case (preceded by : or .)
@@ -703,54 +769,48 @@ export class ClarionTokenizer {
                         }
                         
                         this.tokens.push(newToken);
-                        // 🌈 Special handling for COLOR(...)
-                        if (tokenType === TokenType.Function && match[0].toUpperCase() === "COLOR") {
-                            // Look ahead for '(' and extract the contents
-                            const parenStart = line.indexOf("(", position);
+                        // 🌈 Special handling for COLOR(...) and (#776) FILL(...): each colour argument
+                        // becomes a ColorValue token at its own column, for the editor's swatches.
+                        const colorKeyword = match[0].trim().toUpperCase();
+                        if ((tokenType === TokenType.Function && colorKeyword === "COLOR") ||
+                            (tokenType === TokenType.Attribute && colorKeyword === "FILL")) {
+                            // The '(' must follow the keyword: a bare FILL takes no colour.
+                            const afterKeyword = newToken.start + trimmedValue.length;
+                            const parenStart = /^\s*\(/.test(line.substring(afterKeyword)) ? line.indexOf("(", afterKeyword) : -1;
                             if (parenStart > -1) {
+                                const rawParams: string[] = [];
                                 let parenDepth = 1;
-                                let currentPos = parenStart + 1;
-                                let paramString = "";
-
-                                while (currentPos < line.length && parenDepth > 0) {
+                                let paramStart = parenStart + 1;
+                                for (let currentPos = parenStart + 1; currentPos < line.length && parenDepth > 0; currentPos++) {
                                     const char = line[currentPos];
                                     if (char === "(") parenDepth++;
                                     else if (char === ")") parenDepth--;
-
-                                    if (parenDepth > 0) {
-                                        paramString += char;
+                                    if ((char === "," && parenDepth === 1) || parenDepth === 0) {
+                                        const raw = line.substring(paramStart, currentPos);
+                                        const param = raw.trim();
+                                        if (param) {
+                                            rawParams.push(param);
+                                            const isEquate = /^COLOR:[A-Za-z0-9]+$/i.test(param);
+                                            const isRGBHex = /^(-)?([0-9A-F]+)H$/i.test(param);
+                                            if (isEquate || isRGBHex) {
+                                                const paramColumn = paramStart + raw.indexOf(param);
+                                                this.tokens.push({
+                                                    type: TokenType.ColorValue,
+                                                    value: param,
+                                                    line: lineNumber,
+                                                    start: paramColumn,
+                                                    maxLabelLength: 0
+                                                });
+                                                if (TOKENIZER_TRACE) logger.info(`🌈 ${colorKeyword} param tokenized: ${param} ${paramColumn}`);
+                                            }
+                                        }
+                                        paramStart = currentPos + 1;
                                     }
-                                    currentPos++;
-                                }
-
-                                // Split param string into arguments
-                                const rawParams = paramString.split(",").map(s => s.trim()).filter(Boolean);
-                                // Store parsed COLOR(...) arguments
-                                newToken.colorParams = [];
-
-                                for (const param of rawParams) {
-                                    const isEquate = /^COLOR:[A-Za-z0-9]+$/i.test(param);
-                                    const isRGBHex = /^(-)?([0-9A-F]+)H$/i.test(param);
-
-                                    if (isEquate || isRGBHex) {
-                                        this.tokens.push({
-                                            type: TokenType.ColorValue,
-                                            value: param,
-                                            line: lineNumber,
-                                            start: column, // You could refine this based on match position
-                                            maxLabelLength: 0
-                                        });
-                                        
-                                        if (TOKENIZER_TRACE) logger.info(`🌈 COLOR param tokenized: ${param} ${column}`);
-                                        
-                                    }
-
-                                    newToken.colorParams.push(param);
                                 }
 
                                 // Store as custom metadata
                                 newToken.colorParams = rawParams;
-                                if (TOKENIZER_TRACE) logger.info(`🎨 Parsed COLOR params at line ${lineNumber}: ${rawParams.join(", ")}`);
+                                if (TOKENIZER_TRACE) logger.info(`🎨 Parsed ${colorKeyword} params at line ${lineNumber}: ${rawParams.join(", ")}`);
                             }
                         }
                         else if (TOKENIZER_TRACE && match[0].toUpperCase() === "COLOR") {

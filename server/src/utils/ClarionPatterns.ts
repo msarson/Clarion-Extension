@@ -140,7 +140,23 @@ export class ClarionPatterns {
      * [1] = Parameter list
      */
     public static readonly PROCEDURE_WITH_PARAMS = /(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i;
-    
+
+    /**
+     * The keyword-less MAP prototype form, `memcpy(*?, *?, UNSIGNED),PROC` (#761): the
+     * name opens the line and the parameter list follows it directly.
+     * Capture groups:
+     * [1] = Parameter list
+     */
+    public static readonly KEYWORDLESS_PROTOTYPE_PARAMS = /^\s*[A-Za-z_][\w:]*\s*\(([^)]*)\)/;
+
+    /**
+     * A prototype's parameter-list match, with or without the PROCEDURE keyword. Without
+     * it, a keyword-less MAP prototype read as having no parameters (#761).
+     */
+    public static matchPrototypeParams(line: string): RegExpMatchArray | null {
+        return line.match(this.PROCEDURE_WITH_PARAMS) ?? line.match(this.KEYWORDLESS_PROTOTYPE_PARAMS);
+    }
+
     // ===================================================================
     // ROUTINE PATTERNS
     // ===================================================================
@@ -235,7 +251,7 @@ export class ClarionPatterns {
      * Handles nested parentheses and omittable parameters <LONG x>
      */
     public static countParameters(line: string): number {
-        const match = line.match(this.PROCEDURE_WITH_PARAMS);
+        const match = this.matchPrototypeParams(line);
         if (!match) return 0;
         
         const paramList = match[1].trim();
@@ -273,7 +289,7 @@ export class ClarionPatterns {
      * Example: PROCEDURE(STRING s, LONG extraData = 0, <SHORT flag>) → 2
      */
     public static countDefaultParams(line: string): number {
-        const match = line.match(this.PROCEDURE_WITH_PARAMS);
+        const match = this.matchPrototypeParams(line);
         if (!match) return 0;
         const paramList = match[1].trim();
         if (paramList === '') return 0;

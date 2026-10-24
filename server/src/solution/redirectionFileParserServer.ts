@@ -45,6 +45,37 @@ export interface RedirectionEntry {
 }
 
 /**
+ * #769 — a filemask is "a file name or a file mask using the standard OS wild card characters:
+ * * and ?" (Redirection File help topic), matched against the whole name, case-insensitively.
+ * `*.*` matches every name, as it does in the IDE.
+ */
+export function matchesFileMask(mask: string, filename: string): boolean {
+  if (mask === '*.*') return true;
+  let re = maskPatterns.get(mask);
+  if (!re) {
+    const pattern = mask.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    re = new RegExp(`^${pattern}$`, 'i');
+    maskPatterns.set(mask, re);
+  }
+  return re.test(filename);
+}
+
+/** Compiled masks: findFile tests every entry's mask on every lookup. */
+const maskPatterns = new Map<string, RegExp>();
+
+/**
+ * #769 — whether a mask can match some file with the extension (`.inc` or `inc`): `*.inc` and
+ * `ab*.inc` can, `ab*.clw` cannot. A mask without a dot can only when it ends in `*`.
+ */
+export function maskCanMatchExtension(mask: string, extension: string): boolean {
+  if (mask === '*.*') return true;
+  const ext = extension.replace(/^\./, '');
+  const dot = mask.lastIndexOf('.');
+  if (dot === -1) return mask.endsWith('*');
+  return matchesFileMask(mask.substring(dot + 1), ext);
+}
+
+/**
  * Returns true when the given redirection entry's section is either `Common`
  * (always active regardless of build configuration) OR matches the active
  * build configuration. Comparison is case-insensitive — real-world `.red`
@@ -135,6 +166,16 @@ const warnedUnexpandedMacros = new Set<string>();
  * failure being reported. The condition is once-guarded, user-impacting and
  * actionable, so it earns the channel that is actually on.
  */
+/**
+ * #766 — a red-file path as written: trimmed, and without a surrounding pair of double
+ * quotes. The help quotes directories that hold spaces, and writes
+ * `{include %REDDIR%\oldname.red }` with a space before the brace.
+ */
+function unquoteRedPath(raw: string): string {
+  const p = raw.trim();
+  return p.length >= 2 && p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1).trim() : p;
+}
+
 function warnUnexpandedMacroOnce(macroName: string, redFile: string): void {
   const key = `${macroName.toLowerCase()}|${redFile}`;
   if (warnedUnexpandedMacros.has(key)) return;
@@ -307,8 +348,10 @@ export class RedirectionFileParserServer {
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
-    const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    // #765: resolve, not join — the version's red file name may be a full path, which
+    // the IDE (.NET Path.Combine) keeps as it is.
+    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
+    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
     let redFileToParse = "";
     try {
@@ -367,8 +410,8 @@ export class RedirectionFileParserServer {
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
-    const projectRedFile = path.join(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.join(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
+    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
 
     try {
       // Use async file existence check
@@ -505,7 +548,7 @@ export class RedirectionFileParserServer {
           // multi-include non-determinism. See `docs/audits/include-chaining-audit-3f9f91c8.md`.
           const includeMatch = trimmed.match(/\{include\s+([^}]+)\}/i);
           if (includeMatch && includeMatch[1]) {
-            let includePath = this.resolveMacro(includeMatch[1], redFileToParse);
+            let includePath = this.resolveMacro(unquoteRedPath(includeMatch[1]), redFileToParse);
             includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
             logger.info(`Processing include: ${includePath} from ${redFileToParse}`);
             this.parseRedFileRecursive(includePath, entries, false);
@@ -633,7 +676,7 @@ export class RedirectionFileParserServer {
         if (trimmed.startsWith("{include")) {
           const includeMatch = trimmed.match(/\{include\s+([^}]+)\}/i);
           if (includeMatch && includeMatch[1]) {
-            let includePath = this.resolveMacro(includeMatch[1], redFileToParse);
+            let includePath = this.resolveMacro(unquoteRedPath(includeMatch[1]), redFileToParse);
             includePath = path.isAbsolute(includePath) ? includePath : path.resolve(redPath, includePath);
             logger.info(`Processing include: ${includePath} from ${redFileToParse}`);
 
@@ -711,6 +754,7 @@ export class RedirectionFileParserServer {
         stopsSearch = true;
         p = p.slice(0, -1).trim();
       }
+      p = unquoteRedPath(p);
       if (p.length > 0) {
         let resolved = this.resolveMacro(p, redFile);
         if (resolved.endsWith('|')) {
@@ -1148,19 +1192,6 @@ export class RedirectionFileParserServer {
    * @returns True if the filename matches the mask
    */
   private matchesMask(mask: string, filename: string): boolean {
-    if (mask === "*.*") return true;
-    
-    // Cache the processed mask for better performance
-    const maskLower = mask.toLowerCase();
-    const filenameLower = filename.toLowerCase();
-    
-    // Handle the common case of extension matching (e.g., "*.clw")
-    if (maskLower.startsWith("*.")) {
-      const ext = maskLower.substring(1); // Get ".clw"
-      return filenameLower.endsWith(ext);
-    }
-    
-    // Handle other mask patterns
-    return filenameLower.endsWith(maskLower.replace("*", ""));
+    return matchesFileMask(mask, filename);
   }
 }
