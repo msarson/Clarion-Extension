@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Navigation and hover
 
 - **YIELD, COMMIT, TODAY and other built-ins written without parentheses are no longer called constants.** Clarion calls a built-in that needs no arguments without parentheses, and the hover captioned every such word "Built-in constant"; it now shows the built-in's own card, as a statement when it returns nothing (YIELD, COMMIT, HALT) and as a function when it returns a value (TODAY, ERRORCODE). The DATE entry described the DATE data type and now describes `DATE(month, day, year)`. [#784](https://github.com/msarson/Clarion-Extension/issues/784)
+- **A MAP prototype continued onto a second line with `|` is one entry in the Structure view.** The continuation was read as a new declaration, so `EXPORT,NAME('x')` on the second line appeared as a procedure called EXPORT. [#790](https://github.com/msarson/Clarion-Extension/issues/790)
 
 #### Configuration and build
 
