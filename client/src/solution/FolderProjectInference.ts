@@ -378,7 +378,9 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         const ls = linesOf(f), depths = mapDepths(ls);
         ls.forEach((line, i) => {
             if (depths[i]) return;
-            for (const m of line.replace(/'(?:[^']|'')*'/g, "''").matchAll(/(?<![\w:.])[A-Za-z_]\w*/g)) words.add(m[0].toLowerCase());
+            // Whole prefixed names (PRE:Name, Mod::Name, a:b:Name), as MAP prototypes declare them;
+            // a word after a dot is member access, not a procedure call.
+            for (const m of line.replace(/'(?:[^']|'')*'/g, "''").matchAll(/(?<![\w:.])[A-Za-z_]\w*(?:::?[A-Za-z_]\w*)*/g)) words.add(m[0].toLowerCase());
         });
         wordCache.set(f, words);
         return words;
@@ -419,31 +421,30 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
     };
 
     const buildClosure = (start: SourceFile[], near: SourceFile) => {
-        const built = new Set<SourceFile>(), modules = new Map<SourceFile, Set<string>>();
-        // Files included inside a MAP hold MAP lines: declarations only, never code.
-        const declarations = new Set<SourceFile>();
-        const stack = [...start];
+        const modules = new Map<SourceFile, Set<string>>();
+        // A file included inside a MAP holds MAP lines (declarations); the same file included
+        // in code is code. Each file is walked once per context, and its words count only where
+        // it was reached as code.
+        const asCode = new Set<SourceFile>(), asDeclarations = new Set<SourceFile>();
+        const stack: [SourceFile, boolean][] = start.map(f => [f, false]);
         while (stack.length) {
-            const file = stack.pop()!;
-            if (built.has(file)) continue;
-            built.add(file);
-            const inDeclarations = declarations.has(file);
+            const [file, declaring] = stack.pop()!;
+            const seen = declaring ? asDeclarations : asCode;
+            if (seen.has(file)) continue;
+            seen.add(file);
             for (const d of directivesOf(file)) {
                 const target = resolve(d.target, near);
                 if (!target) continue;
-                if (d.kind === 'INCLUDE') {
-                    if (d.inMap || inDeclarations) declarations.add(target);
-                    stack.push(target);
-                } else if (d.kind === 'LINK') {
-                    if (!d.linkOff) stack.push(target);
-                } else {
+                if (d.kind === 'INCLUDE') stack.push([target, declaring || d.inMap]);
+                else if (d.kind === 'LINK') { if (!d.linkOff) stack.push([target, false]); }
+                else {
                     const declared = modules.get(target) ?? new Set<string>();
                     d.declares.forEach(n => declared.add(n));
                     modules.set(target, declared);
                 }
             }
         }
-        return { files: [...built].filter(f => !declarations.has(f)), modules };
+        return { files: [...asCode], modules };
     };
     for (const program of programs) {
         const project = projectOf.get(program)!;

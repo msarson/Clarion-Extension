@@ -293,6 +293,27 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(asked.sort(), ['parent', 'parent.clw']);
     });
 
+    test('a prefixed library procedure (Mod::Work, PRE:Name) is recognised when called', () => {
+        for (const name of ['Mod::Work', 'PRE:Work', 'a:b:Work']) {
+            const r = inferProjects([f('App.clw', `  PROGRAM\r\n  MAP\r\n  INCLUDE('LIB.INC')\r\n  END\r\n  CODE\r\n  ${name}()`)], [
+                f(LIB + 'LIB.INC', `  MODULE('lib.clw')\r\n${name}()\r\n  END`), f(LIB + 'lib.clw', '  MEMBER()'),
+            ]);
+            assert.deepStrictEqual(r.projects[0].compile, ['App.clw', 'lib.clw'], name);
+        }
+    });
+
+    test('a file included both inside a MAP and in code is code where it is code, in either order', () => {
+        const lib = [f(LIB + 'LIB.INC', "  MODULE('lib.clw')\r\nWork()\r\n  END"), f(LIB + 'lib.clw', '  MEMBER()')];
+        const shared = f('shared.inc', '  Work()');
+        const mapFirst = "  PROGRAM\r\n  MAP\r\n  INCLUDE('LIB.INC')\r\n  INCLUDE('shared.inc')\r\n  END\r\n  CODE\r\n  INCLUDE('shared.inc')";
+        const codeFirst = "  PROGRAM\r\n  MAP\r\n  INCLUDE('LIB.INC')\r\n  END\r\n  CODE\r\n  INCLUDE('shared.inc')\r\n  INCLUDE('deeper.inc')";
+        const deeper = f('deeper.inc', "  MAP\r\n  INCLUDE('shared.inc')\r\n  END");
+        assert.deepStrictEqual(inferProjects([f('App.clw', mapFirst), shared], lib).projects[0].compile, ['App.clw', 'lib.clw'], 'MAP first');
+        assert.deepStrictEqual(inferProjects([f('App.clw', codeFirst), shared, deeper], lib).projects[0].compile, ['App.clw', 'lib.clw'], 'code first');
+        const onlyInMap = "  PROGRAM\r\n  MAP\r\n  INCLUDE('LIB.INC')\r\n  INCLUDE('shared.inc')\r\n  END\r\n  CODE";
+        assert.deepStrictEqual(inferProjects([f('App.clw', onlyInMap), shared], lib).projects[0].compile, ['App.clw'], 'only in a MAP');
+    });
+
     test('compiler directives inside a MODULE block are not procedures a program can call', () => {
         const inc = f(LIB + 'CWUTIL.INC', "  MODULE('cwutil.clw')\r\n    PRAGMA('link(C%V%DOS%X%%L%.LIB)')\r\n    COMPILE('***',_WIDTH32_)\r\nOpenUrlLink(STRING url),ULONG,PROC\r\n  END");
         const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  PRAGMA('define(x=>1)')\r\n  CODE\r\n  COMPILE('***',1)")], [inc, cwutilClw]);
