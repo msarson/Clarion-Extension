@@ -280,6 +280,19 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
     });
 
+    test('a prototype continued over lines declares one procedure, not its parameter types', () => {
+        const inc = f(LIB + 'MULTI.INC', "  MODULE('multi.clw')\r\nMulti(LONG a, LONG b), |\r\n      LONG,PROC\r\nPair(STRING s), |  ! the return type follows\r\n     STRING\r\n  END");
+        const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('MULTI.INC')\r\n  END\r\nx  LONG\r\ns  STRING(10)\r\n  CODE\r\n  x = 1")],
+            [inc, f(LIB + 'multi.clw', '  MEMBER()')]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
+    test('a directive name without an extension is looked up as written and as .clw (#449)', async () => {
+        const asked: string[] = [];
+        await findLibraryFiles([f('App.clw', "  PROGRAM\r\n  INCLUDE('parent')\r\n  CODE")], async names => { asked.push(...names); return {}; }, async () => undefined);
+        assert.deepStrictEqual(asked.sort(), ['parent', 'parent.clw']);
+    });
+
     test('compiler directives inside a MODULE block are not procedures a program can call', () => {
         const inc = f(LIB + 'CWUTIL.INC', "  MODULE('cwutil.clw')\r\n    PRAGMA('link(C%V%DOS%X%%L%.LIB)')\r\n    COMPILE('***',_WIDTH32_)\r\nOpenUrlLink(STRING url),ULONG,PROC\r\n  END");
         const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  PRAGMA('define(x=>1)')\r\n  CODE\r\n  COMPILE('***',1)")], [inc, cwutilClw]);

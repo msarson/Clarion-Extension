@@ -46,6 +46,16 @@ suite('Resolving source names for New Solution (#763)', () => {
         assert.strictEqual(path.normalize(found['Mine.inc']).toLowerCase(), path.join(folder, 'classes', 'Mine.inc').toLowerCase());
     });
 
+    test('a redirection file that includes itself, or a pair that include each other, is read once each', async () => {
+        fs.writeFileSync(path.join(folder, 'Clarion100.red'), '[Common]\r\n*.inc = .\\classes\r\n{include Clarion100.red}\r\n{include other.red}\r\n');
+        fs.writeFileSync(path.join(folder, 'other.red'), '[Common]\r\n*.clw = .\r\n{include Clarion100.red}\r\n');
+        const found = resolveSourceFiles({ folder, settings: settings(), names: ['Mine.inc'] });
+        assert.strictEqual(path.normalize(found['Mine.inc']).toLowerCase(), path.join(folder, 'classes', 'Mine.inc').toLowerCase());
+        const { redirectionPath, ...rest } = settings();
+        const entries = await new RedirectionFileParserServer({ ...rest, primaryRedirectionPath: redirectionPath }).parseRedFileAsync(folder);
+        assert.deepStrictEqual(entries.map(e => e.extension), ['*.inc', '*.clw']);
+    });
+
     test("the loaded solution's settings and parse caches are left alone", () => {
         const before = JSON.stringify({ red: serverSettings.redirectionFile, macros: serverSettings.macros });
         const parseShared = new RedirectionFileParserServer();

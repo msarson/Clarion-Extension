@@ -491,6 +491,38 @@ export class RedirectionFileParserServer {
     entries: RedirectionEntry[],
     isFirst: boolean
   ): RedirectionEntry[] {
+    if (!this.enterRedFile(redFileToParse)) return entries;
+    try {
+      return this.parseRedFileRecursiveBody(redFileToParse, entries, isFirst);
+    } finally {
+      this.leaveRedFile(redFileToParse);
+    }
+  }
+
+  /**
+   * #763 — the .red files being parsed right now, down the {include} chain. A file that includes
+   * itself, or two that include each other, would otherwise recurse until the stack overflows
+   * (sync) or forever (async), with the server blocked; the repeat is skipped instead.
+   */
+  private readonly parsing = new Set<string>();
+  private enterRedFile(redFile: string): boolean {
+    const key = path.resolve(redFile).toLowerCase();
+    if (this.parsing.has(key)) {
+      logger.warn(`Redirection file ${redFile} includes itself through {include}; the repeat is skipped`);
+      return false;
+    }
+    this.parsing.add(key);
+    return true;
+  }
+  private leaveRedFile(redFile: string): void {
+    this.parsing.delete(path.resolve(redFile).toLowerCase());
+  }
+
+  private parseRedFileRecursiveBody(
+    redFileToParse: string,
+    entries: RedirectionEntry[],
+    isFirst: boolean
+  ): RedirectionEntry[] {
     if (!fs.existsSync(redFileToParse)) {
       logger.test(`Redirection file not found: ${redFileToParse}`);
       return entries;
@@ -620,6 +652,19 @@ export class RedirectionFileParserServer {
   
   // Async version of parseRedFileRecursive
   private async parseRedFileRecursiveAsync(
+    redFileToParse: string,
+    entries: RedirectionEntry[],
+    isFirst: boolean
+  ): Promise<RedirectionEntry[]> {
+    if (!this.enterRedFile(redFileToParse)) return entries;
+    try {
+      return await this.parseRedFileRecursiveAsyncBody(redFileToParse, entries, isFirst);
+    } finally {
+      this.leaveRedFile(redFileToParse);
+    }
+  }
+
+  private async parseRedFileRecursiveAsyncBody(
     redFileToParse: string,
     entries: RedirectionEntry[],
     isFirst: boolean

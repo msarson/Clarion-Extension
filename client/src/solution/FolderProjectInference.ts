@@ -12,6 +12,15 @@
  * A member that nothing reaches through MODULE('x') from its program is flagged as a possible
  * leftover: the generator stops writing a module but the old file stays. The source cannot tell a
  * leftover from a real module nobody calls, so the user decides.
+ *
+ * Part 2 (compiler-verified on Clarion 10):
+ * - a bare MEMBER() that a CLASS's active LINK names is that class's implementation; the LINK
+ *   builds it, so it is neither listed nor asked about (LINK('x') and LINK('x',1) are active,
+ *   LINK('x',0) is not);
+ * - library sources outside the folder (Clarion's libsrc, accessories), which redirection finds
+ *   on the server (findLibraryFiles), are followed like the folder's own files; a library MEMBER
+ *   module is listed by bare name when the project's build closure calls a procedure its MAP
+ *   MODULE block declares (left unlisted, it fails Unresolved External).
  */
 import { clarionSourceCandidates } from '../../../common/ClarionSourceNaming';
 
@@ -110,6 +119,8 @@ function moduleBlockNames(ls: string[], at: number): string[] {
     for (let i = at + 1; i < ls.length; i++) {
         const line = ls[i].trim();
         if (/^(END\b|\.$)/i.test(line)) break;
+        // A line continued from the one above (`|`) carries the rest of that prototype.
+        if (/\|\s*$/.test(ls[i - 1])) continue;
         const m = /^([A-Za-z_][\w:]*)\s*(?:\(|,|$|PROCEDURE\b|FUNCTION\b)/i.exec(line);
         // Compiler directives sit in MODULE blocks too (CWUTIL.INC links its .lib with PRAGMA).
         if (m && !/^(MODULE|END|COMPILE|OMIT|INCLUDE|PRAGMA|SECTION|ITEMIZE|EQUATE|ONCE)$/i.test(m[1])) names.push(m[1]);
@@ -117,14 +128,13 @@ function moduleBlockNames(ls: string[], at: number): string[] {
     return names;
 }
 
-/** The file names a source's INCLUDE and MODULE directives use; without an extension, .clw (#449). */
+/** The file names a source's INCLUDE and MODULE directives use: as written, and with .clw when it has no extension (#449). */
 function directiveNames(text: string): string[] {
     const names: string[] = [];
     for (const raw of text.split(/\r?\n/)) {
         if (!/INCLUDE|MODULE/i.test(raw)) continue;
         for (const m of stripComment(raw).matchAll(/\b(?:INCLUDE|MODULE)\s*\(\s*'([^']+)'/gi)) {
-            const name = baseName(m[1]);
-            names.push(/\.[^.\\/]*$/.test(name) ? name : name + '.clw');
+            names.push(...clarionSourceCandidates(baseName(m[1])));
         }
     }
     return names;
@@ -162,14 +172,10 @@ export async function findLibraryFiles(
         } catch {
             break;
         }
-        sources = [];
-        for (const filePath of Object.values(found)) {
-            const text = await read(filePath);
-            if (text === undefined) continue;
-            const file = { relPath: filePath, text };
-            libraries.push(file);
-            sources.push(file);
-        }
+        const paths = [...new Set(Object.values(found))];
+        const texts = await Promise.all(paths.map(p => read(p)));
+        sources = paths.flatMap((relPath, i) => texts[i] === undefined ? [] : [{ relPath, text: texts[i]! }]);
+        libraries.push(...sources);
     }
     return libraries;
 }
