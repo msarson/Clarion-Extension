@@ -586,6 +586,13 @@
         "title": "Project Properties",
         "category": "Clarion",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "clarion.openSolutionProperties",
+        "title": "Solution Properties",
+        "category": "Clarion",
+        "icon": "$(settings-gear)",
+        "enablement": "clarion.solutionOpen"
       }
     ],
     "menus": {
@@ -759,6 +766,11 @@
           "command": "clarion.openProjectProperties",
           "when": "view == solutionView && viewItem == clarionProject",
           "group": "0_properties"
+        },
+        {
+          "command": "clarion.openSolutionProperties",
+          "when": "view == solutionView && viewItem == clarionSolution",
+          "group": "0_properties"
         }
       ],
       "commandPalette": [
@@ -796,6 +808,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "clarion.openSolutionProperties",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@0"
+        },
         {
           "command": "clarion.newSolution",
           "when": "view == solutionView && !clarion.solutionOpen && workspaceFolderCount > 0",

@@ -34,9 +34,9 @@ export const PAGE_CSS = `
   select:focus, input:focus, button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 2px; padding: 6px 14px; font: inherit; cursor: pointer; }
   button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 2px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border, var(--vscode-panel-border)); border-radius: 2px; padding: 4px 10px; font: inherit; cursor: pointer; }
   button.secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
-  button.link { background: none; border: none; padding: 0; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
+  button.link { align-self: flex-start; background: none; border: none; padding: 0; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; text-align: left; }
   button.link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
   button:disabled { opacity: 0.5; cursor: default; }
   main { flex: 999 1 520px; min-width: 0; padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 20px; }

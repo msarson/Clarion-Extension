@@ -41,6 +41,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.closeSolution` | Close the current solution |
 | `clarion.forceRefreshSolutionCache` | Refresh Solution — re-parse `.sln`/projects |
 | `clarion.reinitializeSolution` | Full reinitialize of the solution environment |
+| `clarion.openSolutionProperties` | **Solution Properties** — the solution's Clarion installation, compiler version, configuration and startup project on one page, with its projects (type, references, export file) and the build settings; changes apply at once. The gear on the Solution View's title bar, or the solution node's menu. Open Solution shows the same page when something has to be chosen |
 | `clarion.setConfiguration` | Set the active build configuration (Debug/Release/custom) |
 | `clarion.setActiveVersion` | Pick the active Clarion version (drives redirection/libsrc paths) |
 | `clarion.quickOpen` | Quick Open including redirection paths (`Ctrl+P` when a solution is open; falls back to VS Code's native Quick Open without one) |

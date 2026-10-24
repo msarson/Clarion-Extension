@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { minimalEdit, pageHtml } from '../webview/PageKit';
 
 /**
@@ -25,4 +27,18 @@ suite('Property pages: the shared page kit (#792)', () => {
         assert.deepStrictEqual(minimalEdit('abcabc', 'abc'), { start: 3, end: 6, text: '' });
         assert.strictEqual(minimalEdit('same', 'same'), undefined);
     });
+});
+
+suite('Property pages: every page script parses (#792)', () => {
+    // A page whose script does not parse draws nothing and says nothing: the webview stays blank.
+    const root = path.resolve(__dirname, '..', '..', '..', '..');
+    for (const file of ['client/src/project/ProjectPropertiesEditor.ts', 'client/src/solution/SolutionPanel.ts']) {
+        test(file, () => {
+            const source = fs.readFileSync(path.join(root, file), 'utf8');
+            const script = /script: `([\s\S]*?)`,\s*\}\);/.exec(source)?.[1];
+            assert.ok(script, 'the page script is found');
+            // eslint-disable-next-line no-new-func
+            assert.doesNotThrow(() => new Function('vscode', 'el', 'document', 'window', script.replace(/\$\{[^}]*\}/g, 'null')));
+        });
+    }
 });

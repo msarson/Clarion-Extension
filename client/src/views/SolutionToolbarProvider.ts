@@ -9,25 +9,12 @@ import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clar
 import { GlobalSolutionHistory, SolutionReference } from '../utils/GlobalSolutionHistory';
 import { lastBuildLog } from '../utils/LastBuildLog'; // #681
 import { toolbarIcons } from './ToolbarIcons'; // #682
+import { GraphStatus, graphStatusText } from './GraphStatus';
 
 const logger = LoggerManager.getLogger("SolutionToolbarProvider");
 logger.setLevel("error");
 
-export interface GraphStatus {
-    status: 'building' | 'built';
-    /** Source files that resolved to a path on disk and entered the graph. */
-    fileCount?: number;
-    edgeCount?: number;
-    durationMs?: number;
-    /** #434 — every source file the solution declares, resolved or not. */
-    sourceFileCount?: number;
-    /**
-     * #434 — declared source files that could not be resolved to a path and are
-     * therefore absent from the graph. Non-zero means the graph is incomplete
-     * and the features built on it will silently return nothing for those files.
-     */
-    unresolvedCount?: number;
-}
+export { GraphStatus } from './GraphStatus';
 
 export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     public static readonly viewId = 'clarionSolutionToolbar';
@@ -274,25 +261,11 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
         rows.push(settingsRow());
 
         if (this._graphStatus) {
-            if (this._graphStatus.status === 'building') {
-                const count = this._graphStatus.fileCount ?? 0;
-                rows.push({ label: 'Graph', value: `Building… (${count} files)` });
-            } else {
-                const files = this._graphStatus.fileCount ?? 0;
-                const edges = this._graphStatus.edgeCount ?? 0;
-                const ms = this._graphStatus.durationMs;
-                const time = ms !== undefined ? ` ${ms}ms` : '';
-                // #434 — "built" said nothing about completeness, so a graph
-                // missing most of the solution looked identical to a healthy one.
-                // Only mention it when something is actually missing.
-                const unresolved = this._graphStatus.unresolvedCount ?? 0;
-                const total = this._graphStatus.sourceFileCount;
-                const missing = unresolved > 0
-                    ? `, ⚠️ ${unresolved}${total ? ` of ${total}` : ''} unresolved`
-                    : '';
-                // #687 — clickable: the unresolved file references report.
-                rows.push({ label: 'Graph', value: `${files} files, ${edges} edges${time}${missing}`, command: 'unresolvedReport', title: 'Show the file references that do not resolve' });
-            }
+            const graph = graphStatusText(this._graphStatus);
+            // #687 — once built, clickable: the unresolved file references report.
+            rows.push(graph.built
+                ? { label: 'Graph', value: graph.text, command: 'unresolvedReport', title: 'Show the file references that do not resolve' }
+                : { label: 'Graph', value: graph.text });
         }
 
         return rows;

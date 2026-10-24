@@ -3,6 +3,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
 import { SolutionToolbarProvider, GraphStatus } from './SolutionToolbarProvider';
+import { SolutionPanel } from '../solution/SolutionPanel';
 import { registerSolutionViewCommands, registerStructureViewCommands } from '../commands/ViewCommands';
 import LoggerManager from '../utils/LoggerManager';
 
@@ -247,8 +248,10 @@ export function registerSolutionToolbar(context: ExtensionContext): void {
 
 export function updateSolutionToolbar(): void {
     globalToolbarProvider?.update();
+    SolutionPanel.refresh(); // #792
 }
 
 export function setToolbarGraphStatus(status: GraphStatus): void {
     globalToolbarProvider?.setGraphStatus(status);
+    SolutionPanel.setGraphStatus(status); // #792
 }

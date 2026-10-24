@@ -11,6 +11,9 @@ import { validateRememberedSettings } from './SolutionFallbackPolicy';
 import { unsavedSettingsForSolution } from './UnsavedSolutionSettings';
 import { rememberedSelectionForSwitch, folderSwitchConfigurationSources, SwitchSelection } from '../solution/FolderSwitchSelection';
 import LoggerManager from './LoggerManager';
+import { settleChoice, SolutionChoice } from '../solution/SolutionPage';
+import { SolutionPanel, OpenSelection } from '../solution/SolutionPanel';
+import { extractConfigurationsFromSolution as slnConfigurations } from './ExtensionHelpers';
 import { PathUtils } from '../PathUtils';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -83,7 +86,8 @@ export class SmartSolutionOpener {
 
             // Step 1: Check if we have existing valid settings for this solution
             const existingSettings = await this.getExistingSolutionSettings(solutionPath);
-            
+            let staleReason: string | undefined;
+
             if (existingSettings) {
                 const validation = validateRememberedSettings(
                     solutionPath,
@@ -146,7 +150,8 @@ export class SmartSolutionOpener {
                     return true;
                 } else {
                     logger.warn(`⚠️ Existing settings are stale: ${validation.reason}`);
-                    window.showWarningMessage(`Settings need to be updated: ${validation.reason}`);
+                    // #792 — said on the Solution page, which asks for what has to change.
+                    staleReason = `The settings remembered for this solution no longer work: ${validation.reason}`;
                 }
             }
 
@@ -162,42 +167,21 @@ export class SmartSolutionOpener {
                 selectedConfig = preSelected.configuration;
                 logger.info(`✅ Using pre-selected: Clarion ${selectedInstallation.ideVersion} → ${selectedCompiler} (${selectedConfig})`);
             } else {
-            const installations = await ClarionInstallationDetector.detectInstallations();
-
-            if (installations.length === 0) {
-                const action = await window.showErrorMessage(
-                    "No Clarion installations detected. ClarionProperties.xml not found in standard locations.",
-                    "Browse for Solution (Manual Setup)",
-                    "Cancel"
-                );
-                
-                if (action === "Browse for Solution (Manual Setup)") {
-                    commands.executeCommand('clarion.openSolution');
-                }
-                return false;
-            }
-
-            // Step 3: Let user select installation if multiple found
-
-            if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
-                // Only one installation and one compiler - use it automatically
-                selectedInstallation = installations[0];
-                selectedCompiler = installations[0].compilerVersions[0].name;
-                logger.info(`✅ Auto-selected: Clarion ${selectedInstallation.ideVersion} → ${selectedCompiler}`);
-            } else {
-                // Multiple options - show picker
-                const result = await this.showInstallationPicker(installations);
-                if (!result) {
-                    logger.info("ℹ️ User cancelled installation selection");
+                // Steps 3-4 (#792): what is remembered and still works, else the Solution page, which
+                // asks for the installation, compiler version and configuration together. With no
+                // installation detected, its Browse… finds one outside the standard locations.
+                const selection = await this.chooseSelection(solutionPath, existingSettings ?? {}, {
+                    configuration: this.resolveConfiguration(solutionPath),
+                    reason: staleReason,
+                });
+                if (!selection) {
+                    logger.info("ℹ️ User cancelled the solution's selection");
                     return false;
                 }
-                selectedInstallation = result.installation;
-                selectedCompiler = result.compilerName;
+                selectedInstallation = selection.installation;
+                selectedCompiler = selection.compilerName;
+                selectedConfig = selection.configuration;
             }
-
-            // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
-            selectedConfig = await this.chooseConfigurationForSolution(solutionPath) ?? "Release";
-            } // end else (not preSelected)
 
             // Step 5: Update global variables BEFORE saving to settings so that
             // onDidChangeConfiguration handlers fired during the save see the correct solution.
@@ -254,16 +238,20 @@ export class SmartSolutionOpener {
     }
 
     /**
-     * The configuration to open the solution on: the user's own setting, then the IDE's
-     * .sln.cache, then a pick when the solution declares several. For a folder switch
-     * (`forSwitch`) the settings read are the old folder's (#780): sources come from
-     * folderSwitchConfigurationSources, and a dismissed pick is undefined so the switch stops.
+     * The configuration to open the solution on, as far as it is settled without asking: the
+     * user's own setting, then the IDE's .sln.cache, then the history, then the only one declared.
+     * For a folder switch (`forSwitch`) the settings read are the old folder's (#780): sources come
+     * from folderSwitchConfigurationSources. Null when the user has to choose, which the Solution
+     * page asks (#792).
      */
-    private static async chooseConfigurationForSolution(
-        solutionPath: string,
-        forSwitch?: { remembered?: string }
-    ): Promise<string | undefined> {
-        const configurations = this.extractConfigurationsFromSolution(solutionPath);
+    private static resolveConfiguration(solutionPath: string, forSwitch?: { remembered?: string }): string | null {
+        let configurations: string[];
+        try {
+            configurations = slnConfigurations(fs.readFileSync(solutionPath, 'utf-8'));
+        } catch (error) {
+            logger.warn(`⚠️ Could not read ${solutionPath}: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
 
         // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
         // is only a hint behind it (see SolutionOpener for the same rule).
@@ -285,22 +273,53 @@ export class SmartSolutionOpener {
 
         if (choice.configuration) {
             logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
-            return choice.configuration;
         }
-        if (configurations.length > 1) {
-            const configChoice = await window.showQuickPick(configurations, {
-                placeHolder: "Select build configuration"
-            });
-            if (!configChoice && forSwitch) return undefined;
-            return configChoice ?? configurations[0] ?? "Release";
+        return choice.configuration;
+    }
+
+    /**
+     * #792 — what `solutionPath` builds with. Settled without asking when what is remembered still
+     * works, or there is only one option; otherwise the Solution page asks, everything on one page.
+     * `configuration` is the one settled by precedence (resolveConfiguration). The page is shown
+     * regardless when there is a `reason` to tell, and with `offer` whenever there is more than one
+     * installation or compiler to choose from (#479: a solution being adopted). Null when the user
+     * cancels.
+     */
+    static async chooseSelection(
+        solutionPath: string,
+        remembered: SolutionChoice,
+        options: { configuration?: string | null; reason?: string; offer?: boolean } = {}
+    ): Promise<OpenSelection | null> {
+        const installations = await ClarionInstallationDetector.detectInstallations();
+        // #479 — an installation outside the standard locations is never detected; keep the remembered one.
+        const rememberedFile = remembered.propertiesFile;
+        if (rememberedFile && fs.existsSync(rememberedFile) && !installations.some(i => PathUtils.equalPath(i.propertiesPath, rememberedFile))) {
+            const extra = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(rememberedFile);
+            if (extra) installations.push(extra);
         }
-        return configurations[0] ?? "Release";
+        let configurations: string[] = [];
+        try {
+            configurations = slnConfigurations(fs.readFileSync(solutionPath, 'utf-8'));
+        } catch (error) {
+            logger.warn(`⚠️ Could not read ${solutionPath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const choice: SolutionChoice = { ...remembered, configuration: options.configuration ?? remembered.configuration };
+        const settled = settleChoice(
+            installations.map(i => ({ propertiesFile: i.propertiesPath, ideVersion: i.ideVersion, compilers: i.compilerVersions.map(c => c.name) })),
+            choice, configurations);
+        const alternatives = installations.length > 1 || installations.some(i => i.compilerVersions.length > 1);
+        const installation = installations.find(i => !!settled.propertiesFile && PathUtils.equalPath(i.propertiesPath, settled.propertiesFile));
+        if (settled.complete && installation && !options.reason && !(options.offer && alternatives)) {
+            logger.info(`✅ Settled without asking: Clarion ${installation.ideVersion} → ${settled.version} (${settled.configuration})`);
+            return { installation, compilerName: settled.version!, configuration: settled.configuration! };
+        }
+        return SolutionPanel.chooseForOpen(solutionPath, choice, options.reason);
     }
 
     /**
      * #780 — the selection to record before switching to the solution's folder, so the restarted
-     * window can load it. The remembered one when it can still load; otherwise the installation,
-     * version and configuration pickers run now. Null when the user cancels a picker.
+     * window can load it. The remembered one when it can still load; otherwise the Solution page
+     * asks now (#792). Null when the user cancels it.
      */
     static async selectionForFolderSwitch(solutionPath: string): Promise<SwitchSelection | null> {
         const history = await GlobalSolutionHistory.getReferences();
@@ -312,19 +331,15 @@ export class SmartSolutionOpener {
             logger.info(`✅ Switching folders with the remembered selection: ${remembered.version}`);
             return remembered;
         }
-        const picked = await this.detectAndPickInstallation();
-        if (!picked) {
-            logger.info("ℹ️ User cancelled installation selection");
+        const entry = history.find(r => PathUtils.equalPath(r.solutionFile, solutionPath));
+        const selection = await this.chooseSelection(solutionPath,
+            { propertiesFile: entry?.propertiesFile, version: entry?.version, configuration: entry?.configuration },
+            { configuration: this.resolveConfiguration(solutionPath, { remembered: entry?.configuration }) });
+        if (!selection) {
+            logger.info("ℹ️ User cancelled the solution's selection");
             return null;
         }
-        const configuration = await this.chooseConfigurationForSolution(solutionPath, {
-            remembered: history.find(r => PathUtils.equalPath(r.solutionFile, solutionPath))?.configuration,
-        });
-        if (!configuration) {
-            logger.info("ℹ️ User cancelled configuration selection");
-            return null;
-        }
-        return { propertiesFile: picked.installation.propertiesPath, version: picked.compilerName, configuration };
+        return { propertiesFile: selection.installation.propertiesPath, version: selection.compilerName, configuration: selection.configuration };
     }
 
     /**
@@ -445,38 +460,6 @@ export class SmartSolutionOpener {
             return null;
         }
         return installation;
-    }
-
-    /**
-     * Extracts configurations from solution file
-     */
-    private static extractConfigurationsFromSolution(solutionPath: string): string[] {
-        try {
-            const solutionContent = fs.readFileSync(solutionPath, 'utf-8');
-            const sectionPattern = /GlobalSection\(SolutionConfigurationPlatforms\)\s*=\s*preSolution([\s\S]*?)EndGlobalSection/;
-            const match = sectionPattern.exec(solutionContent);
-
-            if (!match) {
-                logger.warn("⚠️ No configurations found in solution file. Defaulting to Debug/Release.");
-                return ["Debug", "Release"];
-            }
-
-            const sectionContent = match[1];
-            const configurations = sectionContent
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => line && !line.startsWith("GlobalSection"))
-                .map(line => {
-                    const parts = line.split('|');
-                    return parts.length > 0 ? parts[0].trim() : '';
-                })
-                .filter((config, index, self) => config && self.indexOf(config) === index);
-
-            return configurations.length > 0 ? configurations : ["Debug", "Release"];
-        } catch (error) {
-            logger.error("❌ Error parsing solution file:", error);
-            return ["Debug", "Release"];
-        }
     }
 
     /**
