@@ -15,6 +15,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Configuration and build
 
 - **With no solution loaded, the Actions pane offers every way into one.** Next to "No solution open" it now lists Open a solution, New solution (when a folder is open) and the five most recent solutions, each opening as it does from the Solution View. [#783](https://github.com/msarson/Clarion-Extension/issues/783)
+- **A recent solution in the folder already open loads when you pick it.** Picking it from the recent solutions selected it but never loaded it, so nothing happened. [#785](https://github.com/msarson/Clarion-Extension/issues/785)
 
 #### Maintenance
 

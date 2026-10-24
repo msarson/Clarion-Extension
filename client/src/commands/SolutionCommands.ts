@@ -95,11 +95,10 @@ export function registerSolutionOpeningCommands(
                 if (currentFolder && currentFolder.toLowerCase() === actualSolutionFolder.toLowerCase()) {
                     // Already in the correct folder - just open the solution
                     logger.info(`✅ Already in correct folder, opening solution directly`);
-                    // #183 — opening a solution reverses any prior explicit-close intent,
-                    // so the sticky flag must be cleared or the next restart suppresses
-                    // auto-reopen (SmartSolutionOpener doesn't clear it itself).
-                    await context.workspaceState.update(SOLUTION_EXPLICITLY_CLOSED_KEY, undefined);
-                    await SmartSolutionOpener.openDetectedSolution(solutionPath);
+                    // #785 — through the command, which also initializes the solution and refreshes
+                    // the tree (and, #183, clears the explicit-close flag). SmartSolutionOpener on its
+                    // own only selects it: a recent solution in this folder was never loaded.
+                    await commands.executeCommand('clarion.openDetectedSolution', solutionPath);
                 } else {
                     // Different folder - need to switch folders
                     // #780 — with a version, or the restarted window opens a plain folder.

@@ -100,12 +100,12 @@ export class SmartSolutionOpener {
                     // #437 — `validateRememberedSettings` above checks that the files
                     // exist and the version is non-empty; it deliberately says
                     // nothing about the configuration. That check used to live only
-                    // in `initializeSolution`, which `clarion.openDetectedSolution`
-                    // calls afterwards but `clarion.openRecentSolution` (same folder)
-                    // does not — so a stale configuration could be adopted here and
-                    // stay in force for the session, collapsing redirection to
-                    // [Common] (#293) with nothing reported. Validate before the
-                    // value is written anywhere.
+                    // in `initializeSolution`, which runs after this — so a stale
+                    // configuration was written to the globals and the settings
+                    // here first, and on a path that skipped the initialization
+                    // (clarion.openRecentSolution in the same folder, until #785) it
+                    // stayed in force, collapsing redirection to [Common] (#293) with
+                    // nothing reported. Validate before the value is written anywhere.
                     const resolved = await resolveValidConfiguration(
                         solutionPath,
                         existingSettings.configuration
