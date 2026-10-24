@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { classifySource, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { classifySource, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
 
 /**
  * #763 — New Solution in a folder that already holds Clarion sources builds one project per
@@ -226,9 +226,34 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
     });
 
+    test('a library module is listed only where a procedure it declares is called', () => {
+        const r = inferProjects([
+            f('Uses.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  CODE\r\n  x# = OpenUrlLink('y')"),
+            f('Unused.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  CODE\r\n  ! OpenUrlLink('only a comment')\r\n  MESSAGE('OpenUrlLink')"),
+            f('InMember.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  CODE"),
+            f('InMember001.clw', "  MEMBER('InMember')\r\nP PROCEDURE\r\n  CODE\r\n  OpenUrlLink('z')"),
+        ], [cwutilInc, cwutilClw]);
+        assert.deepStrictEqual(r.projects.map(p => [p.name, p.compile.includes('CWUtil.CLW')]), [['Uses', true], ['Unused', false], ['InMember', true]]);
+    });
+
+    test('compiler directives inside a MODULE block are not procedures a program can call', () => {
+        const inc = f(LIB + 'CWUTIL.INC', "  MODULE('cwutil.clw')\r\n    PRAGMA('link(C%V%DOS%X%%L%.LIB)')\r\n    COMPILE('***',_WIDTH32_)\r\nOpenUrlLink(STRING url),ULONG,PROC\r\n  END");
+        const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  PRAGMA('define(x=>1)')\r\n  CODE\r\n  COMPILE('***',1)")], [inc, cwutilClw]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
+    test('a MODULE naming an external library is not a source, even when a .clw of that name exists', () => {
+        // MODULE('CLib') means .clw by #449, and libsrc holds a clib.clw — but that file is a MAP
+        // fragment (its first statement is MODULE), not a MEMBER module: nothing to compile.
+        const clibInc = f(LIB + 'CLIBINC.INC', "  MODULE('CLib')\r\nStrLen(*CSTRING),LONG,RAW,NAME('_strlen')\r\n  END");
+        const clibClw = f(LIB + 'clib.clw', "    module('CW_API')\r\nX(),NAME('x')\r\n    end");
+        const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CLIBINC.INC')\r\n  END\r\n  CODE\r\n  n# = StrLen(s)")], [clibInc, clibClw]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
     test('libraries are found through includes of includes, and only for the programs that reach them', () => {
         const r = inferProjects([
-            f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('AppMap.inc')\r\n  END\r\n  CODE"),
+            f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('AppMap.inc')\r\n  END\r\n  CODE\r\n  OpenUrlLink('x')"),
             f('AppMap.inc', "  INCLUDE('CWUTIL.INC'),ONCE"),
             f('Other.clw', '  PROGRAM\r\n  CODE\r\n  X()'),
         ], [cwutilInc, cwutilClw]);
@@ -238,6 +263,38 @@ suite('New solution from a folder of sources (#763)', () => {
     test('a file in the folder wins over a library file of the same name', () => {
         const r = inferProjects([f('App.clw', usesLibs), f('CWUTIL.INC', '! a local copy that declares nothing')], [cwutilInc, cwutilClw]);
         assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
+    test('library files are found round by round: the names the folder lacks, then the names those files use', async () => {
+        const disk: Record<string, string> = {
+            [LIB + 'CWUTIL.INC']: cwutilInc.text, [LIB + 'CWUtil.CLW']: cwutilClw.text,
+            [LIB + 'EFOCUS.INC']: efocusInc.text, [LIB + 'EFOCUS.CLW']: efocusClw.text,
+        };
+        const asked: string[][] = [];
+        const lookup = async (names: string[]) => {
+            asked.push([...names].sort());
+            const found: Record<string, string> = {};
+            for (const n of names) {
+                const hit = Object.keys(disk).find(p => p.toLowerCase().endsWith('\\' + n.toLowerCase()));
+                if (hit) found[n] = hit;
+            }
+            return found;
+        };
+        const libs = await findLibraryFiles([f('App.clw', usesLibs), f('Here.inc', '')], lookup, async p => disk[p]);
+        assert.deepStrictEqual(libs.map(l => l.relPath).sort(), Object.keys(disk).sort());
+        // Round 1: what the folder's directives name and it does not hold; round 2: what those files name.
+        assert.deepStrictEqual(asked, [['CWUTIL.INC', 'EFOCUS.INC'], ['EFOCUS.CLW', 'cwutil.clw']]);
+    });
+
+    test('the library search stops when the lookup fails, and after a bounded number of rounds', async () => {
+        const failing = await findLibraryFiles([f('App.clw', usesLibs)], async () => { throw new Error('no server'); }, async () => '');
+        assert.deepStrictEqual(failing, []);
+        let rounds = 0;
+        const endless = await findLibraryFiles([f('App.clw', "  INCLUDE('n0.inc')")],
+            async names => { rounds++; return Object.fromEntries(names.map(n => [n, `C:\\lib\\${n}`])); },
+            async p => `  INCLUDE('n${Number(/n(\d+)/.exec(p)![1]) + 1}.inc')`);
+        assert.ok(rounds <= 8, `${rounds} rounds`);
+        assert.ok(endless.length <= 8);
     });
 
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {

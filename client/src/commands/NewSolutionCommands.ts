@@ -5,7 +5,10 @@ import LoggerManager from '../utils/LoggerManager';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { buildCwprojContent, buildSlnContent, CwprojSpec, generateGuid } from '../solution/SolutionFiles';
-import { FolderInference, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { FolderInference, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { getLanguageClient, isClientReady } from '../LanguageClientManager';
+import { versionPathSettings } from '../utils/VersionPathSettings';
+import { ClarionInstallation } from '../utils/ClarionInstallationDetector';
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
@@ -65,6 +68,28 @@ async function readSourceFiles(folderPath: string): Promise<SourceScan> {
     };
     await walk(folderPath);
     return scan;
+}
+
+/**
+ * #763 — where the chosen installation's redirection finds `names` for this folder (Clarion's
+ * libsrc, accessories): the server's own resolver, given this installation's paths and macros
+ * because no solution is loaded yet. Throws when the server cannot answer.
+ */
+async function lookupLibrarySources(
+    folderPath: string,
+    installation: ClarionInstallation,
+    compilerName: string,
+    configuration: string,
+    names: string[]
+): Promise<Record<string, string>> {
+    const client = getLanguageClient();
+    const version = installation.compilerVersions.find(v => v.name === compilerName);
+    if (!client || !isClientReady() || !version) throw new Error('the language server cannot resolve library sources');
+    return client.sendRequest<Record<string, string>>('clarion/resolveSourceFiles', {
+        folder: folderPath,
+        settings: { ...versionPathSettings(version), configuration },
+        names,
+    });
 }
 
 async function promptSolutionName(defaultName: string): Promise<string | undefined> {
@@ -198,7 +223,14 @@ export async function newSolution(): Promise<void> {
         if (scan.unreadable > 0) {
             vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
         }
-        inference = inferProjects(scan.files);
+        // Library sources the folder's directives reach (a MAP MODULE in CWUTIL.INC needs
+        // cwutil.clw listed). Without the server, the folder alone is used, as before.
+        const libraries = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
+            () => findLibraryFiles(scan.files,
+                names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configChoice, names),
+                filePath => fs.promises.readFile(filePath, 'latin1').catch(() => undefined)));
+        inference = inferProjects(scan.files, libraries);
     }
     let specs: CwprojSpec[] | undefined;
     if (inference && inference.projects.length > 0) {

@@ -101,6 +101,79 @@ function programKind(ls: string[]): 'exe' | 'dll' {
     return next === undefined || /^\S/.test(next) ? 'dll' : 'exe';
 }
 
+/**
+ * The procedures a MAP MODULE block declares, from the MODULE line at `at` (comments stripped) to
+ * its END: each prototype's name, the first word of its line.
+ */
+function moduleBlockNames(ls: string[], at: number): string[] {
+    const names: string[] = [];
+    for (let i = at + 1; i < ls.length; i++) {
+        const line = ls[i].trim();
+        if (/^(END\b|\.$)/i.test(line)) break;
+        const m = /^([A-Za-z_][\w:]*)\s*(?:\(|,|$|PROCEDURE\b|FUNCTION\b)/i.exec(line);
+        // Compiler directives sit in MODULE blocks too (CWUTIL.INC links its .lib with PRAGMA).
+        if (m && !/^(MODULE|END|COMPILE|OMIT|INCLUDE|PRAGMA|SECTION|ITEMIZE|EQUATE|ONCE)$/i.test(m[1])) names.push(m[1]);
+    }
+    return names;
+}
+
+/** The file names a source's INCLUDE and MODULE directives use; without an extension, .clw (#449). */
+function directiveNames(text: string): string[] {
+    const names: string[] = [];
+    for (const raw of text.split(/\r?\n/)) {
+        if (!/INCLUDE|MODULE/i.test(raw)) continue;
+        for (const m of stripComment(raw).matchAll(/\b(?:INCLUDE|MODULE)\s*\(\s*'([^']+)'/gi)) {
+            const name = baseName(m[1]);
+            names.push(/\.[^.\\/]*$/.test(name) ? name : name + '.clw');
+        }
+    }
+    return names;
+}
+
+/** Library rounds before the search gives up: includes of includes rarely go three deep. */
+const MAX_LIBRARY_ROUNDS = 8;
+
+/**
+ * #763 — the library sources a folder's directives reach outside it: round by round, the names
+ * not in the folder go to `lookup` (redirection, on the server), the files it finds are read, and
+ * the names those use go next. A failed lookup ends the search with what was found.
+ */
+export async function findLibraryFiles(
+    files: SourceFile[],
+    lookup: (names: string[]) => Promise<Record<string, string>>,
+    read: (filePath: string) => Promise<string | undefined>,
+): Promise<SourceFile[]> {
+    const known = new Set(files.map(f => baseName(f.relPath).toLowerCase()));
+    const libraries: SourceFile[] = [];
+    let sources = files;
+    for (let round = 0; round < MAX_LIBRARY_ROUNDS && sources.length > 0; round++) {
+        const wanted = new Map<string, string>();
+        for (const source of sources) {
+            for (const name of directiveNames(source.text)) {
+                const key = name.toLowerCase();
+                if (!known.has(key) && !wanted.has(key)) wanted.set(key, name);
+            }
+        }
+        if (wanted.size === 0) break;
+        wanted.forEach((_name, key) => known.add(key));
+        let found: Record<string, string>;
+        try {
+            found = await lookup([...wanted.values()]);
+        } catch {
+            break;
+        }
+        sources = [];
+        for (const filePath of Object.values(found)) {
+            const text = await read(filePath);
+            if (text === undefined) continue;
+            const file = { relPath: filePath, text };
+            libraries.push(file);
+            sources.push(file);
+        }
+    }
+    return libraries;
+}
+
 /** A project name nothing can misread: MSBuild expands $( @( %( and ; ' " or control characters break the files. */
 const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
 
@@ -147,22 +220,30 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         return ls;
     };
 
-    /** Every file a MODULE('x') reaches from the program, following INCLUDEs and the reached members. */
-    const reachedModules = (program: SourceFile): Set<SourceFile> => {
-        const seen = new Set<SourceFile>(), reached = new Set<SourceFile>();
+    /**
+     * Every file a MODULE('x') reaches from the program, following INCLUDEs and the reached
+     * members, with the procedure names each MODULE block declares (used for library modules).
+     */
+    const reachedModules = (program: SourceFile): Map<SourceFile, Set<string>> => {
+        const seen = new Set<SourceFile>(), reached = new Map<SourceFile, Set<string>>();
         const stack: SourceFile[] = [program];
         while (stack.length) {
             const file = stack.pop()!;
             if (seen.has(file)) continue;
             seen.add(file);
-            for (const line of linesOf(file)) {
+            const ls = linesOf(file);
+            ls.forEach((line, i) => {
                 for (const m of line.matchAll(/\b(INCLUDE|MODULE)\s*\(\s*'([^']+)'/gi)) {
                     const target = resolve(m[2], program);
                     if (!target) continue;
-                    if (m[1].toUpperCase() === 'MODULE') reached.add(target);
+                    if (m[1].toUpperCase() === 'MODULE') {
+                        const declared = reached.get(target) ?? new Set<string>();
+                        moduleBlockNames(ls, i).forEach(n => declared.add(n));
+                        reached.set(target, declared);
+                    }
                     stack.push(target);
                 }
-            }
+            });
         }
         return reached;
     };
@@ -253,13 +334,20 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         const reached = reachedModules(program);
         project.unreferenced = project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
         // A library source a MAP MODULE reaches has no LINK to build it (compiler-verified, #763):
-        // the project lists it by bare name, as a generated project does, and redirection finds it.
-        // A CLASS's MODULE is left to the class's LINK.
-        for (const file of reached) {
+        // the project lists it by bare name, as a generated project does, and redirection finds
+        // it. Only a MEMBER module (a .clw of MAP lines named by MODULE('CLib') is no source),
+        // only when the project calls a procedure the block declares (an unused prototype needs
+        // nothing linked), and never a CLASS's MODULE, which the class's LINK builds.
+        const projectCode = () => project.compile.map(m => fileAt.get(m)).filter((f): f is SourceFile => !!f)
+            .flatMap(f => linesOf(f).map(l => l.replace(/'(?:[^']|'')*'/g, "''")));
+        let code: string[] | undefined;
+        for (const [file, declared] of reached) {
             const name = baseName(file.relPath);
-            if (library.has(file) && isClw(name) && !classModules.has(name.toLowerCase()) && !project.compile.includes(name)) {
-                project.compile.push(name);
-            }
+            if (!library.has(file) || !isClw(name) || classModules.has(name.toLowerCase()) || project.compile.includes(name)) continue;
+            const kind = classifySource(file.text).kind;
+            if ((kind !== 'member' && kind !== 'bareMember') || declared.size === 0) continue;
+            const called = new RegExp(`(?<![\\w:])(?:${[...declared].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
+            if ((code ??= projectCode()).some(l => called.test(l))) project.compile.push(name);
         }
     }
     return { projects, unassigned, missingProgram, ambiguous, classImplementations };
