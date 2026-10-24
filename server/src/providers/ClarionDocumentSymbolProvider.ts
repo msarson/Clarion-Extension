@@ -10,6 +10,7 @@ import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
+import { resolvePrefixedName, prefixedNameStartsLine } from '../utils/PrefixChain';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -483,19 +484,23 @@ export class ClarionDocumentSymbolProvider {
                         // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
                         // CRITICAL FIX: Only mark as procedure if it's on a NEW line (not the same line as last procedure)
                         // This prevents attribute keywords on the same line from being treated as procedures
-                        else if ((nextToken.type === TokenType.Label || 
+                        else if ((nextToken.type === TokenType.Label ||
                                  nextToken.type === TokenType.Function ||
                                  nextToken.type === TokenType.Variable) &&
                                 nextToken.line !== lastProcedureLine && // NEW: Must be on different line
+                                // #789: an indented `XL:Column:S` arrives as `XL:Column` `:` `S`;
+                                // the name is the whole chain, and it must start its line (#597),
+                                // which also keeps a type argument like GROUP(CFG:Type) out.
+                                prefixedNameStartsLine(tokens, j) &&
                                 j + 1 < tokens.length &&
                                 tokens[j + 1].value === "(" &&
                                 nextToken.value.toUpperCase() !== "MODULE" &&
                                 nextToken.value.toUpperCase() !== "MAP" &&
-                                !this.isAttributeKeyword(nextToken.value)) {
+                                !this.isAttributeKeyword(resolvePrefixedName(tokens, j).name)) {
                             // This looks like a procedure declaration in shorthand MAP syntax
                             nextToken.subType = TokenType.MapProcedure;
-                            // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
-                            nextToken.label = nextToken.value;
+                            // CRITICAL: Set token.label to the procedure name, prefix chain included
+                            nextToken.label = resolvePrefixedName(tokens, j).name;
                             lastProcedureLine = nextToken.line; // Track this line as having a procedure
                             logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
