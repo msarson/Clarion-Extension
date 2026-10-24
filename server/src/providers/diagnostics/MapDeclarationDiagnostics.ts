@@ -537,7 +537,9 @@ export async function validateMissingImplementations(
                     if (implLine !== undefined) {
                         const implFileLines = implFileContent.split('\n');
                         const implSig = implFileLines[implLine.line] ?? '';
-                        const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implSig);
+                        // #793: an overloaded procedure's definition must carry its types.
+                        const overloaded = moduleDecls.filter(d => d.label?.toUpperCase() === procName.toUpperCase()).length > 1;
+                        const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implSig, overloaded);
                         const declSig = docLines[decl.line] ?? '';
                         const declParams = ProcedureSignatureUtils.extractParameterTypes(declSig);
                         const matched = ProcedureSignatureUtils.parametersMatch(implParams, declParams);

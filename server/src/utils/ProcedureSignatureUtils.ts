@@ -140,7 +140,11 @@ export class ProcedureSignatureUtils {
      * built-in type (`PROCEDURE(LONG)`) is still read as that type. A prototype's one-word
      * parameter is its type: use extractParameterTypes for prototypes.
      */
-    public static extractImplementationParameterTypes(signature: string): string[] {
+    public static extractImplementationParameterTypes(signature: string, overloaded = false): string[] {
+        // An overloaded procedure's definition must carry its types: with Test (LONG) and
+        // Test (*STRING), Clarion reads `Test PROCEDURE (q)` as type Q and finds no prototype
+        // (compiler-verified, Clarion 10 and 12). So the label-only reading is for one prototype.
+        if (overloaded) return this.extractParameterTypes(signature);
         const params = this.splitParameters(signature);
         return params.map(param => {
             const bare = param.replace(/^<\s*/, '').replace(/\s*>$/, '').replace(/\s*=.+$/, '')

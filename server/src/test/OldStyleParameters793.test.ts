@@ -67,6 +67,18 @@ suite('Old-style parameters: an implementation naming its parameters without typ
             assert.deepStrictEqual(await mismatches('oldstyle1.clw'), ['map-signature-mismatch@3']);
         });
 
+        test('an overloaded procedure needs typed parameters: a label-only implementation still mismatches', async () => {
+            // Compiler-verified (Clarion 10, 12): with Test (LONG) and Test (*STRING), Test PROCEDURE (q)
+            // reads q as a type — "Label in prototype not defined: Q", "No matching prototype available".
+            write('oldstyle.clw', [
+                '               PROGRAM', '               MAP', "                 MODULE('oldstyle1.clw')",
+                '                   Test (LONG)', '                   Test (*STRING)', '                 END', '               END', '  CODE',
+            ]);
+            write('oldstyle1.clw', ['', "               MEMBER('oldstyle.clw')", '', 'Test  PROCEDURE (q)', '  CODE', '  RETURN']);
+            assert.ok((await mismatches('oldstyle.clw')).length > 0, 'the overloaded prototypes are not all matched');
+            assert.ok(!ProcedureSignatureUtils.parametersMatch(ProcedureSignatureUtils.extractImplementationParameterTypes('Test PROCEDURE (q)', true), ['LONG']));
+        });
+
         test('a different number of parameters is still a mismatch', async () => {
             write('oldstyle1.clw', ['', "               MEMBER('oldstyle.clw')", '', 'Test  PROCEDURE (q, r)', '  CODE', '  RETURN']);
             assert.deepStrictEqual(await mismatches('oldstyle1.clw'), ['map-signature-mismatch@3']);

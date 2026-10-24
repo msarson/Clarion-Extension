@@ -706,7 +706,8 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                 {
                     const implLine = docLines[token.line] || '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(decl.signature);
-                    const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
+                    // #793: an overloaded procedure (several implementations of one name) must carry its types.
+                    const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine, (implementationsByName.get(decl.name.toLowerCase())?.length ?? 0) > 1);
                     if (!ProcedureSignatureUtils.parametersMatch(declParams, implParams)) continue;
 
                     let codeLineStart = -1;
