@@ -84,12 +84,31 @@ async function lookupLibrarySources(
 ): Promise<Record<string, string>> {
     const client = getLanguageClient();
     const version = installation.compilerVersions.find(v => v.name === compilerName);
-    if (!client || !isClientReady() || !version) throw new Error('the language server cannot resolve library sources');
-    return client.sendRequest<Record<string, string>>('clarion/resolveSourceFiles', {
-        folder: folderPath,
-        settings: { ...versionPathSettings(version), configuration },
-        names,
-    });
+    try {
+        if (!client || !isClientReady() || !version) throw new Error('the language server is not ready, or the compiler version was not found');
+        return await client.sendRequest<Record<string, string>>('clarion/resolveSourceFiles', {
+            folder: folderPath,
+            settings: { ...versionPathSettings(version), configuration },
+            names,
+        });
+    } catch (err) {
+        // The search then ends with what it has, and the folder alone decides: say so in the log.
+        logger.warn(`⚠️ Library sources not resolved, New Solution uses the folder alone: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+    }
+}
+
+/** A library file larger than this is no Clarion source New Solution needs to read. */
+const MAX_LIBRARY_FILE_BYTES = 4 * 1024 * 1024;
+
+/** Reads a library file the server found, or nothing when it is unreadable or too large. */
+async function readLibraryFile(filePath: string): Promise<string | undefined> {
+    try {
+        if ((await fs.promises.stat(filePath)).size > MAX_LIBRARY_FILE_BYTES) return undefined;
+        return await fs.promises.readFile(filePath, 'latin1');
+    } catch {
+        return undefined;
+    }
 }
 
 async function promptSolutionName(defaultName: string): Promise<string | undefined> {
@@ -229,7 +248,7 @@ export async function newSolution(): Promise<void> {
             { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
             () => findLibraryFiles(scan.files,
                 names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configChoice, names),
-                filePath => fs.promises.readFile(filePath, 'latin1').catch(() => undefined)));
+                readLibraryFile));
         inference = inferProjects(scan.files, libraries);
     }
     let specs: CwprojSpec[] | undefined;

@@ -140,7 +140,7 @@ function directiveNames(text: string): string[] {
     return names;
 }
 
-/** Library rounds before the search gives up: includes of includes rarely go three deep. */
+/** Library rounds before the search gives up; a real build root needed 7 (includes of includes of .clw names). */
 const MAX_LIBRARY_ROUNDS = 8;
 
 /**
