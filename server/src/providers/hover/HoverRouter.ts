@@ -25,6 +25,7 @@ import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { tokensOnLine } from '../../utils/TokenLineIndex';
+import { continuesPreviousLine } from '../../utils/PrefixChain';
 import { BranchInfo } from '../../tokenizer/TokenTypes';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -788,9 +789,6 @@ export class HoverRouter {
     }
 
     /**
-     * Handle Clarion attributes
-     */
-    /**
      * #791 — the card for an attribute of a MAP/MODULE prototype: the word sits at the top level
      * of the prototype's attribute list (after its parameter list, never inside it), on the
      * prototype's own line or a line continued from it with `|`. Only attributes that apply to a
@@ -815,10 +813,8 @@ export class HoverRouter {
         let start = at;
         for (;;) {
             while (start > 0 && tokens[start - 1].line === tokens[start].line) start--;
-            let p = start - 1;
-            while (p >= 0 && tokens[p].type === TokenType.Comment) p--;
-            if (p < 0 || tokens[p].type !== TokenType.LineContinuation) break;
-            start = p;
+            if (!continuesPreviousLine(tokens, start)) break;
+            start--;
         }
 
         // The prototype's name (or PROCEDURE keyword), then a word at paren depth 0 after it.
@@ -835,6 +831,9 @@ export class HoverRouter {
         return this.formatter.formatAttribute(word, attribute, paramCount, 'PROCEDURE');
     }
 
+    /**
+     * Handle Clarion attributes
+     */
     private handleAttribute(
         word: string,
         line: string,

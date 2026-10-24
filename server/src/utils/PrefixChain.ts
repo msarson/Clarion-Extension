@@ -89,8 +89,17 @@ export function resolvePrefixedName(tokens: Token[], index: number): PrefixedNam
  */
 export function prefixedNameStartsLine(tokens: Token[], index: number): boolean {
     const { startIndex } = resolvePrefixedName(tokens, index);
-    let p = startIndex - 1;
-    if (p >= 0 && tokens[p].line === tokens[index].line) return false;
+    const previous = tokens[startIndex - 1];
+    if (previous && previous.line === tokens[index].line) return false;
+    return !continuesPreviousLine(tokens, startIndex);
+}
+
+/**
+ * Whether the line whose first token is `tokens[firstOnLine]` continues the statement above it:
+ * the previous token, comments skipped, is a `|` line continuation (#790).
+ */
+export function continuesPreviousLine(tokens: Token[], firstOnLine: number): boolean {
+    let p = firstOnLine - 1;
     while (p >= 0 && tokens[p].type === TokenType.Comment) p--;
-    return p < 0 || tokens[p].type !== TokenType.LineContinuation;
+    return p >= 0 && (tokens[p].type === TokenType.LineContinuation || tokens[p].value === '|');
 }

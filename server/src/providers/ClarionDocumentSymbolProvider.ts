@@ -502,7 +502,7 @@ export class ClarionDocumentSymbolProvider {
                             // CRITICAL: Set token.label to the procedure name, prefix chain included
                             nextToken.label = resolvePrefixedName(tokens, j).name;
                             lastProcedureLine = nextToken.line; // Track this line as having a procedure
-                            logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            logger.debug(`Marked shorthand procedure ${nextToken.label} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
                         j++;
