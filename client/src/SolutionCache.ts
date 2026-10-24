@@ -214,8 +214,13 @@ export class SolutionCache {
     private lastCacheTime: number = 0;
     private firstFetchAttempted: boolean = false;
     private fetchInProgress: boolean = false;
-    /** #788: the fetch initialize() is running, for a second initialize() or refresh() to await. */
+    /** #788: the fetch initialize() is running, for a second initialize() or refresh() of the same solution to await. */
     private initializeFetch: Promise<boolean> | null = null;
+    private initializeFetchPath: string | null = null;
+
+    private isSameSolution(a: string | null | undefined, b: string | null | undefined): boolean {
+        return !!a && !!b && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+    }
     private backgroundRefreshScheduled: boolean = false;
     private activationInProgress: boolean = true;
     private filePathCache: Map<string, string> = new Map();
@@ -802,13 +807,19 @@ export class SolutionCache {
             // Client is ready, proceed with normal fetch
             if (this.fetchInProgress) {
                 logger.info("⏳ Fetch already in progress, waiting for it to complete...");
-                // #788: wait for it, as the message says, and report how it went.
-                return this.initializeFetch ? await this.initializeFetch : false;
+                // #788: wait for it, as the message says. The same solution's fetch is this one's
+                // answer; another solution's is not, so wait for it to finish and fetch our own.
+                if (!this.initializeFetch) return false;
+                if (this.isSameSolution(this.initializeFetchPath, solutionFilePath)) return await this.initializeFetch;
+                await this.initializeFetch.catch(() => false);
+                this.solutionFilePath = solutionFilePath;
+                if (this.fetchInProgress) return false;
             }
 
             this.fetchInProgress = true;
             const fetch = this.fetchSolutionTree(startTime);
             this.initializeFetch = fetch;
+            this.initializeFetchPath = solutionFilePath;
             try {
                 return await fetch;
             } finally {
@@ -1102,8 +1113,11 @@ export class SolutionCache {
         // Prevent concurrent refreshes
         if (this.fetchInProgress) {
             logger.info("⏳ Refresh already in progress, waiting for it to complete...");
-            // #788: the fetch running now is the refresh; wait for it and report how it went.
-            return this.initializeFetch ? await this.initializeFetch : false;
+            // #788: the fetch running now for this solution is the refresh; wait for it and report
+            // how it went. One for another solution is not this refresh's answer.
+            return this.initializeFetch && this.isSameSolution(this.initializeFetchPath, this.solutionFilePath)
+                ? await this.initializeFetch
+                : false;
         }
 
         // Clear any cached project details
