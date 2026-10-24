@@ -18,7 +18,7 @@ const msbuildPath = (s: string) => s.replace(/[%$@';?*]/g, c => '%' + c.charCode
 
 export function buildSlnContent(projects: SlnProject[]): string {
     return [
-        '﻿',
+        '\uFEFF',
         'Microsoft Visual Studio Solution File, Format Version 12.00',
         '# Visual Studio 2012',
         '# Clarion 2.1.0.2447',
@@ -47,7 +47,7 @@ export function buildSlnContent(projects: SlnProject[]): string {
 export function buildCwprojContent(spec: CwprojSpec): string {
     const name = xml(spec.name);
     return [
-        '﻿<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
+        '\uFEFF<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">',
         '  <PropertyGroup>',
         `    <ProjectGuid>${spec.guid}</ProjectGuid>`,
         `    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>`,
