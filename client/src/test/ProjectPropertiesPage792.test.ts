@@ -1,5 +1,6 @@
 import * as assert from 'assert';
-import { buildPageState } from '../project/ProjectPropertiesPage';
+import { listItems } from '../project/CwprojItems';
+import { buildPageState, editItems } from '../project/ProjectPropertiesPage';
 import { targetsProperties } from '../project/ProjectPropertyFields';
 
 /**
@@ -21,6 +22,14 @@ const PROJECT = [
     "  <PropertyGroup Condition=\" '$(Configuration)' == 'Release' \">",
     '    <vid>off</vid>',
     '  </PropertyGroup>',
+    '  <ItemGroup>',
+    '    <FileDriver Include="TopSpeed" />',
+    '    <Library Include="Tools.lib" />',
+    '    <Compile Include="Common.clw" />',
+    '    <Compile Include="Common001.clw">',
+    '      <Generated>true</Generated>',
+    '    </Compile>',
+    '  </ItemGroup>',
     '</Project>',
 ].join('\r\n');
 
@@ -48,11 +57,36 @@ suite('Project Properties: the page for a configuration (#792)', () => {
 
     test('fields grouped as on the IDE\'s pages, a held-back field marked with why', () => {
         const state = buildPageState(PROJECT, 'Debug', targetsProperties('$(OutputType) $(vid)'));
-        assert.deepStrictEqual(state.tabs.map(t => t.label), ['Application', 'Compiling', 'Debug', 'Build Events']);
+        assert.deepStrictEqual(state.tabs.map(t => t.label), ['Application', 'Compiling', 'Debug', 'Build Events', 'Sources']);
         assert.deepStrictEqual(state.tabs[1].groups.map(g => g.title), ['General', 'Output', 'Runtime checks']);
         const dep = field(state, 'dep');
         assert.strictEqual(dep.available, false);
         assert.ok(dep.reason);
         assert.strictEqual(field(state, 'vid').available, true);
+    });
+
+    test('the Sources tab: the project\'s items, not per configuration, and the drivers it can add', () => {
+        const state = buildPageState(PROJECT, 'Release', undefined);
+        assert.deepStrictEqual(state.tabs.find(t => t.id === 'sources')!.groups, []);
+        assert.deepStrictEqual(state.sources.compile.map(i => [i.include, i.generated]), [['Common.clw', false], ['Common001.clw', true]]);
+        assert.deepStrictEqual(state.sources.fileDrivers.map(i => i.include), ['TopSpeed']);
+        assert.deepStrictEqual(state.sources.libraries.map(i => i.include), ['Tools.lib']);
+        assert.deepStrictEqual(state.sources.projectReferences, []);
+        // A driver already there, in any case, is not offered again.
+        assert.ok(state.sources.driverChoices.includes('MSSQL'));
+        assert.ok(state.sources.driverChoices.includes('ASCII'));
+        assert.ok(!state.sources.driverChoices.some(d => d.toLowerCase() === 'topspeed'));
+        assert.deepStrictEqual(buildPageState(PROJECT, 'Debug', undefined).sources, state.sources);
+    });
+
+    test('the Sources tab\'s add and remove messages, and the ones it refuses', () => {
+        const added = editItems(PROJECT, { type: 'addItem', kind: 'Library', value: '  Reports.lib ' });
+        assert.deepStrictEqual(listItems(added).libraries.map(i => i.include), ['Tools.lib', 'Reports.lib']);
+        assert.strictEqual(editItems(added, { type: 'removeItem', kind: 'Library', value: 'Reports.lib' }), PROJECT);
+        assert.strictEqual(editItems(PROJECT, { type: 'removeItem', kind: 'FileDriver', value: 'TOPSPEED' }).includes('FileDriver'), false);
+        // A blank value, a kind that is no item, and a new reference (it needs the project's GUID) change nothing.
+        assert.strictEqual(editItems(PROJECT, { type: 'addItem', kind: 'Library', value: '  ' }), PROJECT);
+        assert.strictEqual(editItems(PROJECT, { type: 'addItem', kind: 'PropertyGroup', value: 'x' }), PROJECT);
+        assert.strictEqual(editItems(PROJECT, { type: 'addItem', kind: 'ProjectReference', value: 'Reports.cwproj' }), PROJECT);
     });
 });

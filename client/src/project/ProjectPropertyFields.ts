@@ -70,6 +70,15 @@ export const PROJECT_PROPERTY_FIELDS: ProjectPropertyField[] = [
         options: [{ value: 'Always', label: 'Always' }, { value: 'OnBuildSuccess', label: 'On a successful build' }, { value: 'OnOutputUpdated', label: 'When the output changes' }] },
 ];
 
+/**
+ * The Clarion file drivers a project can name in a FileDriver item, as the IDE registers them:
+ * the drivers the help documents (In-Memory included) and the IDE's driver list ships.
+ */
+export const FILE_DRIVERS: string[] = [
+    'ASCII', 'BASIC', 'BTRIEVE', 'CLARION', 'CLIPPER', 'DBASE3', 'DBASE4', 'DOS', 'FOXPRO', 'MEMORY',
+    'MSSQL', 'ODBC', 'ORACLE', 'SCALABLE', 'SQLANYWHERE', 'SQLite', 'TOPSPEED',
+];
+
 /** The properties a build targets file reads: every `$(Name)` in it, lower-cased. */
 export function targetsProperties(targetsText: string): Set<string> {
     return new Set([...targetsText.matchAll(/\$\(([A-Za-z_][\w.]*)\)/g)].map(m => m[1].toLowerCase()));

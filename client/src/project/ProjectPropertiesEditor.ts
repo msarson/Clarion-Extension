@@ -5,7 +5,8 @@ import LoggerManager from '../utils/LoggerManager';
 import { globalSettings } from '../globals';
 import { setProperty, setPropertyScope } from './CwprojProperties';
 import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, targetsProperties } from './ProjectPropertyFields';
-import { buildPageState } from './ProjectPropertiesPage';
+import { addItem, includeFor } from './CwprojItems';
+import { buildPageState, editItems } from './ProjectPropertiesPage';
 import { minimalEdit, pageHtml as kitPage, scriptJson } from '../webview/PageKit';
 
 const logger = LoggerManager.getLogger('ProjectPropertiesEditor');
@@ -54,7 +55,7 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
         });
         panel.onDidDispose(() => changes.dispose());
 
-        panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; scope?: 'all' | 'configuration' }) => {
+        panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; kind?: string; scope?: 'all' | 'configuration' }) => {
             try {
                 switch (msg.type) {
                     case 'ready':
@@ -78,6 +79,24 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
                         if (!msg.property || !msg.scope) return;
                         await applyText(document, setPropertyScope(document.getText(), msg.property, msg.scope, configuration));
                         break;
+                    case 'addItem':
+                    case 'removeItem':
+                        await applyText(document, editItems(document.getText(), msg));
+                        break;
+                    case 'pickSource': {
+                        // The chosen files, relative to the project's folder, as the IDE's Add › Existing Item does.
+                        const folder = path.dirname(document.uri.fsPath);
+                        const files = await vscode.window.showOpenDialog({
+                            canSelectMany: true,
+                            defaultUri: vscode.Uri.file(folder),
+                            filters: { 'Clarion source': ['clw'] },
+                            openLabel: 'Add to project',
+                        });
+                        let text = document.getText();
+                        for (const f of files ?? []) text = addItem(text, 'Compile', includeFor(folder, f.fsPath));
+                        await applyText(document, text);
+                        break;
+                    }
                     case 'xml':
                         await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
                         break;
@@ -144,6 +163,14 @@ function pageHtml(webview: vscode.Webview): string {
   .scope.per .dot { background: var(--vscode-focusBorder); }
   .scope:disabled { opacity: 0.5; cursor: default; }
   .unavailable .label > span:first-child { color: var(--vscode-disabledForeground); }
+  .columns { display: flex; flex-wrap: wrap; gap: 20px; }
+  .columns > section { flex: 1 1 300px; min-width: 0; }
+  .item { justify-content: space-between; }
+  .item > span { min-width: 0; overflow-wrap: anywhere; }
+  td.file { font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; }
+  td.remove { text-align: right; width: 1%; }
+  .add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--vscode-panel-border); }
+  .add input[type=text] { flex: 1 1 160px; min-width: 0; }
 `,
         body: `
 <header>
@@ -189,6 +216,48 @@ function pageHtml(webview: vscode.Webview): string {
     return input;
   }
 
+  // The Sources tab: the project's items, for every configuration.
+  const remove = (kind, include) => el('button', { type: 'button', class: 'secondary', 'aria-label': 'Remove ' + include,
+    onclick: () => vscode.postMessage({ type: 'removeItem', kind, value: include }) }, 'Remove');
+  const itemRow = (kind, include, ...rest) => el('div', { class: 'row item' }, el('span', {}, ...rest), remove(kind, include));
+  const none = text => el('div', { class: 'empty' }, text);
+
+  function sources(s) {
+    const compiled = el('section', {},
+      el('h2', {}, 'Compiled sources · ' + s.compile.length),
+      s.compile.length === 0 ? none('No source files.') : el('div', { class: 'table-wrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, el('th', {}, 'File'), el('th', {}, ''), el('th', {}, ''))),
+        el('tbody', {}, ...s.compile.map(i => el('tr', {},
+          el('td', { class: 'file' }, i.include),
+          el('td', {}, i.generated ? el('span', { class: 'pill info', title: 'The Clarion IDE generates this module' }, 'Generated') : ''),
+          el('td', { class: 'remove' }, remove('Compile', i.include))))))),
+      el('div', { class: 'add' }, el('button', { type: 'button', class: 'primary', onclick: () => vscode.postMessage({ type: 'pickSource' }) }, 'Add source file…')));
+
+    const references = el('section', {},
+      el('h2', {}, 'Project references'),
+      ...(s.projectReferences.length === 0 ? [none('No project references.')]
+        : s.projectReferences.map(i => itemRow('ProjectReference', i.include, i.name || i.include, i.name ? el('span', { class: 'muted' }, ' · ' + i.include) : null))));
+
+    const choice = el('select', { 'aria-label': 'File driver to add', disabled: s.driverChoices.length === 0 },
+      ...s.driverChoices.map(d => el('option', { value: d }, d)));
+    const drivers = el('section', {},
+      el('h2', {}, 'File drivers'),
+      ...(s.fileDrivers.length === 0 ? [none('No file drivers.')] : s.fileDrivers.map(i => itemRow('FileDriver', i.include, i.include))),
+      el('div', { class: 'add' }, choice, el('button', { type: 'button', class: 'secondary', disabled: s.driverChoices.length === 0,
+        onclick: () => vscode.postMessage({ type: 'addItem', kind: 'FileDriver', value: choice.value }) }, 'Add driver')));
+
+    const library = el('input', { type: 'text', placeholder: 'win32.lib', 'aria-label': 'Library or object to add' });
+    const addLibrary = () => { if (library.value.trim()) vscode.postMessage({ type: 'addItem', kind: 'Library', value: library.value }); };
+    library.addEventListener('keydown', e => { if (e.key === 'Enter') addLibrary(); });
+    const libraries = el('section', {},
+      el('h2', {}, 'Libraries and objects'),
+      ...(s.libraries.length === 0 ? [none('No libraries or objects.')] : s.libraries.map(i => itemRow('Library', i.include, i.include))),
+      el('div', { class: 'add' }, library, el('button', { type: 'button', class: 'secondary', onclick: addLibrary }, 'Add')));
+
+    return [el('div', { class: 'muted' }, 'Items apply to every configuration.'), compiled,
+      el('div', { class: 'columns' }, references, drivers, libraries)];
+  }
+
   function render() {
     if (!state) return;
     document.getElementById('name').textContent = state.outputName || state.file;
@@ -202,6 +271,7 @@ function pageHtml(webview: vscode.Webview): string {
       onclick: () => { tab = t.id; vscode.setState({ tab }); render(); } }, t.label)));
 
     const page = state.tabs.find(t => t.id === tab) || state.tabs[0];
+    if (page.id === 'sources') { document.getElementById('page').replaceChildren(...sources(state.sources)); return; }
     document.getElementById('page').replaceChildren(...page.groups.map(g => el('section', {},
       el('h2', {}, g.title),
       ...g.fields.map(f => {

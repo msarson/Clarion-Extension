@@ -39,7 +39,7 @@ interface Item extends ProjectItem {
 }
 interface Group { openStart: number; openEnd: number; closeStart: number; closeEnd: number; indent: string; items: Item[] }
 
-const KINDS: ItemKind[] = ['Compile', 'ProjectReference', 'FileDriver', 'Library'];
+export const ITEM_KINDS: ItemKind[] = ['Compile', 'ProjectReference', 'FileDriver', 'Library'];
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const indentAt = (text: string, index: number) => /^[ \t]*/.exec(text.slice(lineStartAt(text, index), index))![0];
 const childText = (body: string, name: string) => {
@@ -78,7 +78,7 @@ function readGroups(text: string): Group[] {
                 elementEnd = close.lastIndex;
                 element.lastIndex = elementEnd;
             }
-            const kind = KINDS.find(k => k === e![1]);
+            const kind = ITEM_KINDS.find(k => k === e![1]);
             const include = /\bInclude\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(e[2] ?? '');
             if (!kind || !include) continue;
             const lineStart = lineStartAt(text, elementStart);
