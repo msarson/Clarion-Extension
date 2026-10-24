@@ -25,22 +25,46 @@ function buildClwContent(): string {
 /** Folders a source scan never enters: hidden ones (.git, .vscode) and build output. */
 const SKIP_DIRS = new Set(['node_modules', 'obj', 'bin']);
 
-/** #763 — every .clw/.inc/.equ under the folder, paths relative to it. */
-async function readSourceFiles(folderPath: string): Promise<SourceFile[]> {
-    const files: SourceFile[] = [];
+/** A folder past this is not one application's sources (a drive or home folder): the scan stops. */
+const MAX_SOURCE_FILES = 50000;
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+interface SourceScan { files: SourceFile[]; unreadable: number; tooLarge: boolean }
+
+/**
+ * #763 — every .clw/.inc/.equ under the folder, paths relative to it. Links are not followed
+ * (a linked file or folder can lead outside it), and a folder that cannot be read is counted and
+ * skipped rather than ending the scan.
+ */
+async function readSourceFiles(folderPath: string): Promise<SourceScan> {
+    const scan: SourceScan = { files: [], unreadable: 0, tooLarge: false };
     const walk = async (dir: string): Promise<void> => {
-        for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
+        let entries: fs.Dirent[];
+        try {
+            entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch {
+            scan.unreadable++;
+            return;
+        }
+        for (const entry of entries) {
+            if (scan.tooLarge) return;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 if (!entry.name.startsWith('.') && !SKIP_DIRS.has(entry.name.toLowerCase())) await walk(full);
-            } else if (/\.(clw|inc|equ)$/i.test(entry.name)) {
-                // Clarion source is ANSI; latin1 keeps every byte, and the rules only read ASCII keywords.
-                files.push({ relPath: path.relative(folderPath, full), text: await fs.promises.readFile(full, 'latin1') });
+            } else if (entry.isFile() && /\.(clw|inc|equ)$/i.test(entry.name)) {
+                if (scan.files.length >= MAX_SOURCE_FILES) { scan.tooLarge = true; return; }
+                try {
+                    // Clarion source is ANSI; latin1 keeps every byte, and the rules only read ASCII keywords.
+                    scan.files.push({ relPath: path.relative(folderPath, full), text: await fs.promises.readFile(full, 'latin1') });
+                } catch {
+                    scan.unreadable++;
+                }
             }
         }
     };
     await walk(folderPath);
-    return files;
+    return scan;
 }
 
 async function promptSolutionName(defaultName: string): Promise<string | undefined> {
@@ -77,7 +101,7 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
 async function confirmProjects(inference: FolderInference): Promise<CwprojSpec[] | undefined> {
     const programItems = inference.projects.map(p => ({
         label: p.name,
-        description: `${p.kind === 'dll' ? 'DLL' : 'EXE'} · ${p.compile.length} source file${p.compile.length === 1 ? '' : 's'}`,
+        description: `${p.kind === 'dll' ? 'DLL' : 'EXE'} · ${plural(p.compile.length, 'source file')}`,
         detail: p.programFile,
         picked: true,
         project: p,
@@ -99,18 +123,24 @@ async function confirmProjects(inference: FolderInference): Promise<CwprojSpec[]
         ignoreFocusOut: true,
     });
     if (!dlls) return undefined;
-    const dllNames = new Set(dlls.map(d => d.project));
-    const specs = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllNames.has(p) ? 'dll' as const : 'exe' as const }));
+    const dllProjects = new Set(dlls.map(d => d.project));
+    const specs = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const }));
 
-    for (const module of inference.unassigned) {
+    // Modules the inference could not place: named after no program, or naming a program that
+    // more than one folder holds (then only those programs are offered). Project names are unique.
+    const toPlace = [
+        ...inference.unassigned.map(file => ({ file, why: 'names no program', candidates: specs })),
+        ...inference.ambiguous.map(a => ({ file: a.file, why: 'names a program more than one folder holds', candidates: specs.filter(s => a.candidates.includes(s.name)) })),
+    ];
+    for (const { file, why, candidates } of toPlace) {
         const LEAVE_OUT = 'Leave it out';
-        const pick = await vscode.window.showQuickPick([...specs.map(s => s.name), LEAVE_OUT], {
-            title: `New solution: ${module} names no program`,
-            placeHolder: `Which project compiles ${module}?`,
+        const pick = await vscode.window.showQuickPick([...candidates.map(s => s.name), LEAVE_OUT], {
+            title: `New solution: ${file} ${why}`,
+            placeHolder: `Which project compiles ${file}?`,
             ignoreFocusOut: true,
         });
         if (pick === undefined) return undefined;
-        specs.find(s => s.name === pick)?.compile.push(module);
+        candidates.find(s => s.name === pick)?.compile.push(file);
     }
 
     const leftoverItems = projects.flatMap((p, i) => p.unreferenced.map(m => ({
@@ -118,7 +148,7 @@ async function confirmProjects(inference: FolderInference): Promise<CwprojSpec[]
     })));
     if (leftoverItems.length > 0) {
         const keep = await vscode.window.showQuickPick(leftoverItems, {
-            title: `New solution: ${leftoverItems.length} module${leftoverItems.length === 1 ? '' : 's'} nothing calls through a MODULE`,
+            title: `New solution: ${plural(leftoverItems.length, 'module')} nothing calls through a MODULE`,
             placeHolder: 'A generator can leave old modules behind. Untick the ones the project no longer uses.',
             canPickMany: true,
             ignoreFocusOut: true,
@@ -158,18 +188,21 @@ export async function newSolution(): Promise<void> {
 
     // Step 3 (#763): a folder that already has programs can become their solution
     let inference: FolderInference | undefined;
-    try {
-        const sources = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
-            () => readSourceFiles(folderPath));
-        inference = inferProjects(sources);
-    } catch (err) {
-        logger.error(`❌ Could not read the folder's sources: ${err}`);
+    const scan = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
+        () => readSourceFiles(folderPath));
+    if (scan.tooLarge) {
+        // Part of a folder would give wrong projects: offer only the empty program.
+        vscode.window.showWarningMessage(`This folder holds more than ${MAX_SOURCE_FILES} Clarion source files, so New Solution does not build projects from them. Open the application's own folder to do that.`);
+    } else {
+        if (scan.unreadable > 0) {
+            vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
+        }
+        inference = inferProjects(scan.files);
     }
     let specs: CwprojSpec[] | undefined;
     if (inference && inference.projects.length > 0) {
-        const n = inference.projects.length;
-        const FROM_SOURCES = `From the ${n} program${n === 1 ? '' : 's'} in this folder`;
+        const FROM_SOURCES = `From the ${plural(inference.projects.length, 'program')} in this folder`;
         const choice = await vscode.window.showQuickPick([FROM_SOURCES, 'A new empty program'], {
             placeHolder: 'Build the new solution from…'
         });
@@ -231,7 +264,7 @@ export async function newSolution(): Promise<void> {
     if (!clwPath && inference && inference.missingProgram.length > 0) {
         const m = inference.missingProgram.length;
         vscode.window.showInformationMessage(
-            `${m} module${m === 1 ? ' names a program' : 's name programs'} not in this folder and ${m === 1 ? 'was' : 'were'} left out.`);
+            `${plural(m, 'module')} ${m === 1 ? 'names a program' : 'name programs'} not in this folder and ${m === 1 ? 'was' : 'were'} left out.`);
     }
     // A DLL links only with its export file, <name>.exp beside the project; the generator writes
     // it, but it is often not kept with the sources.

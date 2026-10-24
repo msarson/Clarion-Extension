@@ -97,6 +97,46 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects.map(p => p.name), ['App', 'old_APP', 'v2_app']);
     });
 
+    test('project names stay unique when a folder-qualified name is taken too', () => {
+        const r = inferProjects([f('App.clw', exe), f('old_App.clw', exe), f('old\\App.clw', exe), f('OLD\\app.clw', exe)]);
+        const names = r.projects.map(p => p.name.toLowerCase());
+        assert.strictEqual(new Set(names).size, names.length, names.join(', '));
+    });
+
+    test('a name MSBuild would expand never reaches the project files', () => {
+        const r = inferProjects([f("$(Root.Substring(0,3))x@y%z;w'q.clw", exe)]);
+        assert.ok(!/[$@%;'"]/.test(r.projects[0].name), r.projects[0].name);
+        assert.deepStrictEqual(r.projects[0].compile, ["$(Root.Substring(0,3))x@y%z;w'q.clw"]);
+    });
+
+    test('a member whose program name is shared goes to the program in its own folder', () => {
+        const r = inferProjects([
+            f('a\\App.clw', exe), f('b\\App.clw', exe), f('b\\Worker.clw', member('App')),
+        ]);
+        assert.deepStrictEqual(r.projects.map(p => p.compile), [['a\\App.clw'], ['b\\App.clw', 'b\\Worker.clw']]);
+    });
+
+    test('a member whose program name is shared and not in its folder is asked about', () => {
+        const r = inferProjects([f('a\\App.clw', exe), f('b\\App.clw', exe), f('c\\Worker.clw', member('App'))]);
+        assert.deepStrictEqual(r.projects.map(p => p.compile), [['a\\App.clw'], ['b\\App.clw']]);
+        assert.deepStrictEqual(r.ambiguous, [{ file: 'c\\Worker.clw', candidates: [r.projects[0].name, r.projects[1].name] }]);
+    });
+
+    test('a MEMBER path picks the program it names among programs of the same name', () => {
+        const r = inferProjects([f('a\\App.clw', exe), f('b\\App.clw', exe), f('Worker.clw', member('b\\App.clw'))]);
+        assert.deepStrictEqual(r.projects.map(p => p.compile), [['a\\App.clw'], ['b\\App.clw', 'Worker.clw']]);
+    });
+
+    test('MODULE and INCLUDE without an extension mean .clw (#449)', () => {
+        const r = inferProjects([
+            f('App.clw', exe.replace("MODULE('App001.clw')", "MODULE('App001')") + "\r\n  INCLUDE('Hdr')"),
+            f('App001.clw', member('App')),
+            f('Hdr.clw', "  MAP\r\n    MODULE('App002')\r\n    END\r\n  END"),
+            f('App002.clw', member('App')),
+        ]);
+        assert.deepStrictEqual(r.projects[0].unreferenced, []);
+    });
+
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {
         const r = inferProjects([
             f('App.clw', exe),

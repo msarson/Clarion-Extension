@@ -12,7 +12,7 @@ const B = '{BBBBBBBB-0000-0000-0000-000000000002}';
 suite('Solution and project files for a folder of sources (#763)', () => {
     test('the .sln lists every project with both configurations', () => {
         const sln = buildSlnContent([{ name: 'App', guid: A }, { name: 'Lib', guid: B }]);
-        assert.ok(sln.startsWith('﻿'));
+        assert.ok(sln.startsWith('\uFEFF'));
         assert.ok(sln.includes(`Project("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "App", "App.cwproj", "${A}"\r\nEndProject`));
         assert.ok(sln.includes(`Project("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "Lib", "Lib.cwproj", "${B}"\r\nEndProject`));
         for (const g of [A, B]) for (const c of ['Debug', 'Release']) {
