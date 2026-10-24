@@ -28,6 +28,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Maintenance
 
 - **The release runs the test suite as the dry run does, and stops if it fails.** It ran the server tests on Linux with their result ignored, where the suite cannot pass, so the 1.0.9 release showed 331 failures under a green step. The server and client suites now run on Windows first, and nothing is merged, tagged or published unless they pass; the release then ships the commit they passed on, publishing the same VSIX to the Marketplace as to GitHub, and stops if the branch or the version's tag names another commit. [#781](https://github.com/msarson/Clarion-Extension/issues/781)
+- **Loading a solution no longer logs "Failed to refresh solution cache from server".** Two steps of the load fetch the solution moments apart, and the second gave up at once instead of waiting for the first, so every load reported a failure that had not happened; it now waits and reports the result. [#788](https://github.com/msarson/Clarion-Extension/issues/788)
 
 ---
 

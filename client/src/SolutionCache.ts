@@ -214,6 +214,8 @@ export class SolutionCache {
     private lastCacheTime: number = 0;
     private firstFetchAttempted: boolean = false;
     private fetchInProgress: boolean = false;
+    /** #788: the fetch initialize() is running, for a second initialize() or refresh() to await. */
+    private initializeFetch: Promise<boolean> | null = null;
     private backgroundRefreshScheduled: boolean = false;
     private activationInProgress: boolean = true;
     private filePathCache: Map<string, string> = new Map();
@@ -800,132 +802,17 @@ export class SolutionCache {
             // Client is ready, proceed with normal fetch
             if (this.fetchInProgress) {
                 logger.info("⏳ Fetch already in progress, waiting for it to complete...");
-                return false;
+                // #788: wait for it, as the message says, and report how it went.
+                return this.initializeFetch ? await this.initializeFetch : false;
             }
 
             this.fetchInProgress = true;
-            
+            const fetch = this.fetchSolutionTree(startTime);
+            this.initializeFetch = fetch;
             try {
-                // Guard: client must be set before we can make requests
-                if (!this.client) {
-                    logger.info("⏳ Language client not yet set in SolutionCache; deferring until setLanguageClient() is called.");
-                    this.fetchInProgress = false;
-                    return false;
-                }
-
-                // #291: no progress toast — the editor is fully usable during this fetch
-                // (heavy work is deferred/background by design post-#288/#289/#290) and the
-                // notification read as "wait". The status-bar initialization item is the
-                // single progress surface; only the TIMEOUT path surfaces a warning.
-                {
-                    // Set a timeout to prevent hanging if the server doesn't respond
-                    const timeoutPromise = new Promise<null>((resolve) => {
-                        setTimeout(() => {
-                            logger.warn("⚠️ Server request timed out");
-                            resolve(null);
-                        }, 15000); // 15 second timeout for normal fetches
-                    });
-
-                    const requestStartTime = performance.now();
-                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
-                    // Race between the actual request and the timeout
-                    this.solutionInfo = await Promise.race([
-                        this.sendGetSolutionTreeRequest(),
-                        timeoutPromise
-                    ]);
-                    if (this.solutionInfo === null) {
-                        window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
-                    }
-                    const requestEndTime = performance.now();
-                    logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
-                    logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
-
-                    if (this.solutionInfo && this.solutionInfo.projects && this.solutionInfo.projects.length > 0) {
-                        logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
-                        
-                        // Save to in-memory cache
-                        const saveStart = performance.now();
-                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache starting`);
-                        this.saveToInMemoryCache();
-                        logger.info(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
-                        
-                        // Log basic project information
-                        logger.info(`📊 Solution tree structure:`);
-                        for (let i = 0; i < this.solutionInfo.projects.length; i++) {
-                            const project = this.solutionInfo.projects[i];
-                            logger.info(`📂 Project ${i + 1}/${this.solutionInfo.projects.length}: ${project.name}`);
-                            
-                            // Log counts instead of full details
-                            // Use optional chaining and type assertion to avoid TypeScript errors
-                            const projectWithCounts = project as any;
-                            logger.info(`  - Source Files: ${projectWithCounts.sourceFilesCount || project.sourceFiles?.length || 0}`);
-                            logger.info(`  - File Drivers: ${projectWithCounts.fileDriversCount || project.fileDrivers?.length || 0}`);
-                            logger.info(`  - Libraries: ${projectWithCounts.librariesCount || project.libraries?.length || 0}`);
-                            logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
-                            logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
-                        }
-                    } else {
-                        logger.warn("⚠️ Server returned null solution tree");
-
-                        // Try local parsing as a fallback
-                        if (this.isLocalSlnFallbackEnabled()) {
-                            logger.info("🔄 Attempting local .sln parsing as fallback...");
-                            const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
-
-                            if (localTree) {
-                                this.solutionInfo = localTree;
-                                logger.info("✅ Using locally parsed solution tree as fallback");
-                                this.saveToInMemoryCache();
-                            } else {
-                                // Create an empty solution info
-                                this.solutionInfo = {
-                                    name: path.basename(this.solutionFilePath),
-                                    path: this.solutionFilePath,
-                                    projects: []
-                                };
-                            }
-                        } else {
-                            // Create an empty solution info
-                            this.solutionInfo = {
-                                name: path.basename(this.solutionFilePath),
-                                path: this.solutionFilePath,
-                                projects: []
-                            };
-                        }
-                    }
-                }
-                
-                const endTime = performance.now();
-                logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
-                this.firstFetchAttempted = true;
-                return this.solutionInfo !== null && this.solutionInfo.projects.length > 0;
-            } catch (error) {
-                logger.error(`❌ Error fetching solution tree: ${error instanceof Error ? error.message : String(error)}`);
-                
-                // Try local parsing as a fallback
-                if (this.isLocalSlnFallbackEnabled()) {
-                    logger.info("🔄 Attempting local .sln parsing as fallback after error...");
-                    const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
-                    
-                    if (localTree) {
-                        this.solutionInfo = localTree;
-                        logger.info("✅ Using locally parsed solution tree as fallback after error");
-                        this.saveToInMemoryCache();
-                        this.firstFetchAttempted = true;
-                        return true;
-                    }
-                }
-                
-                // Create an empty solution info
-                this.solutionInfo = {
-                    name: path.basename(this.solutionFilePath),
-                    path: this.solutionFilePath,
-                    projects: []
-                };
-                this.firstFetchAttempted = true;
-                return false;
+                return await fetch;
             } finally {
-                this.fetchInProgress = false;
+                if (this.initializeFetch === fetch) this.initializeFetch = null;
             }
         } catch (error) {
             logger.error(`❌ Error initializing solution cache: ${error instanceof Error ? error.message : String(error)}`);
@@ -938,6 +825,137 @@ export class SolutionCache {
             };
             this.firstFetchAttempted = true;
             return false;
+        }
+    }
+
+    /**
+     * #788 — the server fetch behind initialize(), as one promise a second caller can await:
+     * initializeSolution and reinitializeEnvironment both initialize the cache within
+     * milliseconds of each other, and the second used to give up at once while the first
+     * fetch was still running, so every load logged a failed refresh.
+     */
+    private async fetchSolutionTree(startTime: number): Promise<boolean> {
+        try {
+            // Guard: client must be set before we can make requests
+            if (!this.client) {
+                logger.info("⏳ Language client not yet set in SolutionCache; deferring until setLanguageClient() is called.");
+                this.fetchInProgress = false;
+                return false;
+            }
+
+            // #291: no progress toast — the editor is fully usable during this fetch
+            // (heavy work is deferred/background by design post-#288/#289/#290) and the
+            // notification read as "wait". The status-bar initialization item is the
+            // single progress surface; only the TIMEOUT path surfaces a warning.
+            {
+                // Set a timeout to prevent hanging if the server doesn't respond
+                const timeoutPromise = new Promise<null>((resolve) => {
+                    setTimeout(() => {
+                        logger.warn("⚠️ Server request timed out");
+                        resolve(null);
+                    }, 15000); // 15 second timeout for normal fetches
+                });
+
+                const requestStartTime = performance.now();
+                logger.info(`⏱️ [STARTUP] clarion/getSolutionTree request sent`);
+                // Race between the actual request and the timeout
+                this.solutionInfo = await Promise.race([
+                    this.sendGetSolutionTreeRequest(),
+                    timeoutPromise
+                ]);
+                if (this.solutionInfo === null) {
+                    window.showWarningMessage('Clarion: the solution structure request timed out — the solution view may be incomplete. See the Clarion logs for details.');
+                }
+                const requestEndTime = performance.now();
+                logger.info(`⏱️ [STARTUP] clarion/getSolutionTree response received in ${(requestEndTime - requestStartTime).toFixed(0)}ms (${this.solutionInfo?.projects?.length ?? 0} projects)`);
+                logger.info(`🕒 Server request completed in ${(requestEndTime - requestStartTime).toFixed(2)}ms`);
+
+                if (this.solutionInfo && this.solutionInfo.projects && this.solutionInfo.projects.length > 0) {
+                    logger.info(`✅ Solution tree fetched with ${this.solutionInfo.projects.length} projects`);
+                    
+                    // Save to in-memory cache
+                    const saveStart = performance.now();
+                    logger.info(`⏱️ [STARTUP] saveToInMemoryCache starting`);
+                    this.saveToInMemoryCache();
+                    logger.info(`⏱️ [STARTUP] saveToInMemoryCache done in ${(performance.now() - saveStart).toFixed(0)}ms`);
+                    
+                    // Log basic project information
+                    logger.info(`📊 Solution tree structure:`);
+                    for (let i = 0; i < this.solutionInfo.projects.length; i++) {
+                        const project = this.solutionInfo.projects[i];
+                        logger.info(`📂 Project ${i + 1}/${this.solutionInfo.projects.length}: ${project.name}`);
+                        
+                        // Log counts instead of full details
+                        // Use optional chaining and type assertion to avoid TypeScript errors
+                        const projectWithCounts = project as any;
+                        logger.info(`  - Source Files: ${projectWithCounts.sourceFilesCount || project.sourceFiles?.length || 0}`);
+                        logger.info(`  - File Drivers: ${projectWithCounts.fileDriversCount || project.fileDrivers?.length || 0}`);
+                        logger.info(`  - Libraries: ${projectWithCounts.librariesCount || project.libraries?.length || 0}`);
+                        logger.info(`  - Project References: ${projectWithCounts.projectReferencesCount || project.projectReferences?.length || 0}`);
+                        logger.info(`  - None Files: ${projectWithCounts.noneFilesCount || project.noneFiles?.length || 0}`);
+                    }
+                } else {
+                    logger.warn("⚠️ Server returned null solution tree");
+
+                    // Try local parsing as a fallback
+                    if (this.isLocalSlnFallbackEnabled()) {
+                        logger.info("🔄 Attempting local .sln parsing as fallback...");
+                        const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
+
+                        if (localTree) {
+                            this.solutionInfo = localTree;
+                            logger.info("✅ Using locally parsed solution tree as fallback");
+                            this.saveToInMemoryCache();
+                        } else {
+                            // Create an empty solution info
+                            this.solutionInfo = {
+                                name: path.basename(this.solutionFilePath),
+                                path: this.solutionFilePath,
+                                projects: []
+                            };
+                        }
+                    } else {
+                        // Create an empty solution info
+                        this.solutionInfo = {
+                            name: path.basename(this.solutionFilePath),
+                            path: this.solutionFilePath,
+                            projects: []
+                        };
+                    }
+                }
+            }
+            
+            const endTime = performance.now();
+            logger.info(`✅ Solution initialized from server in ${(endTime - startTime).toFixed(2)}ms`);
+            this.firstFetchAttempted = true;
+            return this.solutionInfo !== null && this.solutionInfo.projects.length > 0;
+        } catch (error) {
+            logger.error(`❌ Error fetching solution tree: ${error instanceof Error ? error.message : String(error)}`);
+            
+            // Try local parsing as a fallback
+            if (this.isLocalSlnFallbackEnabled()) {
+                logger.info("🔄 Attempting local .sln parsing as fallback after error...");
+                const localTree = await this.tryLocalParseFromSln(this.solutionFilePath);
+                
+                if (localTree) {
+                    this.solutionInfo = localTree;
+                    logger.info("✅ Using locally parsed solution tree as fallback after error");
+                    this.saveToInMemoryCache();
+                    this.firstFetchAttempted = true;
+                    return true;
+                }
+            }
+            
+            // Create an empty solution info
+            this.solutionInfo = {
+                name: path.basename(this.solutionFilePath),
+                path: this.solutionFilePath,
+                projects: []
+            };
+            this.firstFetchAttempted = true;
+            return false;
+        } finally {
+            this.fetchInProgress = false;
         }
     }
 
@@ -1084,7 +1102,8 @@ export class SolutionCache {
         // Prevent concurrent refreshes
         if (this.fetchInProgress) {
             logger.info("⏳ Refresh already in progress, waiting for it to complete...");
-            return false;
+            // #788: the fetch running now is the refresh; wait for it and report how it went.
+            return this.initializeFetch ? await this.initializeFetch : false;
         }
 
         // Clear any cached project details
