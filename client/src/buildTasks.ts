@@ -55,7 +55,7 @@ import { ClarionProjectInfo } from "../../common/types";
 import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
 import { buildConfigDirArg } from "./utils/ClarionBuildArgs";
 import { recordBuildLog } from "./utils/LastBuildLog"; // #681
-import { updateSolutionToolbar } from "./views/ViewManager"; // #681
+import { refreshSolutionPage } from "./views/ViewManager"; // #681
 
 const logger = LoggerManager.getLogger("BuildTasks");
 logger.setLevel("error"); // Production: Only log errors
@@ -686,7 +686,7 @@ function processTaskCompletion(
         } else {
             logger.info(`Preserved build log at: ${buildLogPath}`);
             recordBuildLog(buildLogPath); // #681 — the Clarion Tools pane opens it
-            updateSolutionToolbar();
+            refreshSolutionPage();
             window.showInformationMessage(`Build log saved at: ${buildLogPath}`);
         }
     });
@@ -885,7 +885,7 @@ async function executeBuildTaskSync(params: {
                         fs.unlink(buildLogPath, () => {});
                     } else {
                         recordBuildLog(buildLogPath); // #681
-                        updateSolutionToolbar();
+                        refreshSolutionPage();
                     }
                 });
             }

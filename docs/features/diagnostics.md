@@ -405,7 +405,7 @@ Both fail the compile. The compiler opens a MEMBER module's program file itself,
 
 It is checked once the solution has loaded; until the redirection is known every INCLUDE would look missing. Turn it off or change its level with `clarion.diagnostics.unresolvedFileReferences.enabled` / `.severity`.
 
-**Whole solution at once:** **Clarion: Unresolved File References** (or a click on the Graph row in the Clarion Tools pane) lists every INCLUDE and MEMBER that does not resolve, in files you have open or not, with the file and line. MODULE names without a source file and references inside OMIT/COMPILE are listed separately, as they are not necessarily problems. Each row opens the reference.
+**Whole solution at once:** **Clarion: Unresolved File References** (or **Unresolved file references…** on the Solution Properties page) lists every INCLUDE and MEMBER that does not resolve, in files you have open or not, with the file and line. MODULE names without a source file and references inside OMIT/COMPILE are listed separately, as they are not necessarily problems. Each row opens the reference.
 
 > Not the same as the **Missing INCLUDE Diagnostic** above, which reports a *type* used without its `.inc` included; this one reports an INCLUDE or MEMBER whose *file* is missing.
 

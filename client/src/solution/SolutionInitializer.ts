@@ -16,7 +16,7 @@ import {
     updateBuildProjectStatusBar,
     updateInitializationStatusBar
 } from '../statusbar/StatusBarManager';
-import { refreshSolutionTreeView, setToolbarGraphStatus } from '../views/ViewManager';
+import { refreshSolutionTreeView, setSolutionGraphStatus } from '../views/ViewManager';
 import { registerLanguageFeatures } from '../providers/LanguageFeatureManager';
 import { createSolutionFileWatchers } from '../providers/FileWatcherManager';
 import { isClientReady, getClientReadyPromise } from '../LanguageClientManager';
@@ -388,7 +388,7 @@ export async function initializeSolution(
                 sourceFileCount?: number;
                 unresolvedCount?: number;
             }) => {
-                setToolbarGraphStatus(params);
+                setSolutionGraphStatus(params);
             })
         );
 

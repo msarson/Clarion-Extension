@@ -5,7 +5,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 import { pushConfigurationToIde } from '../solution/ClarionIdePreferences';
-import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionPage, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
 import { configurationToStore } from '../utils/ConfigurationPrecedence'; // #674
@@ -114,7 +114,7 @@ export async function chooseConfiguration(picked: string): Promise<void> {
 export async function applyActiveConfiguration(configuration: string): Promise<void> {
     globalSettings.configuration = configuration;
     await updateConfigurationStatusBar(configuration);
-    updateSolutionToolbar();
+    refreshSolutionPage();
     await refreshSolutionTreeView();
     // #564 — the language server resolves files through the redirection file's sections for
     // this configuration; it only heard the configuration at solution load until now.

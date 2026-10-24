@@ -26,12 +26,11 @@ suite('Set Version is named for what it does (#677)', () => {
         assert.strictEqual(cmd!.title, 'Set Version'); // shown as Clarion: Set Version, as #498's and #535's prompts say
     });
 
-    test('bug-pin: the Actions view says it sets the version for the open solution', () => {
-        // #683 — the gear button is gone; the Clarion row of the details table carries the tooltip.
-        const toolbar = read('client', 'src', 'views', 'SolutionToolbarProvider.ts');
-        const rows = read('client', 'src', 'views', 'ToolsPaneRows.ts');
-        assert.ok(!/Set Active Clarion Version/.test(toolbar + rows), 'old tooltip gone');
-        assert.ok(rows.includes("'Set the Clarion version for this solution'"), 'new tooltip');
+    test('bug-pin: the Solution page sets the version for the open solution', () => {
+        // #794 — the Actions pane is gone; its Clarion row is the Solution page's Build with section (#792).
+        const page = read('client', 'src', 'solution', 'SolutionPanel.ts');
+        assert.ok(!/Set Active Clarion Version/.test(page), 'old wording gone');
+        assert.match(page, /applyPickedVersion\(/, 'a version picked on the page is applied as Set Version applies it');
     });
 
     test('the handler\'s comment no longer claims it leaves the solution alone', () => {

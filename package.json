@@ -219,13 +219,6 @@
     "views": {
       "clarionViews": [
         {
-          "id": "clarionSolutionToolbar",
-          "name": "Actions",
-          "type": "webview",
-          "icon": "images/sv57x57.png",
-          "visibility": "visible"
-        },
-        {
           "id": "solutionView",
           "name": "Solution View",
           "icon": "images/sv57x57.png"
@@ -254,13 +247,27 @@
         "command": "clarion.runWithoutDebugging",
         "title": "Run Without Debugging",
         "category": "Clarion",
-        "when": "clarion.solutionOpen"
+        "when": "clarion.solutionOpen",
+        "icon": "$(play)"
       },
       {
         "command": "clarion.startDebugging",
         "title": "Start Debugging (Clarion Debugger)",
         "category": "Clarion",
-        "when": "clarion.solutionOpen"
+        "when": "clarion.solutionOpen",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "clarion.buildAndRun",
+        "title": "Build and Run",
+        "category": "Clarion",
+        "enablement": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.buildAndDebug",
+        "title": "Build and Debug",
+        "category": "Clarion",
+        "enablement": "clarion.solutionOpen"
       },
       {
         "command": "clarion.setStartupProject",
@@ -477,7 +484,8 @@
       {
         "command": "clarion.buildAllProjects",
         "title": "Build All",
-        "category": "Clarion"
+        "category": "Clarion",
+        "icon": "$(tools)"
       },
       {
         "command": "clarion.generateApp",
@@ -809,9 +817,24 @@
       ],
       "view/title": [
         {
-          "command": "clarion.openSolutionProperties",
+          "command": "clarion.buildAllProjects",
           "when": "view == solutionView && clarion.solutionOpen",
           "group": "navigation@0"
+        },
+        {
+          "command": "clarion.runWithoutDebugging",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clarion.startDebugging",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clarion.openSolutionProperties",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "navigation@3"
         },
         {
           "command": "clarion.newSolution",
@@ -824,34 +847,54 @@
           "group": "navigation@1"
         },
         {
-          "command": "clarion.closeSolution",
-          "when": "view == solutionView && clarion.solutionOpen",
-          "group": "navigation@1"
+          "command": "clarion.openSolutionFromList",
+          "when": "view == solutionView && !clarion.solutionOpen",
+          "group": "navigation@2"
         },
         {
-          "command": "clarion.openSolutionFromList",
-          "when": "view == solutionView",
-          "group": "navigation@2"
+          "command": "clarion.buildAndRun",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "1_run@1"
+        },
+        {
+          "command": "clarion.buildAndDebug",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "1_run@2"
+        },
+        {
+          "command": "clarion.openInClarionIDE",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "1_run@3"
         },
         {
           "command": "clarion.forceRefreshSolutionCache",
           "when": "view == solutionView && clarion.solutionOpen",
-          "group": "navigation@3"
+          "group": "2_solution@1"
+        },
+        {
+          "command": "clarion.openSolutionFromList",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "2_solution@2"
+        },
+        {
+          "command": "clarion.closeSolution",
+          "when": "view == solutionView && clarion.solutionOpen",
+          "group": "2_solution@3"
         },
         {
           "command": "clarion.solutionView.filter",
           "when": "view == solutionView && clarion.solutionOpen",
-          "group": "navigation@4"
+          "group": "3_view@1"
         },
         {
           "command": "clarion.solutionView.clearFilter",
           "when": "view == solutionView && clarion.solutionOpen",
-          "group": "navigation@5"
+          "group": "3_view@2"
         },
         {
           "command": "clarion.toggleApplicationSortOrder",
           "when": "view == solutionView && clarion.solutionOpen",
-          "group": "navigation@6"
+          "group": "3_view@3"
         },
         {
           "command": "clarion.structureView.expandAll",
@@ -939,8 +982,13 @@
     "viewsWelcome": [
       {
         "view": "solutionView",
-        "contents": "No Clarion solution is currently open.\n\n[Open Solution](command:clarion.openSolution)\n\nClick the button above to open a `.sln` file or pick from recently-used solutions.",
+        "contents": "No Clarion solution is open.\n\n[Open Solution](command:clarion.openSolution)\n\n[Open a Recent Solution](command:clarion.openSolutionFromList)",
         "when": "!clarion.solutionOpen"
+      },
+      {
+        "view": "solutionView",
+        "contents": "Or make one from this folder: from the programs already in it, or a new empty program.\n\n[New Solution](command:clarion.newSolution)",
+        "when": "!clarion.solutionOpen && workspaceFolderCount > 0"
       }
     ],
     "snippets": [

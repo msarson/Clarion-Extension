@@ -176,6 +176,7 @@ export class SolutionPanel {
             configurations: extractConfigurationsFromSolution(slnText),
             projects,
             reason: this.reason,
+            appData: process.env.APPDATA,
             ...(this.mode === 'properties' ? {
                 startupGuid: settings.get<string>('startupProject') || undefined,
                 build: {
@@ -381,6 +382,7 @@ function html(webview: vscode.Webview): string {
   const post = (type, extra) => vscode.postMessage(Object.assign({ type }, extra || {}));
 
   function choice(field, label, f, extra) {
+    const where = f.configDir ? el('span', { class: 'muted' }, 'Its settings are in ' + f.configDir) : null;
     const s = el('select', { class: f.needs ? 'needs' : '', 'aria-label': label,
       onchange: e => post('choose', { field, value: e.target.value }) });
     if (!f.value) s.append(el('option', { value: '' }, f.options.length ? 'Choose…' : 'None found'));
@@ -388,7 +390,7 @@ function html(webview: vscode.Webview): string {
     s.value = f.value;
     return el('div', { class: 'row' },
       el('div', { class: 'label' }, el('span', { class: f.needs ? 'needs-text' : '' }, label), f.needs ? el('span', { class: 'muted' }, 'Choose one') : null),
-      el('div', { class: 'control' }, extra ? el('div', { class: 'with-button' }, s, extra) : s));
+      el('div', { class: 'control' }, extra ? el('div', { class: 'with-button' }, s, extra) : s, where));
   }
 
   function row(label, ...control) {

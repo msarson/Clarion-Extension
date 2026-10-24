@@ -74,7 +74,7 @@ Every check can be turned off on its own and reported at the severity you choose
 | `clarion.build.showInOutputPanel` | `false` | Also mirror build output into the Output panel (in addition to the Problems panel). |
 | `clarion.build.logFilePath` | `""` | Custom path for the build output log. Empty = solution directory. |
 | `clarion.build.preserveLogFile` | `false` | Keep `build_output.log` after the build completes. |
-| `clarion.startupProject` | `""` | GUID of the project run by **Ctrl+F5** (Run Without Debugging). Unset = the project containing the current file. Usually set via right-click → *Set as Startup Project* in the Solution View, the Startup row in the Clarion Tools pane, or **Clarion: Choose Startup Project**. |
+| `clarion.startupProject` | `""` | GUID of the project run by **Ctrl+F5** (Run Without Debugging). Unset = the project containing the current file. Usually set via right-click → *Set as Startup Project* in the Solution View, Solution Properties, or **Clarion: Choose Startup Project**. |
 | `clarion.run.command` | `""` | A command **Run Without Debugging** executes instead of the project's output exe, in a PowerShell terminal, from the project folder. `${exe}` (the output exe), `${projectDir}` and `${args}` (the project's start arguments) are substituted, for example `& "${projectDir}\CopyRun.bat"`. Empty runs the output exe. Debug still starts the exe itself. |
 | `clarion.configuration` | `""` | Selected build configuration (Debug/Release/custom). Usually set via the status bar or `Clarion: Set Configuration`. |
 

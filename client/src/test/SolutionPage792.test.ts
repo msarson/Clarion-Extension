@@ -104,6 +104,13 @@ suite('Solution page: what a solution builds with (#792)', () => {
         assert.strictEqual(state.startup.value, '11111111-1111-1111-1111-111111111111');
     });
 
+    test('an installation whose ClarionProperties.xml is outside %APPDATA% says where it is (#479)', () => {
+        const tree = { propertiesFile: 'D:\\Apps\\Sales\\ide\\ClarionProperties.xml', ideVersion: '12.0', compilers: ['Clarion 12.0.14373'] };
+        const appData = 'C:\\Users\\a\\AppData\\Roaming';
+        assert.strictEqual(buildSolutionPageState(input({ installations: [tree], appData })).installation.configDir, 'D:\\Apps\\Sales\\ide');
+        assert.strictEqual(buildSolutionPageState(input({ installations: [C12], appData })).installation.configDir, undefined);
+    });
+
     test('properties: the page shows the current choice and the build settings, and is always ready', () => {
         const state = buildSolutionPageState(input({
             mode: 'properties',

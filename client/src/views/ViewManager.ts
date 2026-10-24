@@ -2,7 +2,7 @@ import { commands, window, window as vscodeWindow, workspace, ExtensionContext, 
 import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { StructureViewProvider } from './StructureViewProvider';
 import { StatusViewProvider } from '../StatusViewProvider';
-import { SolutionToolbarProvider, GraphStatus } from './SolutionToolbarProvider';
+import { GraphStatus } from './GraphStatus';
 import { SolutionPanel } from '../solution/SolutionPanel';
 import { registerSolutionViewCommands, registerStructureViewCommands } from '../commands/ViewCommands';
 import LoggerManager from '../utils/LoggerManager';
@@ -214,44 +214,11 @@ export async function createStatusView(
     return { statusView: view, provider };
 }
 
-let globalToolbarProvider: SolutionToolbarProvider | undefined;
-
-/**
- * Registers the solution toolbar webview view provider.
- */
-export function registerSolutionToolbar(context: ExtensionContext): void {
-    const provider = new SolutionToolbarProvider(context.extensionUri);
-    globalToolbarProvider = provider;
-    context.subscriptions.push(
-        // #148 — `retainContextWhenHidden: true` tells VS Code to preserve the
-        // webview's state when the view is hidden (e.g. sidebar collapsed,
-        // tab-switch) instead of tearing it down + recreating on next show.
-        // Without retention, every visibility-flip re-ran `resolveWebviewView`
-        // which re-registered the service worker; under #132 B3's widened
-        // activation flow the re-registration deterministically lost the race
-        // and surfaced as `InvalidStateError: Could not register service worker`.
-        window.registerWebviewViewProvider(
-            SolutionToolbarProvider.viewId,
-            provider,
-            { webviewOptions: { retainContextWhenHidden: true } }
-        )
-    );
-    // #681 — the pane shows these settings, so it follows their changes.
-    context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('clarion.build.preserveLogFile') || e.affectsConfiguration('clarion.run.command')
-            || e.affectsConfiguration('clarion.startupProject')) {
-            provider.update();
-        }
-    }));
-    logger.info("✅ Solution toolbar registered");
+/** The Solution page follows the solution it shows (#792; it replaced the Actions pane, #794). */
+export function refreshSolutionPage(): void {
+    SolutionPanel.refresh();
 }
 
-export function updateSolutionToolbar(): void {
-    globalToolbarProvider?.update();
-    SolutionPanel.refresh(); // #792
-}
-
-export function setToolbarGraphStatus(status: GraphStatus): void {
-    globalToolbarProvider?.setGraphStatus(status);
-    SolutionPanel.setGraphStatus(status); // #792
+export function setSolutionGraphStatus(status: GraphStatus): void {
+    SolutionPanel.setGraphStatus(status);
 }

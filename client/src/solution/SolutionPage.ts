@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { readProperty } from '../project/CwprojProperties';
 import { configurationName, normalizeConfigurationTo } from '../utils/ConfigurationPrecedence';
+import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 
 /**
  * #792 — the Solution page: what a solution builds with (the Clarion installation, its compiler
@@ -55,10 +56,18 @@ export interface SolutionPageInput {
     build?: { keepLog: boolean; lastLog?: string; runCommand: string };
     /** The file graph's line, once it is built (properties mode). */
     graph?: string;
+    /** %APPDATA%, to tell an installation outside it (#479). */
+    appData?: string;
 }
 
 export interface Option { value: string; label: string; }
-export interface ChoiceField { value: string; options: Option[]; needs: boolean; }
+export interface ChoiceField {
+    value: string;
+    options: Option[];
+    needs: boolean;
+    /** #479 — the folder of a ClarionProperties.xml outside %APPDATA% (a ConfigDir tree, #471). */
+    configDir?: string;
+}
 export type Tone = 'good' | 'warn' | 'bad' | 'none';
 
 export interface SolutionPageState {
@@ -147,6 +156,7 @@ export function buildSolutionPageState(input: SolutionPageInput): SolutionPageSt
             value: installation?.propertiesFile ?? '',
             options: input.installations.map(i => ({ value: i.propertiesFile, label: `Clarion ${i.ideVersion}` })),
             needs: !installation,
+            configDir: (installation && describeNonDefaultConfigDir(installation.propertiesFile, input.appData)) || undefined,
         },
         version: {
             value: settled.version ?? '',

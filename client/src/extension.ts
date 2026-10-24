@@ -33,7 +33,7 @@ import { ProjectPropertiesEditorProvider } from './project/ProjectPropertiesEdit
 import { SolutionPanel } from './solution/SolutionPanel';
 import { registerMapModuleCommands } from './commands/MapModuleCommands';
 import { registerDebugCommands } from './commands/DebugCommands';
-import { createSolutionTreeView, createStructureView, registerSolutionToolbar, updateSolutionToolbar } from './views/ViewManager';
+import { createSolutionTreeView, createStructureView, refreshSolutionPage } from './views/ViewManager';
 import { registerLanguageFeatures } from './providers/LanguageFeatureManager';
 import * as SolutionOpener from './solution/SolutionOpener';
 import { showClarionQuickOpen } from './navigation/QuickOpenProvider';
@@ -147,21 +147,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
         context.subscriptions.push({ dispose: () => { clearInterval(heartbeat); clearInterval(reporter); } });
     }
 
-    // #148 — register the Actions-pane webview provider EARLY, before any
-    // awaits in the activation flow. The view's `visibility: "visible"`
-    // contribution in package.json triggers VS Code to start setting up the
-    // webview iframe + service worker as soon as the view container is
-    // available. If our provider isn't registered yet when VS Code tries to
-    // resolve the view, VS Code's SW registration hits an `InvalidStateError`
-    // (the SW tries to attach to a half-set-up document). #132 B3 widened
-    // the activation chain (added `activateClarionVersionState` + LSP server
-    // start awaits) enough to expose this latent race deterministically.
-    //
-    // The provider only depends on `context.extensionUri` (immediately
-    // available); no need to wait on globalState/solution/LSP/folder-settings
-    // before registering. Existing late-call at line ~141 removed.
-    registerSolutionToolbar(context);
-
     // #513 — register the no-folder commands (Open Solution, Set Version) NOW,
     // before any of the activation awaits below (version state, global state,
     // and especially the language-server startup at Phase 6). The welcome-view
@@ -268,10 +253,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     solutionTreeDataProvider = solutionTreeResult.provider;
     context.subscriptions.push(treeView);
 
-    // #148 — `registerSolutionToolbar(context)` moved to the top of activate(),
-    // right after logger setup, to avoid VS Code's webview SW registration
-    // racing against our late-registration in the original flow.
-
     const structureViewResult = await createStructureView(context, structureView, structureViewProvider);
     structureView = structureViewResult.structureView;
     structureViewProvider = structureViewResult.provider;
@@ -342,7 +323,7 @@ async function workspaceHasBeenTrusted(context: ExtensionContext, disposables: D
 
 async function initializeSolution(context: ExtensionContext, refreshDocs: boolean = false): Promise<void> {
     await SolutionInitializer.initializeSolution(context, refreshDocs, client, reinitializeEnvironment);
-    updateSolutionToolbar();
+    refreshSolutionPage();
 }
 
 async function reinitializeEnvironment(refreshDocs: boolean = false): Promise<void> {
@@ -368,7 +349,7 @@ export async function openClarionSolution(context: ExtensionContext) {
 
 export async function closeClarionSolution(context: ExtensionContext, reason: SolutionCloseReason = 'user') {
     await SolutionOpener.closeClarionSolution(context, reinitializeEnvironment, reason);
-    updateSolutionToolbar();
+    refreshSolutionPage();
 }
 
 async function registerOpenCommand(context: ExtensionContext) {

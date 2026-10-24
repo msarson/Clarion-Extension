@@ -328,7 +328,7 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 
 - The installation list ends with **Browse for ClarionProperties.xml…**, so any file can be chosen even when a normal install was also found.
 - Opening a solution offers **Select Different Configuration…** before adopting the current one (Enter or Esc keeps it).
-- While a non-default file is active, the Clarion Tools panel shows a **Config dir** row, and builds pass the same directory to MSBuild as `ConfigDir`, so what you see is what compiles.
+- While a non-default file is active, Solution Properties names its folder, and builds pass the same directory to MSBuild as `ConfigDir`, so what you see is what compiles.
 
 **Manual configuration:**
 ```json
@@ -376,28 +376,26 @@ The full list is in the **[Commands Reference](../reference/commands.md)**.
 
 ---
 
-## The Actions Panel
+## The Solution View's Title Bar
 
-The **Actions** panel at the top of the **Clarion Tools** sidebar has a toolbar and a summary of the open solution.
+With a solution open, the Solution View's title bar has **Build**, **Run** (Ctrl+F5), **Debug** (F5) and **Solution Properties** (the gear). Its `…` menu has Build and Run, Build and Debug, Open in Clarion IDE, Refresh Solution, Open Solution List, Close Solution, and the tree's Filter, Clear Filter and sort order.
 
-**Toolbar:** Open in the Clarion IDE, Build, Run, Build and Run, Debug, Build and Debug. It wraps to a second line in a narrow sidebar.
+With no solution open, the view offers Open Solution, a recent solution, and, with a folder open, New Solution.
 
-**Rows** (a row with a command behind it is clickable):
+## Solution Properties
 
-| Row | Shows | Click |
-|---|---|---|
-| Clarion | The Clarion version in use | Set the version (for this solution when one is open) |
-| Solution | The open solution | — |
-| Config | The build configuration | Change it |
-| Projects | How many projects the solution has | — |
-| Startup | The project Run and Debug start | Choose another (also **Clarion: Choose Startup Project**) |
-| Run | *Only when `clarion.run.command` is set* | Open that setting |
-| Build log | Whether the build log is kept | Open the last log, or keep / stop keeping it |
-| Settings | — | Open the Clarion build settings |
-| Graph | The file graph: files, edges, build time, and a ⚠️ count when project sources cannot be found | Open the **Unresolved File References** report |
-| Config dir | *Only when a non-default ClarionProperties file is active* | — |
+**Solution Properties** (the gear, the solution node's menu, or **Clarion: Solution Properties**) opens a page for the open solution. Changes apply at once.
 
-The Graph row follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
+| Section | Shows |
+|---|---|
+| Build with | The Clarion installation (with the folder of a ClarionProperties.xml outside the standard location), the compiler version, the configuration and the startup project. **Browse…** finds an installation outside the standard locations |
+| Projects | Each project's type (EXE, DLL or LIB), the projects it references, and for a DLL whether its export file is found through redirection. **Properties** opens the project's own page |
+| Build and run | Whether the build log is kept (and the last one), what Run starts (`clarion.run.command`), and the Clarion build settings |
+| File graph | Files, edges and build time, with a ⚠️ count when project sources cannot be found; **Unresolved file references…** opens that report |
+
+The file graph line follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
+
+**Open Solution** shows the same page when something has to be chosen: a solution with no remembered installation, compiler or configuration that works, when there is more than one to choose from. A solution whose remembered choice still works opens straight away.
 
 ---
 

@@ -58,9 +58,10 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.openProjectProperties` | **Project Properties** — a project's options as the Clarion IDE's pages (Application, Compiling, Debug, Build Events), per configuration; on a project in the Solution View, a `.cwproj` in the Explorer, or the title bar of an open `.cwproj`. Also **Open With… › Clarion Project Properties** |
 | `clarion.buildAllProjects` | Build every project |
 | `clarion.startDebugging` | `F5` — launch the startup project under the Clarion debugger |
+| `clarion.buildAndRun` / `clarion.buildAndDebug` | **Build and Run**, **Build and Debug** — build, then run or debug the startup project (the Solution View's `…` menu) |
 | `clarion.runWithoutDebugging` | `Ctrl+F5` — run the startup project |
 | `clarion.setStartupProject` / `clarion.clearStartupProject` | Choose which project `F5`/`Ctrl+F5` targets |
-| `clarion.chooseStartupProject` | **Choose Startup Project** — pick the startup project from a list (also the Startup row in the Clarion Tools pane) |
+| `clarion.chooseStartupProject` | **Choose Startup Project** — pick the startup project from a list (also on the Solution Properties page) |
 | `clarion.clearBuildResults` | **Clear Build Results** — remove the errors and warnings of the extension's last build from Problems. They are also cleared when another build task starts, so they never look current for a build they do not describe |
 
 ## Application (APP) Commands
@@ -117,7 +118,7 @@ Available in the Solution View for solutions with `.app` files under version con
 |---|---|
 | `clarion.setLogLevel` | Pick how much the extension logs (`error` … `debug`) for the run of a problem, without editing settings |
 | `clarion.debugSolutionHistory` | Inspect the recent-solutions memory |
-| `clarion.unresolvedReferencesReport` | **Unresolved File References** — a report of every INCLUDE and MEMBER in the solution whose file cannot be found, with MODULE names that have no source file and references inside OMIT/COMPILE listed separately. Each row opens the reference. Also a click on the Graph row in the Clarion Tools pane |
+| `clarion.unresolvedReferencesReport` | **Unresolved File References** — a report of every INCLUDE and MEMBER in the solution whose file cannot be found, with MODULE names that have no source file and references inside OMIT/COMPILE listed separately. Each row opens the reference. Also on the Solution Properties page |
 | `clarion.debug.showFileRelationshipGraph` | Dump the MODULE/INCLUDE/MEMBER file graph (support/debug) |
 | `clarion.debug.showServerVersion` | Report the language server build actually running — the first thing to check when a fix appears not to have landed |
 
