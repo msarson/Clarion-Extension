@@ -5,7 +5,8 @@ import { versionRowLabel, readRegisteredVersionNames } from '../utils/SolutionFa
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 import { SolutionCache } from '../SolutionCache';
 import LoggerManager from '../utils/LoggerManager';
-import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clarionVersionRow } from './ToolsPaneRows'; // #681, #683
+import { buildLogRow, buildLogMenu, runCommandRow, startupRow, settingsRow, clarionVersionRow, noSolutionRows, resolveRecentClick, SummaryRow, renderSummaryRow } from './ToolsPaneRows'; // #681, #683, #783
+import { GlobalSolutionHistory, SolutionReference } from '../utils/GlobalSolutionHistory';
 import { lastBuildLog } from '../utils/LastBuildLog'; // #681
 import { toolbarIcons } from './ToolbarIcons'; // #682
 
@@ -34,6 +35,11 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private readonly _extensionUri: vscode.Uri;
     private _graphStatus: GraphStatus | undefined;
+    /** #783 — the recent solutions the no-solution rows show, and the generation they were posted as. */
+    private _recent: SolutionReference[] = [];
+    private _recentGen = 0;
+    /** #783 — the latest update(); an older one finishing later posts nothing. */
+    private _updateSeq = 0;
 
     constructor(extensionUri: vscode.Uri) {
         this._extensionUri = extensionUri;
@@ -113,8 +119,26 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
                 case 'openBuildSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', 'clarion.build');
                     break;
+                // #783 — the ways into a solution when none is loaded, through the Solution View's commands.
+                case 'openSolution':
+                    vscode.commands.executeCommand('clarion.openSolution');
+                    break;
+                case 'newSolution':
+                    vscode.commands.executeCommand('clarion.newSolution');
+                    break;
+                case 'openRecent': {
+                    // The page sends only `generation:index`; the path is the one this provider rendered
+                    // in that generation. A click from rows already replaced opens nothing: show the new ones.
+                    const ref = resolveRecentClick(message.arg, this._recentGen, this._recent);
+                    if (ref === 'stale') this.update();
+                    else if (ref) vscode.commands.executeCommand('clarion.openRecentSolution', ref.folderPath, ref.solutionFile);
+                    break;
+                }
             }
         });
+
+        // #783 — the recent solutions are read asynchronously; fill them in once known.
+        this.update();
 
         logger.info("✅ Solution toolbar webview resolved");
     }
@@ -153,12 +177,31 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
      * regardless, as does the Clarion row that sets the version (#683).
      */
     public update(): void {
-        if (this._view) {
-            this._view.webview.postMessage({
+        if (!this._view) return;
+        const seq = ++this._updateSeq;
+        void this.readRecent().then(recent => {
+            if (seq !== this._updateSeq) return; // a newer update() is on its way
+            // #783 — the list and its generation change only here, with the post that shows them.
+            if (recent) {
+                this._recent = recent;
+                this._recentGen++;
+            }
+            this._view?.webview.postMessage({
                 command: 'updateContent',
                 summaryRows: this._getSummaryRows(),
                 solutionLoaded: !!globalSolutionFile,
             });
+        });
+    }
+
+    /** #783 — the recent solutions to show while no solution is loaded; undefined to keep the current list. */
+    private async readRecent(): Promise<SolutionReference[] | undefined> {
+        if (globalSolutionFile) return undefined;
+        try {
+            return await GlobalSolutionHistory.getValidReferences();
+        } catch (error) {
+            logger.warn(`could not read the recent solutions: ${error instanceof Error ? error.message : String(error)}`);
+            return undefined;
         }
     }
 
@@ -195,6 +238,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
 
         if (!globalSolutionFile) {
             rows.push({ label: 'Solution', value: 'No solution open' });
+            // #783 — every way into a solution; the recent rows open what was rendered (`_recent`).
+            rows.push(...noSolutionRows(!!vscode.workspace.workspaceFolders?.length, this._recent, 5, this._recentGen));
             return rows;
         }
 
@@ -382,7 +427,8 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     function escapeHtml(s) {
       const div = document.createElement('div');
       div.textContent = String(s);
-      return div.innerHTML;
+      // #783 — innerHTML leaves quotes alone, and this text also goes inside attributes.
+      return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // #141 Q9 directive #2 — toolbar gating helper. Solution-only elements
@@ -401,11 +447,12 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     if (tbodyEl) {
       tbodyEl.addEventListener('click', function(ev) {
         var row = ev.target && ev.target.closest ? ev.target.closest('tr[data-cmd]') : null;
-        if (row) vscode.postMessage({ command: row.dataset.cmd });
+        if (row) vscode.postMessage({ command: row.dataset.cmd, arg: row.dataset.arg });
       });
     }
     function renderRow(r) {
-      var attrs = r.command ? ' data-cmd="' + escapeHtml(r.command) + '" class="clickable" title="' + escapeHtml(r.title || '') + '"' : '';
+      var arg = r.arg !== undefined ? ' data-arg="' + escapeHtml(r.arg) + '"' : '';
+      var attrs = r.command ? ' data-cmd="' + escapeHtml(r.command) + '"' + arg + ' class="clickable" title="' + escapeHtml(r.title || '') + '"' : '';
       return '<tr' + attrs + '><td class="lbl">' + escapeHtml(r.label) +
              '</td><td class="val">' + escapeHtml(r.value) + '</td></tr>';
     }
@@ -426,19 +473,13 @@ export class SolutionToolbarProvider implements vscode.WebviewViewProvider {
     }
 }
 
+// #783 — moved to the vscode-free ToolsPaneRows so the markup can be tested; re-exported here.
+export { SummaryRow, renderSummaryRow };
+
 /**
  * #148 — Cryptographically-random 32-char nonce for CSP `'nonce-...'` source.
  * Standard VS Code webview helper pattern.
  */
-/** #530 — a summary-table row; `command` makes it clickable (posted like a toolbar button). */
-export interface SummaryRow { label: string; value: string; command?: string; title?: string; }
-
-/** #530 — one `<tr>` of the summary table; exported so the markup can be tested without a webview. */
-export function renderSummaryRow(r: SummaryRow, esc: (s: string) => string): string {
-    const attrs = r.command ? ` data-cmd="${esc(r.command)}" class="clickable" title="${esc(r.title ?? '')}"` : '';
-    return `<tr${attrs}><td class="lbl">${esc(r.label)}</td><td class="val">${esc(r.value)}</td></tr>`;
-}
-
 function getNonce(): string {
     let text = '';
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

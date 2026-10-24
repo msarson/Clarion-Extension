@@ -12,6 +12,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - **YIELD, COMMIT, TODAY and other built-ins written without parentheses are no longer called constants.** Clarion calls a built-in that needs no arguments without parentheses, and the hover captioned every such word "Built-in constant"; it now shows the built-in's own card, as a statement when it returns nothing (YIELD, COMMIT, HALT) and as a function when it returns a value (TODAY, ERRORCODE). The DATE entry described the DATE data type and now describes `DATE(month, day, year)`. [#784](https://github.com/msarson/Clarion-Extension/issues/784)
 
+#### Configuration and build
+
+- **With no solution loaded, the Actions pane offers every way into one.** Next to "No solution open" it now lists Open a solution, New solution (when a folder is open) and the five most recent solutions, each opening as it does from the Solution View. [#783](https://github.com/msarson/Clarion-Extension/issues/783)
+
 #### Maintenance
 
 - **The release runs the test suite as the dry run does, and stops if it fails.** It ran the server tests on Linux with their result ignored, where the suite cannot pass, so the 1.0.9 release showed 331 failures under a green step. The server and client suites now run on Windows first, and nothing is merged, tagged or published unless they pass; the release then ships the commit they passed on, publishing the same VSIX to the Marketplace as to GitHub, and stops if the branch or the version's tag names another commit. [#781](https://github.com/msarson/Clarion-Extension/issues/781)
