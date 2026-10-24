@@ -217,7 +217,7 @@ export async function validateMissingMapDeclarations(
             const declLine = docLines[selfModuleDecl.line] ?? '';
             const implLine = docLines[proc.line] ?? '';
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
-            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
@@ -243,7 +243,7 @@ export async function validateMissingMapDeclarations(
             const declLine = docLines[procLevelDecl.line] ?? '';
             const implLine = docLines[proc.line] ?? '';
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
-            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
@@ -271,7 +271,7 @@ export async function validateMissingMapDeclarations(
             const declLine = docLines[bareModuleDecl.line] ?? '';
             const implLine = docLines[proc.line] ?? '';
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
-            const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+            const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                 diagnostics.push({
                     severity: DiagnosticSeverity.Warning,
@@ -333,7 +333,7 @@ export async function validateMissingMapDeclarations(
                 // Declaration found — compare signatures to catch parameter mismatches
                 try {
                     const implLine = docLines[proc.line] ?? '';
-                    const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+                    const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
 
                     const normalizedResultPath = result.file.toLowerCase().replace(/\\/g, '/');
                     const resultLiveUri = tokenCache.getAllCachedUris().find(uri => {
@@ -537,7 +537,7 @@ export async function validateMissingImplementations(
                     if (implLine !== undefined) {
                         const implFileLines = implFileContent.split('\n');
                         const implSig = implFileLines[implLine.line] ?? '';
-                        const implParams = ProcedureSignatureUtils.extractParameterTypes(implSig);
+                        const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implSig);
                         const declSig = docLines[decl.line] ?? '';
                         const declParams = ProcedureSignatureUtils.extractParameterTypes(declSig);
                         const matched = ProcedureSignatureUtils.parametersMatch(implParams, declParams);

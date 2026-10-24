@@ -16,6 +16,12 @@ export class ProcedureSignatureUtils {
      * Handles both traditional format (with PROCEDURE/FUNCTION keyword) and shorthand MAP format
      */
     public static extractParameterTypes(signature: string): string[] {
+        // Extract just the type from each parameter (remove variable names and defaults)
+        return this.splitParameters(signature).map(param => this.extractParameterType(param));
+    }
+
+    /** A signature's parameters as written, split at depth-0 commas. */
+    private static splitParameters(signature: string): string[] {
         // Try with PROCEDURE/FUNCTION keyword first
         let match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
         
@@ -61,9 +67,8 @@ export class ProcedureSignatureUtils {
         if (currentParam.trim()) {
             params.push(currentParam.trim());
         }
-        
-        // Extract just the type from each parameter (remove variable names and defaults)
-        return params.map(param => this.extractParameterType(param));
+
+        return params;
     }
     
     /**
@@ -127,6 +132,34 @@ export class ProcedureSignatureUtils {
      * Compares two parameter type arrays to see if they match
      * Handles reference indicators like *, &, etc.
      */
+    /**
+     * #793 — the parameter types of an IMPLEMENTATION line (`Name PROCEDURE(...)` that defines
+     * the procedure). There a parameter's type is optional and its label required (Language
+     * Reference, PROCEDURE: "the data type of each parameter (optional) followed by the label"),
+     * so a one-word parameter is a label, returned as '' — it matches any type. A one-word
+     * built-in type (`PROCEDURE(LONG)`) is still read as that type. A prototype's one-word
+     * parameter is its type: use extractParameterTypes for prototypes.
+     */
+    public static extractImplementationParameterTypes(signature: string): string[] {
+        const params = this.splitParameters(signature);
+        return params.map(param => {
+            const bare = param.replace(/^<\s*/, '').replace(/\s*>$/, '').replace(/\s*=.+$/, '')
+                .replace(/\bCONST\s+/gi, '').replace(/\bREF\s+/gi, '').trim();
+            const isLabelOnly = /^[A-Za-z_][\w:]*$/.test(bare) && !this.BUILTIN_TYPES.has(bare.toUpperCase());
+            return isLabelOnly ? '' : this.extractParameterType(param);
+        });
+    }
+
+    /** Built-in type names a one-word implementation parameter can be (#793): anything else is a label. */
+    private static readonly BUILTIN_TYPES = new Set([
+        'STRING', 'CSTRING', 'PSTRING', 'ASTRING', 'BSTRING', 'USTRING',
+        'LONG', 'SHORT', 'BYTE', 'ULONG', 'USHORT', 'SIGNED', 'UNSIGNED',
+        'REAL', 'SREAL', 'BFLOAT4', 'BFLOAT8', 'DECIMAL', 'PDECIMAL',
+        'DATE', 'TIME', 'BOOL', 'ANY', 'VARIANT',
+        'GROUP', 'QUEUE', 'FILE', 'KEY', 'INDEX', 'VIEW', 'WINDOW', 'REPORT', 'BLOB', 'MEMO',
+    ]);
+
+    /** '' in either list matches any type: an implementation parameter given by its label only (#793). */
     public static parametersMatch(implParams: string[], declParams: string[]): boolean {
         if (implParams.length !== declParams.length) {
             return false;
@@ -135,6 +168,7 @@ export class ProcedureSignatureUtils {
         for (let i = 0; i < implParams.length; i++) {
             const implType = implParams[i];
             const declType = declParams[i];
+            if (implType === '' || declType === '') continue;
 
             // Normalize for comparison (remove extra spaces)
             const normalizedImpl = this.normalizeComplexRef(implType.replace(/\s+/g, ' ').trim());

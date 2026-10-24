@@ -310,7 +310,7 @@ export class CrossFileResolver {
                         if (signature) {
                             logger.info(`Found ${procedureDecls.length} overloaded declarations, using signature matching`);
                             const lines = content.split('\n');
-                            const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                            const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature);
 
                             for (const decl of procedureDecls) {
                                 const declSignature = lines[decl.line].trim();
@@ -570,7 +570,7 @@ export class CrossFileResolver {
                     let decl = procedureDecls[0];
                     if (signature && procedureDecls.length > 1) {
                         const lines = content.split('\n');
-                        const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                        const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature);
                         for (const d of procedureDecls) {
                             const declParams = ProcedureSignatureUtils.extractParameterTypes(lines[d.line].trim());
                             if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {

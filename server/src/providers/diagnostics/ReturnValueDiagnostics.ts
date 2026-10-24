@@ -706,7 +706,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                 {
                     const implLine = docLines[token.line] || '';
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(decl.signature);
-                    const implParams = ProcedureSignatureUtils.extractParameterTypes(implLine);
+                    const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
                     if (!ProcedureSignatureUtils.parametersMatch(declParams, implParams)) continue;
 
                     let codeLineStart = -1;

@@ -853,7 +853,7 @@ export class MapProcedureResolver {
 
         // If implementation signature provided, try type matching
         if (implementationSignature && ProcedureUtils.containsProcedureKeyword(implementationSignature)) {
-            const implParams = ProcedureSignatureUtils.extractParameterTypes(implementationSignature);
+            const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implementationSignature);
             logger.info(`Implementation parameter types: [${implParams.join(', ')}]`);
             
             for (const candidate of candidates) {
@@ -1150,7 +1150,7 @@ export class MapProcedureResolver {
             logger.info(`Declaration parameter types: [${declParams.join(', ')}]`);
             
             for (const candidate of candidates) {
-                const implParams = ProcedureSignatureUtils.extractParameterTypes(candidate.signature);
+                const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(candidate.signature);
                 logger.info(`Implementation at line ${candidate.token.line} parameter types: [${implParams.join(', ')}]`);
                 
                 if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
@@ -1654,7 +1654,7 @@ export class MapProcedureResolver {
 
                     for (const impl of implementations) {
                         const signature = lines[impl.line].trim();
-                        const implParams = ProcedureSignatureUtils.extractParameterTypes(signature);
+                        const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature);
 
                         if (ProcedureSignatureUtils.parametersMatch(declParams, implParams)) {
                             logger.info(`✅ Found exact type match in MODULE file at line ${impl.line}`);
