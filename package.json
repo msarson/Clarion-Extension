@@ -580,6 +580,12 @@
         "command": "clarion.setLogLevel",
         "title": "Set Log Level",
         "category": "Clarion"
+      },
+      {
+        "command": "clarion.openProjectProperties",
+        "title": "Project Properties",
+        "category": "Clarion",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {
@@ -748,6 +754,11 @@
           "command": "clarion.exportAppToVersionControl",
           "when": "view == solutionView && viewItem == clarionApp",
           "group": "versioncontrol"
+        },
+        {
+          "command": "clarion.openProjectProperties",
+          "when": "view == solutionView && viewItem == clarionProject",
+          "group": "0_properties"
         }
       ],
       "commandPalette": [
@@ -891,6 +902,20 @@
           "command": "clarion.structureView.disableFollowCursor",
           "group": "navigation@1",
           "when": "clarion.followCursorEnabled"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "clarion.openProjectProperties",
+          "when": "resourceExtname == .cwproj",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "clarion.openProjectProperties",
+          "when": "resourceExtname == .cwproj && activeEditor == workbench.editors.files.textFileEditor",
+          "group": "navigation"
         }
       ]
     },
@@ -1865,7 +1890,19 @@
           "description": "Internal one-shot flag: true after the first-run L3 backfill seeds per-solution version memory from legacy `solutions[].version` entries. Prevents re-running the backfill. Do not edit manually. See #141."
         }
       }
-    }
+    },
+    "customEditors": [
+      {
+        "viewType": "clarion.projectProperties",
+        "displayName": "Clarion Project Properties",
+        "selector": [
+          {
+            "filenamePattern": "*.cwproj"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle",

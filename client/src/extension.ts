@@ -29,6 +29,7 @@ import { registerImplementationCommands } from './commands/ImplementationCommand
 import { registerClassConstantCommands } from './commands/ClassConstantCommands';
 import { registerIncludeStatementCommands } from './commands/IncludeStatementCommands';
 import { registerNewSolutionCommands } from './commands/NewSolutionCommands';
+import { ProjectPropertiesEditorProvider } from './project/ProjectPropertiesEditor';
 import { registerMapModuleCommands } from './commands/MapModuleCommands';
 import { registerDebugCommands } from './commands/DebugCommands';
 import { createSolutionTreeView, createStructureView, registerSolutionToolbar, updateSolutionToolbar } from './views/ViewManager';
@@ -298,6 +299,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
     // Register new solution command
     context.subscriptions.push(...registerNewSolutionCommands(context));
+    context.subscriptions.push(...ProjectPropertiesEditorProvider.register()); // #792
 
     // Register MAP module command (Add MODULE with PROCEDURE from MAP code action)
     context.subscriptions.push(...registerMapModuleCommands(context));

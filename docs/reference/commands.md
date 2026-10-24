@@ -54,6 +54,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.buildSolutionDirect` | Build the whole solution in dependency order from the Solution View's solution node, without the "what do you want to build?" prompt |
 | `clarion.buildCurrentProject` | Build the project containing the active file |
 | `clarion.buildProject` | Build a specific project (Solution View context menu) |
+| `clarion.openProjectProperties` | **Project Properties** — a project's options as the Clarion IDE's pages (Application, Compiling, Debug, Build Events), per configuration; on a project in the Solution View, a `.cwproj` in the Explorer, or the title bar of an open `.cwproj`. Also **Open With… › Clarion Project Properties** |
 | `clarion.buildAllProjects` | Build every project |
 | `clarion.startDebugging` | `F5` — launch the startup project under the Clarion debugger |
 | `clarion.runWithoutDebugging` | `Ctrl+F5` — run the startup project |
