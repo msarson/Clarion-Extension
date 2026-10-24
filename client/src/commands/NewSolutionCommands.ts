@@ -4,7 +4,7 @@ import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { buildCwprojContent, buildSlnContent, CwprojSpec, generateGuid } from '../solution/SolutionFiles';
+import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, CwprojSpec, generateGuid } from '../solution/SolutionFiles';
 import { FolderInference, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { versionPathSettings } from '../utils/VersionPathSettings';
@@ -142,7 +142,10 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
  * which of them are DLLs, where the modules named after no program go, and whether possible
  * leftovers are compiled. Returns the projects to write, or undefined when cancelled.
  */
-async function confirmProjects(inference: FolderInference): Promise<CwprojSpec[] | undefined> {
+/** A project New Solution writes, with whether its prototypes mark their exports (a DLL's .exp). */
+type NewProjectSpec = CwprojSpec & { exportsMarked?: boolean };
+
+async function confirmProjects(inference: FolderInference): Promise<NewProjectSpec[] | undefined> {
     const programItems = inference.projects.map(p => ({
         label: p.name,
         description: `${p.kind === 'dll' ? 'DLL' : 'EXE'} · ${plural(p.compile.length, 'source file')}`,
@@ -168,7 +171,15 @@ async function confirmProjects(inference: FolderInference): Promise<CwprojSpec[]
     });
     if (!dlls) return undefined;
     const dllProjects = new Set(dlls.map(d => d.project));
-    const specs = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const }));
+    const specs: NewProjectSpec[] = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const, exportsMarked: p.exportsMarked }));
+    // A project that imports from another chosen project through MODULE('X.DLL') references it,
+    // which also builds that DLL first.
+    specs.forEach((spec, i) => {
+        spec.references = projects[i].references
+            .map(name => specs.find(other => other.name === name))
+            .filter((other): other is NewProjectSpec => !!other)
+            .map(other => ({ name: other.name, guid: other.guid }));
+    });
 
     // Modules the inference could not place: named after no program, or naming a program that
     // more than one folder holds (then only those programs are offered). Project names are unique.
@@ -251,7 +262,7 @@ export async function newSolution(): Promise<void> {
                 readLibraryFile));
         inference = inferProjects(scan.files, libraries);
     }
-    let specs: CwprojSpec[] | undefined;
+    let specs: NewProjectSpec[] | undefined;
     if (inference && inference.projects.length > 0) {
         const FROM_SOURCES = `From the ${plural(inference.projects.length, 'program')} in this folder`;
         const choice = await vscode.window.showQuickPick([FROM_SOURCES, 'A new empty program'], {
@@ -317,12 +328,42 @@ export async function newSolution(): Promise<void> {
         vscode.window.showInformationMessage(
             `${plural(m, 'module')} ${m === 1 ? 'names a program' : 'name programs'} not in this folder and ${m === 1 ? 'was' : 'were'} left out.`);
     }
-    // A DLL links only with its export file, <name>.exp beside the project; the generator writes
-    // it, but it is often not kept with the sources.
-    const noExp = specs.filter(s => s.kind === 'dll' && !fs.existsSync(path.join(folderPath, `${s.name}.exp`))).map(s => s.name);
-    if (noExp.length > 0) {
+    // #763: a DLL links only with its export file, <name>.exp, which the build finds through
+    // redirection (a generated tree keeps it in genFiles\exp). Missing, a DLL that marks its
+    // exports with EXPORT gets a minimal one; a generated DLL lists its exports in the .exp the
+    // application generator writes, which cannot be made up here.
+    const dllSpecs = specs.filter(s => s.kind === 'dll');
+    let foundExp: Record<string, string> = {};
+    if (dllSpecs.length > 0) {
+        try {
+            foundExp = await lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configChoice, dllSpecs.map(s => `${s.name}.exp`));
+        } catch {
+            // Logged by the lookup; the folder itself is still checked below.
+        }
+    }
+    const written: string[] = [], needGenerator: string[] = [];
+    for (const spec of dllSpecs) {
+        const expName = `${spec.name}.exp`;
+        if (foundExp[expName] || fs.existsSync(path.join(folderPath, expName))) continue;
+        if (spec.exportsMarked) {
+            try {
+                fs.writeFileSync(path.join(folderPath, expName), buildMinimalExpContent(spec.name), 'utf8');
+                written.push(expName);
+            } catch (err) {
+                logger.error(`❌ Could not write ${expName}: ${err}`);
+                needGenerator.push(spec.name);
+            }
+        } else {
+            needGenerator.push(spec.name);
+        }
+    }
+    if (written.length > 0) {
+        vscode.window.showInformationMessage(`Wrote ${written.join(', ')}: the DLL's prototypes mark their exports with EXPORT, so an empty export list is enough.`);
+    }
+    if (needGenerator.length > 0) {
         vscode.window.showWarningMessage(
-            `${noExp.join(', ')} ${noExp.length === 1 ? 'is a DLL and needs' : 'are DLLs and need'} an export file (${noExp.map(n => n + '.exp').join(', ')}) in this folder before ${noExp.length === 1 ? 'it builds' : 'they build'}.`);
+            `${needGenerator.join(', ')} ${needGenerator.length === 1 ? 'is a DLL whose export file was' : 'are DLLs whose export files were'} not found (${needGenerator.map(n => n + '.exp').join(', ')}). ` +
+            `Generate the application in the Clarion IDE to write ${needGenerator.length === 1 ? 'it' : 'them'}, or mark the exported procedures with EXPORT.`);
     }
 
     // Step 8: Open with pre-selected values — skips all pickers in openDetectedSolution

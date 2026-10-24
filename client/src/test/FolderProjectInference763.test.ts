@@ -375,6 +375,23 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.ok(endless.length <= 8);
     });
 
+    test('a project that imports from another project through MODULE(x.DLL) references it', () => {
+        const r = inferProjects([
+            f('App.clw', "  PROGRAM\r\n  INCLUDE('imports.inc')\r\n  MAP\r\n    MODULE('LIB.DLL')\r\nHello  PROCEDURE,DLL\r\n    END\r\n    MODULE('vendor.dll')\r\nX(),DLL\r\n    END\r\n  END\r\n  CODE\r\n  Hello()"),
+            f('imports.inc', "  MAP\r\n    MODULE('Tools.Dll')\r\nT(),DLL\r\n    END\r\n  END"),
+            f('Lib.clw', dll), f('Tools.clw', dll),
+            f('Tools001.clw', member('Tools', "  MAP\r\n    MODULE('tools.dll')\r\nSelfRef(),DLL\r\n    END\r\n  END")),
+        ]);
+        assert.deepStrictEqual(r.projects.map(p => [p.name, p.references]), [['App', ['Lib', 'Tools']], ['Lib', []], ['Tools', []]]);
+    });
+
+    test('a DLL that marks its exports with EXPORT is told apart from one that relies on its .exp', () => {
+        const marked = "  PROGRAM\r\n  MAP\r\nHello  PROCEDURE,EXPORT\r\n  END\r\n  CODE\r\n\r\nHello  PROCEDURE\r\n  CODE";
+        const viaInclude = "  PROGRAM\r\n  MAP\r\n  INCLUDE('Exports.inc')\r\n  END\r\n  CODE\r\n\r\nHello  PROCEDURE\r\n  CODE";
+        const r = inferProjects([f('Marked.clw', marked), f('Plain.clw', dll), f('Viainc.clw', viaInclude), f('Exports.inc', "Hello  PROCEDURE, EXPORT")]);
+        assert.deepStrictEqual(r.projects.map(p => [p.name, p.kind, p.exportsMarked]), [['Marked', 'dll', true], ['Plain', 'dll', false], ['Viainc', 'dll', true]]);
+    });
+
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {
         const r = inferProjects([
             f('App.clw', exe),

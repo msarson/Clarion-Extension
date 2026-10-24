@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildCwprojContent, buildSlnContent } from '../solution/SolutionFiles';
+import { buildCwprojContent, buildMinimalExpContent, buildSlnContent } from '../solution/SolutionFiles';
 
 /**
  * #763 — a solution built from a folder of sources has one project per program, each an EXE or a
@@ -33,6 +33,17 @@ suite('Solution and project files for a folder of sources (#763)', () => {
         const p = buildCwprojContent({ name: 'Lib', guid: B, compile: ['Lib.clw'], kind: 'dll' });
         assert.ok(p.includes('<OutputType>Library</OutputType>'));
         assert.ok(p.includes('<Model>Dll</Model>'));
+    });
+
+    test('a project referencing another gets a ProjectReference with its GUID and name', () => {
+        const p = buildCwprojContent({ name: 'App', guid: A, compile: ['App.clw'], kind: 'exe', references: [{ name: 'Lib', guid: B }] });
+        assert.ok(p.includes(`  <ItemGroup>\r\n    <ProjectReference Include="Lib.cwproj">\r\n      <Project>${B}</Project>\r\n      <Name>Lib</Name>\r\n    </ProjectReference>\r\n  </ItemGroup>`), p);
+        assert.ok(p.indexOf('<ProjectReference') < p.indexOf('<Import Project='), 'before the targets import');
+        assert.ok(!buildCwprojContent({ name: 'Lib', guid: B, compile: ['Lib.clw'], kind: 'dll' }).includes('ProjectReference'));
+    });
+
+    test('a minimal export file names the DLL and exports what its prototypes mark EXPORT', () => {
+        assert.strictEqual(buildMinimalExpContent('Lib'), "LIBRARY 'LIB' GUI\r\nEXPORTS\r\n");
     });
 
     test('file names are escaped for MSBuild and XML', () => {

@@ -5,7 +5,16 @@ import * as crypto from 'crypto';
  * No vscode here, so the content is unit-tested on its own.
  */
 export interface SlnProject { name: string; guid: string }
-export interface CwprojSpec { name: string; guid: string; compile: string[]; kind: 'exe' | 'dll' }
+export interface CwprojSpec { name: string; guid: string; compile: string[]; kind: 'exe' | 'dll'; references?: SlnProject[] }
+
+/**
+ * #763 — the export file of a DLL whose prototypes mark their exports with EXPORT: the linker
+ * needs <name>.exp to build a DLL at all, and with EXPORT on the prototypes an empty EXPORTS list
+ * is enough (compiler-verified on Clarion 10). The name is in capitals, as the generator writes it.
+ */
+export function buildMinimalExpContent(name: string): string {
+    return `LIBRARY '${name.toUpperCase()}' GUI\r\nEXPORTS\r\n`;
+}
 
 /** Generates an uppercase GUID like {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} */
 export function generateGuid(): string {
@@ -75,6 +84,17 @@ export function buildCwprojContent(spec: CwprojSpec): string {
         '  <ItemGroup>',
         ...spec.compile.map(f => `    <Compile Include="${xml(msbuildPath(f))}" />`),
         '  </ItemGroup>',
+        // #763: the DLLs this project imports from, which also builds them first.
+        ...(spec.references?.length ? [
+            '  <ItemGroup>',
+            ...spec.references.flatMap(r => [
+                `    <ProjectReference Include="${xml(msbuildPath(r.name + '.cwproj'))}">`,
+                `      <Project>${r.guid}</Project>`,
+                `      <Name>${xml(r.name)}</Name>`,
+                '    </ProjectReference>',
+            ]),
+            '  </ItemGroup>',
+        ] : []),
         '  <Import Project="$(ClarionBinPath)\\SoftVelocity.Build.Clarion.targets" />',
         '</Project>'
     ].join('\r\n');

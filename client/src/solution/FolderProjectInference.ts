@@ -36,6 +36,10 @@ export interface InferredProject {
     kind: 'exe' | 'dll';
     /** Members no MODULE reaches from the program: possible leftovers (a subset of compile). */
     unreferenced: string[];
+    /** Other projects this one imports from through MODULE('x.DLL'): its ProjectReferences. */
+    references: string[];
+    /** A MAP prototype it compiles carries EXPORT, so a minimal .exp exports what it needs. */
+    exportsMarked: boolean;
 }
 export interface FolderInference {
     projects: InferredProject[];
@@ -316,6 +320,8 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
             compile: [p.relPath],
             kind: programKind(linesOf(p)),
             unreferenced: [],
+            references: [],
+            exportsMarked: false,
         };
         projectOf.set(p, project);
         byStem.set(stem(p.relPath), [...(byStem.get(stem(p.relPath)) ?? []), p]);
@@ -400,6 +406,25 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         return found;
     };
 
+    /**
+     * Whether a file declares a prototype with the EXPORT attribute: a MAP line in it, or any line
+     * when the file is included inside a MAP. A DLL whose prototypes say EXPORT builds with a
+     * minimal .exp (compiler-verified, #763); generated code instead lists its exports in the .exp.
+     */
+    const exportCache = new Map<string, boolean>();
+    const marksExport = (f: SourceFile, declaring: boolean): boolean => {
+        const key = f.relPath + '|' + declaring;
+        let found = exportCache.get(key);
+        if (found !== undefined) return found;
+        found = false;
+        if (/EXPORT/i.test(f.text)) {
+            const ls = linesOf(f), depths = declaring ? ls.map(() => 1) : mapDepths(ls);
+            found = ls.some((l, i) => depths[i] > 0 && /,\s*EXPORT\b/i.test(l));
+        }
+        exportCache.set(key, found);
+        return found;
+    };
+
     /** Each file's INCLUDE, MODULE and LINK directives, parsed once: every project's closure reads them. */
     interface Directive { kind: 'INCLUDE' | 'MODULE' | 'LINK'; target: string; inMap: boolean; declares: string[]; linkOff: boolean }
     const directiveCache = new Map<SourceFile, Directive[]>();
@@ -422,6 +447,8 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
 
     const buildClosure = (start: SourceFile[], near: SourceFile) => {
         const modules = new Map<SourceFile, Set<string>>();
+        const dlls = new Set<string>();
+        let exportsMarked = false;
         // A file included inside a MAP holds MAP lines (declarations); the same file included
         // in code is code. Each file is walked once per context, and its words count only where
         // it was reached as code.
@@ -432,7 +459,10 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
             const seen = declaring ? asDeclarations : asCode;
             if (seen.has(file)) continue;
             seen.add(file);
+            if (!exportsMarked && marksExport(file, declaring)) exportsMarked = true;
             for (const d of directivesOf(file)) {
+                // MODULE('X.DLL') imports from DLL X: no source of that name, so record it first.
+                if (d.kind === 'MODULE' && /\.dll$/i.test(d.target)) dlls.add(stem(d.target));
                 const target = resolve(d.target, near);
                 if (!target) continue;
                 if (d.kind === 'INCLUDE') stack.push([target, declaring || d.inMap]);
@@ -444,7 +474,7 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
                 }
             }
         }
-        return { files: [...asCode], modules };
+        return { files: [...asCode], modules, dlls, exportsMarked };
     };
     for (const program of programs) {
         const project = projectOf.get(program)!;
@@ -459,9 +489,11 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         // build, and the libraries already listed, whose own calls can need another library.
         const listed: SourceFile[] = [];
         const compiled = project.compile.map(m => fileAt.get(m)).filter((f): f is SourceFile => !!f);
+        let closure: ReturnType<typeof buildClosure> | undefined;
         for (let grew = true; grew;) {
             grew = false;
-            const { files: built, modules } = buildClosure([...compiled, ...listed], program);
+            closure = buildClosure([...compiled, ...listed], program);
+            const { files: built, modules } = closure;
             const inBuild = new Set(built);
             for (const [file, declared] of modules) {
                 const name = baseName(file.relPath);
@@ -474,6 +506,12 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
                 grew = true;
             }
         }
+        // A project imports from another through MODULE('X.DLL'): a ProjectReference, which also
+        // builds X first (compiler-verified, #763). A DLL of no project here (vendor.dll) is not one.
+        project.references = projects
+            .filter(other => other !== project && closure!.dlls.has(other.name.toLowerCase()))
+            .map(other => other.name);
+        project.exportsMarked = closure!.exportsMarked;
     }
     return { projects, unassigned, missingProgram, ambiguous, classImplementations };
 }
