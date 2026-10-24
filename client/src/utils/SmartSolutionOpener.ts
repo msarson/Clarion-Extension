@@ -9,6 +9,7 @@ import { chooseConfiguration, explicitConfigurationFor } from './ConfigurationPr
 import { resolveValidConfiguration } from './ConfigurationValidator';
 import { validateRememberedSettings } from './SolutionFallbackPolicy';
 import { unsavedSettingsForSolution } from './UnsavedSolutionSettings';
+import { rememberedSelectionForSwitch, folderSwitchConfigurationSources, SwitchSelection } from '../solution/FolderSwitchSelection';
 import LoggerManager from './LoggerManager';
 import { PathUtils } from '../PathUtils';
 import * as path from 'path';
@@ -195,31 +196,7 @@ export class SmartSolutionOpener {
             }
 
             // Step 4: Extract configurations from .sln file, auto-detect from .sln.cache
-            const configurations = this.extractConfigurationsFromSolution(solutionPath);
-
-            // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
-            // is only a hint behind it (see SolutionOpener for the same rule).
-            const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
-            const choice = chooseConfiguration({
-                explicit: explicitConfigurationFor(
-                    solutionPath,
-                    clarionConfig.get<string>('configuration', ''),
-                    clarionConfig.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', [])),
-                slnCache: readActiveConfigFromSlnCache(solutionPath),
-                available: configurations,
-            });
-
-            if (choice.configuration) {
-                selectedConfig = choice.configuration;
-                logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
-            } else if (configurations.length > 1) {
-                const configChoice = await window.showQuickPick(configurations, {
-                    placeHolder: "Select build configuration"
-                });
-                selectedConfig = configChoice ?? configurations[0] ?? "Release";
-            } else {
-                selectedConfig = configurations[0] ?? "Release";
-            }
+            selectedConfig = await this.chooseConfigurationForSolution(solutionPath) ?? "Release";
             } // end else (not preSelected)
 
             // Step 5: Update global variables BEFORE saving to settings so that
@@ -277,15 +254,97 @@ export class SmartSolutionOpener {
     }
 
     /**
+     * The configuration to open the solution on: the user's own setting, then the IDE's
+     * .sln.cache, then a pick when the solution declares several. For a folder switch
+     * (`forSwitch`) the settings read are the old folder's (#780): sources come from
+     * folderSwitchConfigurationSources, and a dismissed pick is undefined so the switch stops.
+     */
+    private static async chooseConfigurationForSolution(
+        solutionPath: string,
+        forSwitch?: { remembered?: string }
+    ): Promise<string | undefined> {
+        const configurations = this.extractConfigurationsFromSolution(solutionPath);
+
+        // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
+        // is only a hint behind it (see SolutionOpener for the same rule).
+        const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
+        const settingValue = clarionConfig.get<string>('configuration', '');
+        const solutions = clarionConfig.get<Array<{ solutionFile?: string; configuration?: string }>>('solutions', []);
+        const slnCache = readActiveConfigFromSlnCache(solutionPath);
+        const choice = chooseConfiguration(forSwitch
+            ? folderSwitchConfigurationSources({
+                solutionPath, settingValue, solutions, slnCache, available: configurations,
+                folderOpen: (workspace.workspaceFolders?.length ?? 0) > 0,
+                remembered: forSwitch.remembered,
+            })
+            : {
+                explicit: explicitConfigurationFor(solutionPath, settingValue, solutions),
+                slnCache,
+                available: configurations,
+            });
+
+        if (choice.configuration) {
+            logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
+            return choice.configuration;
+        }
+        if (configurations.length > 1) {
+            const configChoice = await window.showQuickPick(configurations, {
+                placeHolder: "Select build configuration"
+            });
+            if (!configChoice && forSwitch) return undefined;
+            return configChoice ?? configurations[0] ?? "Release";
+        }
+        return configurations[0] ?? "Release";
+    }
+
+    /**
+     * #780 — the selection to record before switching to the solution's folder, so the restarted
+     * window can load it. The remembered one when it can still load; otherwise the installation,
+     * version and configuration pickers run now. Null when the user cancels a picker.
+     */
+    static async selectionForFolderSwitch(solutionPath: string): Promise<SwitchSelection | null> {
+        const history = await GlobalSolutionHistory.getReferences();
+        const remembered = rememberedSelectionForSwitch(
+            solutionPath,
+            history,
+            (sln, propertiesFile, version) => validateRememberedSettings(sln, propertiesFile, version).valid);
+        if (remembered) {
+            logger.info(`✅ Switching folders with the remembered selection: ${remembered.version}`);
+            return remembered;
+        }
+        const picked = await this.detectAndPickInstallation();
+        if (!picked) {
+            logger.info("ℹ️ User cancelled installation selection");
+            return null;
+        }
+        const configuration = await this.chooseConfigurationForSolution(solutionPath, {
+            remembered: history.find(r => PathUtils.equalPath(r.solutionFile, solutionPath))?.configuration,
+        });
+        if (!configuration) {
+            logger.info("ℹ️ User cancelled configuration selection");
+            return null;
+        }
+        return { propertiesFile: picked.installation.propertiesPath, version: picked.compilerName, configuration };
+    }
+
+    /**
      * Detects installations and lets the user pick one. Returns null if cancelled or none found.
-     * Used by the new solution wizard to do version selection before creating files.
+     * Used by the new solution wizard to do version selection before creating files, and by a
+     * folder switch (#780).
      */
     static async detectAndPickInstallation(): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
         const installations = await ClarionInstallationDetector.detectInstallations();
 
         if (installations.length === 0) {
-            window.showErrorMessage("No Clarion installations detected. ClarionProperties.xml not found in standard locations.");
-            return null;
+            // #780 — an installation outside the standard locations (#471 ConfigDir) is browsed
+            // for here: a folder switch now needs a version, so without this it could not open.
+            const BROWSE = "Browse for ClarionProperties.xml…";
+            const action = await window.showErrorMessage(
+                "No Clarion installations detected. ClarionProperties.xml not found in standard locations.",
+                BROWSE);
+            if (action !== BROWSE) return null;
+            const browsed = await this.browseForPropertiesFile();
+            return browsed ? this.pickCompiler(browsed) : null;
         }
 
         if (installations.length === 1 && installations[0].compilerVersions.length === 1) {
@@ -346,6 +405,13 @@ export class SmartSolutionOpener {
         }
 
         // Step 2: pick compiler version (skip if only one)
+        return this.pickCompiler(installation);
+    }
+
+    /** The compiler version to use from `installation`; asks when it registers several. */
+    private static async pickCompiler(
+        installation: ClarionInstallation
+    ): Promise<{ installation: ClarionInstallation; compilerName: string } | null> {
         const compilers = installation.compilerVersions;
         if (compilers.length === 1) {
             return { installation, compilerName: compilers[0].name };

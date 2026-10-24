@@ -102,8 +102,12 @@ export function registerSolutionOpeningCommands(
                     await SmartSolutionOpener.openDetectedSolution(solutionPath);
                 } else {
                     // Different folder - need to switch folders
+                    // #780 — with a version, or the restarted window opens a plain folder.
+                    const selection = await SmartSolutionOpener.selectionForFolderSwitch(solutionPath);
+                    if (!selection) return;
                     // First, add the solution to global history with CORRECT folder path
-                    await GlobalSolutionHistory.addSolution(solutionPath, actualSolutionFolder);
+                    await GlobalSolutionHistory.addSolution(solutionPath, actualSolutionFolder,
+                        selection.propertiesFile, selection.version, selection.configuration);
                     logger.info(`✅ Added solution to global history with correct folder path`);
                     
                     // Open the folder - VS Code will reload
