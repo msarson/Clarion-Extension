@@ -90,6 +90,39 @@ suite('Project Properties: reading and writing .cwproj properties (#792)', () =>
         assert.strictEqual((text.match(/<vid>/g) ?? []).length, 1);
     });
 
+    test('removing a property on a shared line removes only that element', () => {
+        const oneLine = '<Project>\r\n  <PropertyGroup><OutputName>A</OutputName><OutputType>Exe</OutputType></PropertyGroup>\r\n  <PropertyGroup Condition=" \'$(Configuration)\' == \'Debug\' "><vid>full</vid></PropertyGroup>\r\n</Project>';
+        const cleared = setProperty(oneLine, 'OutputName', null, null);
+        assert.strictEqual(cleared, oneLine.replace('<OutputName>A</OutputName>', ''));
+        const moved = setPropertyScope(oneLine, 'OutputName', 'configuration', 'Debug');
+        assert.strictEqual(readProperty(moved, 'OutputType', 'Debug').value, 'Exe', 'the neighbour survives');
+        assert.deepStrictEqual(readProperty(moved, 'OutputName', 'Debug'), { value: 'A', scope: 'configuration' });
+        assert.ok(moved.includes('</PropertyGroup>\r\n  <PropertyGroup Condition'), 'the closing tags survive');
+    });
+
+    test('commented-out XML is not project data', () => {
+        const commented = PROJECT.replace('    <OutputName>Sales</OutputName>', '    <!-- <OutputName>Old</OutputName> -->\r\n    <OutputName>Sales</OutputName>')
+            .replace('  <ItemGroup>', '  <!-- <PropertyGroup><vid>never</vid></PropertyGroup> -->\r\n  <ItemGroup>');
+        assert.strictEqual(readProperty(commented, 'OutputName', 'Debug').value, 'Sales');
+        const changed = setProperty(commented, 'OutputName', 'New', null);
+        assert.ok(changed.includes('<!-- <OutputName>Old</OutputName> -->') && changed.includes('<OutputName>New</OutputName>'), changed);
+        assert.deepStrictEqual(configurationsOf(commented), ['Debug', 'Release']);
+        assert.strictEqual(readProperty(commented, 'vid', 'Release').value, 'off');
+    });
+
+    test('the effective value is the last assignment that applies, as MSBuild evaluates', () => {
+        // A configuration group BEFORE the shared one: the later shared value wins.
+        const sharedLast = '<Project>\r\n  <PropertyGroup Condition=" \'$(Configuration)\' == \'Debug\' ">\r\n    <OutputName>DebugName</OutputName>\r\n  </PropertyGroup>\r\n  <PropertyGroup>\r\n    <OutputName>Shared</OutputName>\r\n  </PropertyGroup>\r\n</Project>';
+        assert.deepStrictEqual(readProperty(sharedLast, 'OutputName', 'Debug'), { value: 'Shared', scope: 'all' });
+        // A duplicate in one group: the last one is the value, and the one edited.
+        const dup = PROJECT.replace('    <OutputType>Exe</OutputType>', '    <OutputType>Exe</OutputType>\r\n    <OutputType>WinExe</OutputType>');
+        assert.strictEqual(readProperty(dup, 'OutputType', 'Debug').value, 'WinExe');
+        const edited = setProperty(dup, 'OutputType', 'Library', null);
+        assert.strictEqual(readProperty(edited, 'OutputType', 'Debug').value, 'Library');
+        // Clearing removes every assignment, so an earlier one does not come back.
+        assert.strictEqual(readProperty(setProperty(dup, 'OutputType', null, null), 'OutputType', 'Debug').value, undefined);
+    });
+
     test('a group condition naming the platform too is read as its configuration', () => {
         const withPlatform = PROJECT.replace("Condition=\" '$(Configuration)' == 'Debug' \"", "Condition=\" '$(Configuration)|$(Platform)' == 'Debug|Win32' \"");
         assert.deepStrictEqual(configurationsOf(withPlatform), ['Debug', 'Release']);
