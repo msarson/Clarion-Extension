@@ -57,6 +57,13 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects.map(p => [p.name, p.kind]), [['App', 'exe'], ['Lib', 'dll']]);
     });
 
+    test('a main CODE that ends the file is a DLL whose procedures live in its members', () => {
+        // Ambiguous on purpose: a do-nothing EXE looks the same. A real app had one of each, and
+        // the DLL is the shape real code is built from; the DLL picker lets the user correct it.
+        const r = inferProjects([f('Lib.clw', '  PROGRAM\r\n  MAP\r\n  END\r\n  CODE\r\n\r\n'), f('Lib001.clw', member('Lib'))]);
+        assert.strictEqual(r.projects[0].kind, 'dll');
+    });
+
     test('a bare MEMBER() named after a program joins it; the longest program name wins', () => {
         const r = inferProjects([
             f('IBS.clw', exe), f('IBS_Tools.clw', exe),
@@ -171,6 +178,32 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(classifySource('﻿' + "  MEMBER('App')"), { kind: 'member', program: 'app' });
         const r = inferProjects([f('App.clw', bom + exe), f('App001.clw', bom + member('App'))]);
         assert.deepStrictEqual(r.projects.map(p => [p.compile, p.unreferenced]), [[['App.clw', 'App001.clw'], []]]);
+    });
+
+    test('a class implementation is neither asked about nor compiled: LINK builds it', () => {
+        const r = inferProjects([
+            f('App.clw', exe + "\r\n  INCLUDE('Classes.inc'),ONCE"),
+            f('Classes.inc', [
+                "Small  CLASS,TYPE,MODULE('Small.clw'),LINK('Small.clw',1)",
+                "Init     PROCEDURE",
+                "       END",
+                "Big    CLASS(Small),TYPE, |  ! continued",
+                "         MODULE('Big'),LINK('Big',_LinkMode_)",
+                "       END",
+            ].join('\r\n')),
+            f('classes\\Small.clw', '  MEMBER()'),
+            f('classes\\Big.clw', '  MEMBER()'),
+            f('Unused.clw', '  MEMBER()'),
+        ]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+        assert.deepStrictEqual(r.unassigned, ['Unused.clw']);
+        assert.deepStrictEqual(r.classImplementations, ['classes\\Small.clw', 'classes\\Big.clw']);
+    });
+
+    test('a MAP MODULE naming a bare MEMBER() is not a class implementation', () => {
+        const r = inferProjects([f('App.clw', exe.replace("MODULE('App001.clw')", "MODULE('Util.clw')")), f('Util.clw', '  MEMBER()')]);
+        assert.deepStrictEqual(r.unassigned, ['Util.clw']);
+        assert.deepStrictEqual(r.classImplementations, []);
     });
 
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {

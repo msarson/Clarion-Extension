@@ -36,6 +36,8 @@ export interface FolderInference {
     missingProgram: string[];
     /** MEMBER('x') modules naming a program more than one folder holds: the user picks. */
     ambiguous: { file: string; candidates: string[] }[];
+    /** Bare MEMBER() modules a CLASS's MODULE names: LINK builds them, so they are not listed. */
+    classImplementations: string[];
 }
 
 /** Drops a ! comment, leaving ! inside a quoted string alone. */
@@ -87,7 +89,11 @@ export function classifySource(text: string): SourceKind {
     return { kind: 'other' };
 }
 
-/** The main CODE of a program is empty when the next statement is a label in column 0. */
+/**
+ * A DLL's main CODE is empty: the next statement is a label in column 0, or nothing at all (a
+ * DLL whose procedures all live in its members). An EXE that does nothing yet looks the same;
+ * on a real app that was one stub test program against one such DLL, so the user confirms.
+ */
 function programKind(ls: string[]): 'exe' | 'dll' {
     const code = ls.findIndex(l => /^\s+CODE\s*$/i.test(l));
     if (code < 0) return 'exe';
@@ -151,6 +157,29 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         return reached;
     };
 
+    // A bare MEMBER() that a CLASS's MODULE names is the class's implementation: its LINK adds it
+    // to the build (compiler-verified, #763), so it is neither listed nor asked about. A CLASS
+    // statement may run over several lines joined with `|`.
+    const classModules = new Set<string>();
+    for (const f of files) {
+        if (!/CLASS/i.test(f.text)) continue;
+        // Only lines that say CLASS, and the lines they continue onto, are stripped of comments.
+        const raw = f.text.split(/\r?\n/);
+        for (let i = 0; i < raw.length; i++) {
+            if (!/\bCLASS\b/i.test(raw[i])) continue;
+            let line = stripComment(raw[i]);
+            if (!/\bCLASS\b/i.test(line)) continue;
+            let statement = line;
+            while (/\|\s*$/.test(line) && i + 1 < raw.length) {
+                line = stripComment(raw[++i]);
+                statement = statement.replace(/\|\s*$/, ' ') + line;
+            }
+            for (const m of statement.matchAll(/\bMODULE\s*\(\s*'([^']+)'/gi)) {
+                clarionSourceCandidates(baseName(m[1]).toLowerCase()).forEach(n => classModules.add(n));
+            }
+        }
+    }
+
     const clw = files.filter(f => isClw(f.relPath));
     const kinds = new Map(clw.map(f => [f, classifySource(f.text)]));
     const programs = clw.filter(f => kinds.get(f)!.kind === 'program');
@@ -182,7 +211,7 @@ export function inferProjects(files: SourceFile[]): FolderInference {
     // Longest first, so <Prog>_Tools_BC0 goes to Prog_Tools rather than Prog.
     const prefixes = [...byStem.keys()].sort((a, b) => b.length - a.length);
 
-    const unassigned: string[] = [], missingProgram: string[] = [], ambiguous: FolderInference['ambiguous'] = [];
+    const unassigned: string[] = [], missingProgram: string[] = [], ambiguous: FolderInference['ambiguous'] = [], classImplementations: string[] = [];
     /** Adds the module to its program; between programs of one name, the path a MEMBER names, then the module's own folder decides. */
     const assign = (f: SourceFile, candidates: SourceFile[], target = '') => {
         if (candidates.length > 1 && /\\/.test(target)) {
@@ -203,6 +232,7 @@ export function inferProjects(files: SourceFile[]): FolderInference {
             const s = stem(f.relPath);
             const prefix = prefixes.find(p => s.startsWith(p + '_'));
             if (prefix) assign(f, byStem.get(prefix)!);
+            else if (classModules.has(baseName(f.relPath).toLowerCase())) classImplementations.push(f.relPath);
             else unassigned.push(f.relPath);
         }
     }
@@ -213,5 +243,5 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         const reached = reachedModules(program);
         project.unreferenced = project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
     }
-    return { projects, unassigned, missingProgram, ambiguous };
+    return { projects, unassigned, missingProgram, ambiguous, classImplementations };
 }
