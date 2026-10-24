@@ -658,8 +658,14 @@ export class HoverFormatter {
         functionName: string,
         signatures: any[],
         paramCount: number | null,
-        firstArgType?: string,
-        resolvedIndices?: number[]
+        firstArgType: string | undefined,
+        resolvedIndices: number[] | undefined,
+        /**
+         * #784 — what the built-in is, whichever way it is written: 'statement' when it can be called
+         * with no arguments and returns nothing (YIELD, COMMIT, HALT), else 'function' (TODAY,
+         * OPEN). Decided per built-in, not per call, so `HALT` and `HALT(1)` read alike.
+         */
+        kind: 'statement' | 'function'
     ): Hover {
         if (signatures.length === 0) {
             return {
@@ -703,12 +709,8 @@ export class HoverFormatter {
             }
         }
 
-        const isKeyword = matchingSignatures.every(sig =>
-            !sig.parameters || sig.parameters.length === 0
-        );
-
-        let content = isKeyword
-            ? `**Keyword: ${functionName}**\n\n`
+        let content = kind === 'statement'
+            ? `**Built-in statement: ${functionName}**\n\n`
             : `**Built-in Function: ${functionName}**\n\n`;
 
         if (argResolved && matchingSignatures.length < signatures.length) {

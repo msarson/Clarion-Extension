@@ -1146,6 +1146,13 @@ export class HoverRouter {
         // whitespace); otherwise fall back to a plain constant-style card using the same
         // description text (clarion-builtins.json descriptions already cover both meanings).
         const isActualCall = /^\s*\(/.test(line.slice(wordRange.end.character));
+        // #784 — Clarion calls a built-in that needs no arguments without parentheses (YIELD,
+        // COMMIT, TODAY, ERRORCODE): bare, it is that call, not a constant, and gets its own card.
+        const callableBare = this.builtinService.canCallWithoutArguments(word);
+        const kind = callableBare && !this.builtinService.returnsValue(word) ? 'statement' as const : 'function' as const;
+        if (!isActualCall && callableBare) {
+            return this.formatter.formatBuiltin(word, signatures, 0, undefined, undefined, kind);
+        }
         if (!isActualCall) {
             logger.info(`Word ${word} matches a built-in but isn't called (no '(' follows) - showing constant hover`);
             const doc = signatures[0]?.documentation;
@@ -1167,12 +1174,12 @@ export class HoverRouter {
         // narrowing when the arguments actually carry a resolvable type.
         const resolvedIndices = await this.resolveBuiltinOverloadIndices(word, signatures, document, position, tokens);
         if (resolvedIndices) {
-            return this.formatter.formatBuiltin(word, signatures, paramCount, undefined, resolvedIndices);
+            return this.formatter.formatBuiltin(word, signatures, paramCount, undefined, resolvedIndices, kind);
         }
 
         // Legacy fallback: narrow by first argument's structureType (e.g. OPEN(Names) → 'FILE').
         const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
-        return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined);
+        return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined, undefined, kind);
     }
 
     /**
