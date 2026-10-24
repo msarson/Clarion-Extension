@@ -385,6 +385,30 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects.map(p => [p.name, p.references]), [['App', ['Lib', 'Tools']], ['Lib', []], ['Tools', []]]);
     });
 
+    test('a DLL import picks the program of that name in the importer\'s folder, and none when it cannot tell', () => {
+        const imports = (dllName: string) => `  PROGRAM\r\n  MAP\r\n    MODULE('${dllName}')\r\nHello  PROCEDURE,DLL\r\n    END\r\n  END\r\n  CODE\r\n  Hello()`;
+        const r = inferProjects([f('one\\Lib.clw', dll), f('two\\Lib.clw', dll), f('two\\App.clw', imports('Lib.dll')), f('App2.clw', imports('Lib.dll'))]);
+        const byFile = new Map(r.projects.map(p => [p.programFile, p]));
+        const libInTwo = byFile.get('two\\Lib.clw')!.name;
+        assert.deepStrictEqual(byFile.get('two\\App.clw')!.references, [libInTwo]);
+        assert.deepStrictEqual(byFile.get('App2.clw')!.references, [], 'two programs named Lib and neither beside it');
+    });
+
+    test('references, exports and libraries follow the compile lists the user settles on', () => {
+        const files = [
+            f('App.clw', "  PROGRAM\r\n  MAP\r\n  END\r\n  CODE"),
+            f('Imports.clw', "  MEMBER()\r\n  MAP\r\n    MODULE('Lib.dll')\r\nHello  PROCEDURE,DLL\r\n    END\r\n  END"),
+            f('Lib.clw', dll),
+            f('Lib009.clw', member('Lib', "  MAP\r\nOld  PROCEDURE,EXPORT\r\n  END")),
+        ];
+        const first = inferProjects(files);
+        assert.deepStrictEqual(first.projects.map(p => [p.name, p.references, p.exportsMarked]), [['App', [], false], ['Lib', [], true]]);
+        // The user assigns Imports.clw to App and unticks the leftover Lib009.clw.
+        const settled = inferProjects(files, [], { compile: new Map([['App.clw', ['App.clw', 'Imports.clw']], ['Lib.clw', ['Lib.clw']]]) });
+        assert.deepStrictEqual(settled.projects.map(p => [p.name, p.compile, p.references, p.exportsMarked]),
+            [['App', ['App.clw', 'Imports.clw'], ['Lib'], false], ['Lib', ['Lib.clw'], [], false]]);
+    });
+
     test('a DLL that marks its exports with EXPORT is told apart from one that relies on its .exp', () => {
         const marked = "  PROGRAM\r\n  MAP\r\nHello  PROCEDURE,EXPORT\r\n  END\r\n  CODE\r\n\r\nHello  PROCEDURE\r\n  CODE";
         const viaInclude = "  PROGRAM\r\n  MAP\r\n  INCLUDE('Exports.inc')\r\n  END\r\n  CODE\r\n\r\nHello  PROCEDURE\r\n  CODE";

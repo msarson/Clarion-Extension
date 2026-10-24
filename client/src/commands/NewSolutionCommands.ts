@@ -142,8 +142,8 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
  * which of them are DLLs, where the modules named after no program go, and whether possible
  * leftovers are compiled. Returns the projects to write, or undefined when cancelled.
  */
-/** A project New Solution writes, with whether its prototypes mark their exports (a DLL's .exp). */
-type NewProjectSpec = CwprojSpec & { exportsMarked?: boolean };
+/** A project New Solution writes: its program file, and whether its prototypes mark exports (a DLL's .exp). */
+type NewProjectSpec = CwprojSpec & { programFile?: string; exportsMarked?: boolean };
 
 async function confirmProjects(inference: FolderInference): Promise<NewProjectSpec[] | undefined> {
     const programItems = inference.projects.map(p => ({
@@ -171,15 +171,8 @@ async function confirmProjects(inference: FolderInference): Promise<NewProjectSp
     });
     if (!dlls) return undefined;
     const dllProjects = new Set(dlls.map(d => d.project));
-    const specs: NewProjectSpec[] = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const, exportsMarked: p.exportsMarked }));
-    // A project that imports from another chosen project through MODULE('X.DLL') references it,
-    // which also builds that DLL first.
-    specs.forEach((spec, i) => {
-        spec.references = projects[i].references
-            .map(name => specs.find(other => other.name === name))
-            .filter((other): other is NewProjectSpec => !!other)
-            .map(other => ({ name: other.name, guid: other.guid }));
-    });
+    // References and exports are worked out once the compile lists are settled (newSolution).
+    const specs: NewProjectSpec[] = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const, programFile: p.programFile }));
 
     // Modules the inference could not place: named after no program, or naming a program that
     // more than one folder holds (then only those programs are offered). Project names are unique.
@@ -243,6 +236,7 @@ export async function newSolution(): Promise<void> {
 
     // Step 3 (#763): a folder that already has programs can become their solution
     let inference: FolderInference | undefined;
+    let libraries: SourceFile[] = [];
     const scan = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
         () => readSourceFiles(folderPath));
@@ -255,7 +249,7 @@ export async function newSolution(): Promise<void> {
         }
         // Library sources the folder's directives reach (a MAP MODULE in CWUTIL.INC needs
         // cwutil.clw listed). Without the server, the folder alone is used, as before.
-        const libraries = await vscode.window.withProgress(
+        libraries = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
             () => findLibraryFiles(scan.files,
                 names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configChoice, names),
@@ -272,6 +266,22 @@ export async function newSolution(): Promise<void> {
         if (choice === FROM_SOURCES) {
             specs = await confirmProjects(inference);
             if (!specs) return;
+            // What the user settled on (modules placed, leftovers unticked) decides the libraries
+            // listed, the projects referenced and whether a DLL marks its exports: work them out
+            // again from the final compile lists.
+            const chosen = specs;
+            const settled = inferProjects(scan.files, libraries, { compile: new Map(chosen.map(s => [s.programFile!, s.compile])) });
+            for (const spec of chosen) {
+                const project = settled.projects.find(p => p.programFile === spec.programFile);
+                if (!project) continue;
+                spec.compile = project.compile;
+                spec.exportsMarked = project.exportsMarked;
+                // Only projects the user kept: a reference to an unticked program is dropped.
+                spec.references = project.references
+                    .map(name => chosen.find(other => other.name === name))
+                    .filter((other): other is NewProjectSpec => !!other)
+                    .map(other => ({ name: other.name, guid: other.guid }));
+            }
         }
     }
 
@@ -358,7 +368,11 @@ export async function newSolution(): Promise<void> {
         }
     }
     if (written.length > 0) {
-        vscode.window.showInformationMessage(`Wrote ${written.join(', ')}: the DLL's prototypes mark their exports with EXPORT, so an empty export list is enough.`);
+        // Some EXPORT attributes do not make the list complete: a procedure another project calls
+        // without EXPORT on its prototype is not exported, so say what the file does.
+        vscode.window.showInformationMessage(
+            `Wrote ${written.join(', ')} with an empty export list, so ${written.length === 1 ? 'the DLL exports' : 'the DLLs export'} only the procedures their prototypes mark EXPORT. ` +
+            `A procedure other projects call without EXPORT needs the attribute, or a line in the .exp.`);
     }
     if (needGenerator.length > 0) {
         vscode.window.showWarningMessage(

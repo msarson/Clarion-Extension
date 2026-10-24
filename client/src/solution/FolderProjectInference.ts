@@ -195,7 +195,12 @@ const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
  * directives use (Clarion's libsrc, accessories), with their full paths as relPath. The folder's
  * own files win over a library file of the same name, as `.` comes first in a redirection file.
  */
-export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = []): FolderInference {
+export interface InferOptions {
+    /** The compile lists the user settled on, by program file: references, exports and libraries follow them. */
+    compile?: Map<string, string[]>;
+}
+
+export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = [], options: InferOptions = {}): FolderInference {
     // Directives name a file without its folder: when several folders hold that name, the one
     // beside the program it is read for is meant.
     const byName = new Map<string, SourceFile[]>();
@@ -476,6 +481,15 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         }
         return { files: [...asCode], modules, dlls, exportsMarked };
     };
+    // The user's choices (modules placed, leftovers unticked) replace the inferred lists, so what
+    // follows from them — libraries, references, exports — is worked out from what is compiled.
+    if (options.compile) {
+        for (const project of projects) {
+            const settled = options.compile.get(project.programFile);
+            if (settled) project.compile = [...settled];
+        }
+    }
+
     for (const program of programs) {
         const project = projectOf.get(program)!;
         const reached = reachedModules(program);
@@ -507,10 +521,17 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
             }
         }
         // A project imports from another through MODULE('X.DLL'): a ProjectReference, which also
-        // builds X first (compiler-verified, #763). A DLL of no project here (vendor.dll) is not one.
-        project.references = projects
-            .filter(other => other !== project && closure!.dlls.has(other.name.toLowerCase()))
-            .map(other => other.name);
+        // builds X first (compiler-verified, #763). X is the program file named X — not a project
+        // name, which a second program of that name changes — beside the importer when several
+        // folders hold one, and no reference when that cannot tell. A DLL of no program here
+        // (vendor.dll) is not one.
+        project.references = [];
+        for (const dllStem of closure!.dlls) {
+            const candidates = (byStem.get(dllStem) ?? []).filter(p => p !== program);
+            const target = candidates.length === 1 ? candidates[0]
+                : candidates.find(p => dirName(p.relPath) === dirName(program.relPath));
+            if (target) project.references.push(projectOf.get(target)!.name);
+        }
         project.exportsMarked = closure!.exportsMarked;
     }
     return { projects, unassigned, missingProgram, ambiguous, classImplementations };
