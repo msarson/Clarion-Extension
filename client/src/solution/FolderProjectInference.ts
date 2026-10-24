@@ -48,7 +48,9 @@ function stripComment(line: string): string {
     return line;
 }
 
-const lines = (text: string) => text.split(/\r?\n/).map(stripComment);
+/** A UTF-8 byte-order mark, as decoded text or as the three characters a latin1 read gives. */
+const dropBom = (text: string) => text.replace(/^(﻿|ï»¿)/, '');
+const lines = (text: string) => dropBom(text).split(/\r?\n/).map(stripComment);
 const baseName = (p: string) => p.replace(/^.*[\\/]/, '');
 const dirName = (p: string) => /[\\/]/.test(p) ? p.replace(/[\\/][^\\/]*$/, '').toLowerCase() : '';
 const stem = (p: string) => baseName(p).replace(/\.[^.]*$/, '').toLowerCase();
@@ -57,6 +59,7 @@ const normalize = (p: string) => p.replace(/\//g, '\\').toLowerCase();
 
 /** The first statement, read only as far as it takes. */
 function firstStatement(text: string): string {
+    text = dropBom(text);
     let start = 0;
     while (start <= text.length) {
         const end = text.indexOf('\n', start);
@@ -91,8 +94,17 @@ function programKind(ls: string[]): 'exe' | 'dll' {
 const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
 
 export function inferProjects(files: SourceFile[]): FolderInference {
-    const byName = new Map<string, SourceFile>();
-    for (const f of files) if (!byName.has(baseName(f.relPath).toLowerCase())) byName.set(baseName(f.relPath).toLowerCase(), f);
+    // Directives name a file without its folder: when several folders hold that name, the one
+    // beside the program it is read for is meant.
+    const byName = new Map<string, SourceFile[]>();
+    for (const f of files) {
+        const key = baseName(f.relPath).toLowerCase();
+        byName.set(key, [...(byName.get(key) ?? []), f]);
+    }
+    const lookup = (name: string, near: SourceFile) => {
+        const found = byName.get(name);
+        return found && (found.find(f => dirName(f.relPath) === dirName(near.relPath)) ?? found[0]);
+    };
     // Shared INCLUDE trees are walked once per program: split and strip each file once.
     const lineCache = new Map<SourceFile, string[]>();
     const linesOf = (f: SourceFile) => {
@@ -103,21 +115,21 @@ export function inferProjects(files: SourceFile[]): FolderInference {
 
     /** Every file name a MODULE('x') reaches from the program, following INCLUDEs and the reached members. */
     const reachedModules = (program: SourceFile): Set<string> => {
-        const seen = new Set<string>(), reached = new Set<string>();
-        const stack = [baseName(program.relPath).toLowerCase()];
+        const seen = new Set<SourceFile>(), reached = new Set<string>();
+        const stack: SourceFile[] = [program];
         // #449: a directive's target without an extension means .clw.
         const targets = (raw: string) => clarionSourceCandidates(baseName(raw).toLowerCase());
+        const follow = (name: string) => { const file = lookup(name, program); if (file) stack.push(file); };
         while (stack.length) {
-            const name = stack.pop()!;
-            const file = byName.get(name);
-            if (!file || seen.has(name)) continue;
-            seen.add(name);
+            const file = stack.pop()!;
+            if (seen.has(file)) continue;
+            seen.add(file);
             for (const line of linesOf(file)) {
-                for (const m of line.matchAll(/\bINCLUDE\s*\(\s*'([^']+)'/gi)) stack.push(...targets(m[1]));
+                for (const m of line.matchAll(/\bINCLUDE\s*\(\s*'([^']+)'/gi)) targets(m[1]).forEach(follow);
                 for (const m of line.matchAll(/\bMODULE\s*\(\s*'([^']+)'/gi)) {
                     for (const target of targets(m[1])) {
                         reached.add(target);
-                        stack.push(target);
+                        follow(target);
                     }
                 }
             }

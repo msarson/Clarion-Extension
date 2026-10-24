@@ -137,6 +137,27 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects[0].unreferenced, []);
     });
 
+    test('programs of one name in a sub-folder and the root each keep their own members and leftovers', () => {
+        const prog = (mod: string) => exe.replace('App001.clw', mod);
+        const r = inferProjects([
+            f('a\\main.clw', prog('a1.clw')), f('a\\a1.clw', member('main')),
+            f('main.clw', prog('m1.clw')), f('m1.clw', member('main')),
+        ]);
+        assert.deepStrictEqual(r.projects.map(p => [p.compile, p.unreferenced]), [
+            [['a\\main.clw', 'a\\a1.clw'], []],
+            [['main.clw', 'm1.clw'], []],
+        ]);
+        assert.notStrictEqual(r.projects[0].name.toLowerCase(), r.projects[1].name.toLowerCase());
+    });
+
+    test('a source saved with a UTF-8 byte-order mark is still read (latin1 shows it as three characters)', () => {
+        const bom = 'ï»¿';
+        assert.deepStrictEqual(classifySource(bom + '  PROGRAM\r\n'), { kind: 'program' });
+        assert.deepStrictEqual(classifySource('﻿' + "  MEMBER('App')"), { kind: 'member', program: 'app' });
+        const r = inferProjects([f('App.clw', bom + exe), f('App001.clw', bom + member('App'))]);
+        assert.deepStrictEqual(r.projects.map(p => [p.compile, p.unreferenced]), [[['App.clw', 'App001.clw'], []]]);
+    });
+
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {
         const r = inferProjects([
             f('App.clw', exe),
