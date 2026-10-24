@@ -6,6 +6,7 @@ import { globalSettings } from '../globals';
 import { setProperty, setPropertyScope } from './CwprojProperties';
 import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, targetsProperties } from './ProjectPropertyFields';
 import { buildPageState } from './ProjectPropertiesPage';
+import { minimalEdit, pageHtml as kitPage, scriptJson } from '../webview/PageKit';
 
 const logger = LoggerManager.getLogger('ProjectPropertiesEditor');
 logger.setLevel('error');
@@ -115,73 +116,36 @@ function readTargetsProperties(): Set<string> | undefined {
 }
 
 /** Replaces only the span that changed, so undo steps and the document's other text are untouched. */
-async function applyText(document: vscode.TextDocument, next: string): Promise<void> {
-    const current = document.getText();
-    if (next === current) return;
-    let start = 0;
-    while (start < current.length && start < next.length && current[start] === next[start]) start++;
-    let endCurrent = current.length, endNext = next.length;
-    while (endCurrent > start && endNext > start && current[endCurrent - 1] === next[endNext - 1]) { endCurrent--; endNext--; }
+export async function applyText(document: vscode.TextDocument, next: string): Promise<void> {
+    const span = minimalEdit(document.getText(), next);
+    if (!span) return;
     const edit = new vscode.WorkspaceEdit();
-    edit.replace(document.uri, new vscode.Range(document.positionAt(start), document.positionAt(endCurrent)), next.slice(start, endNext));
+    edit.replace(document.uri, new vscode.Range(document.positionAt(span.start), document.positionAt(span.end)), span.text);
     await vscode.workspace.applyEdit(edit);
-}
-
-function getNonce(): string {
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let text = '';
-    for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
-    return text;
 }
 
 /** The page: VS Code's theme colours; the fields' labels and kinds travel with it, the values by message. */
 function pageHtml(webview: vscode.Webview): string {
-    const nonce = getNonce();
-    const meta = JSON.stringify({
+    const meta = {
         tabs: PROJECT_PROPERTY_TABS,
         fields: Object.fromEntries(PROJECT_PROPERTY_FIELDS.map(f => [f.property, f])),
-    }).replace(/</g, '\\u003c');
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'unsafe-inline';">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Project Properties</title>
-<style>
-  body { margin: 0; padding: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 18px 24px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
-  header .title { flex: 1 1 240px; display: flex; flex-direction: column; gap: 4px; }
-  h1 { margin: 0; font-size: 1.5em; font-weight: 600; }
-  .muted { color: var(--vscode-descriptionForeground); }
-  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  label.inline { display: flex; align-items: center; gap: 8px; }
-  select, input[type=text] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 2px; padding: 4px 8px; font: inherit; }
-  select:focus, input:focus, button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-  button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 2px; padding: 5px 10px; font: inherit; cursor: pointer; }
+    };
+    return kitPage({
+        cspSource: webview.cspSource,
+        title: 'Project Properties',
+        css: `
   .layout { display: flex; flex-wrap: wrap; }
   nav { flex: 1 1 180px; max-width: 220px; padding: 10px 0; border-right: 1px solid var(--vscode-panel-border); display: flex; flex-direction: column; }
   nav button { display: block; width: 100%; min-height: 34px; padding: 0 16px; text-align: left; border: none; border-left: 2px solid transparent; background: none; color: inherit; font: inherit; cursor: pointer; }
   nav button[aria-selected=true] { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); border-left-color: var(--vscode-focusBorder); }
-  main { flex: 999 1 520px; min-width: 0; padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 20px; }
-  section { border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
-  h2 { margin: 0; padding: 9px 16px; font-size: 0.85em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border); }
-  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 9px 16px; border-top: 1px solid var(--vscode-panel-border); }
-  h2 + .row { border-top: none; }
-  .label { flex: 1 1 220px; max-width: 280px; display: flex; flex-direction: column; gap: 2px; }
-  code { font-family: var(--vscode-editor-font-family); font-size: 0.85em; color: var(--vscode-descriptionForeground); background: none; padding: 0; }
-  .control { flex: 999 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-  .control input[type=text] { max-width: 520px; }
-  .note { font-size: 0.9em; color: var(--vscode-editorWarning-foreground); }
   .scope { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; border: 1px solid var(--vscode-panel-border); background: none; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.9em; cursor: pointer; }
   .scope .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--vscode-descriptionForeground); }
   .scope.per { border-color: var(--vscode-focusBorder); color: var(--vscode-foreground); background: var(--vscode-list-inactiveSelectionBackground); }
   .scope.per .dot { background: var(--vscode-focusBorder); }
   .scope:disabled { opacity: 0.5; cursor: default; }
   .unavailable .label > span:first-child { color: var(--vscode-disabledForeground); }
-</style>
-</head>
-<body>
+`,
+        body: `
 <header>
   <div class="title"><h1 id="name">Project</h1><div class="muted" id="sub"></div></div>
   <div class="bar">
@@ -193,22 +157,12 @@ function pageHtml(webview: vscode.Webview): string {
   <nav id="tabs" aria-label="Property pages" role="tablist"></nav>
   <main id="page"></main>
 </div>
-<script nonce="${nonce}">
-(function () {
-  const vscode = acquireVsCodeApi();
-  const META = ${meta};
+`,
+        script: `
+  const META = ${scriptJson(meta)};
   let tab = (vscode.getState() || {}).tab || 'application';
   let state = null;
 
-  const el = (tag, attrs, ...children) => {
-    const e = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs || {})) {
-      if (v === undefined || v === null || v === false) continue;
-      if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? '' : String(v));
-    }
-    for (const c of children) if (c !== null && c !== undefined) e.append(c);
-    return e;
-  };
 
   document.getElementById('xml').addEventListener('click', () => vscode.postMessage({ type: 'xml' }));
   document.getElementById('configuration').addEventListener('change', e => vscode.postMessage({ type: 'configuration', value: e.target.value }));
@@ -271,8 +225,6 @@ function pageHtml(webview: vscode.Webview): string {
     if (e.data && e.data.type === 'state') { state = Object.assign({}, e.data.state, { file: e.data.file }); render(); }
   });
   vscode.postMessage({ type: 'ready' });
-})();
-</script>
-</body>
-</html>`;
+`,
+    });
 }
