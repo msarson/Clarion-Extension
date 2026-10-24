@@ -174,6 +174,9 @@ export async function findLibraryFiles(
     return libraries;
 }
 
+/** A LINK('x', flag) builds x unless its flag is 0; an omitted flag builds it (compiler-verified, #763). */
+const isLinkOff = (flag: string | undefined) => flag !== undefined && flag.trim() === '0';
+
 /** A project name nothing can misread: MSBuild expands $( @( %( and ; ' " or control characters break the files. */
 const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
 
@@ -200,7 +203,17 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
      * folder names: `a\x` is not `ba\x`); a bare name is the one beside `near`, else the first.
      * #449: a target without an extension means .clw.
      */
+    const resolved = new Map<string, SourceFile | undefined>();
     const resolve = (raw: string, near: SourceFile): SourceFile | undefined => {
+        // Every project's closure resolves the same directives: the answer depends only on the
+        // target and the folder it is read from.
+        const key = dirName(near.relPath) + '|' + raw;
+        if (resolved.has(key)) return resolved.get(key);
+        const file = resolveUncached(raw, near);
+        resolved.set(key, file);
+        return file;
+    };
+    const resolveUncached = (raw: string, near: SourceFile): SourceFile | undefined => {
         for (const target of clarionSourceCandidates(normalize(raw).replace(/^\.\\/, ''))) {
             const found = byName.get(baseName(target));
             if (!found) continue;
@@ -231,26 +244,24 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
             const file = stack.pop()!;
             if (seen.has(file)) continue;
             seen.add(file);
-            const ls = linesOf(file);
-            ls.forEach((line, i) => {
-                for (const m of line.matchAll(/\b(INCLUDE|MODULE)\s*\(\s*'([^']+)'/gi)) {
-                    const target = resolve(m[2], program);
-                    if (!target) continue;
-                    if (m[1].toUpperCase() === 'MODULE') {
-                        const declared = reached.get(target) ?? new Set<string>();
-                        moduleBlockNames(ls, i).forEach(n => declared.add(n));
-                        reached.set(target, declared);
-                    }
-                    stack.push(target);
+            for (const d of directivesOf(file)) {
+                if (d.kind === 'LINK') continue;
+                const target = resolve(d.target, program);
+                if (!target) continue;
+                if (d.kind === 'MODULE') {
+                    const declared = reached.get(target) ?? new Set<string>();
+                    d.declares.forEach(n => declared.add(n));
+                    reached.set(target, declared);
                 }
-            });
+                stack.push(target);
+            }
         }
         return reached;
     };
 
-    // A bare MEMBER() that a CLASS's MODULE names is the class's implementation: its LINK adds it
-    // to the build (compiler-verified, #763), so it is neither listed nor asked about. A CLASS
-    // statement may run over several lines joined with `|`.
+    // A bare MEMBER() that a CLASS's active LINK names is the class's implementation: the LINK
+    // adds it to the build (compiler-verified, #763), so it is neither listed nor asked about. A
+    // CLASS statement may run over several lines joined with `|`.
     const classModules = new Set<string>();
     for (const f of [...files, ...libraryFiles]) {
         if (!/CLASS/i.test(f.text)) continue;
@@ -265,7 +276,12 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
                 line = stripComment(raw[++i]);
                 statement = statement.replace(/\|\s*$/, ' ') + line;
             }
-            for (const m of statement.matchAll(/\bMODULE\s*\(\s*'([^']+)'/gi)) {
+            // A LINK is active unless its flag is 0 (compiler-verified on Clarion 10: LINK('x') and
+            // LINK('x',1) build x unlisted, LINK('x',0) does not; the help says an omitted flag is
+            // inactive, the compiler does not). A define (_ABCLinkMode_) counts as active too: ABC
+            // classes build that way with no defines set.
+            for (const m of statement.matchAll(/\bLINK\s*\(\s*'([^']+)'\s*(?:,\s*([^)]*?))?\s*\)/gi)) {
+                if (isLinkOff(m[2])) continue;
                 clarionSourceCandidates(baseName(m[1]).toLowerCase()).forEach(n => classModules.add(n));
             }
         }
@@ -329,6 +345,100 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
     }
 
     const fileAt = new Map(clw.map(f => [f.relPath, f]));
+
+    /**
+     * Each line's MAP depth: inside a MAP (or a MODULE block in it) a line declares, it does not
+     * call. A MODULE block in a file included inside a MAP starts at depth 0 in that file.
+     */
+    const mapDepths = (ls: string[]): number[] => {
+        let depth = 0;
+        return ls.map(line => {
+            const t = line.trim();
+            const at = depth;
+            if (depth > 0) {
+                if (/^(END\b|\.$)/i.test(t)) depth--;
+                else if (/^MODULE\s*\(/i.test(t)) depth++;
+            } else if (/^MAP\b/i.test(t)) depth = 1;
+            return at > 0 || depth > 0 ? 1 : 0;
+        });
+    };
+
+    /** The words a file's code uses: MAP blocks (declarations), strings and member access left out. */
+    const wordCache = new Map<SourceFile, Set<string>>();
+    const codeWordsOf = (f: SourceFile): Set<string> => {
+        let words = wordCache.get(f);
+        if (words) return words;
+        words = new Set<string>();
+        const ls = linesOf(f), depths = mapDepths(ls);
+        ls.forEach((line, i) => {
+            if (depths[i]) return;
+            for (const m of line.replace(/'(?:[^']|'')*'/g, "''").matchAll(/(?<![\w:.])[A-Za-z_]\w*/g)) words.add(m[0].toLowerCase());
+        });
+        wordCache.set(f, words);
+        return words;
+    };
+
+    /**
+     * What a project compiles, from `start`: the files, what they INCLUDE and the class
+     * implementations their active LINKs build; with the procedures each MAP MODULE block in
+     * them declares, by the file the MODULE names.
+     */
+    /** The files whose code uses a word, found once per word across the folder and its libraries. */
+    const callerCache = new Map<string, SourceFile[]>();
+    const callersOf = (word: string): SourceFile[] => {
+        const key = word.toLowerCase();
+        let found = callerCache.get(key);
+        if (!found) callerCache.set(key, found = [...files, ...libraryFiles].filter(f => codeWordsOf(f).has(key)));
+        return found;
+    };
+
+    /** Each file's INCLUDE, MODULE and LINK directives, parsed once: every project's closure reads them. */
+    interface Directive { kind: 'INCLUDE' | 'MODULE' | 'LINK'; target: string; inMap: boolean; declares: string[]; linkOff: boolean }
+    const directiveCache = new Map<SourceFile, Directive[]>();
+    const directivesOf = (file: SourceFile): Directive[] => {
+        let found = directiveCache.get(file);
+        if (found) return found;
+        found = [];
+        if (/INCLUDE|MODULE|LINK/i.test(file.text)) {
+            const ls = linesOf(file), depths = mapDepths(ls);
+            ls.forEach((line, i) => {
+                for (const m of line.matchAll(/\b(INCLUDE|MODULE|LINK)\s*\(\s*'([^']+)'\s*(?:,\s*([^)]*?))?\s*\)?/gi)) {
+                    const kind = m[1].toUpperCase() as Directive['kind'];
+                    found!.push({ kind, target: m[2], inMap: depths[i] > 0, declares: kind === 'MODULE' ? moduleBlockNames(ls, i) : [], linkOff: isLinkOff(m[3]) });
+                }
+            });
+        }
+        directiveCache.set(file, found);
+        return found;
+    };
+
+    const buildClosure = (start: SourceFile[], near: SourceFile) => {
+        const built = new Set<SourceFile>(), modules = new Map<SourceFile, Set<string>>();
+        // Files included inside a MAP hold MAP lines: declarations only, never code.
+        const declarations = new Set<SourceFile>();
+        const stack = [...start];
+        while (stack.length) {
+            const file = stack.pop()!;
+            if (built.has(file)) continue;
+            built.add(file);
+            const inDeclarations = declarations.has(file);
+            for (const d of directivesOf(file)) {
+                const target = resolve(d.target, near);
+                if (!target) continue;
+                if (d.kind === 'INCLUDE') {
+                    if (d.inMap || inDeclarations) declarations.add(target);
+                    stack.push(target);
+                } else if (d.kind === 'LINK') {
+                    if (!d.linkOff) stack.push(target);
+                } else {
+                    const declared = modules.get(target) ?? new Set<string>();
+                    d.declares.forEach(n => declared.add(n));
+                    modules.set(target, declared);
+                }
+            }
+        }
+        return { files: [...built].filter(f => !declarations.has(f)), modules };
+    };
     for (const program of programs) {
         const project = projectOf.get(program)!;
         const reached = reachedModules(program);
@@ -336,18 +446,26 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         // A library source a MAP MODULE reaches has no LINK to build it (compiler-verified, #763):
         // the project lists it by bare name, as a generated project does, and redirection finds
         // it. Only a MEMBER module (a .clw of MAP lines named by MODULE('CLib') is no source),
-        // only when the project calls a procedure the block declares (an unused prototype needs
-        // nothing linked), and never a CLASS's MODULE, which the class's LINK builds.
-        const projectCode = () => project.compile.map(m => fileAt.get(m)).filter((f): f is SourceFile => !!f)
-            .flatMap(f => linesOf(f).map(l => l.replace(/'(?:[^']|'')*'/g, "''")));
-        let code: string[] | undefined;
-        for (const [file, declared] of reached) {
-            const name = baseName(file.relPath);
-            if (!library.has(file) || !isClw(name) || classModules.has(name.toLowerCase()) || project.compile.includes(name)) continue;
-            const kind = classifySource(file.text).kind;
-            if ((kind !== 'member' && kind !== 'bareMember') || declared.size === 0) continue;
-            const called = new RegExp(`(?<![\\w:])(?:${[...declared].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i');
-            if ((code ??= projectCode()).some(l => called.test(l))) project.compile.push(name);
+        // only when the project's code calls a procedure the block declares (an unused prototype
+        // needs nothing linked), and never one a CLASS's active LINK builds. The code is all the
+        // project compiles: its files, what they INCLUDE, the class implementations their LINKs
+        // build, and the libraries already listed, whose own calls can need another library.
+        const listed: SourceFile[] = [];
+        const compiled = project.compile.map(m => fileAt.get(m)).filter((f): f is SourceFile => !!f);
+        for (let grew = true; grew;) {
+            grew = false;
+            const { files: built, modules } = buildClosure([...compiled, ...listed], program);
+            const inBuild = new Set(built);
+            for (const [file, declared] of modules) {
+                const name = baseName(file.relPath);
+                if (!library.has(file) || !isClw(name) || classModules.has(name.toLowerCase()) || listed.includes(file)) continue;
+                const kind = classifySource(file.text).kind;
+                if (kind !== 'member' && kind !== 'bareMember') continue;
+                if (![...declared].some(n => callersOf(n).some(f => inBuild.has(f)))) continue;
+                listed.push(file);
+                if (!project.compile.includes(name)) project.compile.push(name);
+                grew = true;
+            }
         }
     }
     return { projects, unassigned, missingProgram, ambiguous, classImplementations };

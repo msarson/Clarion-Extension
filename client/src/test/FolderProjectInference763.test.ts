@@ -236,6 +236,50 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects.map(p => [p.name, p.compile.includes('CWUtil.CLW')]), [['Uses', true], ['Unused', false], ['InMember', true]]);
     });
 
+    test('only an active LINK builds a class implementation; LINK(x,0) or no LINK leaves it to the user', () => {
+        // Compiler-verified on Clarion 10: LINK('x') and LINK('x',1) build with x unlisted, LINK('x',0)
+        // fails Unresolved External. (The help says an omitted flag is inactive; the compiler disagrees.)
+        const classesInc = (link: string) => f('Classes.inc', `Thing  CLASS,TYPE,MODULE('Impl.clw')${link}\r\nGo       PROCEDURE\r\n       END`);
+        const prog = f('App.clw', exe + "\r\n  INCLUDE('Classes.inc'),ONCE");
+        for (const [link, isLinked] of [[",LINK('Impl.clw',1)", true], [",LINK('Impl.clw',_ABCLinkMode_)", true], [",LINK('Impl.clw')", true], [",LINK('Impl.clw',0)", false], ['', false]] as [string, boolean][]) {
+            const r = inferProjects([prog, classesInc(link), f('Impl.clw', '  MEMBER()')]);
+            assert.deepStrictEqual([r.classImplementations, r.unassigned], isLinked ? [['Impl.clw'], []] : [[], ['Impl.clw']], link || 'no LINK');
+        }
+    });
+
+    test('a library procedure called only from an INCLUDEd fragment or a LINKed class still lists its module', () => {
+        const util = f(LIB + 'UTIL.INC', "  MODULE('util.clw')\r\nRunUtil(),LONG,PROC\r\n  END");
+        const utilClw = f(LIB + 'util.clw', '  MEMBER()');
+        const fromFragment = inferProjects([
+            f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('UTIL.INC')\r\n  END\r\n  CODE\r\n  INCLUDE('body.clw')"),
+            f('body.clw', '  RunUtil()'),
+        ], [util, utilClw]);
+        assert.deepStrictEqual(fromFragment.projects[0].compile, ['App.clw', 'util.clw']);
+        const fromClass = inferProjects([
+            f('App.clw', "  PROGRAM\r\n  INCLUDE('Thing.inc'),ONCE\r\n  MAP\r\n  END\r\n  CODE"),
+            f('Thing.inc', "Thing  CLASS,TYPE,MODULE('Thing.clw'),LINK('Thing.clw',1)\r\nGo       PROCEDURE\r\n       END"),
+            f('Thing.clw', "  MEMBER()\r\n  MAP\r\n  INCLUDE('UTIL.INC')\r\n  END\r\nThing.Go PROCEDURE\r\n  CODE\r\n  RunUtil()"),
+        ], [util, utilClw]);
+        assert.deepStrictEqual(fromClass.projects[0].compile, ['App.clw', 'util.clw']);
+    });
+
+    test('a library that calls another library brings that one in too', () => {
+        const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('UTIL.INC')\r\n  END\r\n  CODE\r\n  RunUtil()")], [
+            f(LIB + 'UTIL.INC', "  MODULE('util.clw')\r\nRunUtil(),LONG,PROC\r\n  END"),
+            f(LIB + 'util.clw', "  MEMBER()\r\n  MAP\r\n  INCLUDE('DEP.INC')\r\n  END\r\nRunUtil PROCEDURE\r\n  CODE\r\n  Dependency()"),
+            f(LIB + 'DEP.INC', "  MODULE('dep.clw')\r\nDependency()\r\n  END"),
+            f(LIB + 'dep.clw', '  MEMBER()'),
+        ]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw', 'util.clw', 'dep.clw']);
+    });
+
+    test('a prototype in a MAP is a declaration, not a call', () => {
+        const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('UTIL.INC')\r\n  RunUtil(),LONG,PROC\r\n  END\r\n  CODE")], [
+            f(LIB + 'UTIL.INC', "  MODULE('util.clw')\r\nRunUtil(),LONG,PROC\r\n  END"), f(LIB + 'util.clw', '  MEMBER()'),
+        ]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
     test('compiler directives inside a MODULE block are not procedures a program can call', () => {
         const inc = f(LIB + 'CWUTIL.INC', "  MODULE('cwutil.clw')\r\n    PRAGMA('link(C%V%DOS%X%%L%.LIB)')\r\n    COMPILE('***',_WIDTH32_)\r\nOpenUrlLink(STRING url),ULONG,PROC\r\n  END");
         const r = inferProjects([f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('CWUTIL.INC'),ONCE\r\n  END\r\n  PRAGMA('define(x=>1)')\r\n  CODE\r\n  COMPILE('***',1)")], [inc, cwutilClw]);
