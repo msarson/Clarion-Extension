@@ -137,14 +137,14 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
     return answer === 'Overwrite';
 }
 
+/** A project New Solution writes: its program file, and whether its prototypes mark exports (a DLL's .exp). */
+type NewProjectSpec = CwprojSpec & { programFile?: string; exportsMarked?: boolean };
+
 /**
  * #763 — the user confirms what the folder inference proposed: which programs become projects,
  * which of them are DLLs, where the modules named after no program go, and whether possible
  * leftovers are compiled. Returns the projects to write, or undefined when cancelled.
  */
-/** A project New Solution writes: its program file, and whether its prototypes mark exports (a DLL's .exp). */
-type NewProjectSpec = CwprojSpec & { programFile?: string; exportsMarked?: boolean };
-
 async function confirmProjects(inference: FolderInference): Promise<NewProjectSpec[] | undefined> {
     const programItems = inference.projects.map(p => ({
         label: p.name,
