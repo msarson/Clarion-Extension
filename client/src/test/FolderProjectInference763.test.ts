@@ -206,6 +206,40 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.classImplementations, []);
     });
 
+    // Library sources: files outside the folder that redirection finds (Clarion's libsrc, accessories).
+    const LIB = 'C:\\Clarion\\libsrc\\win\\';
+    const cwutilInc = f(LIB + 'CWUTIL.INC', "  MODULE('cwutil.clw')\r\nOpenUrlLink(STRING url),ULONG,PROC\r\n  END");
+    const cwutilClw = f(LIB + 'CWUtil.CLW', '  MEMBER()');
+    const efocusInc = f(LIB + 'EFOCUS.INC', "EnhancedFocusClassType CLASS,TYPE,MODULE('EFOCUS.CLW'),LINK('EFOCUS.CLW',1),DLL(0)\r\nInit  PROCEDURE\r\n  END");
+    const efocusClw = f(LIB + 'EFOCUS.CLW', '  MEMBER()');
+    const usesLibs = '  PROGRAM\r\n  INCLUDE(\'EFOCUS.INC\'),ONCE\r\n  MAP\r\n  INCLUDE(\'CWUTIL.INC\'),ONCE\r\n  END\r\n  CODE\r\n  OpenUrlLink(\'x\')';
+
+    test('a MAP MODULE whose source is a library outside the folder is listed by its bare name', () => {
+        const r = inferProjects([f('App.clw', usesLibs)], [cwutilInc, cwutilClw, efocusInc, efocusClw]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw', 'CWUtil.CLW']);
+        assert.deepStrictEqual(r.projects[0].unreferenced, []);
+    });
+
+    test("a library CLASS is left to its LINK, and a MODULE naming no source adds nothing", () => {
+        const win32 = f(LIB + 'WIN32.INC', "  MODULE('Win32')\r\nGetTickCount(),ULONG,PASCAL\r\n  END");
+        const r = inferProjects([f('App.clw', usesLibs.replace("INCLUDE('CWUTIL.INC')", "INCLUDE('WIN32.INC')"))], [win32, efocusInc, efocusClw]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
+    test('libraries are found through includes of includes, and only for the programs that reach them', () => {
+        const r = inferProjects([
+            f('App.clw', "  PROGRAM\r\n  MAP\r\n  INCLUDE('AppMap.inc')\r\n  END\r\n  CODE"),
+            f('AppMap.inc', "  INCLUDE('CWUTIL.INC'),ONCE"),
+            f('Other.clw', '  PROGRAM\r\n  CODE\r\n  X()'),
+        ], [cwutilInc, cwutilClw]);
+        assert.deepStrictEqual(r.projects.map(p => p.compile), [['App.clw', 'CWUtil.CLW'], ['Other.clw']]);
+    });
+
+    test('a file in the folder wins over a library file of the same name', () => {
+        const r = inferProjects([f('App.clw', usesLibs), f('CWUTIL.INC', '! a local copy that declares nothing')], [cwutilInc, cwutilClw]);
+        assert.deepStrictEqual(r.projects[0].compile, ['App.clw']);
+    });
+
     test('a member nothing reaches through MODULE is flagged as a possible leftover', () => {
         const r = inferProjects([
             f('App.clw', exe),

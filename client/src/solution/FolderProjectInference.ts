@@ -104,13 +104,23 @@ function programKind(ls: string[]): 'exe' | 'dll' {
 /** A project name nothing can misread: MSBuild expands $( @( %( and ; ' " or control characters break the files. */
 const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
 
-export function inferProjects(files: SourceFile[]): FolderInference {
+/**
+ * `libraryFiles` are sources outside the folder that redirection finds for the names the folder's
+ * directives use (Clarion's libsrc, accessories), with their full paths as relPath. The folder's
+ * own files win over a library file of the same name, as `.` comes first in a redirection file.
+ */
+export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = []): FolderInference {
     // Directives name a file without its folder: when several folders hold that name, the one
     // beside the program it is read for is meant.
     const byName = new Map<string, SourceFile[]>();
     for (const f of files) {
         const key = baseName(f.relPath).toLowerCase();
         byName.set(key, [...(byName.get(key) ?? []), f]);
+    }
+    const library = new Set(libraryFiles);
+    for (const f of libraryFiles) {
+        const key = baseName(f.relPath).toLowerCase();
+        if (!byName.has(key)) byName.set(key, [f]);
     }
     /**
      * The file a directive names, read for `near`: a target with a folder is that file (whole
@@ -161,7 +171,7 @@ export function inferProjects(files: SourceFile[]): FolderInference {
     // to the build (compiler-verified, #763), so it is neither listed nor asked about. A CLASS
     // statement may run over several lines joined with `|`.
     const classModules = new Set<string>();
-    for (const f of files) {
+    for (const f of [...files, ...libraryFiles]) {
         if (!/CLASS/i.test(f.text)) continue;
         // Only lines that say CLASS, and the lines they continue onto, are stripped of comments.
         const raw = f.text.split(/\r?\n/);
@@ -242,6 +252,15 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         const project = projectOf.get(program)!;
         const reached = reachedModules(program);
         project.unreferenced = project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
+        // A library source a MAP MODULE reaches has no LINK to build it (compiler-verified, #763):
+        // the project lists it by bare name, as a generated project does, and redirection finds it.
+        // A CLASS's MODULE is left to the class's LINK.
+        for (const file of reached) {
+            const name = baseName(file.relPath);
+            if (library.has(file) && isClw(name) && !classModules.has(name.toLowerCase()) && !project.compile.includes(name)) {
+                project.compile.push(name);
+            }
+        }
     }
     return { projects, unassigned, missingProgram, ambiguous, classImplementations };
 }
