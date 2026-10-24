@@ -24,7 +24,7 @@ interface Property {
 }
 interface Group { configuration: string | null; conditional: boolean; groupIndent: string; closeStart: number; closeEnd: number; closeAlone: boolean; closeLineStart: number; props: Property[] }
 
-const eolOf = (text: string) => text.includes('\r\n') ? '\r\n' : '\n';
+export const eolOf = (text: string) => text.includes('\r\n') ? '\r\n' : '\n';
 
 const xmlUnescape = (s: string) => s.replace(/&(lt|gt|quot|apos|amp);/g, (_m, e: string) => ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' } as Record<string, string>)[e]);
 const xmlEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -33,19 +33,19 @@ const msbuildUnescape = (s: string) => s.replace(/%([0-9a-fA-F]{2})/g, (_m, h: s
 const msbuildEscape = (s: string) => s.replace(/%(?=[0-9a-fA-F]{2})/g, '%25').replace(/;/g, '%3b');
 
 /** The display value of a property's raw text, and the raw text for a display value. */
-const decode = (raw: string) => msbuildUnescape(xmlUnescape(raw));
-const encode = (value: string) => xmlEscape(msbuildEscape(value));
+export const decode = (raw: string) => msbuildUnescape(xmlUnescape(raw));
+export const encode = (value: string) => xmlEscape(msbuildEscape(value));
 
-const lineStartAt = (text: string, index: number) => text.lastIndexOf('\n', index - 1) + 1;
-const lineEndAfter = (text: string, index: number) => {
+export const lineStartAt = (text: string, index: number) => text.lastIndexOf('\n', index - 1) + 1;
+export const lineEndAfter = (text: string, index: number) => {
     const nl = text.indexOf('\n', index);
     return nl < 0 ? text.length : nl + 1;
 };
-const blankBetween = (text: string, from: number, to: number) => /^[ \t]*$/.test(text.slice(from, to));
-const restOfLineBlank = (text: string, from: number) => /^[ \t]*(\r?\n|$)/.test(text.slice(from));
+export const blankBetween = (text: string, from: number, to: number) => /^[ \t]*$/.test(text.slice(from, to));
+export const restOfLineBlank = (text: string, from: number) => /^[ \t]*(\r?\n|$)/.test(text.slice(from));
 
 /** The text with comments and CDATA blanked (newlines kept), so structure is matched on live XML at the same offsets. */
-const mask = (text: string) => text.replace(/<!--[^]*?-->|<!\[CDATA\[[^]*?\]\]>/g, m => m.replace(/[^\r\n]/g, ' '));
+export const mask = (text: string) => text.replace(/<!--[^]*?-->|<!\[CDATA\[[^]*?\]\]>/g, m => m.replace(/[^\r\n]/g, ' '));
 
 function configurationOf(condition: string): string | null | undefined {
     const m = /'\$\(Configuration\)(?:\|\$\(Platform\))?'\s*==\s*'([^'|]*)(?:\|[^']*)?'/.exec(condition);
