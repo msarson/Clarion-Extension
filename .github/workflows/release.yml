@@ -16,7 +16,70 @@ permissions:
   contents: write
 
 jobs:
+  # #781 — the tests run as the dry run runs them (testrelease.yml): on Windows, server and client
+  # suites, failures counting. This job used to be a `npm run test:server || true` step on
+  # ubuntu-latest, where the suite cannot pass (file resolution is case-insensitive, as the
+  # compiler's is; #442): the 1.0.9 release showed 331 failing under a green step. The release job
+  # below needs this one, so nothing is merged, tagged or published unless the suite passes, and
+  # it releases the very commit tested here (outputs.sha), not whatever the branch holds by then.
+  # Keep these steps in step with testrelease.yml's.
+  test:
+    runs-on: windows-latest
+
+    # It only reads: npm ci and the suite run without the release's write token.
+    permissions:
+      contents: read
+
+    outputs:
+      sha: ${{ steps.tested.outputs.sha }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout version branch
+        uses: actions/checkout@v5
+        with:
+          ref: version-${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the tested commit
+        id: tested
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify version matches input
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match release input ($INPUT_VERSION)"
+            exit 1
+          fi
+          echo "✅ Version verified: $PKG_VERSION"
+
+      - name: Build dev for the tests
+        run: npm run compile:dev
+
+      - name: Run server tests
+        run: npm run test:server
+
+      - name: Run client tests
+        run: npm run test:client
+
   release:
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -25,6 +88,28 @@ jobs:
         with:
           ref: version-${{ inputs.version }}
           fetch-depth: 0
+
+      # #781 — the branch is checked out again here, minutes after the tests; a push in between
+      # would release a commit they never ran on. Stop instead: dispatch the release again. A
+      # version tag left by an earlier, partly failed attempt must name this commit too: the
+      # release step updates an existing release, so a fix pushed under the same version would
+      # ship a VSIX the tag does not describe. That needs a new version instead.
+      - name: Verify this is the commit the tests passed on
+        env:
+          TESTED: ${{ needs.test.outputs.sha }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ -z "$TESTED" ] || [ "$HEAD_SHA" != "$TESTED" ]; then
+            echo "❌ version-$INPUT_VERSION is at $HEAD_SHA, but the tests passed on '$TESTED'. Dispatch the release again."
+            exit 1
+          fi
+          TAG_SHA=$(git ls-remote origin "refs/tags/v$INPUT_VERSION" "refs/tags/v$INPUT_VERSION^{}" | tail -n 1 | cut -f1)
+          if [ -n "$TAG_SHA" ] && [ "$TAG_SHA" != "$TESTED" ]; then
+            echo "❌ Tag v$INPUT_VERSION already names $TAG_SHA, not the tested $TESTED. Release the change as a new version."
+            exit 1
+          fi
+          echo "✅ Releasing the tested commit $HEAD_SHA"
 
       - name: Configure git
         run: |
@@ -49,16 +134,7 @@ jobs:
           fi
           echo "✅ Version verified: $PKG_VERSION"
 
-      - name: Build dev and run tests
-        run: npm run compile:dev
-        # Build dev output for test runner (tests run against tsc output, not the bundle)
-
-      - name: Run tests
-        run: npm run test:server || true
-        # Some tests rely on local Windows file paths (Clarion installation, redirection fixtures)
-        # and are expected to fail on the Linux CI runner — these are pre-existing environment gaps.
-        # We verify tests pass fully locally before triggering a release.
-
+      # The tests ran in the test job; `vsce package` builds the bundle itself (vscode:prepublish).
       - name: Install vsce
         run: npm install -g @vscode/vsce
 
@@ -75,6 +151,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
+          # #781 — the tag goes on the tested commit; the default is the run's github.sha, the
+          # branch head when the release was dispatched.
+          target_commitish: ${{ needs.test.outputs.sha }}
           name: Release v${{ inputs.version }}
           draft: false
           prerelease: false
@@ -97,8 +176,12 @@ jobs:
 
             See [CHANGELOG.md](https://github.com/msarson/Clarion-Extension/blob/master/CHANGELOG.md) for full details.
 
+      # #781 — the VSIX packaged from the tested commit, the one the GitHub release carries. Plain
+      # `vsce publish` packages the working tree again, and by now that is master after the merge.
       - name: Publish to VS Code Marketplace
-        run: vsce publish --pat ${{ secrets.VSCE_PAT }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: vsce publish --packagePath "./clarion-extensions-$INPUT_VERSION.vsix" --pat ${{ secrets.VSCE_PAT }}
 
       - name: Create next version branch
         env:
