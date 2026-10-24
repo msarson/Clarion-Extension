@@ -18,7 +18,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Configuration and build
 
 - **With no solution loaded, the Actions pane offers every way into one.** Next to "No solution open" it now lists Open a solution, New solution (when a folder is open) and the five most recent solutions, each opening as it does from the Solution View. [#783](https://github.com/msarson/Clarion-Extension/issues/783)
-- **New Solution builds a project for each program already in the folder.** In a folder of existing sources it offers one project per PROGRAM, with each file assigned by its MEMBER statement or, for a generated module named after its program, by name; it marks a DLL by its empty main CODE and asks about any module it cannot place or that nothing calls. A DLL still needs its export file before it builds. [#763](https://github.com/msarson/Clarion-Extension/issues/763)
+- **New Solution builds a project for each program already in the folder.** In a folder of existing sources it offers one project per PROGRAM: files are assigned by their MEMBER statement or a generated module's name, class implementations are left to their LINK, library sources a program calls (such as Clarion's cwutil.clw) are found through redirection and listed, and a DLL is marked by its empty main CODE. It asks only about modules it cannot place or that nothing calls, and a DLL still needs its export file before it builds. [#763](https://github.com/msarson/Clarion-Extension/issues/763)
 - **A recent solution in the folder already open loads when you pick it.** Picking it from the recent solutions selected it but never loaded it, so nothing happened. [#785](https://github.com/msarson/Clarion-Extension/issues/785)
 
 #### Maintenance
