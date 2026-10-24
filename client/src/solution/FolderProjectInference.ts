@@ -56,6 +56,11 @@ const dirName = (p: string) => /[\\/]/.test(p) ? p.replace(/[\\/][^\\/]*$/, '').
 const stem = (p: string) => baseName(p).replace(/\.[^.]*$/, '').toLowerCase();
 const isClw = (p: string) => /\.clw$/i.test(p);
 const normalize = (p: string) => p.replace(/\//g, '\\').toLowerCase();
+/** The relative path is the target, or ends with it at a folder boundary (`a\x` is not `ba\x`). */
+const pathMatches = (relPath: string, target: string) => {
+    const p = normalize(relPath);
+    return p === target || p.endsWith('\\' + target);
+};
 
 /** The first statement, read only as far as it takes. */
 function firstStatement(text: string): string {
@@ -101,9 +106,22 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         const key = baseName(f.relPath).toLowerCase();
         byName.set(key, [...(byName.get(key) ?? []), f]);
     }
-    const lookup = (name: string, near: SourceFile) => {
-        const found = byName.get(name);
-        return found && (found.find(f => dirName(f.relPath) === dirName(near.relPath)) ?? found[0]);
+    /**
+     * The file a directive names, read for `near`: a target with a folder is that file (whole
+     * folder names: `a\x` is not `ba\x`); a bare name is the one beside `near`, else the first.
+     * #449: a target without an extension means .clw.
+     */
+    const resolve = (raw: string, near: SourceFile): SourceFile | undefined => {
+        for (const target of clarionSourceCandidates(normalize(raw).replace(/^\.\\/, ''))) {
+            const found = byName.get(baseName(target));
+            if (!found) continue;
+            if (/\\/.test(target)) {
+                const named = found.find(f => pathMatches(f.relPath, target));
+                if (named) return named;
+            }
+            return found.find(f => dirName(f.relPath) === dirName(near.relPath)) ?? found[0];
+        }
+        return undefined;
     };
     // Shared INCLUDE trees are walked once per program: split and strip each file once.
     const lineCache = new Map<SourceFile, string[]>();
@@ -113,24 +131,20 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         return ls;
     };
 
-    /** Every file name a MODULE('x') reaches from the program, following INCLUDEs and the reached members. */
-    const reachedModules = (program: SourceFile): Set<string> => {
-        const seen = new Set<SourceFile>(), reached = new Set<string>();
+    /** Every file a MODULE('x') reaches from the program, following INCLUDEs and the reached members. */
+    const reachedModules = (program: SourceFile): Set<SourceFile> => {
+        const seen = new Set<SourceFile>(), reached = new Set<SourceFile>();
         const stack: SourceFile[] = [program];
-        // #449: a directive's target without an extension means .clw.
-        const targets = (raw: string) => clarionSourceCandidates(baseName(raw).toLowerCase());
-        const follow = (name: string) => { const file = lookup(name, program); if (file) stack.push(file); };
         while (stack.length) {
             const file = stack.pop()!;
             if (seen.has(file)) continue;
             seen.add(file);
             for (const line of linesOf(file)) {
-                for (const m of line.matchAll(/\bINCLUDE\s*\(\s*'([^']+)'/gi)) targets(m[1]).forEach(follow);
-                for (const m of line.matchAll(/\bMODULE\s*\(\s*'([^']+)'/gi)) {
-                    for (const target of targets(m[1])) {
-                        reached.add(target);
-                        follow(target);
-                    }
+                for (const m of line.matchAll(/\b(INCLUDE|MODULE)\s*\(\s*'([^']+)'/gi)) {
+                    const target = resolve(m[2], program);
+                    if (!target) continue;
+                    if (m[1].toUpperCase() === 'MODULE') reached.add(target);
+                    stack.push(target);
                 }
             }
         }
@@ -171,9 +185,11 @@ export function inferProjects(files: SourceFile[]): FolderInference {
     const unassigned: string[] = [], missingProgram: string[] = [], ambiguous: FolderInference['ambiguous'] = [];
     /** Adds the module to its program; between programs of one name, the path a MEMBER names, then the module's own folder decides. */
     const assign = (f: SourceFile, candidates: SourceFile[], target = '') => {
-        const owner = candidates.length === 1 ? candidates[0]
-            : candidates.find(c => /[\\/]/.test(target) && clarionSourceCandidates(target).some(t => normalize(c.relPath).endsWith(t)))
-            ?? candidates.find(c => dirName(c.relPath) === dirName(f.relPath));
+        if (candidates.length > 1 && /\\/.test(target)) {
+            const named = candidates.filter(c => clarionSourceCandidates(target).some(t => pathMatches(c.relPath, t)));
+            if (named.length > 0) candidates = named;
+        }
+        const owner = candidates.length === 1 ? candidates[0] : candidates.find(c => dirName(c.relPath) === dirName(f.relPath));
         if (owner) projectOf.get(owner)!.compile.push(f.relPath);
         else ambiguous.push({ file: f.relPath, candidates: candidates.map(c => projectOf.get(c)!.name) });
     };
@@ -191,10 +207,11 @@ export function inferProjects(files: SourceFile[]): FolderInference {
         }
     }
 
+    const fileAt = new Map(clw.map(f => [f.relPath, f]));
     for (const program of programs) {
         const project = projectOf.get(program)!;
         const reached = reachedModules(program);
-        project.unreferenced = project.compile.slice(1).filter(m => !reached.has(baseName(m).toLowerCase()));
+        project.unreferenced = project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
     }
     return { projects, unassigned, missingProgram, ambiguous };
 }

@@ -127,6 +127,21 @@ suite('New solution from a folder of sources (#763)', () => {
         assert.deepStrictEqual(r.projects.map(p => p.compile), [['a\\App.clw'], ['b\\App.clw', 'Worker.clw']]);
     });
 
+    test('a MEMBER path matches whole folder names, not the end of one', () => {
+        const r = inferProjects([f('ba\\App.clw', exe), f('a\\App.clw', exe), f('Worker.clw', member('a\\App.clw'))]);
+        assert.deepStrictEqual(r.projects.map(p => p.compile), [['ba\\App.clw'], ['a\\App.clw', 'Worker.clw']]);
+    });
+
+    test('a MODULE or INCLUDE with a folder follows that file, not another of the same name', () => {
+        const r = inferProjects([
+            f('App.clw', exe.replace("MODULE('App001.clw')", "MODULE('src\\Worker.clw')")),
+            f('other\\Worker.clw', member('App')),
+            f('src\\Worker.clw', member('App', "  MAP\r\n    MODULE('Required.clw')\r\n    END\r\n  END")),
+            f('src\\Required.clw', member('App')),
+        ]);
+        assert.deepStrictEqual(r.projects[0].unreferenced, ['other\\Worker.clw']);
+    });
+
     test('MODULE and INCLUDE without an extension mean .clw (#449)', () => {
         const r = inferProjects([
             f('App.clw', exe.replace("MODULE('App001.clw')", "MODULE('App001')") + "\r\n  INCLUDE('Hdr')"),
