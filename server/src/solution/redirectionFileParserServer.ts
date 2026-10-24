@@ -259,6 +259,15 @@ export function resolveConfigurationMode(
   return mode;
 }
 
+/** What a parser reads from the installation: serverSettings by default (#763). */
+export interface RedirectionSettings {
+  macros: Record<string, string>;
+  redirectionFile: string;
+  readonly primaryRedirectionPath: string;
+  libsrcPaths: string[];
+  configuration: string;
+}
+
 export class RedirectionFileParserServer {
   private readonly macros: Record<string, string>;
   private static redFileCache: Map<string, RedirectionEntry[]> = new Map();
@@ -277,6 +286,9 @@ export class RedirectionFileParserServer {
   // Clarion 11.1 docs (redirection_file.htm) — the .red file's own dir is
   // wrong for global-fallback reds (01d635ef).
   private projectPath: string | undefined;
+  private readonly settings: RedirectionSettings;
+  private readonly redCache: Map<string, RedirectionEntry[]>;
+  private readonly incCache: Map<string, RedirectionEntry[]>;
 
   /**
    * Macro source semantics (Aspect 2 of `3f9f91c8` audit).
@@ -299,9 +311,16 @@ export class RedirectionFileParserServer {
    * shape is parsed as a redirection entry, not a macro definition. Earlier
    * task plan-field framings of "cross-file macro reference" trapped this
    * incorrectly; see `docs/audits/include-chaining-audit-3f9f91c8.md` Step 3.
+   *
+   * #763: `settings` replaces serverSettings for one parser — New Solution resolves names for an
+   * installation before any solution is loaded. Such a parser keeps its own parse caches: the
+   * shared ones hold macros expanded for the loaded solution's installation (#568).
    */
-  constructor() {
-    this.macros = serverSettings.macros;
+  constructor(settings?: RedirectionSettings) {
+    this.settings = settings ?? serverSettings;
+    this.redCache = settings ? new Map() : RedirectionFileParserServer.redFileCache;
+    this.incCache = settings ? new Map() : RedirectionFileParserServer.includeCache;
+    this.macros = this.settings.macros;
   }
 
   /**
@@ -343,15 +362,15 @@ export class RedirectionFileParserServer {
 
   public parseRedFile(projectPath: string): RedirectionEntry[] {
     this.projectPath = projectPath;
-    if (!serverSettings.redirectionFile) {
+    if (!this.settings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
     // #765: resolve, not join — the version's red file name may be a full path, which
     // the IDE (.NET Path.Combine) keeps as it is.
-    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    const projectRedFile = path.resolve(projectPath, this.settings.redirectionFile);
+    const globalRedFile = path.resolve(this.settings.primaryRedirectionPath, this.settings.redirectionFile);
 
     let redFileToParse = "";
     try {
@@ -373,9 +392,9 @@ export class RedirectionFileParserServer {
       const cacheKey = this.createCacheKey(redFileToParse);
       
       // Check if we have cached entries for this file path and mtime
-      if (RedirectionFileParserServer.redFileCache.has(cacheKey)) {
+      if (this.redCache.has(cacheKey)) {
         logger.info(`✅ Using cached redirection entries for: ${redFileToParse} (mtime: ${this.getFileMtime(redFileToParse)})`);
-        this.entries = RedirectionFileParserServer.redFileCache.get(cacheKey) || [];
+        this.entries = this.redCache.get(cacheKey) || [];
         return this.entries;
       }
 
@@ -388,7 +407,7 @@ export class RedirectionFileParserServer {
       this.entries = this.parseRedFileRecursive(redFileToParse, [], true);
       
       // Cache the result with the new cache key
-      RedirectionFileParserServer.redFileCache.set(cacheKey, this.entries);
+      this.redCache.set(cacheKey, this.entries);
       
       const duration = Date.now() - started;
       logger.info(`[RED][parse:end] #${id} file=${redFileToParse} rules=${this.entries.length} durMs=${duration}`);
@@ -405,13 +424,13 @@ export class RedirectionFileParserServer {
   // Async version of parseRedFile for better performance
   public async parseRedFileAsync(projectPath: string): Promise<RedirectionEntry[]> {
     this.projectPath = projectPath;
-    if (!serverSettings.redirectionFile) {
+    if (!this.settings.redirectionFile) {
       logger.info("redirectionFile not configured — skipping red file lookup");
       this.lastRedFileParsed = '(no redirectionFile setting)';
       return [];
     }
-    const projectRedFile = path.resolve(projectPath, serverSettings.redirectionFile);
-    const globalRedFile = path.resolve(serverSettings.primaryRedirectionPath, serverSettings.redirectionFile);
+    const projectRedFile = path.resolve(projectPath, this.settings.redirectionFile);
+    const globalRedFile = path.resolve(this.settings.primaryRedirectionPath, this.settings.redirectionFile);
 
     try {
       // Use async file existence check
@@ -438,9 +457,9 @@ export class RedirectionFileParserServer {
       const cacheKey = this.createCacheKey(redFileToParse);
       
       // Check if we have cached entries for this file path and mtime
-      if (RedirectionFileParserServer.redFileCache.has(cacheKey)) {
+      if (this.redCache.has(cacheKey)) {
         logger.info(`✅ Using cached redirection entries for: ${redFileToParse} (mtime: ${this.getFileMtime(redFileToParse)})`);
-        this.entries = RedirectionFileParserServer.redFileCache.get(cacheKey) || [];
+        this.entries = this.redCache.get(cacheKey) || [];
         return this.entries;
       }
 
@@ -453,7 +472,7 @@ export class RedirectionFileParserServer {
       this.entries = await this.parseRedFileRecursiveAsync(redFileToParse, [], true);
       
       // Cache the result with the new cache key
-      RedirectionFileParserServer.redFileCache.set(cacheKey, this.entries);
+      this.redCache.set(cacheKey, this.entries);
       
       const duration = Date.now() - started;
       logger.info(`[RED][parse:end] #${id} file=${redFileToParse} rules=${this.entries.length} durMs=${duration}`);
@@ -481,9 +500,9 @@ export class RedirectionFileParserServer {
       // Check if we have this include file cached
       if (!isFirst) {
         const includeCacheKey = this.createCacheKey(redFileToParse);
-        if (RedirectionFileParserServer.includeCache.has(includeCacheKey)) {
+        if (this.incCache.has(includeCacheKey)) {
           logger.info(`✅ Using cached include file: ${redFileToParse} (mtime: ${this.getFileMtime(redFileToParse)})`);
-          const cachedEntries = RedirectionFileParserServer.includeCache.get(includeCacheKey) || [];
+          const cachedEntries = this.incCache.get(includeCacheKey) || [];
           // Add the cached entries to our entries array
           entries.push(...cachedEntries);
           return entries;
@@ -589,7 +608,7 @@ export class RedirectionFileParserServer {
       // Cache the include file entries if this is an include
       if (!isFirst && includeEntries.length > 0) {
         const includeCacheKey = this.createCacheKey(redFileToParse);
-        RedirectionFileParserServer.includeCache.set(includeCacheKey, includeEntries);
+        this.incCache.set(includeCacheKey, includeEntries);
         logger.info(`✅ Cached ${includeEntries.length} entries for include file: ${redFileToParse}`);
       }
     } catch (error) {
@@ -617,9 +636,9 @@ export class RedirectionFileParserServer {
       // Check if we have this include file cached
       if (!isFirst) {
         const includeCacheKey = this.createCacheKey(redFileToParse);
-        if (RedirectionFileParserServer.includeCache.has(includeCacheKey)) {
+        if (this.incCache.has(includeCacheKey)) {
           logger.info(`✅ Using cached include file: ${redFileToParse} (mtime: ${this.getFileMtime(redFileToParse)})`);
-          const cachedEntries = RedirectionFileParserServer.includeCache.get(includeCacheKey) || [];
+          const cachedEntries = this.incCache.get(includeCacheKey) || [];
           // Add the cached entries to our entries array
           entries.push(...cachedEntries);
           return entries;
@@ -727,7 +746,7 @@ export class RedirectionFileParserServer {
       // Cache the include file entries if this is an include
       if (!isFirst && includeEntries.length > 0) {
         const includeCacheKey = this.createCacheKey(redFileToParse);
-        RedirectionFileParserServer.includeCache.set(includeCacheKey, includeEntries);
+        this.incCache.set(includeCacheKey, includeEntries);
         logger.info(`✅ Cached ${includeEntries.length} entries for include file: ${redFileToParse}`);
       }
     } catch (error) {
@@ -795,10 +814,10 @@ export class RedirectionFileParserServer {
       if (!value) {
         switch (macro) {
           case "bin":
-            value = serverSettings.primaryRedirectionPath;
+            value = this.settings.primaryRedirectionPath;
             break;
           case "redname":
-            value = path.basename(serverSettings.redirectionFile);
+            value = path.basename(this.settings.redirectionFile);
             break;
           // #435 — the remaining macros documented in redirection_file.htm's
           // "Additional Macros" block. %ROOT% and %REDDIR% need no case here:
@@ -903,7 +922,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (!matchesActiveConfiguration(entry, serverSettings.configuration, this.projectPath)) {
+        if (!matchesActiveConfiguration(entry, this.settings.configuration, this.projectPath)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {
@@ -982,8 +1001,8 @@ export class RedirectionFileParserServer {
     // Tier 3: libsrc fallback (b8b2d748). When Tier 1 entries + Tier 2 project
     // root both miss, walk serverSettings.libsrcPaths in declared order and
     // return the first existing match. No-op when libsrcPaths is empty.
-    if (serverSettings.libsrcPaths?.length) {
-      for (const libDir of serverSettings.libsrcPaths) {
+    if (this.settings.libsrcPaths?.length) {
+      for (const libDir of this.settings.libsrcPaths) {
         const candidate = path.join(libDir, filename);
         const normalized = path.normalize(candidate);
         if (checkedPaths.has(normalized)) continue;
@@ -1068,7 +1087,7 @@ export class RedirectionFileParserServer {
         // Lookup-time (not parse-time) so a configuration switch on the
         // same parser instance picks up the new active section without
         // re-parsing.
-        if (!matchesActiveConfiguration(entry, serverSettings.configuration, this.projectPath)) {
+        if (!matchesActiveConfiguration(entry, this.settings.configuration, this.projectPath)) {
           continue;
         }
         if (this.matchesMask(entry.extension, filename)) {
@@ -1158,8 +1177,8 @@ export class RedirectionFileParserServer {
     // return the first existing match. Sequential rather than parallel —
     // declared-order priority matters and the fallback only fires after a
     // miss, so the cost is bounded.
-    if (!result && serverSettings.libsrcPaths?.length) {
-      for (const libDir of serverSettings.libsrcPaths) {
+    if (!result && this.settings.libsrcPaths?.length) {
+      for (const libDir of this.settings.libsrcPaths) {
         const candidate = path.join(libDir, filename);
         const normalized = path.normalize(candidate);
         if (checkedPaths.has(normalized)) continue;
