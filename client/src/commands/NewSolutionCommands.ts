@@ -4,8 +4,10 @@ import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, CwprojSpec, generateGuid } from '../solution/SolutionFiles';
-import { FolderInference, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, generateGuid } from '../solution/SolutionFiles';
+import { classifySource, FolderInference, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { CONFIGURATIONS, NewProjectSpec, ReviewInput, ReviewResult, solutionNameError } from '../solution/NewSolutionReview';
+import { showNewSolutionReview } from '../solution/NewSolutionReviewPanel';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { versionPathSettings } from '../utils/VersionPathSettings';
 import { ClarionInstallation } from '../utils/ClarionInstallationDetector';
@@ -111,15 +113,36 @@ async function readLibraryFile(filePath: string): Promise<string | undefined> {
     }
 }
 
+/**
+ * #792 — where each of `names` (export files) is found before the review page shows them: through
+ * the installation's redirection, else in the folder itself. The page says what will happen to
+ * each; after confirmation the files are looked up again exactly as before.
+ */
+async function findExportFiles(
+    folderPath: string,
+    installation: ClarionInstallation,
+    compilerName: string,
+    configuration: string,
+    names: string[]
+): Promise<Record<string, string>> {
+    let found: Record<string, string> = {};
+    if (names.length === 0) return found;
+    try {
+        found = { ...await lookupLibrarySources(folderPath, installation, compilerName, configuration, names) };
+    } catch {
+        // Logged by the lookup; the folder itself is still checked below.
+    }
+    for (const name of names) {
+        if (!found[name] && fs.existsSync(path.join(folderPath, name))) found[name] = path.join(folderPath, name);
+    }
+    return found;
+}
+
 async function promptSolutionName(defaultName: string): Promise<string | undefined> {
     const solutionName = await vscode.window.showInputBox({
         prompt: 'Solution name',
         value: defaultName,
-        validateInput: (v) => {
-            if (!v || v.trim().length === 0) return 'Solution name cannot be empty';
-            if (/[\\/:*?"<>|]/.test(v)) return 'Solution name contains invalid characters';
-            return undefined;
-        }
+        validateInput: (v) => solutionNameError(v)
     });
     return solutionName?.trim();
 }
@@ -135,79 +158,6 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
         'Overwrite'
     );
     return answer === 'Overwrite';
-}
-
-/** A project New Solution writes: its program file, and whether its prototypes mark exports (a DLL's .exp). */
-type NewProjectSpec = CwprojSpec & { programFile?: string; exportsMarked?: boolean };
-
-/**
- * #763 — the user confirms what the folder inference proposed: which programs become projects,
- * which of them are DLLs, where the modules named after no program go, and whether possible
- * leftovers are compiled. Returns the projects to write, or undefined when cancelled.
- */
-async function confirmProjects(inference: FolderInference): Promise<NewProjectSpec[] | undefined> {
-    const programItems = inference.projects.map(p => ({
-        label: p.name,
-        description: `${p.kind === 'dll' ? 'DLL' : 'EXE'} · ${plural(p.compile.length, 'source file')}`,
-        detail: p.programFile,
-        picked: true,
-        project: p,
-    }));
-    const chosen = await vscode.window.showQuickPick(programItems, {
-        title: 'New solution: one project per program',
-        placeHolder: 'Untick a program to leave it out',
-        canPickMany: true,
-        ignoreFocusOut: true,
-    });
-    if (!chosen || chosen.length === 0) return undefined;
-    const projects = chosen.map(c => c.project);
-
-    const dllItems = projects.map(p => ({ label: p.name, description: p.programFile, picked: p.kind === 'dll', project: p }));
-    const dlls = await vscode.window.showQuickPick(dllItems, {
-        title: 'New solution: which projects are DLLs?',
-        placeHolder: 'Ticked: a DLL (its main CODE is empty). Unticked: an EXE.',
-        canPickMany: true,
-        ignoreFocusOut: true,
-    });
-    if (!dlls) return undefined;
-    const dllProjects = new Set(dlls.map(d => d.project));
-    // References and exports are worked out once the compile lists are settled (newSolution).
-    const specs: NewProjectSpec[] = projects.map(p => ({ name: p.name, guid: generateGuid(), compile: [...p.compile], kind: dllProjects.has(p) ? 'dll' as const : 'exe' as const, programFile: p.programFile }));
-
-    // Modules the inference could not place: named after no program, or naming a program that
-    // more than one folder holds (then only those programs are offered). Project names are unique.
-    const toPlace = [
-        ...inference.unassigned.map(file => ({ file, why: 'names no program', candidates: specs })),
-        ...inference.ambiguous.map(a => ({ file: a.file, why: 'names a program more than one folder holds', candidates: specs.filter(s => a.candidates.includes(s.name)) })),
-    ];
-    for (const { file, why, candidates } of toPlace) {
-        const LEAVE_OUT = 'Leave it out';
-        const pick = await vscode.window.showQuickPick([...candidates.map(s => s.name), LEAVE_OUT], {
-            title: `New solution: ${file} ${why}`,
-            placeHolder: `Which project compiles ${file}?`,
-            ignoreFocusOut: true,
-        });
-        if (pick === undefined) return undefined;
-        candidates.find(s => s.name === pick)?.compile.push(file);
-    }
-
-    const leftoverItems = projects.flatMap((p, i) => p.unreferenced.map(m => ({
-        label: m, description: specs[i].name, picked: true, spec: specs[i],
-    })));
-    if (leftoverItems.length > 0) {
-        const keep = await vscode.window.showQuickPick(leftoverItems, {
-            title: `New solution: ${plural(leftoverItems.length, 'module')} nothing calls through a MODULE`,
-            placeHolder: 'A generator can leave old modules behind. Untick the ones the project no longer uses.',
-            canPickMany: true,
-            ignoreFocusOut: true,
-        });
-        if (!keep) return undefined;
-        const kept = new Set(keep);
-        for (const item of leftoverItems) {
-            if (!kept.has(item)) item.spec.compile = item.spec.compile.filter(f => f !== item.label);
-        }
-    }
-    return specs;
 }
 
 /**
@@ -228,18 +178,11 @@ export async function newSolution(): Promise<void> {
     const installResult = await SmartSolutionOpener.detectAndPickInstallation();
     if (!installResult) return;
 
-    // Step 2: Pick build configuration (no .sln exists yet, offer standard options)
-    const configChoice = await vscode.window.showQuickPick(['Debug', 'Release'], {
-        placeHolder: 'Select build configuration'
-    });
-    if (!configChoice) return;
-
-    // Step 3 (#763): a folder that already has programs can become their solution
-    let inference: FolderInference | undefined;
-    let libraries: SourceFile[] = [];
+    // Step 2 (#763): a folder that already has programs can become their solution
     const scan = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
         () => readSourceFiles(folderPath));
+    let programs = 0;
     if (scan.tooLarge) {
         // Part of a folder would give wrong projects: offer only the empty program.
         vscode.window.showWarningMessage(`This folder holds more than ${MAX_SOURCE_FILES} Clarion source files, so New Solution does not build projects from them. Open the application's own folder to do that.`);
@@ -247,47 +190,63 @@ export async function newSolution(): Promise<void> {
         if (scan.unreadable > 0) {
             vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
         }
-        // Library sources the folder's directives reach (a MAP MODULE in CWUTIL.INC needs
-        // cwutil.clw listed). Without the server, the folder alone is used, as before.
-        libraries = await vscode.window.withProgress(
+        programs = scan.files.filter(f => /\.clw$/i.test(f.relPath) && classifySource(f.text).kind === 'program').length;
+    }
+
+    /**
+     * The folder's proposal under a configuration: library sources the folder's directives reach
+     * through its redirection (a MAP MODULE in CWUTIL.INC needs cwutil.clw listed; without the
+     * server, the folder alone is used), and where each program's export file would be found.
+     */
+    const reviewInput = async (configuration: string): Promise<ReviewInput> => {
+        const libraries = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
             () => findLibraryFiles(scan.files,
-                names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configChoice, names),
+                names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configuration, names),
                 readLibraryFile));
-        inference = inferProjects(scan.files, libraries);
-    }
-    let specs: NewProjectSpec[] | undefined;
-    if (inference && inference.projects.length > 0) {
-        const FROM_SOURCES = `From the ${plural(inference.projects.length, 'program')} in this folder`;
+        const inference = inferProjects(scan.files, libraries);
+        const exportFiles = await findExportFiles(folderPath, installResult.installation, installResult.compilerName, configuration,
+            inference.projects.map(p => `${p.name}.exp`));
+        return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: installResult.compilerName, sourceCount: scan.files.length };
+    };
+
+    // Step 3 (#792): from the programs, one review page settles the projects, the solution name
+    // and the configuration; an empty program asks for them in turn.
+    let inference: FolderInference | undefined;
+    let review: ReviewResult | undefined;
+    if (programs > 0) {
+        const FROM_SOURCES = `From the ${plural(programs, 'program')} in this folder`;
         const choice = await vscode.window.showQuickPick([FROM_SOURCES, 'A new empty program'], {
             placeHolder: 'Build the new solution from…'
         });
         if (!choice) return;
         if (choice === FROM_SOURCES) {
-            specs = await confirmProjects(inference);
-            if (!specs) return;
-            // What the user settled on (modules placed, leftovers unticked) decides the libraries
-            // listed, the projects referenced and whether a DLL marks its exports: work them out
-            // again from the final compile lists.
-            const chosen = specs;
-            const settled = inferProjects(scan.files, libraries, { compile: new Map(chosen.map(s => [s.programFile!, s.compile])) });
-            for (const spec of chosen) {
-                const project = settled.projects.find(p => p.programFile === spec.programFile);
-                if (!project) continue;
-                spec.compile = project.compile;
-                spec.exportsMarked = project.exportsMarked;
-                // Only projects the user kept: a reference to an unticked program is dropped.
-                spec.references = project.references
-                    .map(name => chosen.find(other => other.name === name))
-                    .filter((other): other is NewProjectSpec => !!other)
-                    .map(other => ({ name: other.name, guid: other.guid }));
-            }
+            const input = await reviewInput(CONFIGURATIONS[0]);
+            inference = input.inference;
+            review = await showNewSolutionReview(input, defaultName, reviewInput);
+            if (!review) return;
         }
     }
 
-    // Step 4: Prompt for solution name
-    const trimmedName = await promptSolutionName(defaultName);
-    if (!trimmedName) return;
+    let specs: NewProjectSpec[] | undefined = review?.specs;
+    let configChoice: string;
+    let trimmedName: string;
+    if (review) {
+        configChoice = review.configuration;
+        trimmedName = review.name;
+    } else {
+        // Pick build configuration (no .sln exists yet, offer standard options)
+        const picked = await vscode.window.showQuickPick(CONFIGURATIONS, {
+            placeHolder: 'Select build configuration'
+        });
+        if (!picked) return;
+        configChoice = picked;
+
+        // Step 4: Prompt for solution name
+        const named = await promptSolutionName(defaultName);
+        if (!named) return;
+        trimmedName = named;
+    }
     const slnPath = path.join(folderPath, `${trimmedName}.sln`);
 
     let clwPath: string | undefined;
