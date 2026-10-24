@@ -129,10 +129,6 @@ export class ProcedureSignatureUtils {
     }
     
     /**
-     * Compares two parameter type arrays to see if they match
-     * Handles reference indicators like *, &, etc.
-     */
-    /**
      * #793 — the parameter types of an IMPLEMENTATION line (`Name PROCEDURE(...)` that defines
      * the procedure). There a parameter's type is optional and its label required (Language
      * Reference, PROCEDURE: "the data type of each parameter (optional) followed by the label"),
@@ -163,7 +159,11 @@ export class ProcedureSignatureUtils {
         'GROUP', 'QUEUE', 'FILE', 'KEY', 'INDEX', 'VIEW', 'WINDOW', 'REPORT', 'BLOB', 'MEMO',
     ]);
 
-    /** '' in either list matches any type: an implementation parameter given by its label only (#793). */
+    /**
+     * Compares two parameter type arrays to see if they match
+     * Handles reference indicators like *, &, etc. '' in either list matches any type: an
+     * implementation parameter given by its label only (#793).
+     */
     public static parametersMatch(implParams: string[], declParams: string[]): boolean {
         if (implParams.length !== declParams.length) {
             return false;
