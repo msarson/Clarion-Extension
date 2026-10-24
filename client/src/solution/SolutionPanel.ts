@@ -36,6 +36,8 @@ interface PageMessage { type: string; field?: string; value?: string; cwproj?: s
  */
 export class SolutionPanel {
     private static properties: SolutionPanel | undefined;
+    /** The page Open Solution is waiting on; a second open replaces it (it settles as cancelled). */
+    private static opening: SolutionPanel | undefined;
     private static graph: GraphStatus | undefined;
 
     private input: SolutionPageInput | undefined;
@@ -43,6 +45,8 @@ export class SolutionPanel {
     /** The export-file lookup already done, by the selection it was done for. */
     private expLookedUpFor = '';
     private settle?: (selection: OpenSelection | null) => void;
+    /** Closed: nothing more is posted to it, and work in flight stops. */
+    private disposed = false;
 
     private constructor(
         private readonly panel: vscode.WebviewPanel,
@@ -58,7 +62,9 @@ export class SolutionPanel {
             vscode.window.showErrorMessage(`Solution page: ${err instanceof Error ? err.message : String(err)}`);
         }));
         panel.onDidDispose(() => {
+            this.disposed = true;
             if (SolutionPanel.properties === this) SolutionPanel.properties = undefined;
+            if (SolutionPanel.opening === this) SolutionPanel.opening = undefined;
             this.finish(null);
         });
     }
@@ -99,9 +105,12 @@ export class SolutionPanel {
      * what is known; `reason` says why it is asked.
      */
     static async chooseForOpen(solutionFile: string, remembered: SolutionChoice, reason?: string): Promise<OpenSelection | null> {
+        // As a second quick pick closed the first: two opens confirmed together would load twice.
+        SolutionPanel.opening?.panel.dispose();
         const panel = vscode.window.createWebviewPanel('clarion.openSolution', `Open ${path.basename(solutionFile)}`,
             vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
         const page = new SolutionPanel(panel, 'open', solutionFile, { ...remembered }, reason);
+        SolutionPanel.opening = page;
         const chosen = new Promise<OpenSelection | null>(resolve => { page.settle = resolve; });
         await page.reload();
         return chosen;
@@ -115,7 +124,10 @@ export class SolutionPanel {
             page.panel.dispose();
             return;
         }
-        page.choice = SolutionPanel.currentChoice();
+        // An installation chosen on the page that still waits for its compiler version is kept.
+        const current = SolutionPanel.currentChoice();
+        const pending = !page.choice.version && !!page.choice.propertiesFile && !samePath(page.choice.propertiesFile, current.propertiesFile ?? '');
+        page.choice = pending ? { ...current, propertiesFile: page.choice.propertiesFile, version: undefined } : current;
         void page.reload();
     }
 
@@ -137,6 +149,7 @@ export class SolutionPanel {
     /** Reads the installations, the .sln and its projects again, and redraws. */
     private async reload(): Promise<void> {
         const detected = await ClarionInstallationDetector.detectInstallations();
+        if (this.disposed) return;
         // #479 — an installation outside the standard locations is never detected; keep the one in use.
         for (const file of [this.choice.propertiesFile, ...this.installations.map(i => i.propertiesPath)]) {
             if (file && !detected.some(i => samePath(i.propertiesPath, file)) && fs.existsSync(file)) {
@@ -145,6 +158,7 @@ export class SolutionPanel {
                 if (extra) detected.push(extra);
             }
         }
+        if (this.disposed) return;
         this.installations = detected;
 
         let slnText = '';
@@ -192,12 +206,15 @@ export class SolutionPanel {
     }
 
     private state() {
-        return this.input ? buildSolutionPageState({ ...this.input, choice: this.choice }) : undefined;
+        // The installations as they are now: Browse… adds one after the input was read.
+        return this.input
+            ? buildSolutionPageState({ ...this.input, installations: this.installations.map(toOption), choice: this.choice })
+            : undefined;
     }
 
     private post(): void {
         const state = this.state();
-        if (state) {
+        if (state && !this.disposed) {
             void this.panel.webview.postMessage({ type: 'state', state, graphBuilt: !!SolutionPanel.graph && SolutionPanel.graph.status === 'built' });
         }
     }
@@ -232,7 +249,7 @@ export class SolutionPanel {
                 logger.warn(`export files not resolved: ${err instanceof Error ? err.message : String(err)}`);
             }
         }
-        if (this.expLookedUpFor !== key) return; // a later selection is being looked up
+        if (this.expLookedUpFor !== key || this.disposed) return; // a later selection is being looked up, or the page is closed
         for (const p of dlls) {
             const name = expName(p);
             const beside = [path.dirname(this.solutionFile), path.dirname(p.cwproj)].map(d => path.join(d, name)).find(f => fs.existsSync(f));

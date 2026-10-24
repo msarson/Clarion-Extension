@@ -50,11 +50,19 @@ export function showNewSolutionReview(
                     case 'keep': choices = { ...choices, kept: { ...choices.kept, [msg.key]: msg.value } }; break;
                     case 'name': choices = { ...choices, name: msg.value }; break;
                     case 'configuration': {
+                        const before = choices.configuration;
                         choices = { ...choices, configuration: msg.value };
                         const mine = ++generation;
                         busy = true;
                         post();
-                        const next = await reconfigure(msg.value);
+                        let next: ReviewInput;
+                        try {
+                            next = await reconfigure(msg.value);
+                        } catch (err) {
+                            // The proposal is still the old configuration's: so is the choice.
+                            if (mine === generation) choices = { ...choices, configuration: before };
+                            throw err;
+                        }
                         // A later change of configuration wins over this one.
                         if (mine !== generation || settled) return;
                         input = next;

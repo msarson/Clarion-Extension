@@ -104,6 +104,11 @@ suite('Solution page: what a solution builds with (#792)', () => {
         assert.strictEqual(state.startup.value, '11111111-1111-1111-1111-111111111111');
     });
 
+    test('configurations that share a name are offered once, as the .sln\'s first entry', () => {
+        const state = buildSolutionPageState(input({ configurations: ['Debug|Win32', 'Debug|Any CPU', 'Release|Win32'] }));
+        assert.deepStrictEqual(state.configuration.options, [{ value: 'Debug|Win32', label: 'Debug' }, { value: 'Release|Win32', label: 'Release' }]);
+    });
+
     test('an installation whose ClarionProperties.xml is outside %APPDATA% says where it is (#479)', () => {
         const tree = { propertiesFile: 'D:\\Apps\\Sales\\ide\\ClarionProperties.xml', ideVersion: '12.0', compilers: ['Clarion 12.0.14373'] };
         const appData = 'C:\\Users\\a\\AppData\\Roaming';

@@ -165,7 +165,11 @@ export function buildSolutionPageState(input: SolutionPageInput): SolutionPageSt
         },
         configuration: {
             value: settled.configuration ?? '',
-            options: input.configurations.map(c => ({ value: c, label: configurationName(c) })),
+            // One per name: a configuration is chosen by name (normalizeConfigurationTo), so a second entry
+            // for another platform could never be picked.
+            options: input.configurations
+                .filter((c, i, all) => all.findIndex(x => configurationName(x).toLowerCase() === configurationName(c).toLowerCase()) === i)
+                .map(c => ({ value: c, label: configurationName(c) })),
             needs: !settled.configuration,
         },
         startup: {
