@@ -15,6 +15,10 @@ All notable changes to the Clarion Extension are documented here.
 - **An indented MAP prototype keeps its whole label in the Structure view.** A label with two colons, such as `XL:Column:S`, was shown as `S` when the prototype was indented. [#789](https://github.com/msarson/Clarion-Extension/issues/789)
 - **The attributes of a MAP prototype have hover cards, and NAME says what it means there.** NAME on a prototype showed the card for the `NAME(file)` function, and PROC, DLL, RAW, C and PASCAL showed nothing; NAME now explains the external name the linker uses, and the others show their own cards. [#791](https://github.com/msarson/Clarion-Extension/issues/791)
 
+#### Diagnostics
+
+- **An implementation that names its parameters without their types no longer mismatches its MAP prototype.** Clarion allows `Test PROCEDURE (q)` for the prototype `Test (LONG)`: in a procedure's definition a parameter's type is optional and its label required. Both sides were flagged as a signature mismatch; a parameter of another type, or a different count, still is. [#793](https://github.com/msarson/Clarion-Extension/issues/793)
+
 #### Configuration and build
 
 - **With no solution loaded, the Actions pane offers every way into one.** Next to "No solution open" it now lists Open a solution, New solution (when a folder is open) and the five most recent solutions, each opening as it does from the Solution View. [#783](https://github.com/msarson/Clarion-Extension/issues/783)
