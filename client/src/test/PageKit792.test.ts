@@ -32,7 +32,7 @@ suite('Property pages: the shared page kit (#792)', () => {
 suite('Property pages: every page script parses (#792)', () => {
     // A page whose script does not parse draws nothing and says nothing: the webview stays blank.
     const root = path.resolve(__dirname, '..', '..', '..', '..');
-    for (const file of ['client/src/project/ProjectPropertiesEditor.ts', 'client/src/solution/SolutionPanel.ts']) {
+    for (const file of ['client/src/project/ProjectPropertiesEditor.ts', 'client/src/solution/SolutionPanel.ts', 'client/src/solution/NewSolutionReviewPanel.ts']) {
         test(file, () => {
             const source = fs.readFileSync(path.join(root, file), 'utf8');
             const script = /script: `([\s\S]*?)`,\s*\}\);/.exec(source)?.[1];
