@@ -1188,8 +1188,12 @@
       "name": "NAME",
       "applicableTo": [
         "DATA_TYPE",
-        "FILE_FIELD"
+        "FILE_FIELD",
+        "PROCEDURE"
       ],
+      "controlDescriptions": {
+        "PROCEDURE": "On a procedure prototype, gives the procedure the external name the linker uses (case sensitive): the name of a function in an external library, or a name for a Clarion procedure that skips the compiler's name mangling, for example in the export list of a DLL other languages call."
+      },
       "signatures": [
         {
           "params": [

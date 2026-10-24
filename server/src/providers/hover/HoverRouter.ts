@@ -134,6 +134,14 @@ export class HoverRouter {
             mark('mapDecl');
             if (mapDeclHover) return mapDeclHover;
 
+            // 6.5 #791: an attribute of a MAP/MODULE prototype (PROC, DLL, RAW, NAME...). Step 9
+            // only runs inside a control or CLASS declaration, so these had no card, and NAME
+            // fell through to the NAME(file) built-in.
+            if (isInMapBlock) {
+                const prototypeAttributeHover = this.handlePrototypeAttribute(word, line, wordRange, document, position, tokens);
+                if (prototypeAttributeHover) return prototypeAttributeHover;
+            }
+
             // 7. Handle method declarations (BEFORE built-ins to avoid shadowing by keyword help)
             if (!isInMapBlock) { // Skip if in MAP/MODULE block to prevent misidentification
                 const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
@@ -782,6 +790,51 @@ export class HoverRouter {
     /**
      * Handle Clarion attributes
      */
+    /**
+     * #791 — the card for an attribute of a MAP/MODULE prototype: the word sits at the top level
+     * of the prototype's attribute list (after its parameter list, never inside it), on the
+     * prototype's own line or a line continued from it with `|`. Only attributes that apply to a
+     * PROCEDURE qualify, and the card takes the procedure meaning where one is recorded (NAME).
+     */
+    private handlePrototypeAttribute(
+        word: string,
+        line: string,
+        wordRange: any,
+        document: any,
+        position: { line: number; character: number },
+        tokens: Token[]
+    ): Hover | null {
+        const attribute = this.attributeService.getAttribute(word);
+        if (!attribute?.applicableTo?.includes('PROCEDURE')) return null;
+
+        const at = tokens.findIndex(t => t.line === position.line &&
+            position.character >= t.start && position.character <= t.start + t.value.length);
+        if (at < 0) return null;
+
+        // Back to the start of the statement, across `|` continuations (comments skipped).
+        let start = at;
+        for (;;) {
+            while (start > 0 && tokens[start - 1].line === tokens[start].line) start--;
+            let p = start - 1;
+            while (p >= 0 && tokens[p].type === TokenType.Comment) p--;
+            if (p < 0 || tokens[p].type !== TokenType.LineContinuation) break;
+            start = p;
+        }
+
+        // The prototype's name (or PROCEDURE keyword), then a word at paren depth 0 after it.
+        const anchor = tokens.slice(start, at).findIndex(t => t.subType === TokenType.MapProcedure);
+        if (anchor < 0) return null;
+        let depth = 0;
+        for (let i = start + anchor + 1; i < at; i++) {
+            if (tokens[i].value === '(') depth++;
+            else if (tokens[i].value === ')') depth--;
+        }
+        if (depth !== 0) return null;
+
+        const paramCount = this.countFunctionParameters(line, word, wordRange, document);
+        return this.formatter.formatAttribute(word, attribute, paramCount, 'PROCEDURE');
+    }
+
     private handleAttribute(
         word: string,
         line: string,
