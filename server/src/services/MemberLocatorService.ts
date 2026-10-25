@@ -1787,7 +1787,8 @@ export class MemberLocatorService {
             if (!token.label) continue;
             methods.push({
                 name: token.label,
-                paramCount: countParametersInDeclaration(docLines[token.line] ?? '')
+                // #805: a parameter list continued with `|` is counted whole, not from its first line.
+                paramCount: countParametersInDeclaration(docLines[token.line] === undefined ? '' : withContinuations(docLines, token.line))
             });
         }
         return { methods, parentName };

@@ -2226,8 +2226,24 @@ export class DocumentStructure {
         }
     }
 
+    /**
+     * #804 — the token a PROCEDURE takes its label from. A long label often stands alone on its
+     * line, continued with `|` (and maybe a comment), with PROCEDURE on the next: step back over
+     * the continuation to the label.
+     */
+    private tokenBeforeProcedure(index: number): Token | undefined {
+        let i = index - 1;
+        let continued = false;
+        while (i >= 0 && (this.tokens[i].type === TokenType.LineContinuation || this.tokens[i].type === TokenType.Comment)) {
+            if (this.tokens[i].type === TokenType.LineContinuation) continued = true;
+            i--;
+        }
+        // Only across a continuation: a comment alone on the line above is not part of this statement.
+        return continued ? this.tokens[i] : this.tokens[index - 1];
+    }
+
     private handleProcedureInsideDefinition(token: Token, index: number): void {
-        const prevToken = this.tokens[index - 1];
+        const prevToken = this.tokenBeforeProcedure(index);
         if (prevToken?.type === TokenType.Label) {
             token.label = prevToken.value;
          //   token.subType = TokenType.Procedure; // optional but useful
@@ -2236,7 +2252,7 @@ export class DocumentStructure {
     }
 
     private handleProcedureToken(token: Token, index: number): void {
-        const prevToken = this.tokens[index - 1];
+        const prevToken = this.tokenBeforeProcedure(index);
     
         // 🧠 Determine token type based on context
         if (this.insideClassOrInterfaceOrMapDepth > 0) {
