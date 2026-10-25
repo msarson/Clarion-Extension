@@ -14,10 +14,17 @@ All notable changes to the Clarion Extension are documented here.
 - **A MAP prototype continued onto a second line with `|` is one entry in the Structure view.** The continuation was read as a new declaration, so `EXPORT,NAME('x')` on the second line appeared as a procedure called EXPORT. [#790](https://github.com/msarson/Clarion-Extension/issues/790)
 - **An indented MAP prototype keeps its whole label in the Structure view.** A label with two colons, such as `XL:Column:S`, was shown as `S` when the prototype was indented. [#789](https://github.com/msarson/Clarion-Extension/issues/789)
 - **The attributes of a MAP prototype have hover cards, and NAME says what it means there.** NAME on a prototype showed the card for the `NAME(file)` function, and PROC, DLL, RAW, C and PASCAL showed nothing; NAME now explains the external name the linker uses, and the others show their own cards. [#791](https://github.com/msarson/Clarion-Extension/issues/791)
+- **BAND, BOR, BXOR and BSHIFT hover as built-in functions.** Their cards called them operators and showed `expr1 BAND expr2`; they now show the built-in function card, `BAND(value, mask)`, `BOR(value, mask)`, `BXOR(value, mask)` and `BSHIFT(value, count)`. [#798](https://github.com/msarson/Clarion-Extension/issues/798)
+- **The INTERFACE card shows a parent interface and COM.** The syntax now reads `INTERFACE([parentinterface]) [,TYPE] [,COM]`, and the card no longer says every method must be implemented: a derived class that re-implements its parent's interface may leave methods to the parent. [#797](https://github.com/msarson/Clarion-Extension/issues/797)
 
 #### Diagnostics
 
 - **An implementation that names its parameters without their types no longer mismatches its MAP prototype.** Clarion allows `Test PROCEDURE (q)` for the prototype `Test (LONG)`: in a procedure's definition a parameter's type is optional and its label required. Both sides were flagged as a signature mismatch; a parameter of another type, or a different count, still is. [#793](https://github.com/msarson/Clarion-Extension/issues/793)
+- **A class implementing a derived interface is warned when it leaves out an inherited method.** For `IChild INTERFACE(IParent)`, the methods IChild inherits must also be implemented, as `Class.IChild.Method`; the check counted only IChild's own methods. [#797](https://github.com/msarson/Clarion-Extension/issues/797)
+
+#### Syntax
+
+- **The file-handling built-ins are coloured alike.** STREAM, EMPTY, PACK, BUFFER, SKIP, APPEND, RELEASE, WATCH, LOGOUT, COMMIT and ROLLBACK took the function colour while FLUSH, OPEN, CLOSE and SET took the keyword colour; they now all share the keyword colour. [#799](https://github.com/msarson/Clarion-Extension/issues/799)
 
 #### Configuration and build
 
