@@ -20,6 +20,8 @@ export class SolutionManager {
     public solutionFilePath: string;
     /** #795 — the .sln's modification time when it was parsed; a later one means parse it again. */
     private parsedMtimeMs = 0;
+    /** #801 — each project file's modification time when parsed (-1: missing); any change means parse again. */
+    private parsedProjectMtimes = new Map<string, number>();
     private static instance: SolutionManager | null = null;
     private fileCache: Map<string, string> = new Map();
     private static readonly CACHE_VERSION = 1; // Increment when cache format changes
@@ -101,12 +103,16 @@ export class SolutionManager {
             // #795 — the same .sln is parsed again when it changed since it was parsed (a project
             // added from Solution Properties, by the Clarion IDE or by hand); reused, its projects
             // never changed until the window was reloaded.
+            // #801: a project's own file changed (a source added in the Clarion IDE or by hand) counts too.
             let instance = SolutionManager.instance;
-            if (!instance || instance.solutionFilePath !== filePath || instance.parsedMtimeMs !== stat.mtimeMs) {
+            if (!instance || instance.solutionFilePath !== filePath || instance.parsedMtimeMs !== stat.mtimeMs || instance.projectFilesChanged()) {
                 instance = new SolutionManager(filePath);
                 instance.parsedMtimeMs = stat.mtimeMs;
                 SolutionManager.instance = instance;
                 await instance.initialize();
+                instance.parsedProjectMtimes = new Map((instance.solution?.projects ?? [])
+                    .map(p => path.join(p.path, p.filename))
+                    .map(file => [file, SolutionManager.mtimeOf(file)]));
             }
 
             return instance;
@@ -114,6 +120,17 @@ export class SolutionManager {
             // Reset the solution operation flag when done
             (global as any).solutionOperationInProgress = false;
         }
+    }
+
+    private static mtimeOf(file: string): number {
+        try { return fs.statSync(file).mtimeMs; } catch { return -1; }
+    }
+
+    private projectFilesChanged(): boolean {
+        for (const [file, mtime] of this.parsedProjectMtimes) {
+            if (SolutionManager.mtimeOf(file) !== mtime) return true;
+        }
+        return false;
     }
 
     /** #568 — forget the instance, so the next `create()` for the same .sln loads it afresh. */

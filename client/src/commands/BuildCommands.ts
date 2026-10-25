@@ -217,7 +217,11 @@ export function registerBuildCommands(
             if (globalSolutionFile) {
                 try {
                     vscodeWindow.showInformationMessage("Force refreshing solution cache...");
-                    
+
+                    // #801: reload the solution first, so the server parses a .sln or .cwproj changed
+                    // outside the extension; the cache below only fetched the parse made at load.
+                    await commands.executeCommand('clarion.reinitializeSolution');
+
                     // Get the SolutionCache singleton
                     const solutionCache = SolutionCache.getInstance();
                     

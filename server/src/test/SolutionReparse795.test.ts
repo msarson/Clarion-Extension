@@ -67,4 +67,27 @@ suite('A changed .sln is read again on the next load (#795)', () => {
         const first = await SolutionManager.create(sln);
         assert.strictEqual(await SolutionManager.create(sln), first);
     });
+
+    // #801 — a project's own file changed (a source added in the Clarion IDE or by hand) while the
+    // .sln did not: the next load reused the old parse, so Refresh Solution never showed it.
+    test('bug-pin: a .cwproj changed after loading is read again on the next load (#801)', async () => {
+        const sources = () => SolutionManager.getInstance()!.solution.projects[0].sourceFiles.map(f => f.name);
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw']);
+
+        fs.writeFileSync(path.join(tmpRoot, 'extra.clw'), '  MEMBER()\r\n');
+        const proj = path.join(tmpRoot, 'Sales.cwproj');
+        fs.writeFileSync(proj, fs.readFileSync(proj, 'utf8').replace('<Compile Include="main.clw" />', '<Compile Include="main.clw" /><Compile Include="extra.clw" />'));
+        const later = new Date(Date.now() + 5000);
+        fs.utimesSync(proj, later, later);
+
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
+    });
+
+    test('a project file that disappears also counts as a change (#801)', async () => {
+        const first = await SolutionManager.create(sln);
+        fs.rmSync(path.join(tmpRoot, 'Sales.cwproj'));
+        assert.notStrictEqual(await SolutionManager.create(sln), first);
+    });
 });
