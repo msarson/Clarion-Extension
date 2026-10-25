@@ -32,13 +32,15 @@ suite('Solution View lists the sources of an included .prj (#758)', () => {
             '<Include Include="Sales.prj" />',
             '<Include Include="legacy\\My%20Old.PR" />',
             '<Include Include="notes.txt" />',
+            '<Include Include="Notaprj" />',
         ])), ['Sales.prj', 'legacy\\My Old.PR']);
+        assert.deepStrictEqual(legacyProjectIncludes(cwproj(['<Compile Include="Main.clw" />'])), []);
     });
 
     test('a .prj\'s Clarion sources, following its #include', () => {
         const files: Record<string, string> = { 'common.pi': "#set pfx = 'Mo'\r\n" };
         assert.deepStrictEqual(legacyProjectSources(
-            '#include common.pi\r\n#compile Main.clw\r\n#compile %pfx%d.clw /define(x=>on)\r\n#compile Main.exp\r\n',
+            '#include common.pi\r\n#compile Main.clw\r\n#compile %pfx%d.clw /define(x=>on)\r\n#compile Main.exp\r\n#compile Notaclw\r\n',
             file => files[file.toLowerCase()]),
             ['Main.clw', 'Mod.clw']);
     });

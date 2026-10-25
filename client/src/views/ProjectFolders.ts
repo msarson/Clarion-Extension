@@ -148,7 +148,9 @@ export function isSolutionProjectFile(file: string, projects: { path?: string; f
 
 /** #758 — the legacy project files (.prj, .pr) a .cwproj includes under Projects to include. */
 export function legacyProjectIncludes(cwprojText: string): string[] {
-    return listItems(cwprojText).includes.map(i => i.include).filter(i => /.prj?$/i.test(i));
+    // Most projects include none: skip parsing the item groups on every redraw.
+    if (!/<Include\s/i.test(cwprojText)) return [];
+    return listItems(cwprojText).includes.map(i => i.include).filter(i => /\.prj?$/i.test(i));
 }
 
 /**
@@ -156,5 +158,5 @@ export function legacyProjectIncludes(cwprojText: string): string[] {
  * with its #include files read through `read` (macros and conditions as common/LegacyProject reads them).
  */
 export function legacyProjectSources(prjText: string, read?: (file: string) => string | undefined): string[] {
-    return parseLegacyProject(prjText, { read }).compiles.map(c => c.file).filter(f => /.clw$/i.test(f));
+    return parseLegacyProject(prjText, { read }).compiles.map(c => c.file).filter(f => /\.clw$/i.test(f));
 }

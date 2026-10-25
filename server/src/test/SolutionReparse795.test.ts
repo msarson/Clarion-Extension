@@ -120,6 +120,27 @@ suite('A changed .sln is read again on the next load (#795)', () => {
         assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
     });
 
+    test('bug-pin: a file the .prj #includes, or a .prj that was missing, counts as a change (#758 review)', async () => {
+        const proj = path.join(tmpRoot, 'Sales.cwproj');
+        fs.writeFileSync(proj, fs.readFileSync(proj, 'utf8').replace('<Compile Include="main.clw" />', '<Include Include="Sales.prj" /><Include Include="Later.prj" />'));
+        fs.writeFileSync(path.join(tmpRoot, 'Sales.prj'), '#include common.pi\r\n#compile main.clw\r\n');
+        fs.writeFileSync(path.join(tmpRoot, 'common.pi'), '-- nothing yet\r\n');
+        // Written just now, a file can read as written during the parse (#801), which counts as a change.
+        const earlier = new Date(Date.now() - 60_000);
+        for (const f of ['Sales.cwproj', 'Sales.prj', 'common.pi']) fs.utimesSync(path.join(tmpRoot, f), earlier, earlier);
+        const first = await SolutionManager.create(sln);
+        assert.strictEqual(await SolutionManager.create(sln), first, 'unchanged: the same parse');
+
+        const later = new Date(Date.now() + 5000);
+        fs.writeFileSync(path.join(tmpRoot, 'common.pi'), '#compile extra.clw\r\n');
+        fs.utimesSync(path.join(tmpRoot, 'common.pi'), later, later);
+        const second = await SolutionManager.create(sln);
+        assert.notStrictEqual(second, first, 'the .pi changed');
+
+        fs.writeFileSync(path.join(tmpRoot, 'Later.prj'), '#compile main.clw\r\n');
+        assert.notStrictEqual(await SolutionManager.create(sln), second, 'the missing .prj appeared');
+    });
+
     test('a project file that disappears also counts as a change (#801)', async () => {
         const first = await SolutionManager.create(sln);
         fs.rmSync(path.join(tmpRoot, 'Sales.cwproj'));

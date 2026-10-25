@@ -103,6 +103,22 @@ suite('A .cwproj\'s Projects to include: the .prj\'s sources are the project\'s 
         assert.strictEqual(sm.getProjectPathForFile(modPath), root, 'not SRC: relative redirection resolves from here');
     });
 
+    // Review of #758: the same Include items as the Solution View, and every file read is watched.
+    test('only a .prj or .pr under Projects to include is read as a legacy project', async () => {
+        prj('#compile Mod.clw\r\n', 'Other.pi');
+        prj('#compile Mod.clw\r\n', 'Notaprj');
+        const project = await load(['<Compile Include="Main.clw" />', '<Include Include="Other.pi" />', '<Include Include="Notaprj" />']);
+        assert.deepStrictEqual(names(project), ['Main.clw']);
+        assert.deepStrictEqual(project.legacyProjects, []);
+    });
+
+    test('the files to watch: the .prj, what it #includes, and a .prj not there yet', async () => {
+        prj("#set x = 'Mo'\r\n", 'common.pi');
+        prj('#include common.pi\r\n#compile %x%d.clw\r\n');
+        const project = await load(['<Include Include="Proj.prj" />', '<Include Include="Later.prj" />']);
+        assert.deepStrictEqual(project.legacyProjects.flatMap(l => l.watch).map(p => path.basename(p)), ['Proj.prj', 'common.pi', 'Later.prj']);
+    });
+
     test('a reload reads the .prj again', async () => {
         prj('#compile Main.clw\r\n');
         const project = await load(['<Include Include="Proj.prj" />']);

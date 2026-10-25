@@ -74,6 +74,37 @@ suite('New Solution from a folder with a legacy .prj (#811)', () => {
         assert.deepStrictEqual(inference.projects[0].compile, ['SRC\\Proj.clw']);
     });
 
+    // Review of #811.
+    test('bug-pin: a name the .prj compiles does not take another program\'s module of that name', () => {
+        const inference = inferProjects([
+            f('A.clw', dllProgram),
+            f('B\\B.clw', dllProgram),
+            f('B\\Shared.clw', "  MEMBER('B')\r\n"),
+        ], [], { legacyProjects: [f('A.prj', '#compile A.clw, Shared.clw\r\n')] });
+        const a = inference.projects.find(p => p.name === 'A')!, b = inference.projects.find(p => p.name === 'B')!;
+        assert.deepStrictEqual(a.compile, ['A.clw', 'Shared.clw'], 'not beside A: by bare name, for redirection to find');
+        assert.deepStrictEqual(b.compile, ['B\\B.clw', 'B\\Shared.clw']);
+    });
+
+    test('a path in the .prj is read from the .prj\'s folder; outside the folder it is a bare name', () => {
+        const inference = inferProjects([
+            f('SRC\\Proj.clw', dllProgram),
+            f('SRC\\Lib\\Util.clw', bare),
+            f('Old\\Util.clw', bare),
+            f('Old\\Far.clw', bare),
+        ], [], { legacyProjects: [f('SRC\\Proj.prj', '#compile Proj.clw\r\n#compile Lib\\Util.clw\r\n#compile ..\\..\\Lib\\Far.clw\r\n')] });
+        assert.deepStrictEqual(inference.projects[0].compile, ['SRC\\Proj.clw', 'SRC\\Lib\\Util.clw', 'Far.clw']);
+        assert.deepStrictEqual(inference.unassigned, ['Old\\Util.clw', 'Old\\Far.clw']);
+    });
+
+    test('a .pi the .prj #includes by path, in a sibling folder, is read', () => {
+        const inference = inferProjects([f('App\\Main.clw', dllProgram), f('App\\M1.clw', bare)], [], {
+            legacyProjects: [f('App\\Main.prj', '#include ..\\Common\\srcs.pi\r\n#compile Main.clw\r\n'), f('Common\\srcs.pi', '#compile M1.clw\r\n')],
+        });
+        assert.deepStrictEqual(inference.projects[0].compile, ['App\\Main.clw', 'App\\M1.clw']);
+        assert.deepStrictEqual(inference.unassigned, []);
+    });
+
     test('the .cwproj includes the .prj and lists every source to link', () => {
         const text = buildCwprojContent({ name: 'Proj', guid: '{A}', compile: ['SRC\\Proj.clw', 'Shared.clw'], kind: 'dll', legacyProject: 'Proj.prj' });
         assert.ok(text.includes('    <Include Include="Proj.prj" />'), text);

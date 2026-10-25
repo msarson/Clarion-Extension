@@ -93,16 +93,24 @@ function tokenize(text: string): Token[] {
 }
 
 type Tri = boolean | null;
-interface Frame { active: boolean; parentActive: boolean; taken: 'none' | 'maybe' | 'definite' }
+/** `maybe` is set once any branch was taken on a condition that could not be decided. */
+interface Frame { active: boolean; parentActive: boolean; taken: 'none' | 'maybe' | 'definite'; maybe?: boolean }
+/** Tokens run in one parse, across #includes and macro statements: a macro that expands itself, or #includes that fan out, stop here. */
+const STEP_BUDGET = 200_000;
 
 export function parseLegacyProject(text: string, options: LegacyProjectOptions = {}): LegacyProject {
     const result: LegacyProject = { compiles: [], includes: [], calls: [], defines: {}, links: [], linkTargets: [], uncertain: false };
     const macros = new Map<string, string>(Object.entries(options.macros ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
     const frames: Frame[] = [];
     const including = new Set<string>();
+    /** Macros set in a branch that might not run: a condition naming one is not decided. */
+    const unsure = new Set<string>();
+    let steps = 0;
 
     const expand = (s: string) => s.replace(/%%|%([A-Za-z0-9_]+)%?/g, (_m, name?: string) =>
         name === undefined ? '%' : macros.get(name.toLowerCase()) ?? '');
+    const namesUnsure = (s: string) => [...s.replace(/%%/g, '').matchAll(/%([A-Za-z0-9_]+)/g)].some(m => unsure.has(m[1].toLowerCase()));
+    const inMaybe = () => frames.some(f => f.maybe);
     const active = () => frames.length === 0 || frames[frames.length - 1].active;
     const isStarter = (tok: Token | undefined) => !!tok && tok.t === 'word' && STARTERS.has(tok.v.toLowerCase());
     const isWord = (tok: Token | undefined, v: string) => !!tok && tok.t === 'word' && tok.v.toLowerCase() === v;
@@ -112,6 +120,17 @@ export function parseLegacyProject(text: string, options: LegacyProjectOptions =
     const run = (tokens: Token[], depth: number): void => {
         let i = 0;
         const skipToStarter = () => { while (i < tokens.length && !isStarter(tokens[i])) i++; };
+        /**
+         * A macro in an argument stands for text, which may be a list or a pragma: the word at i is
+         * replaced by the tokens of its expansion, again while they name macros.
+         */
+        const expandArgument = () => {
+            for (let round = 0; round < 8 && tokens[i]?.t === 'word' && tokens[i].v.includes('%'); round++) {
+                const expanded = expand(tokens[i].v);
+                if (expanded === tokens[i].v) break;
+                tokens.splice(i, 1, ...tokenize(expanded));
+            }
+        };
 
         /** `name(args)` groups, comma-separated, from i: each with its args split on top-level commas. */
         const pragmaGroups = (): { name: string; args: Token[][] }[] => {
@@ -168,7 +187,7 @@ export function parseLegacyProject(text: string, options: LegacyProjectOptions =
                     k++;
                     return { value: '', known: false };
                 }
-                return { value: expand(tok.v), known: true };
+                return { value: expand(tok.v), known: !namesUnsure(tok.v) };
             };
             const term = (): Tri => {
                 const tok = expr[k];
@@ -223,10 +242,11 @@ export function parseLegacyProject(text: string, options: LegacyProjectOptions =
         const enterBranch = (frame: Frame, r: Tri) => {
             if (r === true) { frame.active = true; frame.taken = 'definite'; }
             else if (r === false) frame.active = false;
-            else { frame.active = true; frame.taken = 'maybe'; result.uncertain = true; }
+            else { frame.active = true; frame.taken = 'maybe'; frame.maybe = true; result.uncertain = true; }
         };
 
         while (i < tokens.length) {
+            if (++steps > STEP_BUDGET) { result.uncertain = true; i = tokens.length; break; }
             const tok = tokens[i];
             const kw = isStarter(tok) ? tok.v.toLowerCase() : '';
 
@@ -275,16 +295,20 @@ export function parseLegacyProject(text: string, options: LegacyProjectOptions =
                     let value = '';
                     if (isValue(tokens[i]) && !isStarter(tokens[i])) value = expand(tokens[i++].v);
                     macros.set(name, value);
+                    if (inMaybe()) unsure.add(name); else unsure.delete(name);
                     break;
                 }
                 case '#compile': {
+                    expandArgument();
                     while (isValue(tokens[i])) {
                         const compile: LegacyCompile = { file: expand(tokens[i++].v).trim(), defines: {} };
                         if (isWord(tokens[i], '#to')) i += 2;
+                        expandArgument();
                         if (isSym(tokens[i], '/')) { i++; definesOf(pragmaGroups(), compile.defines); }
                         if (compile.file) result.compiles.push(compile);
                         if (!isSym(tokens[i], ',')) break;
                         i++;
+                        expandArgument();
                     }
                     break;
                 }

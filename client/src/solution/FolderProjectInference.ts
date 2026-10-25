@@ -24,6 +24,7 @@
  */
 import { clarionSourceCandidates } from '../../../common/ClarionSourceNaming';
 import { parseLegacyProject } from '../../../common/LegacyProject';
+import * as path from 'path';
 
 export interface SourceFile { relPath: string; text: string }
 export type SourceKind = { kind: 'program' } | { kind: 'member'; program: string } | { kind: 'bareMember' } | { kind: 'other' };
@@ -354,13 +355,39 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         }
         return best;
     };
+    /** A path a .prj writes, from the .prj's folder; null when it leaves the scanned folder. */
+    const folderOf = (relPath: string) => relPath.replace(/[\\/]?[^\\/]*$/, '');
+    const fromPrj = (prj: string, written: string): string | null => {
+        if (path.win32.isAbsolute(written)) return null;
+        const joined = path.win32.normalize(path.win32.join(folderOf(prj) || '.', written));
+        return joined.startsWith('..') ? null : joined.toLowerCase();
+    };
+    const legacyAt = new Map(legacyFiles.map(l => [normalize(l.relPath), l]));
     const legacyParsed = legacyFiles.filter(l => /\.prj?$/i.test(l.relPath)).map(l => ({
         relPath: l.relPath,
         compiles: parseLegacyProject(l.text, {
-            read: name => nearest(legacyFiles.filter(x => baseName(x.relPath).toLowerCase() === baseName(name).toLowerCase()),
-                x => dirName(x.relPath), dirName(l.relPath))?.text,
+            // A path is read from the .prj's folder; a bare name is the nearest file of that name.
+            read: name => /[\\/]/.test(name)
+                ? legacyAt.get(fromPrj(l.relPath, name) ?? '')?.text
+                : nearest(legacyFiles.filter(x => baseName(x.relPath).toLowerCase() === baseName(name).toLowerCase()),
+                    x => dirName(x.relPath), dirName(l.relPath))?.text,
         }).compiles.map(c => c.file).filter(isClw),
     }));
+    const fileAtPath = new Map(files.map(f => [normalize(f.relPath), f]));
+    /**
+     * The folder file a .prj's #compile names for `program`: a path, read from the .prj's folder;
+     * a bare name, the file of that name beside the program. Never a module whose MEMBER names
+     * another program. Anything else is written by its bare name, for redirection to find, as a
+     * library source is.
+     */
+    const legacySource = (written: string, prj: string, program: SourceFile): SourceFile | undefined => {
+        const file = /[\\/]/.test(written)
+            ? fileAtPath.get(fromPrj(prj, written) ?? '')
+            : files.find(f => baseName(f.relPath).toLowerCase() === baseName(written).toLowerCase() && dirName(f.relPath) === dirName(program.relPath));
+        if (!file) return undefined;
+        const kind = classifySource(file.text);
+        return kind.kind === 'member' && kind.program !== stem(program.relPath) ? undefined : file;
+    };
     const placedByLegacy = new Set<SourceFile>();
     for (const program of programs) {
         const name = baseName(program.relPath).toLowerCase();
@@ -371,9 +398,9 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         project.legacyProject = legacy.relPath;
         for (const compile of legacy.compiles) {
             if (baseName(compile).toLowerCase() === name) continue;
-            const file = resolve(compile, program);
-            const entry = file && !library.has(file) ? file.relPath : compile;
-            if (file && !library.has(file)) placedByLegacy.add(file);
+            const file = legacySource(compile, legacy.relPath, program);
+            const entry = file ? file.relPath : baseName(compile);
+            if (file) placedByLegacy.add(file);
             if (!project.compile.some(c => c.toLowerCase() === entry.toLowerCase())) project.compile.push(entry);
         }
     }

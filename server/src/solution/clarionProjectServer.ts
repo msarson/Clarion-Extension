@@ -54,6 +54,8 @@ export interface LegacyProjectRead {
     includes: { file: string; found: boolean }[];
     /** A condition could not be decided, so every branch it might take was read. */
     uncertain: boolean;
+    /** Every file whose change would change what it says: itself (where it would be, when missing) and what it #includes. */
+    watch: string[];
 }
 
 export class ClarionProjectServer {
@@ -434,11 +436,16 @@ export class ClarionProjectServer {
         const listed = new Set(this.sourceFiles.map(f => path.win32.basename(f.name).toLowerCase()));
         for (const item of items) {
             const include = includeOf(item);
-            if (!include) continue;
-            let written = include;
-            try { written = decodeURIComponent(include); } catch { /* not an escape: keep it as written */ }
+            let written = include ?? '';
+            try { written = decodeURIComponent(written); } catch { /* not an escape: keep it as written */ }
+            // Legacy Clarion Project Files, as the IDE's Add Project to Include offers them (and the Solution View reads).
+            if (!/\.prj?$/i.test(written)) continue;
             const prjPath = this.findLegacyFile(written, this.path);
-            const read: LegacyProjectRead = { file: written, path: prjPath ?? undefined, found: false, defines: {}, includes: [], uncertain: false };
+            // A .prj not there yet is watched where it would be, so it is read once it appears.
+            const read: LegacyProjectRead = {
+                file: written, path: prjPath ?? undefined, found: false, defines: {}, includes: [], uncertain: false,
+                watch: [prjPath ?? path.resolve(this.path, written)],
+            };
             this.legacyProjects.push(read);
             if (!prjPath) {
                 logger.warn(`⚠️ Projects to include: ${written} not found for project ${this.name}`);
@@ -453,6 +460,7 @@ export class ClarionProjectServer {
                 read: file => {
                     const at = locate(file);
                     if (!at) return undefined;
+                    read.watch.push(at);
                     try { return fs.readFileSync(at, 'latin1'); } catch { return undefined; }
                 },
                 exists: file => locate(file) ? true : undefined,

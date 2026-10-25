@@ -167,6 +167,43 @@ suite('Legacy project files (#758)', () => {
         assert.deepStrictEqual(p.compiles.map(c => c.file).sort(), ['a.clw', 'b.clw']);
     });
 
+    // Review of #758.
+    test('a macro set in a branch that may not run is not known afterwards', () => {
+        const p = parseLegacyProject([
+            '#if #exists cfg.pi #then #set mode=a #else #set mode=b #endif',
+            '#if %mode=a #then #compile a.clw #elsif %mode=b #then #compile b.clw #endif',
+            '#set mode = c',
+            '#if %mode=c #then #compile c.clw #else #compile notc.clw #endif',
+        ].join('\n'));
+        assert.deepStrictEqual(p.compiles.map(c => c.file), ['a.clw', 'b.clw', 'c.clw'], 'a definite #set makes it known again');
+        assert.strictEqual(p.uncertain, true);
+    });
+
+    test('a macro that refers to itself, or #includes that fan out, stop within a budget', () => {
+        const start = Date.now();
+        const p = parseLegacyProject("#set e = '%%e %%e %%e %%e #x'\n%e\n#compile after.clw");
+        assert.ok(Date.now() - start < 2000, `took ${Date.now() - start} ms`);
+        assert.strictEqual(p.uncertain, true);
+        const read = (name: string) => /^f(\d+)\.pi$/i.test(name) && +name.slice(1, -3) < 30
+            ? `#include f${+name.slice(1, -3) + 1}.pi\n#include f${+name.slice(1, -3) + 1}.pi\n` : undefined;
+        const fanStart = Date.now();
+        parseLegacyProject('#include f0.pi\n', { read });
+        assert.ok(Date.now() - fanStart < 2000, `took ${Date.now() - fanStart} ms`);
+    });
+
+    test('a macro holding a list of sources, or a /define, is read as written there', () => {
+        const p = parseLegacyProject([
+            "#set srcs = 'a.clw, b.clw'",
+            "#set dbg = '/define(x=>1)'",
+            "#set inner = '%%srcs'",
+            '#compile %srcs',
+            '#compile c.clw %dbg, d.clw',
+            '#compile %inner',
+        ].join('\n'));
+        assert.deepStrictEqual(p.compiles.map(c => c.file), ['a.clw', 'b.clw', 'c.clw', 'd.clw', 'a.clw', 'b.clw']);
+        assert.deepStrictEqual(p.compiles[2].defines, { x: '1' });
+    });
+
     test('macro names ignore case and a trailing % is optional', () => {
         const p = parseLegacyProject("#set Pfx = Cla\n#compile %PFX%one.clw, %pfx.two.clw");
         assert.deepStrictEqual(p.compiles.map(c => c.file), ['Claone.clw', 'Cla.two.clw']);
