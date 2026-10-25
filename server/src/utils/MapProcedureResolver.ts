@@ -69,7 +69,13 @@ let mapDeclWalkEpoch = -1;
  * name (the unresolved-call diagnostic asks for each one) re-read the text of every
  * include outside a MAP. `lowerText` is kept only for a file that has a MAP.
  */
-interface OutsideMapTextFacts { hasMap: boolean; hasInclude: boolean; lowerText?: string; }
+interface OutsideMapTextFacts {
+    hasMap: boolean;
+    hasInclude: boolean;
+    lowerText?: string;
+    /** #809 — for a file with INCLUDEs but no MAP (a pass-through header): its INCLUDEs, read from the text. */
+    passIncludes?: string[];
+}
 const outsideMapTextCache = new Map<string, OutsideMapTextFacts>();
 let outsideMapTextEpoch = -1;
 
@@ -337,8 +343,19 @@ export class MapProcedureResolver {
      * is indented), and it can answer for `nameLower` only if its text names it or it
      * has INCLUDEs of its own for the walk to follow. A large API header with a MAP is
      * therefore tokenized only when a call to one of its procedures is looked up.
+     *
+     * #809 — a file with no MAP but INCLUDEs of its own is a pass-through (`'pass'`): a
+     * header whose only job is to include the one that carries the MAP. Its own text
+     * declares nothing, so it is never tokenized; the walk follows its INCLUDEs from the
+     * text (`passIncludes`), each again an include outside a MAP.
      */
-    private outsideMapIncludeMayDeclare(filePath: string, nameLower: string): boolean {
+    private outsideMapIncludeRole(filePath: string, nameLower: string): 'map' | 'pass' | null {
+        const facts = this.outsideMapTextFacts(filePath);
+        if (!facts.hasMap) return facts.hasInclude ? 'pass' : null;
+        return facts.hasInclude || facts.lowerText!.includes(nameLower) ? 'map' : null;
+    }
+
+    private outsideMapTextFacts(filePath: string): OutsideMapTextFacts {
         const epoch = getCrossFileEpoch();
         if (epoch !== outsideMapTextEpoch) {
             outsideMapTextCache.clear();
@@ -350,15 +367,20 @@ export class MapProcedureResolver {
             const text = CrossFileResolver.loadExternalFileContent(
                 TokenCache.getInstance(), pathToCanonicalUri(filePath), filePath);
             const hasMap = text !== undefined && /^[ \t]+MAP\b/im.test(text);
+            const hasInclude = text !== undefined && /INCLUDE\s*\(/i.test(text);
             facts = {
                 hasMap,
-                hasInclude: hasMap && /INCLUDE\s*\(/i.test(text!),
+                hasInclude,
                 lowerText: hasMap ? text!.toLowerCase() : undefined
             };
+            if (!hasMap && hasInclude) {
+                // A file without a MAP has no MAP ranges: every INCLUDE in it sits outside one.
+                const noMap: FileWalkSummary = { mapRanges: [], moduleDecl: new Map(), moduleDeclInMaps: new Map(), bareDecl: new Map() };
+                facts.passIncludes = this.includesOf(noMap, text!, filePath).map(i => i.fileName);
+            }
             outsideMapTextCache.set(key, facts);
         }
-        if (!facts.hasMap) return false;
-        return facts.hasInclude || facts.lowerText!.includes(nameLower);
+        return facts;
     }
 
     /**
@@ -401,7 +423,8 @@ export class MapProcedureResolver {
         visited: Set<string>,
         depth = 0,
         mapScopedRoot = false,
-        acceptBarePrototype = false
+        acceptBarePrototype = false,
+        passThrough = false
     ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         if (depth > 4) return null;
         const key = fromPath.toLowerCase();
@@ -409,9 +432,31 @@ export class MapProcedureResolver {
         visited.add(key);
         if (await cooperativeCheckpoint(visited.size, undefined, 5)) return null;
 
+        // #809 — a pass-through header (no MAP, only INCLUDEs) is walked from its text alone.
+        const includes = passThrough
+            ? (this.outsideMapTextFacts(fromPath).passIncludes ?? []).map(fileName => ({ fileName, insideMap: false }))
+            : await this.tokenizedIncludesOf(fromPath);
+        if (!includes) return null;
+        return this.findDeclarationAmongIncludes(includes, fromPath, procName, visited, depth, mapScopedRoot, acceptBarePrototype);
+    }
+
+    private async tokenizedIncludesOf(fromPath: string): Promise<Array<{ fileName: string; insideMap: boolean }> | null> {
         const from = await this.loadDocForWalk(fromPath);
         if (!from) return null;
+        // #756 — the file's INCLUDEs and MAP ranges come from its walk summary, worked out once.
+        return this.includesOf(this.summaryOf(from.tokens), from.document.getText(),
+            decodeURIComponent(from.document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
+    }
 
+    private async findDeclarationAmongIncludes(
+        includes: Array<{ fileName: string; insideMap: boolean }>,
+        fromPath: string,
+        procName: string,
+        visited: Set<string>,
+        depth: number,
+        mapScopedRoot: boolean,
+        acceptBarePrototype: boolean
+    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
         // #313 follow-up: at the ROOT files, only INCLUDEs that sit INSIDE a MAP block
         // can carry MODULE prototype blocks — walking every include of a PROGRAM file
         // (equates, class headers, …) multiplied the walk by an order of magnitude for
@@ -423,10 +468,9 @@ export class MapProcedureResolver {
         // (`MAP / MODULE('SomeLib') / … / END / END` — how a DLL usually ships its
         // prototypes, included in the global data section). Such a file is only loaded
         // when a cheap text check finds a MAP in it and the name (or INCLUDEs to follow),
-        // so the guard above keeps its cost.
-        // #756 — the file's INCLUDEs and MAP ranges come from its walk summary, worked out once.
-        const includes = this.includesOf(this.summaryOf(from.tokens), from.document.getText(),
-            decodeURIComponent(from.document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
+        // so the guard above keeps its cost. #809 — the MAP file may sit one or more
+        // includes further down, behind a header without a MAP that only includes it;
+        // such a pass-through is followed from its text and never tokenized.
         const nameLower = procName.toLowerCase();
 
         // #361 — the inner loop below loads (and, cold, tokenizes) EVERY include of
@@ -439,7 +483,16 @@ export class MapProcedureResolver {
             const outsideMap = mapScopedRoot && !include.insideMap;
             const incPath = this.resolveIncludeTarget(include.fileName, fromPath);
             if (!incPath || visited.has(incPath.toLowerCase())) continue;
-            if (outsideMap && !this.outsideMapIncludeMayDeclare(incPath, nameLower)) continue;
+            if (outsideMap) {
+                const role = this.outsideMapIncludeRole(incPath, nameLower);
+                if (role === null) continue;
+                if (role === 'pass') {
+                    const through = await this.findModuleDeclarationInIncludesOf(
+                        incPath, procName, visited, depth + 1, /* mapScopedRoot */ true, acceptBarePrototype, /* passThrough */ true);
+                    if (through) return through;
+                    continue;
+                }
+            }
 
             await timeSlice(); // #361 — keep the loop responsive across include loads
             const inc = await this.loadDocForWalk(incPath);

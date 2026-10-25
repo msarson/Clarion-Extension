@@ -20,6 +20,7 @@ import { HoverProvider } from '../providers/HoverProvider';
 import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { ImplementationProvider } from '../providers/ImplementationProvider';
 import { setServerInitialized } from '../serverState';
+import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import {
     callableOnLine, opensBody, classifyImplementation, classifyAgreement, definitionLocations, normaliseFile
 } from './support/hoverDefinitionAgreement';
@@ -241,6 +242,88 @@ suite('Every ProcedureCallDetector shape through hover, F12 and Ctrl+F12 (#636)'
                 assert.ok(a.f12.length > 0 && !a.f12.includes(LOCAL), `F12 names the procedure: ${detail}`);
                 assert.deepStrictEqual(a.ctrlF12, [BODY], `Ctrl+F12 opens the body: ${detail}`);
             }
+        });
+    }
+});
+
+suite('A call to a procedure prototyped in a nested INCLUDE (#809)', () => {
+    // The caller includes a header in its global data; that header only includes a second
+    // one, which carries the MAP / MODULE prototype of a procedure implemented elsewhere.
+    // F12 found the prototype; Ctrl+F12 from the call found nothing, while Ctrl+F12 from
+    // the prototype opened the body. The MAP-include walk skipped the first header because
+    // it has no MAP of its own.
+    const OTHER_CLW = [
+        '  MEMBER()',
+        '  MAP',
+        '  END',
+        'IntProperty PROCEDURE(LONG W, LONG F, LONG P)',   // 3
+        '  CODE',
+        '  RETURN 0',
+    ];
+    const INNER_INC = [
+        '  MAP',
+        "    MODULE('other.clw')",
+        '      IntProperty(LONG W, LONG F, LONG P),LONG',   // 2
+        '    END',
+        '  END',
+    ];
+    const OUTER_INC = ["  INCLUDE('inner.inc'),ONCE"];
+    // The exporting project prototypes the procedure for itself as well, so the procedure
+    // index holds two declarations and its unique-hit fast path cannot answer: the
+    // INCLUDE walk from the caller has to.
+    const EXPORTER_INC = [
+        '  MAP',
+        "    MODULE('other.clw')",
+        '      IntProperty(LONG W, LONG F, LONG P),LONG',
+        '    END',
+        '  END',
+    ];
+    const CALLER = [
+        '  PROGRAM',
+        "  INCLUDE('outer.inc'),ONCE",
+        '  MAP',
+        '  END',
+        'W        LONG',
+        'dropfeq  LONG',
+        '  CODE',
+        '  x# = IntProperty(W, dropfeq, 1)',                                                   // 7
+        '  W $ dropfeq {PROP:Format} = (IntProperty(W, dropfeq, PROP:DropWidth) - 32) & |',    // 8
+        "                              'L(2)|M#2#@S60@32L(2)@S8@'",
+    ];
+    const FILES: Record<string, string[]> = {
+        'other.clw': OTHER_CLW, 'inner.inc': INNER_INC, 'outer.inc': OUTER_INC, 'exporter.inc': EXPORTER_INC,
+        'caller.clw': CALLER,
+    };
+    let fx: DiskSolution;
+
+    suiteSetup(async () => {
+        setServerInitialized(true);
+        fx = createDiskSolution(FILES);
+        await StructureDeclarationIndexer.getInstance().buildIndex(fx.root);
+    });
+    suiteTeardown(() => fx.dispose());
+
+    for (const line of [7, 8]) {
+        test(`${CALLER[line].trim()}: hover, F12 and Ctrl+F12 all reach the procedure`, async () => {
+            TokenCache.getInstance().clearAllTokens();
+            const doc = fx.open('caller.clw');
+            const position = { line, character: CALLER[line].indexOf('IntProperty') + 2 };
+            const def = await new DefinitionProvider().provideDefinition(doc, position);
+            const hover = await new HoverProvider().provideHover(doc, position);
+            const impl = await new ImplementationProvider().provideImplementation(doc, position);
+            const read = (f: string) => {
+                const name = Object.keys(FILES).find(n => normaliseFile(fx.uriOf(n)) === f);
+                return name ? FILES[name] : undefined;
+            };
+            const show = (d: any) => definitionLocations(d).map(l => `${l.file.split('/').pop()}:${l.line}`).join(', ');
+            const detail = `F12 -> ${show(def)}; Ctrl+F12 -> ${show(impl)}`;
+            // With no file graph built, F12 may name either indexed prototype; both declare
+            // the same body, which is what Ctrl+F12 must open.
+            assert.ok(['inner.inc:2', 'exporter.inc:2'].includes(show(def)), `F12 opens a prototype: ${detail}`);
+            assert.strictEqual(show(impl), 'other.clw:3', `Ctrl+F12 opens the body: ${detail}`);
+            assert.strictEqual(classifyImplementation('IntProperty', def, impl, read), 'agree', detail);
+            const hoverText = hover ? JSON.stringify(hover.contents) : '';
+            assert.ok(/IntProperty/.test(hoverText), `hover shows the procedure: ${detail}; hover ${hoverText}`);
         });
     }
 });

@@ -165,6 +165,32 @@ suite('Hover — MAP inside a globally included file', () => {
         assert.ok(!loaded.includes('otherapigi.inc'), `otherapigi.inc must not be loaded, loaded: ${loaded.join(', ')}`);
     });
 
+    test('#809: a globally included header that only includes the MAP file is followed, and not tokenized', async () => {
+        writeFixture('passgi.inc', [
+            '! includes the logging API',
+            "  INCLUDE('logapigi.inc'),ONCE",
+        ]);
+        writeFixture('mainpassgi.clw', [
+            '  PROGRAM',
+            "  INCLUDE('passgi.inc'),ONCE",
+            '  MAP',
+            '  END',
+            '  CODE',
+        ]);
+        const doc = openDoc('mainpassgi.clw');
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const resolver = new MapProcedureResolver();
+        const loaded: string[] = [];
+        const original = (resolver as any).loadDocForWalk.bind(resolver);
+        (resolver as any).loadDocForWalk = async (p: string) => { loaded.push(path.basename(p).toLowerCase()); return original(p); };
+
+        const hit = await resolver.findDeclarationInMapIncludes('Log_SetChannel', doc, tokens);
+
+        assert.ok(hit && hit.doc.uri.toLowerCase().endsWith('logapigi.inc'), `found through passgi.inc, got ${hit?.doc.uri}`);
+        assert.strictEqual(hit!.declLine, 4);
+        assert.ok(!loaded.includes('passgi.inc'), `passgi.inc is read as text, not tokenized; loaded: ${loaded.join(', ')}`);
+    });
+
     test('a MODULE in a globally included file without a MAP is still not a prototype source', async () => {
         writeFixture('nomapgi.inc', [
             "  MODULE('LogLib')",
