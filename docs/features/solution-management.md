@@ -75,7 +75,7 @@ The containing folder opens automatically, and the solution is loaded.
 - **Folder:** the open folder to start with; **Choose folder…** picks another, or creates one. Made in another folder, the window then opens that folder with the solution.
 - **Build with:** the Clarion installation, compiler version and configuration. **Browse…** finds an installation outside the standard locations.
 - **Start from:** the programs already in the folder, or a new empty program.
-  - **From the programs:** the page shows one project per program, as an EXE or a DLL, with its sources, the projects it references and its export file. It also lists the modules it could not place and possible leftovers, so you can settle them before anything is written.
+  - **From the programs:** the page shows one project per program, as an EXE or a DLL, with its sources, the projects it references and its export file. It also lists the modules it could not place and possible leftovers, so you can settle them before anything is written. Where a legacy `.prj` or `.pr` in the folder compiles a program, that project gets exactly the sources the `.prj` lists, and its `.cwproj` includes the `.prj` (under **Projects to include**) so the `.prj`'s defines still apply. Every source is listed in the `.cwproj` as well: the build compiles what the `.prj` names but links only the `.cwproj`'s own sources.
   - **A new empty program:** name its main source file. The solution gets one project, `SolutionName.cwproj`, and a starter `.clw` with `PROGRAM` and `CODE`.
 - **Solution name**, then **Create**.
 
@@ -117,6 +117,8 @@ Clarion Tools
 - Double-click: Opens file in editor
 
 **A project's folders, as in the Clarion IDE:** each project shows **File Drivers**, **Libraries, Objects and Resource Files**, **Projects to include** (legacy TopSpeed `.prj`/`.pr` projects pulled into the build) and **Referenced Projects**, always, then its source files. Right-click a folder for **Add…** (also its `+` button) and an entry for **Remove**; the change is saved to the `.cwproj` at once, as the IDE does. A click on a folder opens Project Properties on its Sources tab, on a referenced project its own Project Properties, on an included project its file.
+
+**Legacy projects:** the Clarion sources an included `.prj` or `.pr` compiles (its `#compile` lines) belong to the project and are listed with its sources, so hover, Go to Definition and redirection work for them as for any other source. The `.prj`'s `#include` files, `#set` macros and `#if` conditions are followed; a condition that cannot be decided (`#older`, or `#exists` for a file not found) counts every branch it might take. A `.prj` changed outside VS Code is read again with the solution, and saving one in VS Code redraws the Solution View.
 
 **Projects sorted by build order:** Projects in the Solution View are ordered dependency-first (libraries before the applications that depend on them), matching the actual build order.
 
