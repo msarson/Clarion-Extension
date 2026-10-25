@@ -19,7 +19,8 @@ import { makeTimeSlicer } from '../../utils/cooperativeScan';
  *     definitions in the class's implementation module (`MODULE('x.clw')`).
  *
  * So this validator resolves, per class:
- *   - the required method set — each implemented interface's methods, found
+ *   - the required method set — each implemented interface's methods, including
+ *     those a derived `INTERFACE(Parent)` inherits (#797), found
  *     same-file or via the class file's INCLUDE chain
  *     (`MemberLocatorService.enumerateInterfaceMembersWithParamCounts`);
  *   - the provided implementations — three-part `Class.Interface.Method` defs in

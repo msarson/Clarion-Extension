@@ -449,11 +449,18 @@
       "name": "INTERFACE",
       "category": "complex",
       "description": "Declares an interface definition (contract)",
-      "syntax": "label INTERFACE [,TYPE]",
-      "parameters": [],
-      "attributes": ["TYPE"],
+      "syntax": "label INTERFACE ( [ parentinterface ] ) [, TYPE] [, COM]",
+      "parameters": [
+        {
+          "name": "parentinterface",
+          "type": "INTERFACE",
+          "optional": true,
+          "description": "A previously declared INTERFACE to derive from. The new interface inherits all of its methods and may add its own; a method with the same name and parameter list replaces the inherited one"
+        }
+      ],
+      "attributes": ["TYPE", "COM"],
       "size": "N/A (interface definition)",
-      "notes": "Defines an interface that classes can implement. Contains method prototypes without implementation. Classes implementing the interface must provide all method implementations."
+      "notes": "Holds method prototypes only (no properties); every method is implicitly VIRTUAL. TYPE is implicit; COM makes every method use the PASCAL calling convention. A class that IMPLEMENTS the interface defines each method as Class.Interface.Method PROCEDURE, inherited methods included. Since Clarion 6.3 a derived class may re-implement an interface its parent already implements without overriding every method: the compiler generates stubs that call the nearest implementation up the class hierarchy."
     },
     {
       "name": "MODULE",

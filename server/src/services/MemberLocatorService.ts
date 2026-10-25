@@ -56,6 +56,8 @@ let varWalkEpoch = -1;
 // #420: per-file column-0 label set + INCLUDE targets, one regex pass per file per
 // cross-file epoch (see the walk's note). null = unreadable. Tiny: labels only.
 interface LabelScan { labels: Set<string>; includes: string[] }
+/** #797: what one INTERFACE declares itself, and the parent interface it derives from. */
+interface InterfaceDeclaredMembers { methods: Array<{ name: string; paramCount: number }>; parentName?: string }
 const labelScanCache = new Map<string, LabelScan | null>();
 let labelScanEpoch = -1;
 
@@ -557,11 +559,46 @@ export class MemberLocatorService {
     /**
      * Enumerates interface methods with their declaration parameter counts.
      * Used by the interface-implementation diagnostic to distinguish overloads.
+     *
+     * #797: includes the methods a derived interface (`IChild INTERFACE(IParent)`) inherits, up the
+     * whole parent chain. A class implementing IChild owes them under IChild's name
+     * (`Cls.IChild.ParentMethod`) - Clarion 10 refuses both an omission ("Missing procedure
+     * definition") and `Cls.IParent.ParentMethod` ("This CLASS does not implement this
+     * INTERFACE"). A derived method with the parent's name and parameter count overrides it, so
+     * it is listed once. Null only when `ifaceName` itself cannot be found; an unresolvable
+     * parent leaves the methods found so far, never a guess.
      */
     async enumerateInterfaceMembersWithParamCounts(
         ifaceName: string,
         document: TextDocument
     ): Promise<Array<{ name: string; paramCount: number }> | null> {
+        const methods: Array<{ name: string; paramCount: number }> = [];
+        const keys = new Set<string>();
+        const seen = new Set<string>();
+        let current: string | undefined = ifaceName;
+        while (current && !seen.has(current.toLowerCase())) {
+            seen.add(current.toLowerCase());
+            const declared = await this.enumerateOwnInterfaceMembersWithParamCounts(current, document);
+            if (!declared) {
+                if (current === ifaceName) return null;
+                break;
+            }
+            for (const m of declared.methods) {
+                const key = `${m.name.toLowerCase()}#${m.paramCount}`;
+                if (keys.has(key)) continue;
+                keys.add(key);
+                methods.push(m);
+            }
+            current = declared.parentName;
+        }
+        return methods;
+    }
+
+    /** The methods `ifaceName` declares itself, and the parent interface it names, if any. */
+    private async enumerateOwnInterfaceMembersWithParamCounts(
+        ifaceName: string,
+        document: TextDocument
+    ): Promise<InterfaceDeclaredMembers | null> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
         const docLines = document.getText().split(/\r?\n/);
@@ -1006,7 +1043,7 @@ export class MemberLocatorService {
         // tokenized every reachable INC with no yield at all — an ifaceImpl freeze).
         timeSlice: () => Promise<void> = makeTimeSlicer(),
         fromFile?: string // #571 — the requesting file: INCLUDEs resolve through its project's redirection
-    ): Promise<Array<{ name: string; paramCount: number }> | null> {
+    ): Promise<InterfaceDeclaredMembers | null> {
         const includeTokens = tokens.filter(t => t.value?.toUpperCase() === 'INCLUDE' && t.referencedFile);
         for (const inc of includeTokens) {
             await timeSlice();
@@ -1723,15 +1760,24 @@ export class MemberLocatorService {
         tokens: Token[],
         ifaceName: string,
         docLines: string[]
-    ): Array<{ name: string; paramCount: number }> | null {
-        const ifaceToken = tokens.find(t =>
+    ): InterfaceDeclaredMembers | null {
+        const ifaceIndex = tokens.findIndex(t =>
             t.type === TokenType.Structure &&
             t.subType === TokenType.Interface &&
             t.label?.toLowerCase() === ifaceName.toLowerCase() &&
             t.finishesAt !== undefined
         );
+        const ifaceToken = ifaceIndex >= 0 ? tokens[ifaceIndex] : undefined;
         if (!ifaceToken || ifaceToken.finishesAt === undefined) return null;
         const ifaceEnd = ifaceToken.finishesAt;
+
+        // #797: `label INTERFACE(parentinterface)` - the parent is the name inside the parentheses
+        const open = tokens[ifaceIndex + 1];
+        const parentToken = tokens[ifaceIndex + 2];
+        const parentName = open?.value === '(' && open.line === ifaceToken.line &&
+            parentToken && parentToken.line === ifaceToken.line && parentToken.value !== ')'
+            ? parentToken.value
+            : undefined;
 
         const methods: Array<{ name: string; paramCount: number }> = [];
         for (const token of tokens) {
@@ -1744,7 +1790,7 @@ export class MemberLocatorService {
                 paramCount: countParametersInDeclaration(docLines[token.line] ?? '')
             });
         }
-        return methods;
+        return { methods, parentName };
     }
 
     /** Walks the INCLUDE chain of a document searching for className.memberName. */
