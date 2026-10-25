@@ -79,7 +79,8 @@ export interface SolutionPageState {
     version: ChoiceField;
     configuration: ChoiceField;
     startup: { value: string; options: Option[] };
-    projects: { name: string; guid: string; cwproj: string; kind: ProjectKind; references: string; exp: { text: string; tone: Tone }; startup: boolean }[];
+    /** #800: location is the .cwproj's path from the solution's folder; the full path when outside it. */
+    projects: { name: string; guid: string; cwproj: string; location: string; kind: ProjectKind; references: string; exp: { text: string; tone: Tone }; startup: boolean }[];
     build?: { log: string; keepLog: boolean; run: string };
     graph?: string;
     /** Everything is chosen, so the solution can open. */
@@ -142,6 +143,12 @@ function expStatus(p: SolutionPageProject, solutionFolder: string, versionChosen
     return { text: `Found: ${relative && !relative.startsWith('..') ? relative : p.exp}`, tone: 'good' };
 }
 
+/** #800 — a project's path from the solution's folder; its full path when it is outside that folder or on another drive. */
+function locationFrom(solutionFolder: string, cwproj: string): string {
+    const relative = path.win32.relative(solutionFolder, cwproj);
+    return relative && !relative.startsWith('..') && !path.win32.isAbsolute(relative) ? relative : cwproj;
+}
+
 export function buildSolutionPageState(input: SolutionPageInput): SolutionPageState {
     const settled = settleChoice(input.installations, input.choice, input.configurations);
     const installation = input.installations.find(i => settled.propertiesFile && samePath(i.propertiesFile, settled.propertiesFile));
@@ -180,6 +187,7 @@ export function buildSolutionPageState(input: SolutionPageInput): SolutionPageSt
             name: p.name,
             guid: p.guid,
             cwproj: p.cwproj,
+            location: locationFrom(folder, p.cwproj),
             kind: p.kind,
             references: p.references.length ? p.references.join(', ') : '—',
             exp: expStatus(p, folder, !!settled.version),

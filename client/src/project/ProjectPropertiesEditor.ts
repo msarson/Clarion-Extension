@@ -47,7 +47,8 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
         const post = () => panel.webview.postMessage({
             type: 'state',
             state: buildPageState(document.getText(), configuration, targets),
-            file: path.basename(document.uri.fsPath),
+            // #800: the full path, shown as Solution Properties shows the .sln's.
+            file: document.uri.fsPath,
         });
 
         const changes = vscode.workspace.onDidChangeTextDocument(e => {
@@ -260,8 +261,8 @@ function pageHtml(webview: vscode.Webview): string {
 
   function render() {
     if (!state) return;
-    document.getElementById('name').textContent = state.outputName || state.file;
-    document.getElementById('sub').textContent = state.kind + ' project · ' + state.file;
+    document.getElementById('name').textContent = state.outputName || state.file.split(/[\\\\/]/).pop();
+    document.getElementById('sub').textContent = state.file + ' · ' + state.kind + ' project';
     const cfg = document.getElementById('configuration');
     cfg.replaceChildren(...state.configurations.map(c => el('option', { value: c }, c)));
     cfg.value = state.configuration;
