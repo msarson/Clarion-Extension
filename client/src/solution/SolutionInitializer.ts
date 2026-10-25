@@ -5,7 +5,8 @@ import { LanguageClient } from 'vscode-languageclient/node';
 import { globalSolutionFile, globalClarionPropertiesFile, globalClarionVersion, globalSettings, setGlobalClarionSelection, getClarionConfigTarget } from '../globals';
 import { buildDiagnosticSettingsPayload } from '../utils/DiagnosticSettingsSync';
 import { ClarionExtensionCommands } from '../ClarionExtensionCommands'; // #567
-import { rememberedSolutionState, readRegisteredVersionNames, rememberedSolutionPromptCommand } from '../utils/SolutionFallbackPolicy';
+import { rememberedSolutionState, readRegisteredVersionNames, rememberedSolutionPromptCommand, validateRememberedSettings } from '../utils/SolutionFallbackPolicy';
+import { selectionAtStartup } from './FolderSwitchSelection'; // #792
 import { SolutionCache } from '../SolutionCache';
 import { resolveValidConfiguration } from '../utils/ConfigurationValidator';
 import {
@@ -99,21 +100,22 @@ export async function workspaceHasBeenTrusted(
         
         // If properties file or version is missing, check global history first
         // (they may have been stored during a cross-workspace switch)
-        if (!globalClarionPropertiesFile || !globalClarionVersion) {
-            logger.info("🔍 Settings incomplete — checking GlobalSolutionHistory for stored settings...");
-            const history = await GlobalSolutionHistory.getReferences();
-            const historyEntry = history.find(r =>
-                r.solutionFile.toLowerCase() === globalSolutionFile.toLowerCase()
+        // #792 — and when they no longer load: a folder switch records the selection chosen for it
+        // in the history, and a folder still remembering an old one would otherwise win, so the
+        // choice just made was lost and nothing loaded. Saved to the folder, so it holds from now on.
+        const fromHistory = selectionAtStartup(
+            globalSolutionFile,
+            { propertiesFile: globalClarionPropertiesFile, version: globalClarionVersion, configuration: globalSettings.configuration },
+            await GlobalSolutionHistory.getReferences(),
+            (sln, propertiesFile, version) => validateRememberedSettings(sln, propertiesFile, version).valid);
+        if (fromHistory) {
+            logger.info(`✅ Restoring settings from global history: propertiesFile=${fromHistory.propertiesFile}, version=${fromHistory.version}`);
+            await setGlobalClarionSelection(
+                globalSolutionFile,
+                fromHistory.propertiesFile,
+                fromHistory.version,
+                fromHistory.configuration || globalSettings.configuration || 'Release'
             );
-            if (historyEntry?.propertiesFile && historyEntry?.version) {
-                logger.info(`✅ Restoring settings from global history: propertiesFile=${historyEntry.propertiesFile}, version=${historyEntry.version}`);
-                await setGlobalClarionSelection(
-                    globalSolutionFile,
-                    historyEntry.propertiesFile,
-                    historyEntry.version,
-                    historyEntry.configuration || globalSettings.configuration || 'Release'
-                );
-            }
         }
 
         // If still missing — pre-#132/#141 era used to hardcode legacy defaults

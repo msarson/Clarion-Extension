@@ -332,9 +332,15 @@ export class SmartSolutionOpener {
             return remembered;
         }
         const entry = history.find(r => PathUtils.equalPath(r.solutionFile, solutionPath));
+        // Remembered but no longer loadable: the page says why it asks, as opening in this folder does.
+        const stale = entry?.propertiesFile && entry.version
+            ? validateRememberedSettings(solutionPath, entry.propertiesFile, entry.version) : undefined;
         const selection = await this.chooseSelection(solutionPath,
             { propertiesFile: entry?.propertiesFile, version: entry?.version, configuration: entry?.configuration },
-            { configuration: this.resolveConfiguration(solutionPath, { remembered: entry?.configuration }) });
+            {
+                configuration: this.resolveConfiguration(solutionPath, { remembered: entry?.configuration }),
+                reason: stale && !stale.valid ? `The settings remembered for this solution no longer work: ${stale.reason}` : undefined,
+            });
         if (!selection) {
             logger.info("ℹ️ User cancelled the solution's selection");
             return null;
