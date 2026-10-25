@@ -99,3 +99,33 @@ export function buildCwprojContent(spec: CwprojSpec): string {
         '</Project>'
     ].join('\r\n');
 }
+
+/**
+ * A new program's main source. #795: an EXE's main CODE runs it; a DLL's is empty, as the
+ * generator writes it (a DLL's procedures are called, its program never runs).
+ */
+export function buildProgramContent(kind: 'exe' | 'dll'): string {
+    return [
+        '  PROGRAM',
+        '',
+        '  MAP',
+        '  END',
+        '',
+        '  CODE',
+        ...(kind === 'exe' ? ["  MESSAGE('Hello World')"] : []),
+        '',
+    ].join('\r\n').replace(/\r\n$/, kind === 'dll' ? '\r\n' : '');
+}
+
+/**
+ * #795 — the files of a project added from Solution Properties, relative to the solution's
+ * folder: its .cwproj, its main program and, for a DLL, the export file it cannot link without.
+ */
+export function newProjectFiles(spec: { name: string; kind: 'exe' | 'dll'; mainFile: string; guid: string }): { path: string; content: string }[] {
+    const files = [
+        { path: `${spec.name}.cwproj`, content: buildCwprojContent({ name: spec.name, guid: spec.guid, compile: [spec.mainFile], kind: spec.kind }) },
+        { path: spec.mainFile, content: buildProgramContent(spec.kind) },
+    ];
+    if (spec.kind === 'dll') files.push({ path: `${spec.name}.exp`, content: buildMinimalExpContent(spec.name) });
+    return files;
+}

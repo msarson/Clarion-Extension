@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildSolutionPageState, projectsInSln, projectSummary, settleChoice, SolutionPageInput } from '../solution/SolutionPage';
+import { buildSolutionPageState, newProjectError, projectsInSln, projectSummary, settleChoice, SolutionPageInput } from '../solution/SolutionPage';
 
 /**
  * #792 stages 3 and 4 — the Solution page. One page shows what a solution builds with (the Clarion
@@ -129,5 +129,18 @@ suite('Solution page: what a solution builds with (#792)', () => {
         assert.strictEqual(state.build?.log, 'Kept: build_20261024.log');
         assert.strictEqual(state.build?.run, 'The startup project\'s program');
         assert.strictEqual(state.graph, '412 files, 1,920 edges');
+    });
+});
+
+suite('Solution Properties: a new project is checked before anything is written (#795)', () => {
+    const projects = [{ name: 'Sales' }, { name: 'Common' }];
+    test('a name and a .clw main file are needed', () => {
+        assert.strictEqual(newProjectError('Orders', 'Orders.clw', projects), undefined);
+        assert.match(newProjectError('', 'Orders.clw', projects) ?? '', /empty/);
+        assert.match(newProjectError('Or:ders', 'Orders.clw', projects) ?? '', /invalid/);
+        assert.match(newProjectError('Orders', 'Orders.txt', projects) ?? '', /\.clw/);
+    });
+    test('a name the solution already has is refused', () => {
+        assert.match(newProjectError('common', 'common.clw', projects) ?? '', /already/);
     });
 });

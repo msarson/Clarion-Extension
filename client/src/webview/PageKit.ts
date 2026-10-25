@@ -23,6 +23,7 @@ export function scriptJson(value: unknown): string {
 
 /** The styles every page uses; a page adds its own after them. */
 export const PAGE_CSS = `
+  [hidden] { display: none !important; }
   body { margin: 0; padding: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 18px 24px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
   header .title { flex: 1 1 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }

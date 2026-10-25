@@ -6,7 +6,7 @@
  * from…") and the empty program's own prompts (configuration, name, main file).
  */
 import { buildReviewState, CONFIGURATIONS, NewProjectSpec, ReviewChoices, ReviewInput, reviewResult, ReviewState, solutionNameError } from './NewSolutionReview';
-import { ChoiceField, InstallationOption, settleChoice, SolutionChoice } from './SolutionPage';
+import { ChoiceField, InstallationOption, mainFileError, settleChoice, SolutionChoice } from './SolutionPage';
 
 export interface FormInput {
     /** The folder the solution is made in; '' until one is chosen (no folder is open). */
@@ -76,13 +76,6 @@ function buildWith(input: FormInput, choices: FormChoices) {
 
 function mainFileOf(choices: FormChoices): string {
     return choices.mainFile ?? `${choices.name.trim() || 'Program'}.clw`;
-}
-
-function mainFileError(file: string): string | undefined {
-    if (!file || file.trim().length === 0) return 'File name cannot be empty';
-    if (!file.trim().toLowerCase().endsWith('.clw')) return 'File must have a .clw extension';
-    if (/[\\/:*?"<>|]/.test(file.trim())) return 'File name contains invalid characters';
-    return undefined;
 }
 
 export function buildFormState(input: FormInput, choices: FormChoices): FormState {

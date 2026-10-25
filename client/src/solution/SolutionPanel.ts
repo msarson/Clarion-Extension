@@ -10,9 +10,11 @@ import { lastBuildLog } from '../utils/LastBuildLog';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { GraphStatus, graphStatusText } from '../views/GraphStatus';
 import { pageHtml } from '../webview/PageKit';
+import { addProjectToSln, projectGuidOf } from './SlnEdit';
+import { generateGuid, newProjectFiles } from './SolutionFiles';
 import LoggerManager from '../utils/LoggerManager';
 import {
-    buildSolutionPageState, InstallationOption, projectsInSln, projectSummary, SolutionChoice, SolutionPageInput, SolutionPageProject,
+    buildSolutionPageState, InstallationOption, newProjectError, projectsInSln, projectSummary, SolutionChoice, SolutionPageInput, SolutionPageProject,
 } from './SolutionPage';
 
 const logger = LoggerManager.getLogger('SolutionPanel');
@@ -26,7 +28,7 @@ export interface OpenSelection {
     configuration: string;
 }
 
-interface PageMessage { type: string; field?: string; value?: string; cwproj?: string; checked?: boolean; }
+interface PageMessage { type: string; field?: string; value?: string; cwproj?: string; checked?: boolean; name?: string; kind?: 'exe' | 'dll'; mainFile?: string; }
 
 /**
  * #792 — the Solution page in the editor area. `showProperties` shows the loaded solution and
@@ -317,7 +319,68 @@ export class SolutionPanel {
             case 'unresolved':
                 await vscode.commands.executeCommand('clarion.unresolvedReferencesReport');
                 break;
+            case 'addNew':
+                await this.addNewProject(msg.name ?? '', msg.kind === 'dll' ? 'dll' : 'exe', msg.mainFile ?? '');
+                break;
+            case 'addExisting':
+                await this.addExistingProject();
+                break;
         }
+    }
+
+    /**
+     * #795 — a new project in the solution's folder: its .cwproj, main program and (a DLL) export
+     * file, then its entry in the .sln. Nothing is written over an existing file.
+     */
+    private async addNewProject(name: string, kind: 'exe' | 'dll', mainFile: string): Promise<void> {
+        const error = newProjectError(name, mainFile, this.input?.projects ?? []);
+        if (error) {
+            void this.panel.webview.postMessage({ type: 'addError', message: error });
+            return;
+        }
+        const folder = path.dirname(this.solutionFile);
+        const guid = generateGuid();
+        const files = newProjectFiles({ name: name.trim(), kind, mainFile: mainFile.trim(), guid });
+        const existing = files.filter(f => fs.existsSync(path.join(folder, f.path))).map(f => f.path);
+        if (existing.length) {
+            void this.panel.webview.postMessage({ type: 'addError', message: `Already in the solution's folder: ${existing.join(', ')}` });
+            return;
+        }
+        const sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), { name: name.trim(), path: files[0].path, guid });
+        for (const f of files) fs.writeFileSync(path.join(folder, f.path), f.content, 'utf8');
+        fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        await this.solutionChanged(name.trim());
+    }
+
+    /** #795 — an existing .cwproj, named in the .sln by its own GUID and its path from the solution's folder. */
+    private async addExistingProject(): Promise<void> {
+        const folder = path.dirname(this.solutionFile);
+        const picked = await vscode.window.showOpenDialog({
+            title: 'Add a project to the solution', filters: { 'Clarion project': ['cwproj'] }, canSelectMany: false,
+            openLabel: 'Add', defaultUri: vscode.Uri.file(folder),
+        });
+        if (!picked?.length) return;
+        const file = picked[0].fsPath;
+        const guid = projectGuidOf(fs.readFileSync(file, 'utf8'));
+        if (!guid) {
+            vscode.window.showErrorMessage(`${path.basename(file)} has no ProjectGuid, so the solution cannot name it.`);
+            return;
+        }
+        const relative = path.relative(folder, file);
+        const name = path.basename(file).replace(/\.cwproj$/i, '');
+        const sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), {
+            name, guid, path: path.isAbsolute(relative) ? file : relative,
+        });
+        fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        await this.solutionChanged(name);
+    }
+
+    /** The .sln changed under the loaded solution: reload it, then this page. */
+    private async solutionChanged(added: string): Promise<void> {
+        void this.panel.webview.postMessage({ type: 'added' });
+        await vscode.commands.executeCommand('clarion.forceRefreshSolutionCache');
+        await this.reload();
+        vscode.window.showInformationMessage(`Added ${added} to ${path.basename(this.solutionFile)}.`);
     }
 
     /** A field changed: kept on the page while opening; applied to the loaded solution otherwise. */
@@ -381,7 +444,7 @@ function html(webview: vscode.Webview): string {
   .reason strong { color: var(--vscode-editorWarning-foreground); }
   select.needs { border-color: var(--vscode-editorWarning-foreground); }
   .label .needs-text { color: var(--vscode-editorWarning-foreground); font-weight: 600; }
-  .control .with-button { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .with-button { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .control select { max-width: 520px; }
   footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 24px 32px; }
   footer .muted { flex: 1 1 260px; }
@@ -396,6 +459,7 @@ function html(webview: vscode.Webview): string {
         script: `
   let state = null;
   let graphBuilt = false;
+  let adding = false, mainEdited = false;
   const post = (type, extra) => vscode.postMessage(Object.assign({ type }, extra || {}));
 
   function choice(field, label, f, extra) {
@@ -454,6 +518,25 @@ function html(webview: vscode.Webview): string {
           el('td', {}, el('span', { class: tone(p.exp.tone) }, p.exp.text)),
           el('td', {}, el('button', { type: 'button', class: 'link', onclick: () => post('project', { cwproj: p.cwproj }) }, 'Properties')))))))));
 
+    if (!open) {
+      const name = el('input', { type: 'text', id: 'np-name', 'aria-label': 'Project name', placeholder: 'Name',
+        oninput: e => { if (!mainEdited) document.getElementById('np-main').value = e.target.value ? e.target.value + '.clw' : ''; } });
+      const kind = el('select', { id: 'np-kind', 'aria-label': 'EXE or DLL' }, el('option', { value: 'exe' }, 'EXE'), el('option', { value: 'dll' }, 'DLL'));
+      const main = el('input', { type: 'text', id: 'np-main', 'aria-label': 'Main source file', placeholder: 'Main source file',
+        oninput: () => { mainEdited = true; } });
+      const form = el('div', { class: 'row', id: 'np-form', hidden: !adding },
+        el('div', { class: 'with-button' }, name, kind, main,
+          el('button', { type: 'button', class: 'primary', onclick: () => post('addNew', {
+            name: name.value, kind: kind.value, mainFile: main.value }) }, 'Add'),
+          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = false; render(); } }, 'Cancel'),
+          el('span', { class: 'note', id: 'np-error' })));
+      sections[sections.length - 1].append(
+        el('div', { class: 'row' }, el('div', { class: 'with-button' },
+          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = true; mainEdited = false; render(); document.getElementById('np-name').focus(); } }, 'New project…'),
+          el('button', { type: 'button', class: 'secondary', onclick: () => post('addExisting') }, 'Add an existing project…'))),
+        form);
+    }
+
     if (state.build) {
       const keep = el('input', { type: 'checkbox', onchange: e => post('keepLog', { checked: e.target.checked }) });
       keep.checked = state.build.keepLog;
@@ -477,7 +560,14 @@ function html(webview: vscode.Webview): string {
   }
 
   window.addEventListener('message', e => {
-    if (e.data && e.data.type === 'state') { state = e.data.state; graphBuilt = !!e.data.graphBuilt; render(); }
+    if (e.data && e.data.type === 'state') {
+      // A redraw keeps what is typed in the new-project form.
+      const keep = adding ? ['np-name', 'np-kind', 'np-main'].map(id => document.getElementById(id) && document.getElementById(id).value) : null;
+      state = e.data.state; graphBuilt = !!e.data.graphBuilt; render();
+      if (keep) ['np-name', 'np-kind', 'np-main'].forEach((id, i) => { if (keep[i] !== null && document.getElementById(id)) document.getElementById(id).value = keep[i]; });
+    }
+    if (e.data && e.data.type === 'addError') { const n = document.getElementById('np-error'); if (n) n.textContent = e.data.message; }
+    if (e.data && e.data.type === 'added') { adding = false; render(); }
   });
   post('ready');
 `,

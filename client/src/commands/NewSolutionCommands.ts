@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, generateGuid } from '../solution/SolutionFiles';
+import { buildCwprojContent, buildMinimalExpContent, buildProgramContent, buildSlnContent, generateGuid } from '../solution/SolutionFiles';
 import { classifySource, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
 import { NewProjectSpec, ReviewInput } from '../solution/NewSolutionReview';
 import { NewSolutionFolder, showNewSolutionForm } from '../solution/NewSolutionReviewPanel';
@@ -14,18 +14,6 @@ import { ClarionInstallation, ClarionInstallationDetector } from '../utils/Clari
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
-
-function buildClwContent(): string {
-    return [
-        '  PROGRAM',
-        '',
-        '  MAP',
-        '  END',
-        '',
-        '  CODE',
-        "  MESSAGE('Hello World')"
-    ].join('\r\n');
-}
 
 /** Folders a source scan never enters: hidden ones (.git, .vscode) and build output. */
 const SKIP_DIRS = new Set(['node_modules', 'obj', 'bin']);
@@ -237,7 +225,7 @@ export async function newSolution(): Promise<void> {
     try {
         fs.writeFileSync(slnPath, buildSlnContent(specs), 'utf8');
         specs.forEach((s, i) => fs.writeFileSync(cwprojPaths[i], buildCwprojContent(s), 'utf8'));
-        if (clwPath) fs.writeFileSync(clwPath, buildClwContent(), 'utf8');
+        if (clwPath) fs.writeFileSync(clwPath, buildProgramContent('exe'), 'utf8');
         logger.info(`✅ Created new solution: ${trimmedName} (${specs.length} project(s)) in ${folderPath}`);
 
         // Create the Clarion IDE preferences XML so the IDE recognises startup project + config

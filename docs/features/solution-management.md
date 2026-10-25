@@ -386,7 +386,7 @@ With no solution open, the view offers Open Solution, a recent solution, and, wi
 | Section | Shows |
 |---|---|
 | Build with | The Clarion installation (with the folder of a ClarionProperties.xml outside the standard location), the compiler version, the configuration and the startup project. **Browse…** finds an installation outside the standard locations |
-| Projects | Each project's type (EXE, DLL or LIB), the projects it references, and for a DLL whether its export file is found through redirection. **Properties** opens the project's own page |
+| Projects | Each project's type (EXE, DLL or LIB), the projects it references, and for a DLL whether its export file is found through redirection. **Properties** opens the project's own page. **New project…** adds a project to the solution (its name, EXE or DLL, and main source file; a DLL also gets its export file), and **Add an existing project…** adds a .cwproj from disk |
 | Build and run | Whether the build log is kept (and the last one), what Run starts (`clarion.run.command`), and the Clarion build settings |
 | File graph | Files, edges and build time, with a ⚠️ count when project sources cannot be found; **Unresolved file references…** opens that report |
 
