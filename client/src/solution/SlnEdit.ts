@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { projectsInSln } from './SolutionPage';
 
 /**
@@ -16,7 +17,9 @@ export interface SlnProjectEntry {
     guid: string;
 }
 
-const samePath = (a: string, b: string) => a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase();
+/** One project file, however its path is spelt: both resolved against the solution's folder. */
+const samePath = (folder: string, a: string, b: string) =>
+    path.win32.resolve(folder, a).toLowerCase() === path.win32.resolve(folder, b).toLowerCase();
 
 /** A section's lines between `GlobalSection(name)` and its `EndGlobalSection`; undefined when absent. */
 function section(text: string, name: string): { start: number; bodyStart: number; end: number } | undefined {
@@ -41,11 +44,19 @@ function lineEnd(text: string, index: number): number {
     return nl < 0 ? text.length : nl + 1;
 }
 
-export function addProjectToSln(text: string, project: SlnProjectEntry): string {
+/**
+ * `text` with `project` added. `solutionFolder` resolves the projects' paths, so one file written
+ * two ways is still one project. Throws when the project, or another of its name, is already
+ * listed, and when the .sln did not decode cleanly (written back, the lost characters would
+ * corrupt other projects' lines).
+ */
+export function addProjectToSln(text: string, project: SlnProjectEntry, solutionFolder: string): string {
+    if (text.includes('�')) throw new Error('The solution file is not UTF-8 encoded, so it cannot be changed safely here. Save it as UTF-8, or add the project in the Clarion IDE.');
     const eol = text.includes('\r\n') ? '\r\n' : '\n';
     for (const p of projectsInSln(text)) {
         if (p.guid.toLowerCase() === project.guid.toLowerCase()) throw new Error(`The solution already has a project with the GUID ${project.guid} (${p.name}).`);
-        if (samePath(p.path, project.path)) throw new Error(`The solution already has ${project.path}.`);
+        if (samePath(solutionFolder, p.path, project.path)) throw new Error(`The solution already has ${project.path}.`);
+        if (p.name.toLowerCase() === project.name.toLowerCase()) throw new Error(`The solution already has a project called ${p.name}.`);
     }
     const global = /^Global[ \t]*$/m.exec(text);
     if (!global) throw new Error('This is not a solution file: it has no Global section.');

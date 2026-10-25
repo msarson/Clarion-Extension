@@ -25,11 +25,12 @@ const SLN = [
     '',
 ].join('\r\n');
 
+const FOLDER = 'C:/Apps/Sales';
 const COMMON = { name: 'Common', path: 'lib\\Common.cwproj', guid: '{22222222-2222-2222-2222-222222222222}' };
 
 suite('Solution Properties: adding a project to the .sln (#795)', () => {
     test('the Project block follows the others, and every configuration builds it', () => {
-        const text = addProjectToSln(SLN, COMMON);
+        const text = addProjectToSln(SLN, COMMON, FOLDER);
         const expected = SLN
             .replace('EndProject\r\nGlobal',
                 'EndProject\r\nProject("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "Common", "lib\\Common.cwproj", "{22222222-2222-2222-2222-222222222222}"\r\nEndProject\r\nGlobal')
@@ -46,20 +47,20 @@ suite('Solution Properties: adding a project to the .sln (#795)', () => {
     test('a solution with no projects, or no ProjectConfigurationPlatforms section, gets them', () => {
         const empty = SLN.replace(/Project\("[^\r]*\r\nEndProject\r\n/, '')
             .replace(/\tGlobalSection\(ProjectConfigurationPlatforms\)[\s\S]*?\tEndGlobalSection\r\n/, '');
-        const text = addProjectToSln(empty, COMMON);
+        const text = addProjectToSln(empty, COMMON, FOLDER);
         assert.ok(text.includes('# Visual Studio 2012\r\nProject("{12B76EC0-1D7B-4FA7-A7D0-C524288B48A1}") = "Common"'), text);
         assert.ok(text.includes('\tEndGlobalSection\r\n\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\r\n\t\t{22222222-2222-2222-2222-222222222222}.Debug|Win32.Build.0'), text);
         assert.ok(text.endsWith('\tEndGlobalSection\r\nEndGlobal\r\n'), text);
     });
 
     test('a project the solution already lists is refused, by GUID or by path', () => {
-        assert.throws(() => addProjectToSln(SLN, { ...COMMON, guid: '{11111111-1111-1111-1111-111111111111}' }), /already/);
-        assert.throws(() => addProjectToSln(SLN, { ...COMMON, path: 'sales.CWPROJ' }), /already/);
+        assert.throws(() => addProjectToSln(SLN, { ...COMMON, guid: '{11111111-1111-1111-1111-111111111111}' }, FOLDER), /already/);
+        assert.throws(() => addProjectToSln(SLN, { ...COMMON, path: 'sales.CWPROJ' }, FOLDER), /already/);
     });
 
     test('a .sln with LF line endings keeps them', () => {
         const lf = SLN.replace(/\r\n/g, '\n');
-        assert.ok(!addProjectToSln(lf, COMMON).includes('\r'));
+        assert.ok(!addProjectToSln(lf, COMMON, FOLDER).includes('\r'));
     });
 
     test('an existing project is identified by its ProjectGuid', () => {

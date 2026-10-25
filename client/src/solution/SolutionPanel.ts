@@ -346,9 +346,31 @@ export class SolutionPanel {
             void this.panel.webview.postMessage({ type: 'addError', message: `Already in the solution's folder: ${existing.join(', ')}` });
             return;
         }
-        const sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), { name: name.trim(), path: files[0].path, guid });
-        for (const f of files) fs.writeFileSync(path.join(folder, f.path), f.content, 'utf8');
-        fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        let sln: string;
+        try {
+            sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), { name: name.trim(), path: files[0].path, guid }, folder);
+            // A .sln under source control is read-only until checked out: find out before writing anything.
+            fs.accessSync(this.solutionFile, fs.constants.W_OK);
+        } catch (err) {
+            void this.panel.webview.postMessage({ type: 'addError', message: writeError(err, this.solutionFile) });
+            return;
+        }
+        // All or nothing: a file that appeared meanwhile is not overwritten ('wx'), and when a later
+        // write fails the files already written are removed, so a retry is not blocked by them.
+        const written: string[] = [];
+        try {
+            for (const f of files) {
+                fs.writeFileSync(path.join(folder, f.path), f.content, { encoding: 'utf8', flag: 'wx' });
+                written.push(path.join(folder, f.path));
+            }
+            fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        } catch (err) {
+            for (const f of written) {
+                try { fs.unlinkSync(f); } catch { /* leave it; the message names the failure */ }
+            }
+            void this.panel.webview.postMessage({ type: 'addError', message: writeError(err, this.solutionFile) });
+            return;
+        }
         await this.solutionChanged(name.trim());
     }
 
@@ -368,10 +390,15 @@ export class SolutionPanel {
         }
         const relative = path.relative(folder, file);
         const name = path.basename(file).replace(/\.cwproj$/i, '');
-        const sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), {
-            name, guid, path: path.isAbsolute(relative) ? file : relative,
-        });
-        fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        try {
+            const sln = addProjectToSln(fs.readFileSync(this.solutionFile, 'utf8'), {
+                name, guid, path: path.isAbsolute(relative) ? file : relative,
+            }, folder);
+            fs.writeFileSync(this.solutionFile, sln, 'utf8');
+        } catch (err) {
+            vscode.window.showErrorMessage(writeError(err, this.solutionFile));
+            return;
+        }
         await this.solutionChanged(name);
     }
 
@@ -431,6 +458,14 @@ export class SolutionPanel {
 
 const samePath = (a: string, b: string) => a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase();
 
+/** What a failed add says: a read-only .sln (checked in, not out) by name, anything else as it came. */
+function writeError(err: unknown, solutionFile: string): string {
+    const code = (err as { code?: string })?.code;
+    if (code === 'EPERM' || code === 'EACCES') return `${path.basename(solutionFile)} is read-only. Check it out of source control, or clear its read-only flag, then add the project again.`;
+    if (code === 'EEXIST') return 'A file the project needs was created in the folder meanwhile; nothing was added.';
+    return err instanceof Error ? err.message : String(err);
+}
+
 function toOption(i: ClarionInstallation): InstallationOption {
     return { propertiesFile: i.propertiesPath, ideVersion: i.ideVersion, compilers: i.compilerVersions.map(c => c.name) };
 }
@@ -459,7 +494,7 @@ function html(webview: vscode.Webview): string {
         script: `
   let state = null;
   let graphBuilt = false;
-  let adding = false, mainEdited = false;
+  let adding = false, mainEdited = false, addError = '';
   const post = (type, extra) => vscode.postMessage(Object.assign({ type }, extra || {}));
 
   function choice(field, label, f, extra) {
@@ -528,11 +563,11 @@ function html(webview: vscode.Webview): string {
         el('div', { class: 'with-button' }, name, kind, main,
           el('button', { type: 'button', class: 'primary', onclick: () => post('addNew', {
             name: name.value, kind: kind.value, mainFile: main.value }) }, 'Add'),
-          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = false; render(); } }, 'Cancel'),
-          el('span', { class: 'note', id: 'np-error' })));
+          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = false; addError = ''; render(); } }, 'Cancel'),
+          el('span', { class: 'note', id: 'np-error' }, addError)));
       sections[sections.length - 1].append(
         el('div', { class: 'row' }, el('div', { class: 'with-button' },
-          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = true; mainEdited = false; render(); document.getElementById('np-name').focus(); } }, 'New project…'),
+          el('button', { type: 'button', class: 'secondary', onclick: () => { adding = true; mainEdited = false; addError = ''; render(); document.getElementById('np-name').focus(); } }, 'New project…'),
           el('button', { type: 'button', class: 'secondary', onclick: () => post('addExisting') }, 'Add an existing project…'))),
         form);
     }
@@ -561,13 +596,20 @@ function html(webview: vscode.Webview): string {
 
   window.addEventListener('message', e => {
     if (e.data && e.data.type === 'state') {
-      // A redraw keeps what is typed in the new-project form.
-      const keep = adding ? ['np-name', 'np-kind', 'np-main'].map(id => document.getElementById(id) && document.getElementById(id).value) : null;
+      // A redraw (the graph or a setting changed) keeps the new-project form as it was: what is
+      // typed, which field has focus and where its caret is.
+      const ids = ['np-name', 'np-kind', 'np-main'];
+      const keep = adding ? ids.map(id => document.getElementById(id) && document.getElementById(id).value) : null;
+      const focused = document.activeElement && ids.includes(document.activeElement.id) ? document.activeElement : null;
+      const caret = focused && 'selectionStart' in focused ? [focused.selectionStart, focused.selectionEnd] : null;
+      const focusedId = focused ? focused.id : null;
       state = e.data.state; graphBuilt = !!e.data.graphBuilt; render();
-      if (keep) ['np-name', 'np-kind', 'np-main'].forEach((id, i) => { if (keep[i] !== null && document.getElementById(id)) document.getElementById(id).value = keep[i]; });
+      if (keep) ids.forEach((id, i) => { if (keep[i] !== null && document.getElementById(id)) document.getElementById(id).value = keep[i]; });
+      const refocus = focusedId && document.getElementById(focusedId);
+      if (refocus) { refocus.focus(); if (caret && refocus.setSelectionRange) refocus.setSelectionRange(caret[0], caret[1]); }
     }
-    if (e.data && e.data.type === 'addError') { const n = document.getElementById('np-error'); if (n) n.textContent = e.data.message; }
-    if (e.data && e.data.type === 'added') { adding = false; render(); }
+    if (e.data && e.data.type === 'addError') { addError = e.data.message; const n = document.getElementById('np-error'); if (n) n.textContent = addError; }
+    if (e.data && e.data.type === 'added') { adding = false; addError = ''; render(); }
   });
   post('ready');
 `,

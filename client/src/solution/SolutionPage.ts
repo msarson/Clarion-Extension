@@ -202,14 +202,16 @@ export function buildSolutionPageState(input: SolutionPageInput): SolutionPageSt
 export function mainFileError(file: string): string | undefined {
     if (!file || file.trim().length === 0) return 'File name cannot be empty';
     if (!file.trim().toLowerCase().endsWith('.clw')) return 'File must have a .clw extension';
-    if (/[\/:*?"<>|]/.test(file.trim())) return 'File name contains invalid characters';
+    // A slash or backslash would make it a path, written outside the folder.
+    if (/[\\/:*?"<>|]/.test(file.trim())) return 'File name contains invalid characters';
     return undefined;
 }
 
 /** #795 — why a new project cannot be added as named; undefined when it can. */
 export function newProjectError(name: string, mainFile: string, projects: { name: string }[]): string | undefined {
     if (!name || name.trim().length === 0) return 'Project name cannot be empty';
-    if (/[\/:*?"<>|]/.test(name)) return 'Project name contains invalid characters';
+    // A path would write outside the folder; an apostrophe would end the name in a DLL's .exp.
+    if (/[\\/:*?"<>|']/.test(name)) return 'Project name contains invalid characters';
     if (projects.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) return `The solution already has a project called ${name.trim()}`;
     return mainFileError(mainFile);
 }
