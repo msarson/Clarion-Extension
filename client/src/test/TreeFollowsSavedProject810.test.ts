@@ -66,8 +66,9 @@ suite('Solution View follows a .cwproj saved from Project Properties (#810)', ()
         const inner = tree.slice(tree.indexOf('private async getChildrenInner('), tree.indexOf("else if (element.data && (element.data as any).guid)"));
         assert.match(inner, /element\.children\.length > 0 && !this\.sourcesStale\(projectData\)/);
         const local = tree.slice(tree.indexOf('private parseProjectFilesLocally('), tree.indexOf('private fetchProjectFiles('));
-        assert.match(local, /projectSourceFiles\(content\)/);
-        assert.match(local, /this\._sourceStamps\.record\(cwprojPath, content\)/);
+        // #758: the content and the stamp now come with the included .prj files' sources and text.
+        assert.match(local, /projectSourceFiles\(project\.content, project\.legacySources\)/);
+        assert.match(local, /this\._sourceStamps\.record\(cwprojPath, project\.stamp\)/);
         assert.doesNotMatch(local, /files\.length > 0 \? \{ files \} : null/);
     });
 

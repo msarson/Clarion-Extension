@@ -120,7 +120,9 @@ export function registerProjectFolderCommands(solutionTreeDataProvider: Solution
         // A redraw only: the .cwproj watcher still reloads the solution for the language server.
         workspace.onDidSaveTextDocument(document => {
             const projects = SolutionCache.getInstance().getSolutionInfo()?.projects ?? [];
-            if (isSolutionProjectFile(document.uri.fsPath, projects)) solutionTreeDataProvider?.redraw();
+            // #758: so does a legacy project file, which a project may include; the redraw reads the
+            // sources of each expanded project again only when its files' text changed.
+            if (isSolutionProjectFile(document.uri.fsPath, projects) || /\.(prj|pr|pi)$/i.test(document.uri.fsPath)) solutionTreeDataProvider?.redraw();
         }),
     ];
 }

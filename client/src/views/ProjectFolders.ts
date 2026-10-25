@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { addItem, includeFor, ItemKind, listItems } from '../project/CwprojItems';
+import { parseLegacyProject } from '../../../common/LegacyProject';
 
 /**
  * #803 — a project in the Solution View as the Clarion IDE's Solution Explorer shows it: four
@@ -97,12 +98,20 @@ export function referenceCandidates(
  * path the .cwproj holds. A project with none has none: an empty list is not a reason to ask the
  * server, whose parse is the one made when the solution loaded.
  */
-export function projectSourceFiles(cwprojText: string): { name: string; relativePath: string }[] {
+export function projectSourceFiles(cwprojText: string, legacySources: string[] = []): { name: string; relativePath: string }[] {
     const files: { name: string; relativePath: string }[] = [];
     const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
     let m: RegExpExecArray | null;
     while ((m = compileRe.exec(cwprojText)) !== null) {
         files.push({ name: path.win32.basename(m[1]), relativePath: m[1] });
+    }
+    // #758: then the sources of an included .prj, each once; redirection finds them on a click.
+    const listed = new Set(files.map(f => f.name.toLowerCase()));
+    for (const source of legacySources) {
+        const name = path.win32.basename(source);
+        if (listed.has(name.toLowerCase())) continue;
+        listed.add(name.toLowerCase());
+        files.push({ name, relativePath: source });
     }
     return files;
 }
@@ -135,4 +144,17 @@ export function isSolutionProjectFile(file: string, projects: { path?: string; f
     if (!/\.cwproj$/i.test(file)) return false;
     const target = path.win32.normalize(file).toLowerCase();
     return projects.some(p => !!p?.path && !!p.filename && path.win32.normalize(path.win32.join(p.path, p.filename)).toLowerCase() === target);
+}
+
+/** #758 — the legacy project files (.prj, .pr) a .cwproj includes under Projects to include. */
+export function legacyProjectIncludes(cwprojText: string): string[] {
+    return listItems(cwprojText).includes.map(i => i.include).filter(i => /.prj?$/i.test(i));
+}
+
+/**
+ * #758 — the Clarion sources a legacy project compiles: the .clw files its #compile lines name,
+ * with its #include files read through `read` (macros and conditions as common/LegacyProject reads them).
+ */
+export function legacyProjectSources(prjText: string, read?: (file: string) => string | undefined): string[] {
+    return parseLegacyProject(prjText, { read }).compiles.map(c => c.file).filter(f => /.clw$/i.test(f));
 }

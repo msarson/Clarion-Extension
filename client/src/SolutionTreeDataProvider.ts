@@ -13,7 +13,7 @@ import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
-import { isProjectNodeData, projectFolders, projectSourceFiles, ProjectSourceStamps } from './views/ProjectFolders';
+import { isProjectNodeData, legacyProjectIncludes, legacyProjectSources, projectFolders, projectSourceFiles, ProjectSourceStamps } from './views/ProjectFolders';
 
 /** #803: each IDE folder's icon, for the folder and its entries. */
 const FOLDER_ICONS: Record<string, string> = {
@@ -116,15 +116,43 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         });
     }
 
-    /** #810: the project's .cwproj holds other text than its source nodes were built from. */
+    /** #810: the project's .cwproj (or a .prj it includes, #758) holds other text than its source nodes were built from. */
     private sourcesStale(projectData: any): boolean {
         const projectPath = projectData?.path ?? projectData?.projectPath;
         const filename = projectData?.filename;
         if (!projectPath || !filename) return false;
         const cwprojPath = path.join(String(projectPath), String(filename));
-        let text: string | null = null;
-        try { text = fs.readFileSync(cwprojPath, 'utf-8'); } catch { /* unreadable: keep what is shown */ }
-        return this._sourceStamps.stale(cwprojPath, text);
+        return this._sourceStamps.stale(cwprojPath, this.readProjectSources(cwprojPath)?.stamp ?? null);
+    }
+
+    /**
+     * #758 — a project's .cwproj, the sources of the legacy .prj files it includes, and a stamp of
+     * all their text. A .prj and the files it #includes are looked for beside it, then in the
+     * project folder; the server finds the sources through redirection when one is opened.
+     */
+    private readProjectSources(cwprojPath: string): { content: string; legacySources: string[]; stamp: string } | null {
+        let content: string;
+        try { content = fs.readFileSync(cwprojPath, 'utf-8'); } catch { return null; }
+        const projectDir = path.dirname(cwprojPath);
+        const readNear = (file: string, dir: string): string | undefined => {
+            for (const candidate of path.isAbsolute(file) ? [file] : [path.resolve(dir, file), path.resolve(projectDir, file)]) {
+                try { return fs.readFileSync(candidate, 'latin1'); } catch { /* not there */ }
+            }
+            return undefined;
+        };
+        const legacySources: string[] = [];
+        let stamp = content;
+        for (const include of legacyProjectIncludes(content)) {
+            const prjDir = path.dirname(path.resolve(projectDir, include));
+            const read = (file: string) => {
+                const text = readNear(file, prjDir);
+                stamp += '\0' + file + '\0' + (text ?? '');
+                return text;
+            };
+            const prjText = read(include);
+            if (prjText !== undefined) legacySources.push(...legacyProjectSources(prjText, read));
+        }
+        return { content, legacySources, stamp };
     }
 
     private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
@@ -133,11 +161,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const filename = projectData?.filename;
             if (!projectPath || !filename) return null;
             const cwprojPath = path.join(String(projectPath), String(filename));
-            if (!fs.existsSync(cwprojPath)) return null;
-            const content = fs.readFileSync(cwprojPath, 'utf-8');
+            const project = this.readProjectSources(cwprojPath);
+            if (!project) return null;
             // #810: a project with no sources has none; the server's list is the one from load.
-            const files = projectSourceFiles(content);
-            this._sourceStamps.record(cwprojPath, content);
+            // #758: an included .prj's sources are the project's too.
+            const files = projectSourceFiles(project.content, project.legacySources);
+            this._sourceStamps.record(cwprojPath, project.stamp);
             treePerf.perf("Tree expand: local cwproj fallback", { project: label, files: files.length });
             return { files };
         } catch (error) {
